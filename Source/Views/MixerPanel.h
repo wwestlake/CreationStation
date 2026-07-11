@@ -9,6 +9,11 @@ class MixerPanel final : public juce::Component
 public:
     MixerPanel();
 
+    void setChannelGain(int channelIndex, float gain);
+    void setChannelPan(int channelIndex, float pan);
+    void setChannelMuted(int channelIndex, bool shouldMute);
+    void setChannelSoloed(int channelIndex, bool shouldSolo);
+
     std::function<void(int, float)> onGainChanged;
     std::function<void(int, float)> onPanChanged;
     std::function<void(int, bool)> onMuteChanged;

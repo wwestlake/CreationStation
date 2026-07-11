@@ -51,7 +51,7 @@ private:
         std::atomic<float> level { 0.0f };
     };
 
-    static constexpr int trackCount = 4;
+    static constexpr int trackCount = 8;
 
     juce::AudioSourcePlayer audioSourcePlayer;
     juce::MixerAudioSource mixerSource;

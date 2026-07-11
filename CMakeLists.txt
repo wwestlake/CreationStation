@@ -23,6 +23,8 @@ juce_generate_juce_header(CreativeWorkstation)
 target_sources(CreativeWorkstation PRIVATE
     Source/Audio/WorkstationAudioEngine.cpp
     Source/Audio/WorkstationAudioEngine.h
+    Source/ControlSurface/XTouchControlSurface.cpp
+    Source/ControlSurface/XTouchControlSurface.h
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h

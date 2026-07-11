@@ -76,8 +76,12 @@ WorkstationAudioEngine::WorkstationAudioEngine()
 {
     tracks.add(new DemoTrackSource("Drums", 110.0));
     tracks.add(new DemoTrackSource("Bass", 55.0));
-    tracks.add(new DemoTrackSource("Music", 220.0));
-    tracks.add(new DemoTrackSource("Voice", 330.0));
+    tracks.add(new DemoTrackSource("Keys", 220.0));
+    tracks.add(new DemoTrackSource("Lead", 330.0));
+    tracks.add(new DemoTrackSource("Vox", 440.0));
+    tracks.add(new DemoTrackSource("FX", 550.0));
+    tracks.add(new DemoTrackSource("Perc", 660.0));
+    tracks.add(new DemoTrackSource("Aux", 770.0));
 
     for (auto* track : tracks)
         mixerSource.addInputSource(track, false);

@@ -12,6 +12,7 @@ A JUCE-based C++ audio workstation starter built around three layers:
 - Node graph canvas for routing and DSP
 - DSL editor scaffold for functional audio scripts
 - AI panel placeholder for assistant-driven patching
+- MIDI control-surface support with X-Touch / Mackie-style faders and transport
 
 ## Build
 
@@ -42,3 +43,4 @@ The DSL scaffold is intentionally small right now, but it points toward:
 - Add project and session persistence
 - Expand the DSL into a parser, type checker, and execution backend
 - Connect AI to patch generation and code synthesis
+- Grow the MIDI layer into full learned mapping, banking, and motor-fader feedback

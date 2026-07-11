@@ -102,7 +102,7 @@ MixerPanel::MixerPanel()
     addAndMakeVisible(headerLabel);
 
     int index = 0;
-    for (const auto& name : { "Drums", "Bass", "Music", "Voice", "Master" })
+    for (const auto& name : { "Drums", "Bass", "Keys", "Lead", "Vox", "FX", "Perc", "Aux", "Master" })
     {
         auto* strip = strips.add(new ChannelStrip(index++, name));
         addAndMakeVisible(strip);
@@ -130,4 +130,28 @@ void MixerPanel::resized()
         strip->setBounds(stripArea.removeFromLeft(stripWidth));
         stripArea.removeFromLeft(gap);
     }
+}
+
+void MixerPanel::setChannelGain(int channelIndex, float gain)
+{
+    if (juce::isPositiveAndBelow(channelIndex, strips.size()))
+        strips[(size_t) channelIndex]->setGain(gain);
+}
+
+void MixerPanel::setChannelPan(int channelIndex, float pan)
+{
+    if (juce::isPositiveAndBelow(channelIndex, strips.size()))
+        strips[(size_t) channelIndex]->setPan(pan);
+}
+
+void MixerPanel::setChannelMuted(int channelIndex, bool shouldMute)
+{
+    if (juce::isPositiveAndBelow(channelIndex, strips.size()))
+        strips[(size_t) channelIndex]->setMuted(shouldMute);
+}
+
+void MixerPanel::setChannelSoloed(int channelIndex, bool shouldSolo)
+{
+    if (juce::isPositiveAndBelow(channelIndex, strips.size()))
+        strips[(size_t) channelIndex]->setSoloed(shouldSolo);
 }
