@@ -3,7 +3,7 @@
 AuthGateView::AuthGateView()
 {
     titleLabel.setText("Sign in to Creation Station", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(juce::FontOptions(30.0f)).boldened());
+    titleLabel.setFont(juce::Font(30.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
@@ -21,7 +21,7 @@ AuthGateView::AuthGateView()
     statusEditor.setCaretVisible(false);
     statusEditor.setPopupMenuEnabled(false);
     statusEditor.setText("Waiting for you to start the sign-in flow.");
-    statusEditor.setFont(juce::Font(juce::FontOptions(15.0f)));
+    statusEditor.setFont(juce::Font(15.0f));
     statusEditor.setColour(juce::TextEditor::textColourId, juce::Colour(0xffaab6c9));
     statusEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);
     statusEditor.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);

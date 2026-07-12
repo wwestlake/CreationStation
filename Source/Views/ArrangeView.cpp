@@ -43,7 +43,7 @@ void ArrangeView::Lane::paint(juce::Graphics& g)
     g.fillRect(nameArea);
 
     g.setColour(juce::Colour(0xffd7deea));
-    g.setFont(juce::Font(juce::FontOptions(15.0f)).boldened());
+    g.setFont(juce::Font(15.0f).boldened());
     g.drawText(juce::String(trackIndex + 1) + ". " + trackName, nameArea.reduced(14, 0), juce::Justification::centredLeft, true);
 
     auto clipArea = getLocalBounds().withTrimmedLeft(180).reduced(10, 16);
@@ -141,7 +141,7 @@ void ArrangeView::Canvas::paint(juce::Graphics& g)
 
     auto ruler = header.withTrimmedLeft(180);
     g.setColour(juce::Colour(0xff8ea0b7));
-    g.setFont(juce::Font(juce::FontOptions(13.0f)));
+    g.setFont(juce::Font(13.0f));
 
     auto beatWidth = 90;
     for (int beat = 0; beat < 24; ++beat)
@@ -167,7 +167,7 @@ ArrangeView::ArrangeView()
     setName("DAW");
 
     titleLabel.setText("Arrange View", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(juce::FontOptions(24.0f)).boldened());
+    titleLabel.setFont(juce::Font(24.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 

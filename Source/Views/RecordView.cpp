@@ -27,7 +27,7 @@ void RecordView::TrackRow::paint(juce::Graphics& g)
     g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(2.0f), 10.0f, 1.0f);
 
     g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(juce::FontOptions(14.0f)).boldened());
+    g.setFont(juce::Font(14.0f).boldened());
     g.drawText(juce::String(trackIndex + 1) + ". " + trackName, 16, 0, 220, getHeight(), juce::Justification::centredLeft);
 }
 
@@ -41,7 +41,7 @@ void RecordView::TrackRow::resized()
 RecordView::RecordView()
 {
     titleLabel.setText("Record View", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(juce::FontOptions(24.0f)).boldened());
+    titleLabel.setFont(juce::Font(24.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 

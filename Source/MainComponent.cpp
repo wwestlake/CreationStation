@@ -59,7 +59,7 @@ MainComponent::TransportBar::TransportBar()
 
     titleLabel.setText("Creation Station", juce::dontSendNotification);
     titleLabel.setJustificationType(juce::Justification::centredLeft);
-    titleLabel.setFont(juce::Font(juce::FontOptions(28.0f)).boldened());
+    titleLabel.setFont(juce::Font(28.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
@@ -114,12 +114,12 @@ MainComponent::TransportBar::TransportBar()
     addAndMakeVisible(projectButton);
 
     profileNameLabel.setJustificationType(juce::Justification::centredLeft);
-    profileNameLabel.setFont(juce::Font(juce::FontOptions(17.0f)).boldened());
+    profileNameLabel.setFont(juce::Font(17.0f).boldened());
     profileNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(profileNameLabel);
 
     profileDetailLabel.setJustificationType(juce::Justification::centredLeft);
-    profileDetailLabel.setFont(juce::Font(juce::FontOptions(13.0f)));
+    profileDetailLabel.setFont(juce::Font(13.0f));
     profileDetailLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9fb0c8));
     addAndMakeVisible(profileDetailLabel);
 
@@ -129,7 +129,7 @@ MainComponent::TransportBar::TransportBar()
 MainComponent::ViewModeBar::ViewModeBar()
 {
     titleLabel.setText("Workspaces", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(juce::FontOptions(18.0f)).boldened());
+    titleLabel.setFont(juce::Font(18.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
@@ -178,7 +178,7 @@ void MainComponent::ViewModeBar::paint(juce::Graphics& g)
                1.0f);
 
     g.setColour(juce::Colour(0xff8ea0b7));
-    g.setFont(juce::Font(juce::FontOptions(13.0f)));
+        g.setFont(juce::Font(13.0f));
     g.drawText(workspaceModeName(activeMode) + " active", getLocalBounds().reduced(12, 0), juce::Justification::centredRight, true);
 }
 
@@ -271,7 +271,7 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
         g.setColour(juce::Colour(0xff223041));
         g.fillEllipse(avatar.toFloat());
         g.setColour(juce::Colour(0xff8ea0b7));
-        g.setFont(juce::Font(juce::FontOptions(15.0f)).boldened());
+        g.setFont(juce::Font(15.0f).boldened());
         g.drawText(profileInitials, avatar, juce::Justification::centred, false);
 
         auto badgeArea = chip.removeFromRight(38).withSizeKeepingCentre(28, 28);
@@ -281,7 +281,7 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
         else
         {
             g.setColour(juce::Colour(0xfff2cc60));
-            g.setFont(juce::Font(juce::FontOptions(12.0f)).boldened());
+            g.setFont(juce::Font(12.0f).boldened());
             g.drawText("★", badgeArea, juce::Justification::centred, false);
         }
     }
@@ -352,7 +352,7 @@ MainComponent::PluginRackBar::PluginRackBar()
     setName("Plugin Rack");
     titleLabel.setText("Master Insert", juce::dontSendNotification);
     titleLabel.setJustificationType(juce::Justification::centredLeft);
-    titleLabel.setFont(juce::Font(juce::FontOptions(18.0f)).boldened());
+    titleLabel.setFont(juce::Font(18.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 

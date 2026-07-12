@@ -200,16 +200,16 @@ juce::Image createCreationStationSplashImage()
     g.drawImageWithin(logo, 58, 112, 180, 180, juce::RectanglePlacement::centred, false);
 
     g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(juce::FontOptions(34.0f)).boldened());
+    g.setFont(juce::Font(34.0f).boldened());
     g.drawText("Creation Station", 274, 92, 380, 40, juce::Justification::left, false);
 
     g.setColour(juce::Colour(0xff9fb0c8));
-    g.setFont(juce::Font(juce::FontOptions(18.0f)));
+    g.setFont(juce::Font(18.0f));
     g.drawText("Audio workstation Â· mixer Â· node graph Â· AI assist",
                274, 136, 380, 28, juce::Justification::left, false);
 
     g.setColour(juce::Colour(0xff7fcfff));
-    g.setFont(juce::Font(juce::FontOptions(17.0f)).boldened());
+    g.setFont(juce::Font(17.0f).boldened());
     g.drawText("Loading your creative deck...", 274, 176, 280, 26, juce::Justification::left, false);
 
     g.setColour(juce::Colour(0xff56f4ff));
@@ -218,7 +218,7 @@ juce::Image createCreationStationSplashImage()
     g.fillRoundedRectangle(274.0f, 218.0f, 376.0f, 8.0f, 4.0f);
 
     g.setColour(juce::Colour(0xffd8e2ff));
-    g.setFont(juce::Font(juce::FontOptions(15.0f)));
+    g.setFont(juce::Font(15.0f));
     g.drawText("Banked mixer â€¢ xTouch control â€¢ VST hosting â€¢ DSP graph",
                274, 258, 410, 24, juce::Justification::left, false);
 
