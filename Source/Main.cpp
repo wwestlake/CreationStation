@@ -1,20 +1,26 @@
 #include <JuceHeader.h>
+#include "Branding.h"
 #include "MainComponent.h"
 
-class CreativeWorkstationApplication : public juce::JUCEApplication
+class CreativeWorkstationApplication : public juce::JUCEApplication,
+                                       private juce::Timer
 {
 public:
-    const juce::String getApplicationName() override { return "Creative Workstation"; }
+    const juce::String getApplicationName() override { return "Creation Station"; }
     const juce::String getApplicationVersion() override { return "0.1.0"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
-    void initialise (const juce::String&) override
+    void initialise(const juce::String&) override
     {
-        mainWindow.reset(new MainWindow(getApplicationName()));
+        splash = new juce::SplashScreen(getApplicationName(), branding::createCreationStationSplashImage(), true);
+        splash->toFront(true);
+        startTimer(1800);
     }
 
     void shutdown() override
     {
+        stopTimer();
+        splash = nullptr;
         mainWindow = nullptr;
     }
 
@@ -33,6 +39,7 @@ private:
                                  .findColour(juce::ResizableWindow::backgroundColourId),
                              DocumentWindow::allButtons)
         {
+            setIcon(branding::createCreationStationLogoImage(128));
             setUsingNativeTitleBar(true);
             setResizable(true, true);
             setContentOwned(new MainComponent(), true);
@@ -46,6 +53,18 @@ private:
         }
     };
 
+    void timerCallback() override
+    {
+        stopTimer();
+        mainWindow.reset(new MainWindow(getApplicationName()));
+
+        if (splash != nullptr)
+            splash->deleteAfterDelay(juce::RelativeTime::seconds(2.0), false);
+
+        splash = nullptr;
+    }
+
+    juce::SplashScreen* splash = nullptr;
     std::unique_ptr<MainWindow> mainWindow;
 };
 

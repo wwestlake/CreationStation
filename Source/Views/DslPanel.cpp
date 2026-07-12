@@ -2,6 +2,7 @@
 
 DslPanel::DslPanel()
 {
+    setName("DSL");
     headerLabel.setText("Functional DSP DSL", juce::dontSendNotification);
     headerLabel.setFont(juce::Font(juce::FontOptions(24.0f)).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -9,16 +10,21 @@ DslPanel::DslPanel()
 
     sourceEditor.setMultiLine(true);
     sourceEditor.setReturnKeyStartsNewLine(true);
-    sourceEditor.setText(R"(# Creative Workstation DSP script
-let drive = saturate(0.35)
-let space = reverb(room = 0.62, mix = 0.18)
-route master = input |> drive |> space |> limiter()
+    sourceEditor.setText(R"(# Creation Station DSP script
+source osc1 = sine(freq = 220, amp = 0.25)
+source mic1 = mic(gain = 0.70)
+effect drive1 = drive(amount = 0.35)
+effect tone1 = filter(cutoff = 0.62)
+effect space1 = delay(time = 0.18, feedback = 0.24)
+sink out = speakers(level = 1.0)
+route main = osc1 -> drive1 -> tone1 -> space1 -> out
+modulate drive1.amount = lfo(rate = 0.25, depth = 0.15)
 )");
     addAndMakeVisible(sourceEditor);
 
     outputEditor.setMultiLine(true);
     outputEditor.setReadOnly(true);
-    outputEditor.setText("Compile to see diagnostics.");
+    outputEditor.setText("Compile to see sources, effects, sinks, and routing diagnostics.");
     addAndMakeVisible(outputEditor);
 
     compileButton.onClick = [this] { compileSource(); };

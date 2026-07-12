@@ -15,6 +15,11 @@ struct DslModule
     bool success = false;
     juce::String summary;
     juce::Array<DslDiagnostic> diagnostics;
+    int sourceCount = 0;
+    int effectCount = 0;
+    int sinkCount = 0;
+    int connectionCount = 0;
+    int modulationCount = 0;
 };
 
 class DslCompiler final

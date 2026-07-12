@@ -16,6 +16,8 @@ juce_add_gui_app(CreativeWorkstation
     PRODUCT_NAME "Creative Workstation"
     COMPANY_NAME "Creation Station"
     BUNDLE_ID "com.creationstation.creativeworkstation"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconBig.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconSmall.png"
 )
 
 juce_generate_juce_header(CreativeWorkstation)
@@ -23,13 +25,27 @@ juce_generate_juce_header(CreativeWorkstation)
 target_sources(CreativeWorkstation PRIVATE
     Source/Audio/WorkstationAudioEngine.cpp
     Source/Audio/WorkstationAudioEngine.h
+    Source/Audio/SignalGraphRuntime.cpp
+    Source/Audio/SignalGraphRuntime.h
+    Source/Auth/DesktopAuthSession.cpp
+    Source/Auth/DesktopAuthSession.h
+    Source/Branding.cpp
+    Source/Branding.h
     Source/ControlSurface/XTouchControlSurface.cpp
     Source/ControlSurface/XTouchControlSurface.h
+    Source/Project/ProjectManager.cpp
+    Source/Project/ProjectManager.h
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
     Source/Language/DslCompiler.cpp
     Source/Language/DslCompiler.h
+    Source/Language/SignalGraph.cpp
+    Source/Language/SignalGraph.h
+    Source/Views/AuthGateView.cpp
+    Source/Views/AuthGateView.h
+    Source/Views/ArrangeView.cpp
+    Source/Views/ArrangeView.h
     Source/Views/AiPanel.cpp
     Source/Views/AiPanel.h
     Source/Views/DslPanel.cpp
@@ -38,17 +54,22 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/GraphPanel.h
     Source/Views/MixerPanel.cpp
     Source/Views/MixerPanel.h
+    Source/Views/RecordView.cpp
+    Source/Views/RecordView.h
 )
 
 target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    JUCE_PLUGINHOST_VST3=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_VERSION>"
 )
 
 target_link_libraries(CreativeWorkstation PRIVATE
     juce::juce_audio_devices
+    juce::juce_audio_processors
+    juce::juce_audio_formats
     juce::juce_audio_utils
     juce::juce_dsp
     juce::juce_gui_extra
@@ -56,3 +77,18 @@ target_link_libraries(CreativeWorkstation PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
 )
+
+install(TARGETS CreativeWorkstation RUNTIME DESTINATION . RESOURCE DESTINATION .)
+install(FILES README.md LICENSE DESTINATION .)
+
+set(CPACK_PACKAGE_NAME "CreativeWorkstation")
+set(CPACK_PACKAGE_VENDOR "Creation Station")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Creative Workstation")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-win64")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Creative Workstation")
+set(CPACK_GENERATOR "ZIP;WIX")
+set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")
+set(CPACK_STRIP_FILES TRUE)
+
+include(CPack)

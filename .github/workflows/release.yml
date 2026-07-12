@@ -1,0 +1,100 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch JUCE
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git "$env:RUNNER_TEMP\JUCE"
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          choco install wixtoolset --no-progress -y
+          $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $wixBin
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE"
+
+      - name: Build app
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target CreativeWorkstation
+
+      - name: Stage install tree
+        shell: pwsh
+        run: |
+          cmake --install build --config Release --prefix "$env:RUNNER_TEMP\creative-workstation-install"
+
+      - name: Create ZIP and MSI packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          cpack -G ZIP --config build\CPackConfig.cmake -B artifacts
+          cpack -G WIX --config build\CPackConfig.cmake -B artifacts
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: creative-workstation-windows
+          path: artifacts/*
+
+      - name: Classify release channel
+        id: classify
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $versionText = $env:GITHUB_REF_NAME.TrimStart('v')
+          $versionParts = $versionText.Split('.')
+          $major = [int]$versionParts[0]
+          $minor = [int]$versionParts[1]
+          $patch = [int]$versionParts[2]
+          $channel = "stable"
+          $prerelease = "false"
+
+          if ($major -eq 0 -and $minor -lt 5) {
+            $channel = "alpha"
+            $prerelease = "true"
+          }
+          elseif ($major -eq 0 -and $minor -ge 5) {
+            $channel = "beta"
+            $prerelease = "true"
+          }
+
+          $suffix = ""
+          if ($channel -ne "stable") {
+            $suffix = " ($channel)"
+          }
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$versionText"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "channel=$channel"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "prerelease=$prerelease"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "suffix=$suffix"
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Creation Station ${{ github.ref_name }}${{ steps.classify.outputs.suffix }}
+          prerelease: ${{ steps.classify.outputs.prerelease }}
+          files: artifacts/*

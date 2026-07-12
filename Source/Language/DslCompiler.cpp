@@ -38,7 +38,11 @@ bool DslCompiler::isRecognisedStatement(const juce::String& line)
     if (trimmed.isEmpty() || trimmed.startsWithChar('#'))
         return true;
 
-    static const juce::StringArray prefixes { "let ", "fn ", "graph ", "node ", "route ", "emit " };
+    static const juce::StringArray prefixes
+    {
+        "let ", "fn ", "graph ", "node ", "route ", "emit ",
+        "source ", "effect ", "sink ", "connect ", "modulate ", "automation "
+    };
     for (const auto& prefix : prefixes)
         if (trimmed.startsWithIgnoreCase(prefix))
             return true;
@@ -68,15 +72,32 @@ DslModule DslCompiler::compile(const juce::String& source) const
     {
         if (! isRecognisedStatement(line))
         {
-            module.diagnostics.add({ lineNumber, "Unknown statement. Start lines with let, fn, graph, node, route, or emit." });
+            module.diagnostics.add({ lineNumber, "Unknown statement. Start lines with source, effect, sink, connect, modulate, route, let, fn, graph, node, or emit." });
             return module;
         }
+
+        auto trimmed = line.trimStart();
+        if (trimmed.startsWithIgnoreCase("source "))
+            ++module.sourceCount;
+        else if (trimmed.startsWithIgnoreCase("effect "))
+            ++module.effectCount;
+        else if (trimmed.startsWithIgnoreCase("sink "))
+            ++module.sinkCount;
+        else if (trimmed.startsWithIgnoreCase("connect ") || trimmed.startsWithIgnoreCase("route "))
+            ++module.connectionCount;
+        else if (trimmed.startsWithIgnoreCase("modulate ") || trimmed.startsWithIgnoreCase("automation "))
+            ++module.modulationCount;
 
         ++lineNumber;
     }
 
     module.success = true;
-    module.summary = "Parsed " + juce::String(lines.size()) + " source lines into a candidate DSP module.";
+    module.summary = "Parsed " + juce::String(lines.size()) + " lines: "
+                   + juce::String(module.sourceCount) + " sources, "
+                   + juce::String(module.effectCount) + " effects, "
+                   + juce::String(module.sinkCount) + " sinks, "
+                   + juce::String(module.connectionCount) + " routes, "
+                   + juce::String(module.modulationCount) + " modulation lanes.";
     return module;
 }
 } // namespace cw
