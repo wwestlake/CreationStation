@@ -117,7 +117,7 @@ GraphPanel::GraphPanel()
 {
     setName("Node Graph");
     headerLabel.setText("Sources → Effects → Sinks", juce::dontSendNotification);
-    headerLabel.setFont(juce::Font(juce::FontOptions(24.0f)).boldened());
+    headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 

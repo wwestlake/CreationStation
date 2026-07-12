@@ -53,7 +53,7 @@ void DockingWorkspace::DockGroup::TabButton::paintButton(juce::Graphics& g,
     g.drawRoundedRectangle(bounds, 6.0f, 1.0f);
 
     g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(juce::FontOptions(13.0f)).boldened());
+    g.setFont(juce::Font(13.0f).boldened());
     g.drawFittedText(title, getLocalBounds().reduced(8, 0), juce::Justification::centred, 1);
 }
 

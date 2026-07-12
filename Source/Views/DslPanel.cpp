@@ -4,7 +4,7 @@ DslPanel::DslPanel()
 {
     setName("DSL");
     headerLabel.setText("Functional DSP DSL", juce::dontSendNotification);
-    headerLabel.setFont(juce::Font(juce::FontOptions(24.0f)).boldened());
+    headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 
