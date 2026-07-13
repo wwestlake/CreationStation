@@ -124,7 +124,10 @@ jobs:
         if: steps.classify.outputs.kind == 'driver'
         shell: pwsh
         run: |
-          powershell.exe -ExecutionPolicy Bypass -File Driver\Build\DriverBuild.ps1 -Configuration Release
+          winget install Microsoft.WindowsSDK.10.0.28000 --accept-source-agreements --accept-package-agreements --disable-interactivity
+          winget install Microsoft.WindowsWDK.10.0.28000 --accept-source-agreements --accept-package-agreements --disable-interactivity
+          $driverBuildScript = Resolve-Path ".\Driver\Build\DriverBuild.ps1"
+          powershell.exe -ExecutionPolicy Bypass -File $driverBuildScript -Configuration Release
 
       - name: Stage release assets
         shell: pwsh

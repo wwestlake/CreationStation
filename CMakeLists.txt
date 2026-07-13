@@ -104,7 +104,10 @@ target_link_libraries(DjehutiRouter PRIVATE
     juce::juce_recommended_warning_flags
 )
 
-install(TARGETS DjehutiRouter RUNTIME DESTINATION . RESOURCE DESTINATION . COMPONENT DjehutiRouter)
+install(TARGETS DjehutiRouter
+    RUNTIME DESTINATION . COMPONENT DjehutiRouter
+    RESOURCE DESTINATION . COMPONENT DjehutiRouter
+)
 
 target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_WEB_BROWSER=0
@@ -126,7 +129,10 @@ target_link_libraries(CreativeWorkstation PRIVATE
     juce::juce_recommended_warning_flags
 )
 
-install(TARGETS CreativeWorkstation RUNTIME DESTINATION . RESOURCE DESTINATION . COMPONENT CreativeWorkstation)
+install(TARGETS CreativeWorkstation
+    RUNTIME DESTINATION . COMPONENT CreativeWorkstation
+    RESOURCE DESTINATION . COMPONENT CreativeWorkstation
+)
 install(FILES README.md LICENSE DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "CreativeWorkstation")
