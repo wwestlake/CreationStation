@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <vector>
 #include "Auth/DesktopAuthSession.h"
 #include "Audio/WorkstationAudioEngine.h"
 #include "ControlSurface/XTouchControlSurface.h"
@@ -12,6 +13,7 @@
 #include "Views/GraphPanel.h"
 #include "Views/MixerPanel.h"
 #include "Views/RecordView.h"
+#include "Views/TourGuideOverlay.h"
 
 class MainComponent final : public juce::Component
 {
@@ -109,6 +111,8 @@ private:
         std::function<void()> onOpenProfilePageRequested;
         std::function<void()> onLogoutRequested;
         std::function<void()> onProjectMenuRequested;
+        std::function<void()> onTourRequested;
+        std::function<void()> onAudioRequested;
 
         void setProfile(const DesktopAuthSession::SessionData& session);
         void clearProfile();
@@ -128,6 +132,8 @@ private:
         juce::TextButton recordButton { "Record" };
         juce::TextButton signInButton { "Sign In" };
         juce::TextButton projectButton { "Project" };
+        juce::TextButton audioButton { "Audio" };
+        juce::TextButton tourButton { "Tour" };
         juce::Label profileNameLabel;
         juce::Label profileDetailLabel;
         juce::Image profileBadgeImage;
@@ -155,6 +161,7 @@ private:
     DslPanel dslPanel;
     RecordView recordView;
     AiPanel aiPanel;
+    TourGuideOverlay tourOverlay;
     std::unique_ptr<juce::FileChooser> pluginChooser;
     std::unique_ptr<juce::DocumentWindow> pluginEditorWindow;
     juce::Component::SafePointer<TransportBar> transportBarSafe;
@@ -162,6 +169,8 @@ private:
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     ProjectManager projectManager;
     std::unique_ptr<juce::FileChooser> projectChooser;
+    std::unique_ptr<juce::DocumentWindow> audioDeviceWindow;
+    std::vector<bool> armedTracks;
     bool authenticated = false;
     WorkspaceMode activeMode = WorkspaceMode::arrange;
 
@@ -178,6 +187,12 @@ private:
     void openProject();
     void saveProject();
     void revealProjectFolder();
+    void showAudioSettings();
+    void showTour();
+    juce::String createRecordingTakeName() const;
+    void refreshRecentTakes();
+    bool startRecordingSession();
+    void stopRecordingSession();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

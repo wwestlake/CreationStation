@@ -29,6 +29,18 @@ modulate drive1.amount = lfo(rate = 0.25, depth = 0.15)
 
     compileButton.onClick = [this] { compileSource(); };
     addAndMakeVisible(compileButton);
+
+    compileSource();
+}
+
+void DslPanel::setSourceText(const juce::String& text)
+{
+    sourceEditor.setText(text, juce::dontSendNotification);
+}
+
+juce::String DslPanel::getSourceText() const
+{
+    return sourceEditor.getText();
 }
 
 void DslPanel::paint(juce::Graphics& g)

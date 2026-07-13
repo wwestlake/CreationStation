@@ -14,6 +14,8 @@ public:
     void setEcho(float amount);
     void setWidth(float amount);
     void setEnabled(bool shouldEnable);
+    juce::ValueTree createState() const;
+    void restoreState(const juce::ValueTree& state);
 
     std::function<void(float)> onDriveChanged;
     std::function<void(float)> onInputChanged;

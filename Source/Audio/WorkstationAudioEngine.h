@@ -14,6 +14,10 @@ public:
 
     void setPlaying(bool shouldPlay);
     bool isPlaying() const noexcept { return playing; }
+    bool isRecording() const noexcept { return recording; }
+    bool startRecordingToFile(const juce::File& file, juce::String& errorMessage);
+    void stopRecording();
+    juce::File getRecordingFile() const { return recordingFile; }
 
     static constexpr int getVisibleChannelCount() noexcept { return visibleChannelCount; }
     static constexpr int getTrackCount() noexcept { return trackCount; }
@@ -175,6 +179,7 @@ private:
 
     void prepareGraph(double sampleRate, int blockSize);
     void processGraph(juce::AudioBuffer<float>& buffer);
+    void writeRecording(const juce::AudioBuffer<float>& buffer);
 
     juce::AudioSourcePlayer audioSourcePlayer;
     juce::MixerAudioSource mixerSource;
@@ -188,6 +193,7 @@ private:
     double graphSampleRate = 44100.0;
     SignalGraphRuntime signalGraph;
     std::atomic<bool> playing { false };
+    std::atomic<bool> recording { false };
     std::atomic<float> masterGain { 0.8f };
     std::atomic<bool> graphEnabled { true };
     std::atomic<float> graphInput { 0.85f };
@@ -195,4 +201,8 @@ private:
     std::atomic<float> graphTone { 0.55f };
     std::atomic<float> graphEcho { 0.08f };
     std::atomic<float> graphWidth { 0.5f };
+    juce::TimeSliceThread recordingThread { "CreationStationRecorder" };
+    juce::CriticalSection recordingLock;
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> recordingWriter;
+    juce::File recordingFile;
 };

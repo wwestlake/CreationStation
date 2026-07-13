@@ -2,17 +2,16 @@ name: Build and Release
 
 on:
   push:
-    branches:
-      - main
     tags:
-      - "v*"
-  workflow_dispatch:
+      - "creation-station-v*"
+      - "djehuti-router-v*"
+      - "djehuti-drivers-v*"
 
 permissions:
   contents: write
 
 jobs:
-  build-windows:
+  build-release:
     runs-on: windows-latest
 
     steps:
@@ -24,61 +23,73 @@ jobs:
         run: |
           git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git "$env:RUNNER_TEMP\JUCE"
 
-      - name: Install WiX Toolset
-        shell: pwsh
-        run: |
-          choco install wixtoolset --no-progress -y
-          $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
-          Add-Content -Path $env:GITHUB_PATH -Value $wixBin
-
-      - name: Configure CMake
-        shell: pwsh
-        run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE"
-
-      - name: Build app
-        shell: pwsh
-        run: |
-          cmake --build build --config Release --target CreativeWorkstation
-
-      - name: Stage install tree
-        shell: pwsh
-        run: |
-          cmake --install build --config Release --prefix "$env:RUNNER_TEMP\creative-workstation-install"
-
-      - name: Create ZIP and MSI packages
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          cpack -G ZIP --config build\CPackConfig.cmake -B artifacts
-          cpack -G WIX --config build\CPackConfig.cmake -B artifacts
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: creative-workstation-windows
-          path: artifacts/*
-
-      - name: Classify release channel
+      - name: Classify release
         id: classify
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          $versionText = $env:GITHUB_REF_NAME.TrimStart('v')
-          $versionParts = $versionText.Split('.')
-          $major = [int]$versionParts[0]
-          $minor = [int]$versionParts[1]
-          $patch = [int]$versionParts[2]
+          $tag = $env:GITHUB_REF_NAME
+
+          switch -Regex -CaseSensitive ($tag) {
+            '^creation-station-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
+              $productSlug = "creation-station"
+              $displayName = "Creation Station"
+              $kind = "app"
+              $cmakeTarget = "CreativeWorkstation"
+              $componentName = "CreativeWorkstation"
+              break
+            }
+
+            '^djehuti-router-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
+              $productSlug = "djehuti-router"
+              $displayName = "Djehuti Router"
+              $kind = "app"
+              $cmakeTarget = "DjehutiRouter"
+              $componentName = "DjehutiRouter"
+              break
+            }
+
+            '^djehuti-drivers-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
+              $productSlug = "djehuti-drivers"
+              $displayName = "Djehuti Drivers"
+              $kind = "driver"
+              $cmakeTarget = ""
+              $componentName = ""
+              break
+            }
+
+            default {
+              throw "Tag '$tag' must start with creation-station-v, djehuti-router-v, or djehuti-drivers-v."
+            }
+          }
+
+          $versionText = $Matches.version
+          $explicitChannel = $Matches.channel
           $channel = "stable"
           $prerelease = "false"
 
-          if ($major -eq 0 -and $minor -lt 5) {
-            $channel = "alpha"
+          if ($explicitChannel) {
+            if ($explicitChannel -match '^(alpha|beta)$') {
+              $channel = $explicitChannel
+            }
+            else {
+              $channel = $explicitChannel
+            }
+
             $prerelease = "true"
           }
-          elseif ($major -eq 0 -and $minor -ge 5) {
-            $channel = "beta"
-            $prerelease = "true"
+          else {
+            $parts = $versionText.Split('.')
+            $major = [int]$parts[0]
+            $minor = [int]$parts[1]
+
+            if ($major -eq 0 -and $minor -lt 5) {
+              $channel = "alpha"
+              $prerelease = "true"
+            }
+            elseif ($major -eq 0 -and $minor -ge 5) {
+              $channel = "beta"
+              $prerelease = "true"
+            }
           }
 
           $suffix = ""
@@ -86,15 +97,82 @@ jobs:
             $suffix = " ($channel)"
           }
 
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "tag=$tag"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "product_slug=$productSlug"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "display_name=$displayName"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "kind=$kind"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "cmake_target=$cmakeTarget"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "component_name=$componentName"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$versionText"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "channel=$channel"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "prerelease=$prerelease"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "suffix=$suffix"
 
+      - name: Configure CMake
+        if: steps.classify.outputs.kind != 'driver'
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE"
+
+      - name: Build app
+        if: steps.classify.outputs.kind == 'app'
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target ${{ steps.classify.outputs.cmake_target }}
+
+      - name: Build driver
+        if: steps.classify.outputs.kind == 'driver'
+        shell: pwsh
+        run: |
+          powershell.exe -ExecutionPolicy Bypass -File Driver\Build\DriverBuild.ps1 -Configuration Release
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $stageRoot = Join-Path $PWD "artifacts\stage"
+          New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
+
+          if ("${{ steps.classify.outputs.kind }}" -eq "app") {
+            $installRoot = Join-Path $stageRoot "${{ steps.classify.outputs.product_slug }}"
+            New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+
+            cmake --install build --config Release --prefix $installRoot --component ${{ steps.classify.outputs.component_name }}
+
+            $exe = Get-ChildItem $installRoot -Recurse -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+            if (-not $exe) {
+              throw "Could not find the packaged executable for ${{ steps.classify.outputs.display_name }}."
+            }
+          }
+          else {
+            $installRoot = Join-Path $stageRoot "${{ steps.classify.outputs.product_slug }}"
+            New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+
+            $driverSys = Get-ChildItem Driver\Build\out\Release\x64 -Filter 'DjehutiRouterDriver.sys' | Select-Object -First 1
+            if (-not $driverSys) { throw "Could not find the built driver binary." }
+
+            Copy-Item $driverSys.FullName $installRoot
+            Copy-Item Driver\INF\DjehutiRouter.inf $installRoot
+            Copy-Item Driver\README.md $installRoot
+            Copy-Item Driver\Contract\DjehutiRouterDriverContract.h $installRoot
+          }
+
+          $zipName = Join-Path $PWD ("artifacts\{0}.zip" -f "${{ steps.classify.outputs.tag }}")
+          if (Test-Path $zipName) {
+            Remove-Item $zipName -Force
+          }
+
+          Compress-Archive -Path (Join-Path $stageRoot "${{ steps.classify.outputs.product_slug }}\*") -DestinationPath $zipName -Force
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.classify.outputs.product_slug }}
+          path: artifacts/*.zip
+
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: Creation Station ${{ github.ref_name }}${{ steps.classify.outputs.suffix }}
+          name: ${{ steps.classify.outputs.display_name }} ${{ steps.classify.outputs.version }}${{ steps.classify.outputs.suffix }}
           prerelease: ${{ steps.classify.outputs.prerelease }}
-          files: artifacts/*
+          files: artifacts/*.zip

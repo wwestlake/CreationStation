@@ -318,6 +318,8 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
 WorkstationAudioEngine::WorkstationAudioEngine()
     : masterOutputSource(*this, mixerSource, masterInsertSource)
 {
+    recordingThread.startThread();
+
     for (int trackIndex = 0; trackIndex < trackCount; ++trackIndex)
         tracks.add(new TrackChannelSource(createDefaultTrackName(trackIndex), 55.0 + (trackIndex * 17.5)));
 
@@ -349,6 +351,25 @@ void WorkstationAudioEngine::processGraph(juce::AudioBuffer<float>& buffer)
     signalGraph.setWidth(graphWidth.load());
     signalGraph.setMasterGain(masterGain.load());
     signalGraph.render(buffer);
+    writeRecording(buffer);
+}
+
+void WorkstationAudioEngine::writeRecording(const juce::AudioBuffer<float>& buffer)
+{
+    if (! recording.load() || buffer.getNumChannels() < 2 || buffer.getNumSamples() <= 0)
+        return;
+
+    const juce::ScopedTryLock lock(recordingLock);
+    if (! lock.isLocked() || recordingWriter == nullptr)
+        return;
+
+    const float* channelData[] =
+    {
+        buffer.getReadPointer(0),
+        buffer.getReadPointer(1)
+    };
+
+    recordingWriter->write(channelData, buffer.getNumSamples());
 }
 
 void WorkstationAudioEngine::attachToDevice(juce::AudioDeviceManager& deviceManager)
@@ -369,6 +390,57 @@ void WorkstationAudioEngine::setPlaying(bool shouldPlay)
         track->setPlaying(shouldPlay);
 
     audioSourcePlayer.setGain(shouldPlay ? 1.0f : 0.0f);
+}
+
+bool WorkstationAudioEngine::startRecordingToFile(const juce::File& file, juce::String& errorMessage)
+{
+    if (file.getFullPathName().isEmpty())
+    {
+        errorMessage = "Recording file path was empty.";
+        return false;
+    }
+
+    if (recording.load())
+        stopRecording();
+
+    file.getParentDirectory().createDirectory();
+    if (file.existsAsFile())
+        file.deleteFile();
+
+    std::unique_ptr<juce::FileOutputStream> outputStream(file.createOutputStream());
+    if (outputStream == nullptr)
+    {
+        errorMessage = "Could not create the recording file.";
+        return false;
+    }
+
+    juce::WavAudioFormat wavFormat;
+    auto* writer = wavFormat.createWriterFor(outputStream.release(),
+                                             graphSampleRate,
+                                             2,
+                                             24,
+                                             {},
+                                             0);
+
+    if (writer == nullptr)
+    {
+        errorMessage = "Could not create the audio writer.";
+        return false;
+    }
+
+    const juce::ScopedLock lock(recordingLock);
+    recordingWriter = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(writer, recordingThread, 32768);
+    recordingFile = file;
+    recording = true;
+    return true;
+}
+
+void WorkstationAudioEngine::stopRecording()
+{
+    const juce::ScopedLock lock(recordingLock);
+    recordingWriter.reset();
+    recording = false;
+    recordingFile = {};
 }
 
 juce::String WorkstationAudioEngine::getTrackName(int trackIndex) const

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CreativeWorkstation VERSION 0.1.0 LANGUAGES CXX)
+project(CreativeWorkstation VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,11 +52,59 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/DslPanel.h
     Source/Views/GraphPanel.cpp
     Source/Views/GraphPanel.h
+    Source/Views/TourGuideOverlay.cpp
+    Source/Views/TourGuideOverlay.h
     Source/Views/MixerPanel.cpp
     Source/Views/MixerPanel.h
     Source/Views/RecordView.cpp
     Source/Views/RecordView.h
 )
+
+juce_add_gui_app(DjehutiRouter
+    PRODUCT_NAME "Djehuti Router"
+    COMPANY_NAME "Creation Station"
+    BUNDLE_ID "com.creationstation.djehuti.router"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconBig.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconSmall.png"
+)
+
+juce_generate_juce_header(DjehutiRouter)
+
+target_sources(DjehutiRouter PRIVATE
+    Source/Branding.cpp
+    Source/Branding.h
+    Source/Router/RouterAudioEngine.cpp
+    Source/Router/RouterAudioEngine.h
+    Source/Router/RouterCableModel.cpp
+    Source/Router/RouterCableModel.h
+    Source/Router/RouterDriverContract.h
+    Source/Router/RouterEndpointRegistry.cpp
+    Source/Router/RouterEndpointRegistry.h
+    Source/Router/RouterMain.cpp
+    Source/Router/RouterMainComponent.cpp
+    Source/Router/RouterMainComponent.h
+)
+
+target_compile_definitions(DjehutiRouter PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:DjehutiRouter,JUCE_PRODUCT_NAME>"
+    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:DjehutiRouter,JUCE_VERSION>"
+)
+
+target_link_libraries(DjehutiRouter PRIVATE
+    juce::juce_audio_devices
+    juce::juce_audio_processors
+    juce::juce_audio_formats
+    juce::juce_audio_utils
+    juce::juce_dsp
+    juce::juce_gui_extra
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_lto_flags
+    juce::juce_recommended_warning_flags
+)
+
+install(TARGETS DjehutiRouter RUNTIME DESTINATION . RESOURCE DESTINATION . COMPONENT DjehutiRouter)
 
 target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_WEB_BROWSER=0
@@ -78,8 +126,8 @@ target_link_libraries(CreativeWorkstation PRIVATE
     juce::juce_recommended_warning_flags
 )
 
-install(TARGETS CreativeWorkstation RUNTIME DESTINATION . RESOURCE DESTINATION .)
-install(FILES README.md LICENSE DESTINATION .)
+install(TARGETS CreativeWorkstation RUNTIME DESTINATION . RESOURCE DESTINATION . COMPONENT CreativeWorkstation)
+install(FILES README.md LICENSE DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "CreativeWorkstation")
 set(CPACK_PACKAGE_VENDOR "Creation Station")
@@ -88,6 +136,9 @@ set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-win64")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Creative Workstation")
 set(CPACK_GENERATOR "ZIP;WIX")
+set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+set(CPACK_WIX_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENTS_ALL CreativeWorkstation DjehutiRouter)
 set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")
 set(CPACK_STRIP_FILES TRUE)
 
