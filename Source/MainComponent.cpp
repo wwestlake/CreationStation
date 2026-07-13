@@ -50,6 +50,11 @@ juce::String workspaceModeName(MainComponent::WorkspaceMode mode)
 
     return "DAW";
 }
+
+juce::String makeRecordingTimestamp()
+{
+    return juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
+}
 }
 
 MainComponent::TransportBar::TransportBar()
@@ -59,7 +64,7 @@ MainComponent::TransportBar::TransportBar()
 
     titleLabel.setText("Creation Station", juce::dontSendNotification);
     titleLabel.setJustificationType(juce::Justification::centredLeft);
-    titleLabel.setFont(juce::Font(juce::FontOptions(28.0f)).boldened());
+    titleLabel.setFont(juce::Font(28.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
@@ -70,6 +75,20 @@ MainComponent::TransportBar::TransportBar()
 
     projectButton.setButtonText("Project: No project open");
     addAndMakeVisible(projectButton);
+
+    audioButton.onClick = [this]
+    {
+        if (onAudioRequested)
+            onAudioRequested();
+    };
+    addAndMakeVisible(audioButton);
+
+    tourButton.onClick = [this]
+    {
+        if (onTourRequested)
+            onTourRequested();
+    };
+    addAndMakeVisible(tourButton);
 
     statusLabel.setText("Ready for audio work.", juce::dontSendNotification);
     statusLabel.setJustificationType(juce::Justification::centredRight);
@@ -114,12 +133,12 @@ MainComponent::TransportBar::TransportBar()
     addAndMakeVisible(projectButton);
 
     profileNameLabel.setJustificationType(juce::Justification::centredLeft);
-    profileNameLabel.setFont(juce::Font(juce::FontOptions(17.0f)).boldened());
+    profileNameLabel.setFont(juce::Font(17.0f).boldened());
     profileNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(profileNameLabel);
 
     profileDetailLabel.setJustificationType(juce::Justification::centredLeft);
-    profileDetailLabel.setFont(juce::Font(juce::FontOptions(13.0f)));
+    profileDetailLabel.setFont(juce::Font(13.0f));
     profileDetailLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9fb0c8));
     addAndMakeVisible(profileDetailLabel);
 
@@ -129,7 +148,7 @@ MainComponent::TransportBar::TransportBar()
 MainComponent::ViewModeBar::ViewModeBar()
 {
     titleLabel.setText("Workspaces", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(juce::FontOptions(18.0f)).boldened());
+    titleLabel.setFont(juce::Font(18.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
@@ -178,7 +197,7 @@ void MainComponent::ViewModeBar::paint(juce::Graphics& g)
                1.0f);
 
     g.setColour(juce::Colour(0xff8ea0b7));
-    g.setFont(juce::Font(juce::FontOptions(13.0f)));
+        g.setFont(juce::Font(13.0f));
     g.drawText(workspaceModeName(activeMode) + " active", getLocalBounds().reduced(12, 0), juce::Justification::centredRight, true);
 }
 
@@ -271,7 +290,7 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
         g.setColour(juce::Colour(0xff223041));
         g.fillEllipse(avatar.toFloat());
         g.setColour(juce::Colour(0xff8ea0b7));
-        g.setFont(juce::Font(juce::FontOptions(15.0f)).boldened());
+        g.setFont(juce::Font(15.0f).boldened());
         g.drawText(profileInitials, avatar, juce::Justification::centred, false);
 
         auto badgeArea = chip.removeFromRight(38).withSizeKeepingCentre(28, 28);
@@ -281,7 +300,7 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
         else
         {
             g.setColour(juce::Colour(0xfff2cc60));
-            g.setFont(juce::Font(juce::FontOptions(12.0f)).boldened());
+            g.setFont(juce::Font(12.0f).boldened());
             g.drawText("★", badgeArea, juce::Justification::centred, false);
         }
     }
@@ -328,6 +347,8 @@ void MainComponent::TransportBar::resized()
     titleLabel.setBounds(left.removeFromTop(28));
     midiStatusLabel.setBounds(left.removeFromTop(20));
     projectButton.setBounds(left.removeFromTop(24).withWidth(260));
+    audioButton.setBounds(left.removeFromTop(24).withWidth(76));
+    tourButton.setBounds(left.removeFromTop(24).withWidth(72));
 
     statusLabel.setBounds(area.removeFromRight(260));
     recordButton.setBounds(area.removeFromRight(110));
@@ -352,7 +373,7 @@ MainComponent::PluginRackBar::PluginRackBar()
     setName("Plugin Rack");
     titleLabel.setText("Master Insert", juce::dontSendNotification);
     titleLabel.setJustificationType(juce::Justification::centredLeft);
-    titleLabel.setFont(juce::Font(juce::FontOptions(18.0f)).boldened());
+    titleLabel.setFont(juce::Font(18.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
@@ -517,6 +538,14 @@ MainComponent::MainComponent()
     {
         showProjectMenu();
     };
+    transportBar.onAudioRequested = [this]
+    {
+        showAudioSettings();
+    };
+    transportBar.onTourRequested = [this]
+    {
+        showTour();
+    };
     if (authSession.hasValidSession())
     {
         authenticated = true;
@@ -549,11 +578,18 @@ MainComponent::MainComponent()
     addAndMakeVisible(dslPanel);
     addAndMakeVisible(recordView);
     addAndMakeVisible(aiPanel);
+    addChildComponent(tourOverlay);
 
     pluginRackBar.setContextMaster();
     arrangeView.setTotalTrackCount(engine.getTrackCount());
     arrangeView.setVisibleTrackCount(8);
     recordView.setTrackCount(8);
+    armedTracks.resize((size_t) engine.getTrackCount(), false);
+    recordView.onTrackArmChanged = [this](int trackIndex, bool shouldArm)
+    {
+        if (juce::isPositiveAndBelow(trackIndex, (int) armedTracks.size()))
+            armedTracks[(size_t) trackIndex] = shouldArm;
+    };
 
     for (int index = 0; index < engine.getTrackCount(); ++index)
     {
@@ -572,14 +608,19 @@ MainComponent::MainComponent()
     };
     transportBar.onStop = [this]
     {
+        stopRecordingSession();
         engine.setPlaying(false);
         midiSurface.setTransportState(false, false);
     };
     transportBar.onRecord = [this]
     {
-        engine.setPlaying(true);
-        midiSurface.setTransportState(true, true);
-        transportBar.setStatusText("Transport: record armed (demo tone)");
+        if (engine.isRecording())
+            stopRecordingSession();
+        else if (startRecordingSession())
+        {
+            engine.setPlaying(true);
+            midiSurface.setTransportState(true, true);
+        }
     };
     transportBar.onSignInRequested = [this]
     {
@@ -1031,6 +1072,7 @@ MainComponent::MainComponent()
                     });
                 break;
             case XTouchControlSurface::TransportCommand::stop:
+                stopRecordingSession();
                 engine.setPlaying(false);
                 midiSurface.setTransportState(false, false);
                 if (safeBar != nullptr)
@@ -1041,14 +1083,21 @@ MainComponent::MainComponent()
                     });
                 break;
             case XTouchControlSurface::TransportCommand::record:
-                engine.setPlaying(true);
-                midiSurface.setTransportState(true, true);
-                if (safeBar != nullptr)
-                    juce::MessageManager::callAsync([safeBar]
+                if (engine.isRecording())
+                {
+                    stopRecordingSession();
+                }
+                else if (startRecordingSession())
+                {
+                    engine.setPlaying(true);
+                    midiSurface.setTransportState(true, true);
+                    if (safeBar != nullptr)
+                        juce::MessageManager::callAsync([safeBar]
                     {
                         if (safeBar != nullptr)
                             safeBar->setStatusText("Transport: record armed");
                     });
+                }
                 break;
             case XTouchControlSurface::TransportCommand::rewind:
                 if (safeBar != nullptr)
@@ -1115,6 +1164,59 @@ MainComponent::MainComponent()
     loadSessionFromDisk();
     refreshVisibleBank();
     refreshInsertRack();
+    refreshRecentTakes();
+
+    tourOverlay.setSteps(
+        {
+            {
+                "Welcome",
+                "This tour gives you a quick map of the app. Click Next to move through the basics, or click the highlighted areas when you want the walkthrough to advance.",
+                nullptr,
+                false
+            },
+            {
+                "Transport",
+                "Use Play, Stop, and Record here. This is the fastest place to control playback.",
+                [this] { return transportBar.getBounds(); },
+                true
+            },
+            {
+                "Workspaces",
+                "These tabs switch between the DAW, mixer, node graph, DSL, record view, and AI workspace.",
+                [this] { return viewModeBar.getBounds(); },
+                true
+            },
+            {
+                "Mixer",
+                "The mixer is where channels, banks, mute, solo, and the master strip live.",
+                [this] { return mixerPanel.getBounds(); },
+                false
+            },
+            {
+                "Node Graph",
+                "This view is for sound design chains: sources, effects, and sinks.",
+                [this] { return graphPanel.getBounds(); },
+                false
+            },
+            {
+                "DSL",
+                "The DSL lets you write functional-style signal flow and automation as text.",
+                [this] { return dslPanel.getBounds(); },
+                false
+            },
+            {
+                "Record",
+                "Record mode arms tracks and writes audio takes into your project folder.",
+                [this] { return recordView.getBounds(); },
+                false
+            },
+            {
+                "Done",
+                "That’s the basic map. Open this tour again from the Tour button anytime.",
+                [this] { return transportBar.getBounds(); },
+                false
+            }
+        });
 }
 
 MainComponent::~MainComponent()
@@ -1155,6 +1257,7 @@ void MainComponent::resized()
     recordView.setBounds(contentArea);
     aiPanel.setBounds(contentArea);
     authGateView.setBounds(getLocalBounds());
+    tourOverlay.setBounds(getLocalBounds());
 }
 
 void MainComponent::setWorkspaceMode(WorkspaceMode mode)
@@ -1176,6 +1279,8 @@ void MainComponent::refreshModeVisibility()
     recordView.setVisible(activeMode == WorkspaceMode::record);
     aiPanel.setVisible(activeMode == WorkspaceMode::ai);
     authGateView.setVisible(false);
+    if (tourOverlay.isActive())
+        tourOverlay.toFront(true);
 }
 
 void MainComponent::refreshAuthState()
@@ -1198,6 +1303,36 @@ void MainComponent::refreshAuthState()
 void MainComponent::openLagDaemonProfile()
 {
     juce::URL("https://lagdaemon.com/profile").launchInDefaultBrowser();
+}
+
+void MainComponent::showAudioSettings()
+{
+    if (audioDeviceWindow != nullptr)
+    {
+        audioDeviceWindow->toFront(true);
+        return;
+    }
+
+    auto selector = std::make_unique<juce::AudioDeviceSelectorComponent>(deviceManager,
+                                                                         0, 2,
+                                                                         0, 2,
+                                                                         true, true, true, false);
+
+    auto window = std::make_unique<juce::DocumentWindow>("Audio Devices",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::closeButton);
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setContentOwned(selector.release(), true);
+    window->centreWithSize(720, 540);
+    window->setVisible(true);
+    audioDeviceWindow = std::move(window);
+}
+
+void MainComponent::showTour()
+{
+    tourOverlay.start();
+    tourOverlay.toFront(true);
 }
 
 void MainComponent::showProjectMenu()
@@ -1297,6 +1432,71 @@ void MainComponent::saveProject()
     transportBar.setStatusText("Project saved.");
 }
 
+juce::String MainComponent::createRecordingTakeName() const
+{
+    return "Take-" + makeRecordingTimestamp() + ".wav";
+}
+
+void MainComponent::refreshRecentTakes()
+{
+    if (! projectManager.hasProject())
+    {
+        recordView.setRecentTakes({});
+        arrangeView.setRecordedClips({});
+        return;
+    }
+
+    auto audioDirectory = projectManager.getCurrentProject().audioDirectory;
+    juce::Array<juce::File> takeFiles;
+    audioDirectory.findChildFiles(takeFiles, juce::File::findFiles, false, "*.wav");
+
+    juce::StringArray names;
+    for (int index = 0; index < juce::jmin(10, takeFiles.size()); ++index)
+        names.add(takeFiles[(size_t) index].getFileName());
+
+    recordView.setRecentTakes(names);
+    arrangeView.setRecordedClips(names);
+}
+
+bool MainComponent::startRecordingSession()
+{
+    if (! projectManager.hasProject())
+    {
+        juce::String errorMessage;
+        if (! projectManager.createProject("Untitled Project", errorMessage))
+        {
+            transportBar.setStatusText("Could not create a project for recording.");
+            return false;
+        }
+    }
+
+    auto takeFile = projectManager.getCurrentProject().audioDirectory.getChildFile(createRecordingTakeName());
+    juce::String errorMessage;
+    if (! engine.startRecordingToFile(takeFile, errorMessage))
+    {
+        transportBar.setStatusText("Record failed: " + errorMessage);
+        return false;
+    }
+
+    transportBar.setStatusText("Recording: " + takeFile.getFileName());
+    recordView.setRecordingState(true, takeFile.getFileName());
+    refreshRecentTakes();
+    return true;
+}
+
+void MainComponent::stopRecordingSession()
+{
+    if (! engine.isRecording())
+        return;
+
+    auto takeName = engine.getRecordingFile().getFileName();
+    engine.stopRecording();
+    midiSurface.setTransportState(false, false);
+    transportBar.setStatusText("Recording stopped.");
+    recordView.setRecordingState(false, takeName);
+    refreshRecentTakes();
+}
+
 void MainComponent::revealProjectFolder()
 {
     if (! projectManager.hasProject())
@@ -1328,6 +1528,8 @@ void MainComponent::saveSessionToDisk() const
     state.setProperty("graphWidth", engine.getGraphWidth(), nullptr);
     state.setProperty("arrangeVisibleTracks", arrangeView.getVisibleTrackCount(), nullptr);
     state.setProperty("workspaceMode", static_cast<int>(activeMode), nullptr);
+    state.setProperty("dslSource", dslPanel.getSourceText(), nullptr);
+    state.addChild(graphPanel.createState(), -1, nullptr);
 
     projectManager.saveProjectState(state);
 
@@ -1387,6 +1589,12 @@ void MainComponent::loadSessionFromDisk()
     graphPanel.setEcho(engine.getGraphEcho());
     graphPanel.setWidth(engine.getGraphWidth());
 
+    if (auto dslSource = state.getProperty("dslSource").toString(); dslSource.isNotEmpty())
+        dslPanel.setSourceText(dslSource);
+
+    if (auto graphState = state.getChildWithName("NodeGraph"); graphState.isValid())
+        graphPanel.restoreState(graphState);
+
     auto visibleTracks = (int) state.getProperty("arrangeVisibleTracks", arrangeView.getVisibleTrackCount());
     arrangeView.setVisibleTrackCount(juce::jlimit(1, engine.getTrackCount(), visibleTracks));
     recordView.setTrackCount(arrangeView.getVisibleTrackCount());
@@ -1404,6 +1612,8 @@ void MainComponent::loadSessionFromDisk()
 
     refreshInsertRack();
     transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+    refreshRecentTakes();
+
 }
 
 void MainComponent::refreshInsertRack()

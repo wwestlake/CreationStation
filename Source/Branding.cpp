@@ -173,6 +173,98 @@ juce::Image createCreationStationLogoImage(int size)
     return image;
 }
 
+juce::Image createDjehutiRouterLogoImage(int size)
+{
+    const juce::String svg = R"svg(
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="28" y1="20" x2="228" y2="234" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#101724"/>
+      <stop offset="100%" stop-color="#06070c"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="28" y1="28" x2="228" y2="228" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#56f4ff"/>
+      <stop offset="50%" stop-color="#7f7dff"/>
+      <stop offset="100%" stop-color="#ff5fc8"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="52" fill="url(#bg)"/>
+  <rect x="28" y="28" width="200" height="200" rx="40" fill="none" stroke="url(#accent)" stroke-width="4" opacity="0.50"/>
+  <path d="M66 98h60c18 0 30 9 30 25 0 14-10 24-26 26l28 36"
+        fill="none" stroke="url(#accent)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M66 158h52c10 0 19-3 27-9l24-18"
+        fill="none" stroke="#d8e2ff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+  <circle cx="70" cy="98" r="8" fill="#56f4ff"/>
+  <circle cx="152" cy="123" r="8" fill="#7f7dff"/>
+  <circle cx="182" cy="186" r="8" fill="#ff5fc8"/>
+  <path d="M104 70h18l14 34 17-52 16 76 20-30h18"
+        fill="none" stroke="#9fb3ff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity="0.84"/>
+  <path d="M88 186h78" stroke="#2f3952" stroke-width="12" stroke-linecap="round" opacity="0.9"/>
+  <path d="M112 186h22m10 0h16" stroke="#56f4ff" stroke-width="8" stroke-linecap="round"/>
+  <path d="M198 176l20 10-20 10z" fill="#ff5fc8" opacity="0.95"/>
+  <path d="M176 72c14 8 24 20 30 36" fill="none" stroke="#56f4ff" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+</svg>
+)svg";
+
+    auto xml = juce::parseXML(svg);
+    if (xml == nullptr)
+        return {};
+
+    auto drawable = juce::Drawable::createFromSVG(*xml);
+    if (drawable == nullptr)
+        return {};
+
+    juce::Image image(juce::Image::ARGB, size, size, true);
+    juce::Graphics g(image);
+    drawable->drawWithin(g, image.getBounds().toFloat(), juce::RectanglePlacement::centred, 1.0f);
+    return image;
+}
+
+juce::Image createDjehutiRouterSplashImage()
+{
+    constexpr int width = 720;
+    constexpr int height = 420;
+
+    juce::Image image(juce::Image::ARGB, width, height, true);
+    juce::Graphics g(image);
+
+    g.fillAll(juce::Colour(0xff090b10));
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff122033), 0.0f, 0.0f,
+                                            juce::Colour(0xff090b10), 0.0f, (float) height, false));
+    g.fillRoundedRectangle(image.getBounds().toFloat().reduced(14.0f), 30.0f);
+
+    g.setColour(juce::Colour(0xff273451));
+    g.drawRoundedRectangle(image.getBounds().toFloat().reduced(14.0f), 30.0f, 1.0f);
+
+    auto logo = createDjehutiRouterLogoImage(180);
+    g.drawImageWithin(logo, 58, 112, 180, 180, juce::RectanglePlacement::centred, false);
+
+    g.setColour(juce::Colours::white);
+    g.setFont(juce::Font(34.0f).boldened());
+    g.drawText("Djehuti Router", 274, 92, 380, 40, juce::Justification::left, false);
+
+    g.setColour(juce::Colour(0xff9fb0c8));
+    g.setFont(juce::Font(18.0f));
+    g.drawText("Routing monitor, capture, and device paths",
+               274, 136, 420, 28, juce::Justification::left, false);
+
+    g.setColour(juce::Colour(0xff7fcfff));
+    g.setFont(juce::Font(17.0f).boldened());
+    g.drawText("DjeRoute keeps your signal flow visible.", 274, 176, 320, 26, juce::Justification::left, false);
+
+    g.setColour(juce::Colour(0xff56f4ff));
+    g.fillRoundedRectangle(274.0f, 218.0f, 340.0f, 8.0f, 4.0f);
+    g.setColour(juce::Colour(0x403c4a66));
+    g.fillRoundedRectangle(274.0f, 218.0f, 376.0f, 8.0f, 4.0f);
+
+    g.setColour(juce::Colour(0xffd8e2ff));
+    g.setFont(juce::Font(15.0f));
+    g.drawText("Source • sink • preset • future driver layer",
+               274, 258, 410, 24, juce::Justification::left, false);
+
+    return image;
+}
+
 juce::Image createCreationStationSplashImage()
 {
     constexpr int width = 720;
@@ -200,16 +292,16 @@ juce::Image createCreationStationSplashImage()
     g.drawImageWithin(logo, 58, 112, 180, 180, juce::RectanglePlacement::centred, false);
 
     g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(juce::FontOptions(34.0f)).boldened());
+    g.setFont(juce::Font(34.0f).boldened());
     g.drawText("Creation Station", 274, 92, 380, 40, juce::Justification::left, false);
 
     g.setColour(juce::Colour(0xff9fb0c8));
-    g.setFont(juce::Font(juce::FontOptions(18.0f)));
+    g.setFont(juce::Font(18.0f));
     g.drawText("Audio workstation Â· mixer Â· node graph Â· AI assist",
                274, 136, 380, 28, juce::Justification::left, false);
 
     g.setColour(juce::Colour(0xff7fcfff));
-    g.setFont(juce::Font(juce::FontOptions(17.0f)).boldened());
+    g.setFont(juce::Font(17.0f).boldened());
     g.drawText("Loading your creative deck...", 274, 176, 280, 26, juce::Justification::left, false);
 
     g.setColour(juce::Colour(0xff56f4ff));
@@ -218,7 +310,7 @@ juce::Image createCreationStationSplashImage()
     g.fillRoundedRectangle(274.0f, 218.0f, 376.0f, 8.0f, 4.0f);
 
     g.setColour(juce::Colour(0xffd8e2ff));
-    g.setFont(juce::Font(juce::FontOptions(15.0f)));
+    g.setFont(juce::Font(15.0f));
     g.drawText("Banked mixer â€¢ xTouch control â€¢ VST hosting â€¢ DSP graph",
                274, 258, 410, 24, juce::Justification::left, false);
 

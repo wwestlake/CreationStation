@@ -4,7 +4,7 @@ DslPanel::DslPanel()
 {
     setName("DSL");
     headerLabel.setText("Functional DSP DSL", juce::dontSendNotification);
-    headerLabel.setFont(juce::Font(juce::FontOptions(24.0f)).boldened());
+    headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 
@@ -29,6 +29,18 @@ modulate drive1.amount = lfo(rate = 0.25, depth = 0.15)
 
     compileButton.onClick = [this] { compileSource(); };
     addAndMakeVisible(compileButton);
+
+    compileSource();
+}
+
+void DslPanel::setSourceText(const juce::String& text)
+{
+    sourceEditor.setText(text, juce::dontSendNotification);
+}
+
+juce::String DslPanel::getSourceText() const
+{
+    return sourceEditor.getText();
 }
 
 void DslPanel::paint(juce::Graphics& g)

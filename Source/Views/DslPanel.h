@@ -8,6 +8,9 @@ class DslPanel final : public juce::Component
 public:
     DslPanel();
 
+    void setSourceText(const juce::String& text);
+    juce::String getSourceText() const;
+
     void paint(juce::Graphics&) override;
     void resized() override;
 

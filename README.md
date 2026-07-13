@@ -6,6 +6,8 @@ A JUCE-based C++ audio workstation starter built around three layers:
 - a node graph for routing and modular DSP
 - a functional-style DSL for programmable audio behavior
 
+It now also includes a second executable, `Djehuti Router` (`DjeRoute`), for simple PC-wide audio patching and monitor switching.
+
 ## What’s in the starter
 
 - Mixer-style workspace foundation
@@ -13,6 +15,8 @@ A JUCE-based C++ audio workstation starter built around three layers:
 - DSL editor scaffold for functional audio scripts
 - AI panel placeholder for assistant-driven patching
 - MIDI control-surface support with X-Touch / Mackie-style faders and transport
+- Separate `Djehuti Router` companion app for sources, sinks, and BYOK routing help
+- Windows virtual driver scaffold under `Driver/` for the future OBS/Reaper device layer
 
 ## Build
 
@@ -27,6 +31,17 @@ $env:JUCE_DIR="D:\path\to\JUCE"
 cmake -S . -B build
 cmake --build build --config Release
 ```
+
+## Release tracks
+
+This repo publishes three separate products from one codebase, and releases are routed by product-prefixed tags:
+
+- `creation-station-v0.1.2`
+- `djehuti-router-v0.1.2`
+- `djehuti-drivers-v0.1.2`
+
+See `Release-Products.md` for the release mapping.
+See `Versioning.md` for how the three products can stay version-synced when we want them to move together.
 
 ## DSL direction
 

@@ -117,7 +117,7 @@ GraphPanel::GraphPanel()
 {
     setName("Node Graph");
     headerLabel.setText("Sources → Effects → Sinks", juce::dontSendNotification);
-    headerLabel.setFont(juce::Font(juce::FontOptions(24.0f)).boldened());
+    headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 
@@ -212,6 +212,43 @@ void GraphPanel::setEnabled(bool shouldEnable)
     graphEnabledToggle.setToggleState(shouldEnable, juce::dontSendNotification);
     for (auto* card : nodeCards)
         card->setEnabled(shouldEnable);
+}
+
+juce::ValueTree GraphPanel::createState() const
+{
+    juce::ValueTree graphState("NodeGraph");
+    graphState.setProperty("enabled", graphEnabledToggle.getToggleState(), nullptr);
+
+    for (const auto* card : nodeCards)
+    {
+        juce::ValueTree nodeState("Node");
+        nodeState.setProperty("name", card->nodeTemplate.name, nullptr);
+        nodeState.setProperty("category", cw::nodeCategoryName(card->nodeTemplate.category), nullptr);
+        nodeState.setProperty("amount", card->amountSlider.getValue(), nullptr);
+        nodeState.setProperty("enabled", card->enableToggle.getToggleState(), nullptr);
+        graphState.addChild(nodeState, -1, nullptr);
+    }
+
+    return graphState;
+}
+
+void GraphPanel::restoreState(const juce::ValueTree& state)
+{
+    if (! state.isValid())
+        return;
+
+    graphEnabledToggle.setToggleState((bool) state.getProperty("enabled", true), juce::dontSendNotification);
+
+    int cardIndex = 0;
+    for (const auto child : state)
+    {
+        if (! child.hasType("Node") || cardIndex >= nodeCards.size())
+            continue;
+
+        auto& card = *nodeCards[cardIndex++];
+        card.setAmount((float) child.getProperty("amount", card.amountSlider.getValue()));
+        card.setEnabled((bool) child.getProperty("enabled", true));
+    }
 }
 
 void GraphPanel::paint(juce::Graphics& g)

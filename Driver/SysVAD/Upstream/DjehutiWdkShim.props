@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <WDKContentRoot Condition="'$(WDKContentRoot)' == '' and Exists('C:\Program Files (x86)\Windows Kits\10\build\WindowsDriver.Default.props')">C:\Program Files (x86)\Windows Kits\10\</WDKContentRoot>
+    <IsKernelModeToolset>true</IsKernelModeToolset>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)' == ''">10.0.19041.0</WindowsTargetPlatformVersion>
+    <TargetPlatformVersion Condition="'$(TargetPlatformVersion)' == ''">$(WindowsTargetPlatformVersion)</TargetPlatformVersion>
+    <KMDF_VERSION_MINOR Condition="'$(KMDF_VERSION_MINOR)' == ''">15</KMDF_VERSION_MINOR>
+    <DDK_INC_PATH Condition="'$(DDK_INC_PATH)' == ''">$(WDKContentRoot)Include\$(WindowsTargetPlatformVersion)\km;$(WDKContentRoot)Include\$(WindowsTargetPlatformVersion)\shared;$(WDKContentRoot)Include\$(WindowsTargetPlatformVersion)\ucrt;$(WDKContentRoot)Include\$(WindowsTargetPlatformVersion)\um;$(WDKContentRoot)Include\wdf\kmdf\1.$(KMDF_VERSION_MINOR)</DDK_INC_PATH>
+    <DDK_LIB_PATH Condition="'$(DDK_LIB_PATH)' == ''">$(WDKContentRoot)Lib\$(WindowsTargetPlatformVersion)\km\$(Platform)\</DDK_LIB_PATH>
+    <WDF_LIB_PATH Condition="'$(WDF_LIB_PATH)' == ''">$(WDKContentRoot)Lib\wdf\kmdf\$(Platform)\</WDF_LIB_PATH>
+    <IncludePath>$(DDK_INC_PATH);$(IncludePath)</IncludePath>
+    <LibraryPath>$(DDK_LIB_PATH);$(WDF_LIB_PATH);$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+
+  <Import Condition="Exists('$(WDKContentRoot)build\WindowsDriver.Default.props')" Project="$(WDKContentRoot)build\WindowsDriver.Default.props" />
+  <Import Condition="Exists('$(WDKContentRoot)build\$(Platform)\WindowsKernelModeDriver\WDK.$(Platform).WindowsKernelModeDriver.props')" Project="$(WDKContentRoot)build\$(Platform)\WindowsKernelModeDriver\WDK.$(Platform).WindowsKernelModeDriver.props" />
+  <Import Condition="Exists('$(WDKContentRoot)build\$(Platform)\ImportAfter\WDK.$(Platform).WindowsKernelModeDriver.Platform.props')" Project="$(WDKContentRoot)build\$(Platform)\ImportAfter\WDK.$(Platform).WindowsKernelModeDriver.Platform.props" />
+</Project>
