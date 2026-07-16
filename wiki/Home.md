@@ -89,6 +89,7 @@ Creation Station will author patches that can be loaded by focused runtime plugi
 Creation Station is also becoming the proving ground for a deeper language and runtime platform:
 
 - [Patina Core and Audio Architecture](Patina-Core-and-Audio-Architecture.md)
+- [Patina Implementation Spec v0](Patina-Implementation-Spec-v0.md)
 
 ## Cross-Platform Notes
 
