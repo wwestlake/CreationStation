@@ -91,6 +91,7 @@ Creation Station is also becoming the proving ground for a deeper language and r
 - [Patina Core and Audio Architecture](Patina-Core-and-Audio-Architecture.md)
 - [Patina Implementation Spec v0](Patina-Implementation-Spec-v0.md)
 - [Patina IR C++ Type Model](Patina-IR-Cpp-Type-Model.md)
+- [Patina Surface Syntax and EBNF](Patina-Surface-Syntax-and-EBNF.md)
 
 ## Cross-Platform Notes
 
