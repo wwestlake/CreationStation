@@ -1,4 +1,5 @@
 #include "PatinaLowering.h"
+#include "PatinaBuiltins.h"
 
 namespace cw::patina
 {
@@ -6,6 +7,10 @@ namespace
 {
 ir::Domain domainForCallee(const QualifiedName& callee)
 {
+    BuiltinsRegistry builtins;
+    if (const auto* signature = builtins.findNode(callee))
+        return signature->domain;
+
     if (callee.segments.isEmpty())
         return ir::Domain::worker;
 

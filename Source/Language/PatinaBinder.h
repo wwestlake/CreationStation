@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PatinaBuiltins.h"
 #include "PatinaSurfaceAst.h"
 
 namespace cw::patina
@@ -54,6 +55,7 @@ struct BoundNodeDeclaration
     juce::String name;
     QualifiedName callee;
     juce::String resolvedImportPath;
+    juce::String builtinQualifiedName;
     juce::Array<BoundNamedArgument> arguments;
     int line = 0;
 };
