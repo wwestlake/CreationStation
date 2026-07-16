@@ -38,6 +38,8 @@ juce_generate_juce_header(CreativeWorkstation)
 juce_generate_juce_header(CreationStationInstrument)
 
 target_sources(CreativeWorkstation PRIVATE
+    Source/AI/CreationStationContextEngine.cpp
+    Source/AI/CreationStationContextEngine.h
     Source/Audio/WorkstationAudioEngine.cpp
     Source/Audio/WorkstationAudioEngine.h
     Source/Audio/PatchRuntimePlayer.cpp
@@ -70,6 +72,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/PatinaSurfaceAst.h
     Source/Language/PatinaTypes.cpp
     Source/Language/PatinaTypes.h
+    Source/Language/PatinaArtifactLoader.cpp
+    Source/Language/PatinaArtifactLoader.h
     Source/Language/PatinaBuiltins.cpp
     Source/Language/PatinaBuiltins.h
     Source/Language/PatinaBinder.cpp

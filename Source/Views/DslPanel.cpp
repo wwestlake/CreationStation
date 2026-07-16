@@ -44,6 +44,27 @@ export instrument main
     compileButton.onClick = [this] { compileSource(); };
     addAndMakeVisible(compileButton);
 
+    exportButton.onClick = [this]
+    {
+        if (lastModule.success && onArtifactExportRequested)
+            onArtifactExportRequested(lastModule.artifactJson, makeSuggestedArtifactName());
+    };
+    addAndMakeVisible(exportButton);
+
+    saveButton.onClick = [this]
+    {
+        if (lastModule.success && onArtifactSaveToLibraryRequested)
+            onArtifactSaveToLibraryRequested(lastModule.artifactJson, makeSuggestedArtifactName());
+    };
+    addAndMakeVisible(saveButton);
+
+    loadButton.onClick = [this]
+    {
+        if (onArtifactLoadRequested)
+            onArtifactLoadRequested();
+    };
+    addAndMakeVisible(loadButton);
+
     compileSource();
 }
 
@@ -70,14 +91,22 @@ void DslPanel::resized()
 
     auto left = area.removeFromLeft(area.getWidth() / 2 - 10);
     auto right = area;
-    sourceEditor.setBounds(left.withTrimmedBottom(40));
-    compileButton.setBounds(left.removeFromBottom(34).removeFromRight(160));
+    sourceEditor.setBounds(left.withTrimmedBottom(80));
+    auto buttonRow = left.removeFromBottom(72);
+    compileButton.setBounds(buttonRow.removeFromLeft(160).removeFromTop(34));
+    buttonRow.removeFromLeft(10);
+    exportButton.setBounds(buttonRow.removeFromLeft(160).removeFromTop(34));
+    buttonRow.removeFromLeft(10);
+    saveButton.setBounds(buttonRow.removeFromLeft(160).removeFromTop(34));
+    buttonRow.removeFromLeft(10);
+    loadButton.setBounds(buttonRow.removeFromLeft(140).removeFromTop(34));
     outputEditor.setBounds(right);
 }
 
 void DslPanel::compileSource()
 {
     auto result = compiler.compile(sourceEditor.getText());
+    lastModule = result;
     juce::String output;
 
     if (result.success)
@@ -91,4 +120,47 @@ void DslPanel::compileSource()
     }
 
     outputEditor.setText(output, juce::dontSendNotification);
+    exportButton.setEnabled(result.success);
+    saveButton.setEnabled(result.success);
+}
+
+juce::String DslPanel::makeSuggestedArtifactName() const
+{
+    auto packageName = lastModule.packageName;
+    if (packageName.isEmpty())
+        return "patina-artifact";
+
+    auto suggested = packageName.toLowerCase();
+    suggested = suggested.replace("@", "");
+    suggested = suggested.replace("/", "-");
+    suggested = suggested.retainCharacters("abcdefghijklmnopqrstuvwxyz0123456789-_");
+    return suggested.isNotEmpty() ? suggested : "patina-artifact";
+}
+
+void DslPanel::showLoadedArtifactSummary(const cw::patina::ir::Document& document, const juce::File& sourceFile)
+{
+    juce::StringArray lines;
+    lines.add("Loaded Patina artifact");
+    lines.add("File: " + sourceFile.getFullPathName());
+    lines.add("Package: " + document.packageName);
+    lines.add("Version: " + document.packageVersion);
+    lines.add("Schema: " + document.schemaVersion + "  Runtime: " + document.runtimeVersion + "  ABI: " + document.abiVersion);
+    lines.add("Graphs: " + juce::String(document.graphs.size()) + "  |  Exports: " + juce::String(document.exports.size()));
+    lines.add("");
+
+    for (const auto& graph : document.graphs)
+    {
+        lines.add("graph " + graph.name);
+        for (const auto& parameter : graph.parameters)
+            lines.add("  param " + parameter.name + " : " + parameter.type.toString());
+        for (const auto& node : graph.nodes)
+            lines.add("  node " + node.id + " :: " + node.kind);
+        for (const auto& edge : graph.edges)
+            lines.add("  edge " + edge.sourceNode + "." + edge.sourcePort
+                      + " -> " + edge.destinationNode + "." + edge.destinationPort
+                      + " : " + edge.signalType.toString());
+        lines.add("");
+    }
+
+    outputEditor.setText(lines.joinIntoString("\n"), juce::dontSendNotification);
 }

@@ -2,17 +2,23 @@
 
 #include <JuceHeader.h>
 #include <vector>
+#include "AI/CreationStationContextEngine.h"
 #include "Auth/DesktopAuthSession.h"
 #include "Audio/WorkstationAudioEngine.h"
 #include "ControlSurface/XTouchControlSurface.h"
+#include "Content/ContentLibrary.h"
+#include "Content/ContentApiClient.h"
 #include "Project/ProjectManager.h"
+#include "Language/PatinaArtifactLoader.h"
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ArrangeView.h"
+#include "Views/ContentPanel.h"
 #include "Views/DslPanel.h"
 #include "Views/GraphPanel.h"
 #include "Views/MixerPanel.h"
 #include "Views/RecordView.h"
+#include "Views/SignalLabPanel.h"
 #include "Views/TourGuideOverlay.h"
 
 class MainComponent final : public juce::Component
@@ -21,6 +27,8 @@ public:
     enum class WorkspaceMode
     {
         arrange,
+        signal,
+        library,
         mix,
         node,
         code,
@@ -49,11 +57,13 @@ private:
     private:
         WorkspaceMode activeMode = WorkspaceMode::arrange;
         juce::Label titleLabel;
-        juce::TextButton arrangeButton { "DAW" };
-        juce::TextButton mixButton { "Mix" };
-        juce::TextButton nodeButton { "Node" };
-        juce::TextButton codeButton { "DSL" };
-        juce::TextButton recordButton { "Record" };
+        juce::TextButton arrangeButton { "Foley" };
+        juce::TextButton signalButton { "Signal" };
+        juce::TextButton libraryButton { "Library" };
+        juce::TextButton mixButton { "Layers" };
+        juce::TextButton nodeButton { "Patch" };
+        juce::TextButton codeButton { "Script" };
+        juce::TextButton recordButton { "Capture" };
         juce::TextButton aiButton { "AI" };
     };
 
@@ -149,6 +159,7 @@ private:
 
     juce::AudioDeviceManager deviceManager;
     DesktopAuthSession authSession { "creative-workstation" };
+    CreationStationContextEngine contextEngine;
     WorkstationAudioEngine engine;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
@@ -156,6 +167,8 @@ private:
     ViewModeBar viewModeBar;
     PluginRackBar pluginRackBar;
     ArrangeView arrangeView;
+    SignalLabPanel signalLabPanel;
+    ContentPanel contentPanel;
     MixerPanel mixerPanel;
     GraphPanel graphPanel;
     DslPanel dslPanel;
@@ -168,7 +181,14 @@ private:
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     ProjectManager projectManager;
+    ContentLibrary contentLibrary;
+    ContentApiClient contentApiClient;
+    std::unique_ptr<juce::FileChooser> storageRootChooser;
     std::unique_ptr<juce::FileChooser> projectChooser;
+    std::unique_ptr<juce::FileChooser> assetChooser;
+    std::unique_ptr<juce::FileChooser> patchChooser;
+    std::unique_ptr<juce::FileChooser> patinaArtifactChooser;
+    std::unique_ptr<juce::FileChooser> contentUploadChooser;
     std::unique_ptr<juce::DocumentWindow> audioDeviceWindow;
     std::vector<bool> armedTracks;
     bool authenticated = false;
@@ -189,6 +209,13 @@ private:
     void revealProjectFolder();
     void showAudioSettings();
     void showTour();
+    void importProjectSounds();
+    void refreshProjectAssets();
+    void refreshFoleyArrangement();
+    void refreshContentLibrary();
+    void downloadContentItem(const ContentLibrary::Item& item);
+    void activateContentItem(const ContentLibrary::Item& item);
+    bool ensureStorageRootConfigured();
     juce::String createRecordingTakeName() const;
     void refreshRecentTakes();
     bool startRecordingSession();

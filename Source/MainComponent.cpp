@@ -1,5 +1,7 @@
 #include "MainComponent.h"
 #include "Branding.h"
+#include "Patch/PatchModel.h"
+#include <thread>
 
 namespace
 {
@@ -40,20 +42,28 @@ juce::String workspaceModeName(MainComponent::WorkspaceMode mode)
 {
     switch (mode)
     {
-        case MainComponent::WorkspaceMode::arrange: return "DAW";
-        case MainComponent::WorkspaceMode::mix: return "Mix";
-        case MainComponent::WorkspaceMode::node: return "Node";
-        case MainComponent::WorkspaceMode::code: return "DSL";
-        case MainComponent::WorkspaceMode::record: return "Record";
+        case MainComponent::WorkspaceMode::arrange: return "Foley";
+        case MainComponent::WorkspaceMode::signal: return "Signal";
+        case MainComponent::WorkspaceMode::library: return "Library";
+        case MainComponent::WorkspaceMode::mix: return "Layers";
+        case MainComponent::WorkspaceMode::node: return "Patch";
+        case MainComponent::WorkspaceMode::code: return "Script";
+        case MainComponent::WorkspaceMode::record: return "Capture";
         case MainComponent::WorkspaceMode::ai: return "AI";
     }
 
-    return "DAW";
+    return "Foley";
 }
 
 juce::String makeRecordingTimestamp()
 {
     return juce::Time::getCurrentTime().formatted("%Y-%m-%d_%H-%M-%S");
+}
+
+bool isAdminRole(const juce::String& role)
+{
+    auto normalized = role.trim().toLowerCase();
+    return normalized == "admin" || normalized == "administrator";
 }
 }
 
@@ -147,7 +157,7 @@ MainComponent::TransportBar::TransportBar()
 
 MainComponent::ViewModeBar::ViewModeBar()
 {
-    titleLabel.setText("Workspaces", juce::dontSendNotification);
+    titleLabel.setText("Creative Modes", juce::dontSendNotification);
     titleLabel.setFont(juce::Font(18.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
@@ -165,6 +175,8 @@ MainComponent::ViewModeBar::ViewModeBar()
     };
 
     setupButton(arrangeButton, WorkspaceMode::arrange);
+    setupButton(signalButton, WorkspaceMode::signal);
+    setupButton(libraryButton, WorkspaceMode::library);
     setupButton(mixButton, WorkspaceMode::mix);
     setupButton(nodeButton, WorkspaceMode::node);
     setupButton(codeButton, WorkspaceMode::code);
@@ -178,6 +190,8 @@ void MainComponent::ViewModeBar::setActiveMode(WorkspaceMode newMode)
 {
     activeMode = newMode;
     arrangeButton.setToggleState(activeMode == WorkspaceMode::arrange, juce::dontSendNotification);
+    signalButton.setToggleState(activeMode == WorkspaceMode::signal, juce::dontSendNotification);
+    libraryButton.setToggleState(activeMode == WorkspaceMode::library, juce::dontSendNotification);
     mixButton.setToggleState(activeMode == WorkspaceMode::mix, juce::dontSendNotification);
     nodeButton.setToggleState(activeMode == WorkspaceMode::node, juce::dontSendNotification);
     codeButton.setToggleState(activeMode == WorkspaceMode::code, juce::dontSendNotification);
@@ -206,8 +220,10 @@ void MainComponent::ViewModeBar::resized()
     auto area = getLocalBounds().reduced(14, 8);
     titleLabel.setBounds(area.removeFromLeft(140));
     area.removeFromLeft(8);
-    auto buttonWidth = 86;
+    auto buttonWidth = 78;
     arrangeButton.setBounds(area.removeFromLeft(buttonWidth));
+    signalButton.setBounds(area.removeFromLeft(buttonWidth));
+    libraryButton.setBounds(area.removeFromLeft(buttonWidth));
     mixButton.setBounds(area.removeFromLeft(buttonWidth));
     nodeButton.setBounds(area.removeFromLeft(buttonWidth));
     codeButton.setBounds(area.removeFromLeft(buttonWidth));
@@ -557,7 +573,11 @@ MainComponent::MainComponent()
         authGateView.setStatusText("Restored your saved login.");
     }
 
-    if (! projectManager.loadLastProject())
+    juce::String storageError;
+    if (! projectManager.loadStorageConfiguration(storageError))
+        ensureStorageRootConfigured();
+
+    if (projectManager.hasStorageRoot() && ! projectManager.loadLastProject())
     {
         juce::String projectError;
         projectManager.createProject("Untitled Project", projectError);
@@ -573,6 +593,8 @@ MainComponent::MainComponent()
     addAndMakeVisible(viewModeBar);
     addAndMakeVisible(pluginRackBar);
     addAndMakeVisible(arrangeView);
+    addAndMakeVisible(signalLabPanel);
+    addAndMakeVisible(contentPanel);
     addAndMakeVisible(mixerPanel);
     addAndMakeVisible(graphPanel);
     addAndMakeVisible(dslPanel);
@@ -603,17 +625,20 @@ MainComponent::MainComponent()
 
     transportBar.onPlay = [this]
     {
+        engine.stopAssetPreview();
         engine.setPlaying(true);
         midiSurface.setTransportState(true, false);
     };
     transportBar.onStop = [this]
     {
         stopRecordingSession();
+        engine.stopAssetPreview();
         engine.setPlaying(false);
         midiSurface.setTransportState(false, false);
     };
     transportBar.onRecord = [this]
     {
+        engine.stopAssetPreview();
         if (engine.isRecording())
             stopRecordingSession();
         else if (startRecordingSession())
@@ -721,6 +746,421 @@ MainComponent::MainComponent()
         recordView.setTrackCount(arrangeView.getVisibleTrackCount());
         for (int index = 0; index < arrangeView.getVisibleTrackCount(); ++index)
             recordView.setTrackName(index, engine.getTrackName(index));
+    };
+
+    arrangeView.onImportAssetRequested = [this]
+    {
+        importProjectSounds();
+    };
+
+    arrangeView.onAssetPreviewRequested = [this](const juce::File& assetFile)
+    {
+        if (! projectManager.hasProject() || ! assetFile.existsAsFile())
+            return;
+
+        WorkstationAudioEngine::PreviewSettings settings;
+        settings.startNormalized = arrangeView.getTrimStart();
+        settings.endNormalized = arrangeView.getTrimEnd();
+        settings.gainDecibels = arrangeView.getGainDecibels();
+        settings.fadeInNormalized = arrangeView.getFadeInNormalized();
+        settings.fadeOutNormalized = arrangeView.getFadeOutNormalized();
+        settings.reverse = arrangeView.isReverseEnabled();
+        settings.normalize = arrangeView.isNormalizeEnabled();
+
+        juce::String errorMessage;
+        if (engine.previewAssetFile(assetFile, settings, errorMessage))
+            transportBar.setStatusText("Previewing slice: " + assetFile.getFileName());
+        else if (errorMessage.isNotEmpty())
+            transportBar.setStatusText(errorMessage);
+    };
+
+    arrangeView.onArrangementChanged = [this]
+    {
+        refreshFoleyArrangement();
+        saveSessionToDisk();
+    };
+
+    signalLabPanel.onPreviewRequested = [this](const juce::AudioBuffer<float>& buffer, double sampleRate, const juce::String& suggestedName)
+    {
+        juce::String errorMessage;
+        if (engine.previewGeneratedBuffer(buffer, sampleRate, errorMessage))
+            transportBar.setStatusText("Previewing signal: " + suggestedName);
+        else if (errorMessage.isNotEmpty())
+            transportBar.setStatusText(errorMessage);
+    };
+
+    signalLabPanel.onRenderRequested = [this](const juce::AudioBuffer<float>& buffer, double sampleRate, const juce::String& suggestedName)
+    {
+        if (! projectManager.hasProject())
+        {
+            juce::String projectError;
+            if (! projectManager.createProject("Untitled Project", projectError))
+            {
+                transportBar.setStatusText("Could not create a project for rendered sounds.");
+                return;
+            }
+
+            transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+        }
+
+        juce::String errorMessage;
+        auto renderedFile = projectManager.saveGeneratedAssetFile(buffer, sampleRate, suggestedName, errorMessage);
+        if (renderedFile.existsAsFile())
+        {
+            refreshProjectAssets();
+            refreshContentLibrary();
+            saveSessionToDisk();
+            transportBar.setStatusText("Rendered signal into project sounds: " + renderedFile.getFileName());
+        }
+        else if (errorMessage.isNotEmpty())
+        {
+            transportBar.setStatusText(errorMessage);
+        }
+    };
+
+    signalLabPanel.onPatchExportRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
+    {
+        if (! projectManager.hasProject())
+        {
+            juce::String projectError;
+            if (! projectManager.createProject("Untitled Project", projectError))
+            {
+                transportBar.setStatusText("Could not create a project for patch export.");
+                return;
+            }
+
+            transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+        }
+
+        juce::String errorMessage;
+        auto patchFile = projectManager.savePatchFile(patchJson, suggestedName, errorMessage);
+        if (patchFile.existsAsFile())
+        {
+            refreshContentLibrary();
+            saveSessionToDisk();
+            transportBar.setStatusText("Exported patch: " + patchFile.getFileName());
+        }
+        else if (errorMessage.isNotEmpty())
+        {
+            transportBar.setStatusText(errorMessage);
+        }
+    };
+
+    signalLabPanel.onPatchSaveToLibraryRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
+    {
+        if (! ensureStorageRootConfigured())
+            return;
+
+        juce::String errorMessage;
+        auto patchFile = projectManager.saveUserPatchFile(patchJson, suggestedName, errorMessage);
+        if (patchFile.existsAsFile())
+        {
+            refreshContentLibrary();
+            transportBar.setStatusText("Saved patch to your library: " + patchFile.getFileName());
+        }
+        else if (errorMessage.isNotEmpty())
+        {
+            transportBar.setStatusText(errorMessage);
+        }
+    };
+
+    signalLabPanel.onPatchLoadRequested = [this]
+    {
+        auto startDirectory = projectManager.hasProject()
+            ? projectManager.getCurrentProject().dslDirectory.getChildFile("Patches")
+            : projectManager.getProjectsRoot();
+
+        patchChooser = std::make_unique<juce::FileChooser>("Load a Creation Station patch",
+                                                           startDirectory,
+                                                           "*.cspatch");
+
+        patchChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                  [this](const juce::FileChooser& chooser)
+                                  {
+                                      auto file = chooser.getResult();
+                                      patchChooser.reset();
+
+                                      if (! file.existsAsFile())
+                                          return;
+
+                                      juce::String errorMessage;
+                                      cw::PatchDocument document;
+                                      if (! cw::parsePatchDocumentJson(file.loadFileAsString(), document, errorMessage))
+                                      {
+                                          transportBar.setStatusText(errorMessage);
+                                          return;
+                                      }
+
+                                      if (! signalLabPanel.loadPatchDocument(document, errorMessage))
+                                      {
+                                          transportBar.setStatusText(errorMessage);
+                                          return;
+                                      }
+
+                                      transportBar.setStatusText("Loaded patch: " + file.getFileName());
+                                      setWorkspaceMode(WorkspaceMode::signal);
+                                  });
+    };
+
+    dslPanel.onArtifactExportRequested = [this](const juce::String& artifactJson, const juce::String& suggestedName)
+    {
+        if (! projectManager.hasProject())
+        {
+            juce::String projectError;
+            if (! projectManager.createProject("Untitled Project", projectError))
+            {
+                transportBar.setStatusText("Could not create a project for Patina artifact export.");
+                return;
+            }
+
+            transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+        }
+
+        juce::String errorMessage;
+        auto artifactFile = projectManager.savePatinaArtifactFile(artifactJson, suggestedName, errorMessage);
+        if (artifactFile.existsAsFile())
+        {
+            saveSessionToDisk();
+            transportBar.setStatusText("Exported Patina artifact: " + artifactFile.getFileName());
+        }
+        else if (errorMessage.isNotEmpty())
+        {
+            transportBar.setStatusText(errorMessage);
+        }
+    };
+
+    dslPanel.onArtifactSaveToLibraryRequested = [this](const juce::String& artifactJson, const juce::String& suggestedName)
+    {
+        if (! ensureStorageRootConfigured())
+            return;
+
+        juce::String errorMessage;
+        auto artifactFile = projectManager.saveUserPatinaArtifactFile(artifactJson, suggestedName, errorMessage);
+        if (artifactFile.existsAsFile())
+        {
+            refreshContentLibrary();
+            transportBar.setStatusText("Saved Patina artifact to your library: " + artifactFile.getFileName());
+        }
+        else if (errorMessage.isNotEmpty())
+        {
+            transportBar.setStatusText(errorMessage);
+        }
+    };
+
+    dslPanel.onArtifactLoadRequested = [this]
+    {
+        auto startDirectory = projectManager.hasProject()
+            ? projectManager.getCurrentProject().dslDirectory.getChildFile("Patina")
+            : (projectManager.hasStorageRoot() ? projectManager.getStorageRoot() : juce::File{});
+
+        patinaArtifactChooser = std::make_unique<juce::FileChooser>("Load a Patina artifact",
+                                                                    startDirectory,
+                                                                    "*.patina.json");
+
+        patinaArtifactChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                           [this](const juce::FileChooser& chooser)
+                                           {
+                                               auto file = chooser.getResult();
+                                               patinaArtifactChooser.reset();
+
+                                               if (! file.existsAsFile())
+                                                   return;
+
+                                               cw::patina::ArtifactLoader loader;
+                                               cw::patina::ir::Document document;
+                                               juce::String errorMessage;
+                                               if (! loader.loadJson(file.loadFileAsString(), document, errorMessage))
+                                               {
+                                                   transportBar.setStatusText(errorMessage);
+                                                   return;
+                                               }
+
+                                               dslPanel.showLoadedArtifactSummary(document, file);
+                                               transportBar.setStatusText("Loaded Patina artifact: " + file.getFileName());
+                                               setWorkspaceMode(WorkspaceMode::code);
+                                           });
+    };
+
+    contextEngine.onContextReady = [this](const CreationStationContextEngine::ContextPacket& packet)
+    {
+        aiPanel.setContextPacket(packet);
+        transportBar.setStatusText("AI context packet ready.");
+    };
+
+    aiPanel.onPromptSubmitted = [this](const juce::String& prompt)
+    {
+        contextEngine.clearDocuments();
+
+        CreationStationContextEngine::SourceDocument modeDocument;
+        modeDocument.id = "workspace-mode";
+        modeDocument.title = "Current workspace";
+        modeDocument.category = "session";
+        modeDocument.body = "Workspace mode: " + workspaceModeName(activeMode);
+        modeDocument.tags.add(activeMode == WorkspaceMode::code ? "script"
+                             : activeMode == WorkspaceMode::signal ? "signal"
+                             : activeMode == WorkspaceMode::library ? "library"
+                             : activeMode == WorkspaceMode::arrange ? "foley"
+                             : activeMode == WorkspaceMode::mix ? "layers"
+                             : activeMode == WorkspaceMode::node ? "patch"
+                             : activeMode == WorkspaceMode::record ? "capture"
+                                                                   : "ai");
+        modeDocument.updatedAt = juce::Time::getCurrentTime();
+        contextEngine.upsertDocument(modeDocument);
+
+        CreationStationContextEngine::SourceDocument dslDocument;
+        dslDocument.id = "patina-source";
+        dslDocument.title = "Patina source buffer";
+        dslDocument.category = "language";
+        dslDocument.body = dslPanel.getSourceText();
+        dslDocument.tags.addArray({ "patina", "dsl", "script" });
+        dslDocument.updatedAt = juce::Time::getCurrentTime();
+        contextEngine.upsertDocument(dslDocument);
+
+        CreationStationContextEngine::SourceDocument projectDocument;
+        projectDocument.id = "project-state";
+        projectDocument.title = "Project state";
+        projectDocument.category = "project";
+        projectDocument.body = projectManager.hasProject()
+            ? ("Project: " + projectManager.getDisplayLabel() + "\nPath: " + projectManager.getCurrentProject().rootDirectory.getFullPathName())
+            : "No project is currently open.";
+        projectDocument.tags.addArray({ "project", "session" });
+        projectDocument.updatedAt = juce::Time::getCurrentTime();
+        contextEngine.upsertDocument(projectDocument);
+
+        CreationStationContextEngine::SourceDocument libraryDocument;
+        libraryDocument.id = "content-library";
+        libraryDocument.title = "Content library summary";
+        libraryDocument.category = "content";
+        libraryDocument.body = contentLibrary.createSummaryText();
+        libraryDocument.tags.addArray({ "content", "library" });
+        libraryDocument.updatedAt = juce::Time::getCurrentTime();
+        contextEngine.upsertDocument(libraryDocument);
+
+        CreationStationContextEngine::RetrievalRequest request;
+        request.prompt = prompt;
+        request.workspaceMode = workspaceModeName(activeMode).toLowerCase();
+        request.projectName = projectManager.hasProject() ? projectManager.getDisplayLabel() : juce::String();
+        request.maxItems = 6;
+
+        contextEngine.submitRequest(request);
+        transportBar.setStatusText("Building AI context packet...");
+    };
+
+    contentPanel.onRefreshRequested = [this]
+    {
+        refreshContentLibrary();
+    };
+
+    contentPanel.onOpenContentFolderRequested = [this]
+    {
+        if (! ensureStorageRootConfigured())
+            return;
+
+        projectManager.getContentDirectory().revealToUser();
+    };
+
+    contentPanel.onAdminPublishRequested = [this]
+    {
+        if (! authenticated || ! isAdminRole(authSession.getSession().user.role))
+        {
+            transportBar.setStatusText("Admin publishing is only available to admin accounts.");
+            return;
+        }
+
+        if (! ensureStorageRootConfigured())
+            return;
+
+        contentUploadChooser = std::make_unique<juce::FileChooser>("Choose a content package to publish",
+                                                                   projectManager.getStorageRoot(),
+                                                                   "*.cspatch;*.cspack;*.zip;*.wav");
+
+        contentUploadChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                          [this](const juce::FileChooser& chooser)
+                                          {
+                                              auto selectedFile = chooser.getResult();
+                                              contentUploadChooser.reset();
+
+                                              if (! selectedFile.existsAsFile())
+                                                  return;
+
+                                              auto* dialog = new juce::AlertWindow("Admin Publish Content",
+                                                                                   "Enter content metadata for upload.",
+                                                                                   juce::MessageBoxIconType::QuestionIcon);
+                                              dialog->addTextEditor("name", selectedFile.getFileNameWithoutExtension());
+                                              dialog->addTextEditor("type", selectedFile.hasFileExtension(".cspatch") ? "patch"
+                                                                                     : selectedFile.hasFileExtension(".cspack") ? "pack"
+                                                                                     : selectedFile.hasFileExtension(".wav") ? "sample-pack"
+                                                                                     : "pack");
+                                              dialog->addTextEditor("version", "0.1.0");
+                                              dialog->addTextEditor("description", "Published from Creation Station.");
+                                              dialog->addTextEditor("tags", "creation-station");
+                                              dialog->addTextEditor("tier", "");
+                                              dialog->addTextEditor("minAppVersion", "0.2.0");
+                                              dialog->addButton("Publish", 1);
+                                              dialog->addButton("Cancel", 0);
+
+                                              auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+                                              dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+                                                  [safeThis, dialog, selectedFile](int result) mutable
+                                                  {
+                                                      std::unique_ptr<juce::AlertWindow> ownedDialog(dialog);
+                                                      if (result != 1 || safeThis == nullptr)
+                                                          return;
+
+                                                      ContentApiClient::AdminUploadRequest request;
+                                                      request.productSlug = "creation-station";
+                                                      request.name = ownedDialog->getTextEditorContents("name").trim();
+                                                      request.itemType = ownedDialog->getTextEditorContents("type").trim();
+                                                      request.version = ownedDialog->getTextEditorContents("version").trim();
+                                                      request.description = ownedDialog->getTextEditorContents("description").trim();
+                                                      request.tags.addTokens(ownedDialog->getTextEditorContents("tags"), ",", "\"");
+                                                      request.tags.trim();
+                                                      request.tags.removeEmptyStrings();
+                                                      request.requiredTierId = ownedDialog->getTextEditorContents("tier").trim();
+                                                      request.minAppVersion = ownedDialog->getTextEditorContents("minAppVersion").trim();
+                                                      request.fileType = selectedFile.getFileExtension().trimCharactersAtStart(".").toLowerCase();
+                                                      request.packageFile = selectedFile;
+
+                                                      safeThis->transportBar.setStatusText("Publishing content to LagDaemon...");
+                                                      auto token = safeThis->authSession.getSession().token;
+
+                                                      std::thread([safeThis, token, request]()
+                                                      {
+                                                          juce::String errorMessage;
+                                                          juce::String createdId;
+
+                                                          if (! safeThis->contentApiClient.createAdminContent(token, request, createdId, errorMessage)
+                                                              || ! safeThis->contentApiClient.uploadAdminContentFile(token, createdId, request.packageFile, errorMessage))
+                                                          {
+                                                              juce::MessageManager::callAsync([safeThis, errorMessage]
+                                                              {
+                                                                  if (safeThis != nullptr)
+                                                                      safeThis->transportBar.setStatusText(errorMessage);
+                                                              });
+                                                              return;
+                                                          }
+
+                                                          juce::MessageManager::callAsync([safeThis]
+                                                          {
+                                                              if (safeThis != nullptr)
+                                                              {
+                                                                  safeThis->transportBar.setStatusText("Content published to LagDaemon.");
+                                                                  safeThis->refreshContentLibrary();
+                                                              }
+                                                          });
+                                                      }).detach();
+                                                  }), true);
+                                          });
+    };
+
+    contentPanel.onDownloadRequested = [this](const ContentLibrary::Item& item)
+    {
+        downloadContentItem(item);
+    };
+
+    contentPanel.onRevealItemRequested = [this](const ContentLibrary::Item& item)
+    {
+        activateContentItem(item);
     };
 
     pluginRackBar.onLoadPlugin = [this, refreshVisibleBank]
@@ -1165,6 +1605,7 @@ MainComponent::MainComponent()
     refreshVisibleBank();
     refreshInsertRack();
     refreshRecentTakes();
+    refreshContentLibrary();
 
     tourOverlay.setSteps(
         {
@@ -1176,37 +1617,49 @@ MainComponent::MainComponent()
             },
             {
                 "Transport",
-                "Use Play, Stop, and Record here. This is the fastest place to control playback.",
+                "Use Play, Stop, and Record here. This is the fastest place to audition and capture ideas.",
                 [this] { return transportBar.getBounds(); },
                 true
             },
             {
-                "Workspaces",
-                "These tabs switch between the DAW, mixer, node graph, DSL, record view, and AI workspace.",
+                "Creative Modes",
+                "These modes switch between Foley staging, signal forging, content browsing, layering, patch design, scripting, capture, and AI help.",
                 [this] { return viewModeBar.getBounds(); },
                 true
             },
             {
-                "Mixer",
-                "The mixer is where channels, banks, mute, solo, and the master strip live.",
+                "Signal Lab",
+                "Signal Lab lets you design a tone from oscillators, noise, and an envelope, then inspect it with a scope and frequency analyzer.",
+                [this] { return signalLabPanel.getBounds(); },
+                false
+            },
+            {
+                "Library",
+                "The content library is where free, downloaded, premium, and personal content will show up once the LagDaemon service is connected.",
+                [this] { return contentPanel.getBounds(); },
+                false
+            },
+            {
+                "Layers",
+                "The layer view is where raw sounds stack, blend, mute, solo, and move under the master strip.",
                 [this] { return mixerPanel.getBounds(); },
                 false
             },
             {
-                "Node Graph",
-                "This view is for sound design chains: sources, effects, and sinks.",
+                "Patch Lab",
+                "This view is for sound-design chains: sources, processors, and printable outputs.",
                 [this] { return graphPanel.getBounds(); },
                 false
             },
             {
-                "DSL",
-                "The DSL lets you write functional-style signal flow and automation as text.",
+                "Script",
+                "The script view lets you write functional-style signal flow and automation as text.",
                 [this] { return dslPanel.getBounds(); },
                 false
             },
             {
-                "Record",
-                "Record mode arms tracks and writes audio takes into your project folder.",
+                "Capture",
+                "Capture mode arms source lanes and writes fresh takes into your project folder.",
                 [this] { return recordView.getBounds(); },
                 false
             },
@@ -1251,6 +1704,8 @@ void MainComponent::resized()
 
     auto contentArea = area;
     arrangeView.setBounds(contentArea);
+    signalLabPanel.setBounds(contentArea);
+    contentPanel.setBounds(contentArea);
     mixerPanel.setBounds(contentArea);
     graphPanel.setBounds(contentArea);
     dslPanel.setBounds(contentArea);
@@ -1273,6 +1728,8 @@ void MainComponent::refreshModeVisibility()
     viewModeBar.setVisible(true);
     pluginRackBar.setVisible(true);
     arrangeView.setVisible(activeMode == WorkspaceMode::arrange);
+    signalLabPanel.setVisible(activeMode == WorkspaceMode::signal);
+    contentPanel.setVisible(activeMode == WorkspaceMode::library);
     mixerPanel.setVisible(activeMode == WorkspaceMode::mix);
     graphPanel.setVisible(activeMode == WorkspaceMode::node);
     dslPanel.setVisible(activeMode == WorkspaceMode::code);
@@ -1286,6 +1743,7 @@ void MainComponent::refreshModeVisibility()
 void MainComponent::refreshAuthState()
 {
     refreshModeVisibility();
+    contentPanel.setAuthState(authenticated, authenticated && isAdminRole(authSession.getSession().user.role));
 
     if (authenticated)
     {
@@ -1335,6 +1793,293 @@ void MainComponent::showTour()
     tourOverlay.toFront(true);
 }
 
+void MainComponent::importProjectSounds()
+{
+    if (! ensureStorageRootConfigured())
+        return;
+
+    if (! projectManager.hasProject())
+    {
+        juce::String errorMessage;
+        if (! projectManager.createProject("Untitled Project", errorMessage))
+        {
+            transportBar.setStatusText("Could not create a project for imported sounds.");
+            return;
+        }
+
+        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+    }
+
+    assetChooser = std::make_unique<juce::FileChooser>("Import project sounds",
+                                                       juce::File{},
+                                                       "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+
+    assetChooser->launchAsync(juce::FileBrowserComponent::openMode
+                                  | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::canSelectMultipleItems,
+                              [this](const juce::FileChooser& result)
+                              {
+                                  auto selectedFiles = result.getResults();
+                                  assetChooser.reset();
+
+                                  if (selectedFiles.isEmpty())
+                                      return;
+
+                                  auto importedCount = 0;
+                                  juce::String lastError;
+
+                                  for (const auto& sourceFile : selectedFiles)
+                                  {
+                                      juce::String errorMessage;
+                                      auto imported = projectManager.importAssetFile(sourceFile, errorMessage);
+                                      if (imported.existsAsFile())
+                                          ++importedCount;
+                                      else
+                                          lastError = errorMessage;
+                                  }
+
+                                  refreshProjectAssets();
+                                  saveSessionToDisk();
+
+                                  if (importedCount > 0)
+                                      transportBar.setStatusText("Imported " + juce::String(importedCount) + " sound(s) into this project.");
+                                  else if (lastError.isNotEmpty())
+                                      transportBar.setStatusText(lastError);
+                              });
+}
+
+void MainComponent::refreshProjectAssets()
+{
+    if (! projectManager.hasProject())
+    {
+        arrangeView.setAssetFiles({});
+        return;
+    }
+
+    auto assetFiles = projectManager.listAssetFiles();
+    arrangeView.setAssetFiles(assetFiles);
+}
+
+void MainComponent::refreshContentLibrary()
+{
+    if (! projectManager.hasStorageRoot())
+    {
+        contentPanel.setStoragePath({});
+        contentPanel.setItems({});
+        contentPanel.setStatusText("Choose a local storage location to initialize the content library.");
+        return;
+    }
+
+    contentPanel.setStoragePath(projectManager.getStorageRoot().getFullPathName());
+
+    juce::String errorMessage;
+    if (! contentLibrary.loadFromStorage(projectManager.getBuiltInContentDirectory(),
+                                         projectManager.getDownloadedContentDirectory(),
+                                         projectManager.getUserContentDirectory(),
+                                         projectManager.getContentManifestFile(),
+                                         errorMessage))
+    {
+        contentPanel.setItems({});
+        contentPanel.setStatusText(errorMessage);
+        return;
+    }
+
+    auto combinedItems = contentLibrary.getItems();
+    contentPanel.setItems(combinedItems);
+    contentPanel.setStatusText(contentLibrary.createSummaryText());
+
+    if (! authenticated)
+        return;
+
+    contentPanel.setStatusText(contentLibrary.createSummaryText() + "  |  Syncing LagDaemon...");
+    auto token = authSession.getSession().token;
+
+    std::thread([this, token, combinedItems]()
+    {
+        juce::Array<ContentApiClient::LibraryItem> remoteLibrary;
+        juce::String remoteError;
+        if (! contentApiClient.fetchLibrary(token, "creation-station", remoteLibrary, remoteError))
+        {
+            juce::MessageManager::callAsync([safeThis = juce::Component::SafePointer<MainComponent>(this), remoteError]
+            {
+                if (safeThis != nullptr)
+                    safeThis->contentPanel.setStatusText(remoteError);
+            });
+            return;
+        }
+
+        auto mergedItems = combinedItems;
+        juce::StringArray installedIds;
+        for (const auto& localItem : combinedItems)
+            installedIds.addIfNotAlreadyThere(localItem.id);
+
+        for (const auto& remoteItem : remoteLibrary)
+        {
+            if (installedIds.contains(remoteItem.id))
+                continue;
+
+            ContentLibrary::Item item;
+            item.id = remoteItem.id;
+            item.name = remoteItem.name;
+            item.type = remoteItem.itemType;
+            item.category = remoteItem.tags.isEmpty() ? "LagDaemon Content" : remoteItem.tags.joinIntoString(", ");
+            item.description = remoteItem.description.isNotEmpty() ? remoteItem.description : ("Remote " + remoteItem.itemType + " from LagDaemon.");
+            item.requiredTier = remoteItem.requiredTier;
+            item.version = remoteItem.version;
+            item.origin = ContentLibrary::Origin::remote;
+            item.accessState = remoteItem.accessState == "locked" ? ContentLibrary::AccessState::locked
+                                                                  : ContentLibrary::AccessState::available;
+            item.fileSizeBytes = remoteItem.sizeBytes;
+            mergedItems.add(item);
+        }
+
+        juce::MessageManager::callAsync([safeThis = juce::Component::SafePointer<MainComponent>(this), mergedItems]
+        {
+            if (safeThis != nullptr)
+            {
+                safeThis->contentPanel.setItems(mergedItems);
+                safeThis->contentPanel.setStatusText("Library ready: " + juce::String(mergedItems.size()) + " local + remote items.");
+            }
+        });
+    }).detach();
+}
+
+void MainComponent::downloadContentItem(const ContentLibrary::Item& item)
+{
+    if (! authenticated)
+    {
+        contentPanel.setStatusText("Sign in to download LagDaemon content.");
+        return;
+    }
+
+    if (! projectManager.hasStorageRoot())
+    {
+        contentPanel.setStatusText("Choose a local storage location before downloading content.");
+        return;
+    }
+
+    if (item.origin != ContentLibrary::Origin::remote || item.id.isEmpty())
+    {
+        contentPanel.setStatusText("That item is already local.");
+        return;
+    }
+
+    auto slug = item.name.trim().toLowerCase().retainCharacters("abcdefghijklmnopqrstuvwxyz0123456789-_ ");
+    slug = slug.replace(" ", "-");
+    while (slug.contains("--"))
+        slug = slug.replace("--", "-");
+    slug = slug.trimCharactersAtStart("-");
+    slug = slug.trimCharactersAtEnd("-");
+    if (slug.isEmpty())
+        slug = "content";
+
+    juce::String extension;
+    if (item.type == "patch")
+        extension = ".cspatch";
+    else if (item.type == "pack" || item.type == "sample-pack")
+        extension = ".cspack";
+    else if (item.type == "audio")
+        extension = ".wav";
+    else
+        extension = ".bin";
+
+    auto destination = projectManager.getDownloadedContentDirectory()
+                           .getChildFile(item.id + "__" + slug + extension);
+    auto token = authSession.getSession().token;
+
+    contentPanel.setStatusText("Downloading " + item.name + "...");
+    std::thread([this, token, item, destination]()
+    {
+        juce::String errorMessage;
+        auto success = contentApiClient.downloadContentItem(token, item.id, destination, errorMessage);
+
+        juce::MessageManager::callAsync([safeThis = juce::Component::SafePointer<MainComponent>(this), success, errorMessage, item]
+        {
+            if (safeThis == nullptr)
+                return;
+
+            if (! success)
+            {
+                safeThis->contentPanel.setStatusText(errorMessage);
+                return;
+            }
+
+            safeThis->contentPanel.setStatusText("Downloaded " + item.name + " from LagDaemon.");
+            safeThis->refreshContentLibrary();
+        });
+    }).detach();
+}
+
+void MainComponent::activateContentItem(const ContentLibrary::Item& item)
+{
+    if (! item.file.existsAsFile())
+    {
+        contentPanel.setStatusText("That content item is not available on disk.");
+        return;
+    }
+
+    if (item.type == "patch")
+    {
+        juce::String errorMessage;
+        cw::PatchDocument document;
+        if (! cw::parsePatchDocumentJson(item.file.loadFileAsString(), document, errorMessage))
+        {
+            contentPanel.setStatusText(errorMessage);
+            return;
+        }
+
+        if (! signalLabPanel.loadPatchDocument(document, errorMessage))
+        {
+            contentPanel.setStatusText(errorMessage);
+            return;
+        }
+
+        transportBar.setStatusText("Opened patch from library: " + item.file.getFileName());
+        setWorkspaceMode(WorkspaceMode::signal);
+        return;
+    }
+
+    if (item.type == "audio")
+    {
+        if (! projectManager.hasProject())
+        {
+            contentPanel.setStatusText("Open or create a project before importing library audio into Foley.");
+            return;
+        }
+
+        juce::String errorMessage;
+        auto importedFile = projectManager.importAssetFile(item.file, errorMessage);
+        if (! importedFile.existsAsFile())
+        {
+            contentPanel.setStatusText(errorMessage);
+            return;
+        }
+
+        refreshProjectAssets();
+        arrangeView.addAssetClipToSelectedTrack(importedFile.getFileName());
+        refreshFoleyArrangement();
+        transportBar.setStatusText("Imported library audio into Foley: " + importedFile.getFileName());
+        setWorkspaceMode(WorkspaceMode::arrange);
+        return;
+    }
+
+    item.file.revealToUser();
+    transportBar.setStatusText("Revealed content item: " + item.file.getFileName());
+}
+
+void MainComponent::refreshFoleyArrangement()
+{
+    if (! projectManager.hasProject())
+        return;
+
+    juce::String errorMessage;
+    if (! engine.setFoleyArrangement(arrangeView.createState(), projectManager.getCurrentProject().assetsDirectory, errorMessage)
+        && errorMessage.isNotEmpty())
+    {
+        transportBar.setStatusText(errorMessage);
+    }
+}
+
 void MainComponent::showProjectMenu()
 {
     juce::PopupMenu menu;
@@ -1361,6 +2106,9 @@ void MainComponent::showProjectMenu()
 
 void MainComponent::createNewProject()
 {
+    if (! ensureStorageRootConfigured())
+        return;
+
     auto* nameEditor = new juce::AlertWindow("New Project",
                                              "Give the project a name.",
                                              juce::MessageBoxIconType::QuestionIcon);
@@ -1386,12 +2134,16 @@ void MainComponent::createNewProject()
         }
 
         options->transportBar.setProjectLabel("Project: " + options->projectManager.getDisplayLabel());
+        options->refreshProjectAssets();
         options->saveSessionToDisk();
     }), true);
 }
 
 void MainComponent::openProject()
 {
+    if (! ensureStorageRootConfigured())
+        return;
+
     projectChooser = std::make_unique<juce::FileChooser>("Open a Creation Station project",
                                                          projectManager.getProjectsRoot(),
                                                          "*",
@@ -1415,6 +2167,7 @@ void MainComponent::openProject()
                              }
 
                              transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+                             refreshProjectAssets();
                              loadSessionFromDisk();
                              saveSessionToDisk();
                          });
@@ -1443,6 +2196,7 @@ void MainComponent::refreshRecentTakes()
     {
         recordView.setRecentTakes({});
         arrangeView.setRecordedClips({});
+        refreshProjectAssets();
         return;
     }
 
@@ -1456,10 +2210,14 @@ void MainComponent::refreshRecentTakes()
 
     recordView.setRecentTakes(names);
     arrangeView.setRecordedClips(names);
+    refreshProjectAssets();
 }
 
 bool MainComponent::startRecordingSession()
 {
+    if (! ensureStorageRootConfigured())
+        return false;
+
     if (! projectManager.hasProject())
     {
         juce::String errorMessage;
@@ -1468,6 +2226,9 @@ bool MainComponent::startRecordingSession()
             transportBar.setStatusText("Could not create a project for recording.");
             return false;
         }
+
+        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+        refreshProjectAssets();
     }
 
     auto takeFile = projectManager.getCurrentProject().audioDirectory.getChildFile(createRecordingTakeName());
@@ -1505,17 +2266,71 @@ void MainComponent::revealProjectFolder()
     projectManager.getCurrentProject().rootDirectory.revealToUser();
 }
 
+bool MainComponent::ensureStorageRootConfigured()
+{
+    if (projectManager.hasStorageRoot())
+        return true;
+
+    if (storageRootChooser != nullptr)
+        return false;
+
+    transportBar.setStatusText("Choose a local storage folder for Creation Station.");
+    storageRootChooser = std::make_unique<juce::FileChooser>("Choose a local storage folder for Creation Station",
+                                                             juce::File{},
+                                                             juce::String{},
+                                                             true);
+
+    storageRootChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                    [this](const juce::FileChooser& chooser)
+                                    {
+                                        auto selectedDirectory = chooser.getResult();
+                                        storageRootChooser.reset();
+
+                                        if (! selectedDirectory.isDirectory())
+                                        {
+                                            transportBar.setStatusText("Storage location is required before the studio can save projects or content.");
+                                            return;
+                                        }
+
+                                        juce::String errorMessage;
+                                        if (! projectManager.setStorageRoot(selectedDirectory, errorMessage))
+                                        {
+                                            transportBar.setStatusText(errorMessage);
+                                            return;
+                                        }
+
+                                        if (! projectManager.loadLastProject())
+                                        {
+                                            juce::String projectError;
+                                            projectManager.createProject("Untitled Project", projectError);
+                                        }
+
+                                        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+                                        refreshProjectAssets();
+                                        refreshContentLibrary();
+                                        loadSessionFromDisk();
+                                        refreshRecentTakes();
+                                        transportBar.setStatusText("Storage set to " + projectManager.getStorageRoot().getFullPathName());
+                                    });
+
+    return false;
+}
+
 
 
 juce::File MainComponent::getSessionFile() const
 {
-    auto sessionDirectory = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                               .getChildFile("CreationStation");
-    return sessionDirectory.getChildFile("session.xml");
+    if (! projectManager.hasStorageRoot())
+        return {};
+
+    return projectManager.getConfigDirectory().getChildFile("session.xml");
 }
 
 void MainComponent::saveSessionToDisk() const
 {
+    if (! projectManager.hasStorageRoot())
+        return;
+
     auto state = engine.createSessionState();
     state.setProperty("bankOffset", mixerPanel.getBankOffset(), nullptr);
     state.setProperty("insertContext", pluginRackBar.isTrackContext() ? "track" : "master", nullptr);
@@ -1529,6 +2344,8 @@ void MainComponent::saveSessionToDisk() const
     state.setProperty("arrangeVisibleTracks", arrangeView.getVisibleTrackCount(), nullptr);
     state.setProperty("workspaceMode", static_cast<int>(activeMode), nullptr);
     state.setProperty("dslSource", dslPanel.getSourceText(), nullptr);
+    state.addChild(arrangeView.createState(), -1, nullptr);
+    state.addChild(signalLabPanel.createState(), -1, nullptr);
     state.addChild(graphPanel.createState(), -1, nullptr);
 
     projectManager.saveProjectState(state);
@@ -1541,6 +2358,9 @@ void MainComponent::saveSessionToDisk() const
 
 void MainComponent::loadSessionFromDisk()
 {
+    if (! projectManager.hasStorageRoot())
+        return;
+
     auto state = projectManager.loadProjectState();
     if (! state.isValid())
     {
@@ -1592,8 +2412,16 @@ void MainComponent::loadSessionFromDisk()
     if (auto dslSource = state.getProperty("dslSource").toString(); dslSource.isNotEmpty())
         dslPanel.setSourceText(dslSource);
 
+    refreshProjectAssets();
+
     if (auto graphState = state.getChildWithName("NodeGraph"); graphState.isValid())
         graphPanel.restoreState(graphState);
+
+    if (auto arrangeState = state.getChildWithName("ArrangeView"); arrangeState.isValid())
+        arrangeView.restoreState(arrangeState);
+
+    if (auto signalState = state.getChildWithName("SignalLab"); signalState.isValid())
+        signalLabPanel.restoreState(signalState);
 
     auto visibleTracks = (int) state.getProperty("arrangeVisibleTracks", arrangeView.getVisibleTrackCount());
     arrangeView.setVisibleTrackCount(juce::jlimit(1, engine.getTrackCount(), visibleTracks));
@@ -1608,11 +2436,12 @@ void MainComponent::loadSessionFromDisk()
     }
 
     auto savedMode = (int) state.getProperty("workspaceMode", static_cast<int>(WorkspaceMode::arrange));
-    setWorkspaceMode(static_cast<WorkspaceMode>(juce::jlimit(0, 5, savedMode)));
+    setWorkspaceMode(static_cast<WorkspaceMode>(juce::jlimit(0, 6, savedMode)));
 
     refreshInsertRack();
     transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
     refreshRecentTakes();
+    refreshFoleyArrangement();
 
 }
 

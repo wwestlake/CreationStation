@@ -13,6 +13,15 @@ AiPanel::AiPanel()
     promptEditor.setText("Describe the sound or transformation you want.");
     addAndMakeVisible(promptEditor);
 
+    contextLabel.setText("Context Packet", juce::dontSendNotification);
+    contextLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+    addAndMakeVisible(contextLabel);
+
+    contextEditor.setMultiLine(true);
+    contextEditor.setReadOnly(true);
+    contextEditor.setText("The local retrieval engine will assemble project context here.");
+    addAndMakeVisible(contextEditor);
+
     responseEditor.setMultiLine(true);
     responseEditor.setReadOnly(true);
     responseEditor.setText("The assistant will draft DSP ideas, node graphs, or DSL code here.");
@@ -20,10 +29,33 @@ AiPanel::AiPanel()
 
     generateButton.onClick = [this]
     {
-        responseEditor.setText("Drafting a graph and DSL sketch for: " + promptEditor.getText(),
-                               juce::dontSendNotification);
+        if (onPromptSubmitted)
+            onPromptSubmitted(promptEditor.getText());
+        else
+            responseEditor.setText("AI request queued for: " + promptEditor.getText(),
+                                   juce::dontSendNotification);
     };
     addAndMakeVisible(generateButton);
+}
+
+void AiPanel::setContextPacket(const CreationStationContextEngine::ContextPacket& packet)
+{
+    contextEditor.setText(packet.summary, juce::dontSendNotification);
+
+    juce::String response;
+    response << "Context-aware drafting basis:\n\n";
+    for (const auto& snippet : packet.snippets)
+        response << "- " << snippet.title << ": " << snippet.excerpt << "\n";
+
+    if (packet.snippets.isEmpty())
+        response << "No strong local context matched yet. The assistant should ask for more specifics or fall back to general design help.";
+
+    responseEditor.setText(response, juce::dontSendNotification);
+}
+
+juce::String AiPanel::getPromptText() const
+{
+    return promptEditor.getText();
 }
 
 void AiPanel::paint(juce::Graphics& g)
@@ -37,8 +69,13 @@ void AiPanel::resized()
     headerLabel.setBounds(area.removeFromTop(40));
     area.removeFromTop(10);
 
-    auto top = area.removeFromTop(area.getHeight() / 2 - 8);
-    promptEditor.setBounds(top.withTrimmedBottom(36));
-    generateButton.setBounds(top.removeFromBottom(30).removeFromRight(160));
+    auto promptArea = area.removeFromTop(120);
+    promptEditor.setBounds(promptArea.withTrimmedBottom(36));
+    generateButton.setBounds(promptArea.removeFromBottom(30).removeFromRight(160));
+
+    auto middle = area.removeFromTop(area.getHeight() / 2 - 10);
+    contextLabel.setBounds(middle.removeFromTop(22));
+    contextEditor.setBounds(middle);
+    area.removeFromTop(10);
     responseEditor.setBounds(area);
 }

@@ -93,6 +93,7 @@ Creation Station is also becoming the proving ground for a deeper language and r
 - [Patina IR C++ Type Model](Patina-IR-Cpp-Type-Model.md)
 - [Patina Surface Syntax and EBNF](Patina-Surface-Syntax-and-EBNF.md)
 - [Patina Surface AST Model](Patina-Surface-AST-Model.md)
+- [Creation Station AI Context Architecture](Creation-Station-AI-Context-Architecture.md)
 
 ## Cross-Platform Notes
 
