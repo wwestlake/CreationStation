@@ -67,6 +67,11 @@ juce::File ProjectManager::getContentManifestFile() const
     return getConfigDirectory().getChildFile("content-library.json");
 }
 
+juce::File ProjectManager::getAiContextStoreFile() const
+{
+    return getConfigDirectory().getChildFile("ai-context-store.json");
+}
+
 juce::File ProjectManager::getProjectsRoot() const
 {
     return getWorkspaceRoot();

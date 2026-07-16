@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <vector>
 #include "AI/CreationStationContextEngine.h"
+#include "AI/CreationStationContextStore.h"
 #include "Auth/DesktopAuthSession.h"
 #include "Audio/WorkstationAudioEngine.h"
 #include "ControlSurface/XTouchControlSurface.h"
@@ -160,6 +161,7 @@ private:
     juce::AudioDeviceManager deviceManager;
     DesktopAuthSession authSession { "creative-workstation" };
     CreationStationContextEngine contextEngine;
+    CreationStationContextStore contextStore;
     WorkstationAudioEngine engine;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
@@ -213,6 +215,7 @@ private:
     void refreshProjectAssets();
     void refreshFoleyArrangement();
     void refreshContentLibrary();
+    void refreshAiContextStore();
     void downloadContentItem(const ContentLibrary::Item& item);
     void activateContentItem(const ContentLibrary::Item& item);
     bool ensureStorageRootConfigured();

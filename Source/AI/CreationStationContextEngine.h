@@ -54,6 +54,7 @@ public:
     ~CreationStationContextEngine() override;
 
     void upsertDocument(const SourceDocument& document);
+    void replaceDocuments(const juce::Array<SourceDocument>& newDocuments);
     void clearDocuments();
     void submitRequest(const RetrievalRequest& request);
     ContextPacket getLastPacket() const;

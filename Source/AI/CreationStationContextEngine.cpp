@@ -55,6 +55,12 @@ void CreationStationContextEngine::upsertDocument(const SourceDocument& document
     documents.add(document);
 }
 
+void CreationStationContextEngine::replaceDocuments(const juce::Array<SourceDocument>& newDocuments)
+{
+    const juce::ScopedLock sl(lock);
+    documents = newDocuments;
+}
+
 void CreationStationContextEngine::clearDocuments()
 {
     const juce::ScopedLock sl(lock);

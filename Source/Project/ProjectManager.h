@@ -55,6 +55,7 @@ public:
     juce::File getDownloadedContentDirectory() const;
     juce::File getUserContentDirectory() const;
     juce::File getContentManifestFile() const;
+    juce::File getAiContextStoreFile() const;
     juce::File getWorkspaceRoot() const;
     juce::File getProjectsRoot() const;
     juce::File getProjectManifestFile() const;

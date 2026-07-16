@@ -40,6 +40,8 @@ juce_generate_juce_header(CreationStationInstrument)
 target_sources(CreativeWorkstation PRIVATE
     Source/AI/CreationStationContextEngine.cpp
     Source/AI/CreationStationContextEngine.h
+    Source/AI/CreationStationContextStore.cpp
+    Source/AI/CreationStationContextStore.h
     Source/Audio/WorkstationAudioEngine.cpp
     Source/Audio/WorkstationAudioEngine.h
     Source/Audio/PatchRuntimePlayer.cpp

@@ -989,52 +989,7 @@ MainComponent::MainComponent()
 
     aiPanel.onPromptSubmitted = [this](const juce::String& prompt)
     {
-        contextEngine.clearDocuments();
-
-        CreationStationContextEngine::SourceDocument modeDocument;
-        modeDocument.id = "workspace-mode";
-        modeDocument.title = "Current workspace";
-        modeDocument.category = "session";
-        modeDocument.body = "Workspace mode: " + workspaceModeName(activeMode);
-        modeDocument.tags.add(activeMode == WorkspaceMode::code ? "script"
-                             : activeMode == WorkspaceMode::signal ? "signal"
-                             : activeMode == WorkspaceMode::library ? "library"
-                             : activeMode == WorkspaceMode::arrange ? "foley"
-                             : activeMode == WorkspaceMode::mix ? "layers"
-                             : activeMode == WorkspaceMode::node ? "patch"
-                             : activeMode == WorkspaceMode::record ? "capture"
-                                                                   : "ai");
-        modeDocument.updatedAt = juce::Time::getCurrentTime();
-        contextEngine.upsertDocument(modeDocument);
-
-        CreationStationContextEngine::SourceDocument dslDocument;
-        dslDocument.id = "patina-source";
-        dslDocument.title = "Patina source buffer";
-        dslDocument.category = "language";
-        dslDocument.body = dslPanel.getSourceText();
-        dslDocument.tags.addArray({ "patina", "dsl", "script" });
-        dslDocument.updatedAt = juce::Time::getCurrentTime();
-        contextEngine.upsertDocument(dslDocument);
-
-        CreationStationContextEngine::SourceDocument projectDocument;
-        projectDocument.id = "project-state";
-        projectDocument.title = "Project state";
-        projectDocument.category = "project";
-        projectDocument.body = projectManager.hasProject()
-            ? ("Project: " + projectManager.getDisplayLabel() + "\nPath: " + projectManager.getCurrentProject().rootDirectory.getFullPathName())
-            : "No project is currently open.";
-        projectDocument.tags.addArray({ "project", "session" });
-        projectDocument.updatedAt = juce::Time::getCurrentTime();
-        contextEngine.upsertDocument(projectDocument);
-
-        CreationStationContextEngine::SourceDocument libraryDocument;
-        libraryDocument.id = "content-library";
-        libraryDocument.title = "Content library summary";
-        libraryDocument.category = "content";
-        libraryDocument.body = contentLibrary.createSummaryText();
-        libraryDocument.tags.addArray({ "content", "library" });
-        libraryDocument.updatedAt = juce::Time::getCurrentTime();
-        contextEngine.upsertDocument(libraryDocument);
+        refreshAiContextStore();
 
         CreationStationContextEngine::RetrievalRequest request;
         request.prompt = prompt;
@@ -1853,11 +1808,13 @@ void MainComponent::refreshProjectAssets()
     if (! projectManager.hasProject())
     {
         arrangeView.setAssetFiles({});
+        refreshAiContextStore();
         return;
     }
 
     auto assetFiles = projectManager.listAssetFiles();
     arrangeView.setAssetFiles(assetFiles);
+    refreshAiContextStore();
 }
 
 void MainComponent::refreshContentLibrary()
@@ -1867,6 +1824,7 @@ void MainComponent::refreshContentLibrary()
         contentPanel.setStoragePath({});
         contentPanel.setItems({});
         contentPanel.setStatusText("Choose a local storage location to initialize the content library.");
+        refreshAiContextStore();
         return;
     }
 
@@ -1881,12 +1839,14 @@ void MainComponent::refreshContentLibrary()
     {
         contentPanel.setItems({});
         contentPanel.setStatusText(errorMessage);
+        refreshAiContextStore();
         return;
     }
 
     auto combinedItems = contentLibrary.getItems();
     contentPanel.setItems(combinedItems);
     contentPanel.setStatusText(contentLibrary.createSummaryText());
+    refreshAiContextStore();
 
     if (! authenticated)
         return;
@@ -1939,9 +1899,32 @@ void MainComponent::refreshContentLibrary()
             {
                 safeThis->contentPanel.setItems(mergedItems);
                 safeThis->contentPanel.setStatusText("Library ready: " + juce::String(mergedItems.size()) + " local + remote items.");
+                safeThis->refreshAiContextStore();
             }
         });
     }).detach();
+}
+
+void MainComponent::refreshAiContextStore()
+{
+    if (! projectManager.hasStorageRoot())
+    {
+        contextEngine.clearDocuments();
+        return;
+    }
+
+    juce::String errorMessage;
+    if (! contextStore.rebuild(projectManager,
+                               contentLibrary,
+                               workspaceModeName(activeMode),
+                               dslPanel.getSourceText(),
+                               errorMessage))
+    {
+        transportBar.setStatusText(errorMessage);
+        return;
+    }
+
+    contextEngine.replaceDocuments(contextStore.getDocuments());
 }
 
 void MainComponent::downloadContentItem(const ContentLibrary::Item& item)
