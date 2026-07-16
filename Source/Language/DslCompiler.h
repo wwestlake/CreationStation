@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PatinaSurfaceAst.h"
 
 namespace cw
 {
@@ -20,14 +21,20 @@ struct DslModule
     int sinkCount = 0;
     int connectionCount = 0;
     int modulationCount = 0;
+    int graphCount = 0;
+    int importCount = 0;
+    int exportCount = 0;
+    int parameterCount = 0;
+    int letCount = 0;
+    juce::String packageName;
+    juce::String version;
+    juce::String debugTree;
+    patina::SourceFile surfaceAst;
 };
 
 class DslCompiler final
 {
 public:
     DslModule compile(const juce::String& source) const;
-
-private:
-    static bool isRecognisedStatement(const juce::String& line);
 };
 } // namespace cw

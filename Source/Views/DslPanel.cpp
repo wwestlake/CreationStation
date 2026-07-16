@@ -3,28 +3,42 @@
 DslPanel::DslPanel()
 {
     setName("DSL");
-    headerLabel.setText("Functional DSP DSL", juce::dontSendNotification);
+    headerLabel.setText("Patina Surface Language", juce::dontSendNotification);
     headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 
     sourceEditor.setMultiLine(true);
     sourceEditor.setReturnKeyStartsNewLine(true);
-    sourceEditor.setText(R"(# Creation Station DSP script
-source osc1 = sine(freq = 220, amp = 0.25)
-source mic1 = mic(gain = 0.70)
-effect drive1 = drive(amount = 0.35)
-effect tone1 = filter(cutoff = 0.62)
-effect space1 = delay(time = 0.18, feedback = 0.24)
-sink out = speakers(level = 1.0)
-route main = osc1 -> drive1 -> tone1 -> space1 -> out
-modulate drive1.amount = lfo(rate = 0.25, depth = 0.15)
+    sourceEditor.setText(R"(# Patina starter patch
+package "@lagdaemon/soft-keys"
+version "0.1.0"
+
+import "@lagdaemon/core-audio"
+
+graph main:
+    param cutoff: control<f32> = 1200.0
+    let base_hz = 220.0
+    node midi   = event.midi_input()
+    node notehz = event.note_to_frequency()
+    node osc    = audio.oscillator(waveform: "triangle", frequency: base_hz)
+    node env    = control.envelope.adsr(attack: 0.05, decay: 0.12, sustain: 0.72, release: 0.28)
+    node amp    = audio.gain()
+    node out    = audio.output()
+
+    connect midi.note -> notehz.note
+    connect notehz.frequency -> osc.frequency
+    connect osc.out -> amp.in
+    connect env.out -> amp.gain
+    connect amp.out -> out.in
+
+export instrument main
 )");
     addAndMakeVisible(sourceEditor);
 
     outputEditor.setMultiLine(true);
     outputEditor.setReadOnly(true);
-    outputEditor.setText("Compile to see sources, effects, sinks, and routing diagnostics.");
+    outputEditor.setText("Compile to see Patina AST and graph diagnostics.");
     addAndMakeVisible(outputEditor);
 
     compileButton.onClick = [this] { compileSource(); };
@@ -57,7 +71,7 @@ void DslPanel::resized()
     auto left = area.removeFromLeft(area.getWidth() / 2 - 10);
     auto right = area;
     sourceEditor.setBounds(left.withTrimmedBottom(40));
-    compileButton.setBounds(left.removeFromBottom(34).removeFromRight(140));
+    compileButton.setBounds(left.removeFromBottom(34).removeFromRight(160));
     outputEditor.setBounds(right);
 }
 
@@ -68,7 +82,7 @@ void DslPanel::compileSource()
 
     if (result.success)
     {
-        output << "OK\n" << result.summary;
+        output << result.summary;
     }
     else
     {

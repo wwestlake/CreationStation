@@ -20,6 +20,6 @@ private:
     juce::Label headerLabel;
     juce::TextEditor sourceEditor;
     juce::TextEditor outputEditor;
-    juce::TextButton compileButton { "Compile DSP" };
+    juce::TextButton compileButton { "Compile Patina" };
     cw::DslCompiler compiler;
 };
