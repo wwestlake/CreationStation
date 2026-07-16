@@ -119,10 +119,17 @@ DslModule DslCompiler::compile(const juce::String& source) const
         {
             debugLines.add("    node " + node.id + " :: " + node.kind + " [" + patina::ir::toString(node.domain) + "]");
             for (const auto& argument : node.arguments)
-                debugLines.add("      arg " + argument.name + " = " + patina::ir::describeValueRef(argument.value));
+                debugLines.add("      arg " + argument.name + " = " + patina::ir::describeValueRef(argument.value)
+                               + " : " + argument.valueType.toString());
+            for (const auto& input : node.inputs)
+                debugLines.add("      in  " + input.name + " : " + input.type.toString());
+            for (const auto& output : node.outputs)
+                debugLines.add("      out " + output.name + " : " + output.type.toString());
         }
         for (const auto& edge : graph.edges)
-            debugLines.add("    edge " + edge.sourceNode + "." + edge.sourcePort + " -> " + edge.destinationNode + "." + edge.destinationPort);
+            debugLines.add("    edge " + edge.sourceNode + "." + edge.sourcePort + " -> "
+                           + edge.destinationNode + "." + edge.destinationPort
+                           + " : " + edge.signalType.toString());
         debugLines.add("  }");
     }
 

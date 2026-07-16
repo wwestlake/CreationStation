@@ -68,6 +68,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/PatinaParser.cpp
     Source/Language/PatinaParser.h
     Source/Language/PatinaSurfaceAst.h
+    Source/Language/PatinaTypes.cpp
+    Source/Language/PatinaTypes.h
     Source/Language/PatinaBuiltins.cpp
     Source/Language/PatinaBuiltins.h
     Source/Language/PatinaBinder.cpp

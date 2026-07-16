@@ -4,6 +4,20 @@ namespace cw::patina
 {
 namespace
 {
+juce::var typeToVar(const TypeSpec& type)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty("family", type.family);
+    object->setProperty("raw", type.toString());
+
+    juce::Array<juce::var> generics;
+    for (const auto& generic : type.genericArguments)
+        generics.add(generic);
+    object->setProperty("genericArguments", juce::var(generics));
+
+    return juce::var(object);
+}
+
 juce::var valueRefToVar(const ir::ValueRef& valueRef)
 {
     auto* object = new juce::DynamicObject();
@@ -33,6 +47,7 @@ juce::var parameterToVar(const ir::Parameter& parameter)
     auto* object = new juce::DynamicObject();
     object->setProperty("name", parameter.name);
     object->setProperty("type", parameter.typeText);
+    object->setProperty("typeSpec", typeToVar(parameter.type));
     object->setProperty("hasDefaultValue", parameter.hasDefaultValue);
 
     if (parameter.hasDefaultValue)
@@ -46,6 +61,15 @@ juce::var nodeArgumentToVar(const ir::NodeArgument& argument)
     auto* object = new juce::DynamicObject();
     object->setProperty("name", argument.name);
     object->setProperty("value", valueRefToVar(argument.value));
+    object->setProperty("valueType", typeToVar(argument.valueType));
+    return juce::var(object);
+}
+
+juce::var portToVar(const ir::Port& port)
+{
+    auto* object = new juce::DynamicObject();
+    object->setProperty("name", port.name);
+    object->setProperty("type", typeToVar(port.type));
     return juce::var(object);
 }
 
@@ -62,6 +86,16 @@ juce::var nodeToVar(const ir::Node& node)
         arguments.add(nodeArgumentToVar(argument));
     object->setProperty("arguments", juce::var(arguments));
 
+    juce::Array<juce::var> inputs;
+    for (const auto& input : node.inputs)
+        inputs.add(portToVar(input));
+    object->setProperty("inputs", juce::var(inputs));
+
+    juce::Array<juce::var> outputs;
+    for (const auto& output : node.outputs)
+        outputs.add(portToVar(output));
+    object->setProperty("outputs", juce::var(outputs));
+
     return juce::var(object);
 }
 
@@ -72,6 +106,7 @@ juce::var edgeToVar(const ir::Edge& edge)
     object->setProperty("sourcePort", edge.sourcePort);
     object->setProperty("destinationNode", edge.destinationNode);
     object->setProperty("destinationPort", edge.destinationPort);
+    object->setProperty("signalType", typeToVar(edge.signalType));
     object->setProperty("line", edge.line);
     return juce::var(object);
 }

@@ -14,14 +14,25 @@ BuiltinNodeSignature makeNode(const juce::String& qualifiedName,
     node.qualifiedName = qualifiedName;
     node.domain = domain;
 
-    for (const auto& argument : arguments)
+    TypeSystem typeSystem;
+
+    for (auto argument : arguments)
+    {
+        argument.parsedValueType = typeSystem.parseType(argument.valueType);
         node.arguments.add(argument);
+    }
 
-    for (const auto& input : inputs)
+    for (auto input : inputs)
+    {
+        input.parsedValueType = typeSystem.parseType(input.valueType);
         node.inputs.add(input);
+    }
 
-    for (const auto& output : outputs)
+    for (auto output : outputs)
+    {
+        output.parsedValueType = typeSystem.parseType(output.valueType);
         node.outputs.add(output);
+    }
 
     return node;
 }
@@ -66,19 +77,12 @@ const BuiltinPortSignature* BuiltinsRegistry::findOutput(const BuiltinNodeSignat
 
 bool BuiltinsRegistry::isValueAssignableTo(const juce::String& sourceType, const juce::String& destinationType) const
 {
-    if (sourceType == destinationType)
-        return true;
+    return isValueAssignableTo(typeSystem.parseType(sourceType), typeSystem.parseType(destinationType));
+}
 
-    if (sourceType == "i64" && destinationType == "f32")
-        return true;
-
-    if ((sourceType == "f32" || sourceType == "i64") && destinationType == "control<f32>")
-        return true;
-
-    if (sourceType == "bool" && destinationType == "control<bool>")
-        return true;
-
-    return false;
+bool BuiltinsRegistry::isValueAssignableTo(const TypeSpec& sourceType, const TypeSpec& destinationType) const
+{
+    return typeSystem.isAssignableTo(sourceType, destinationType);
 }
 
 const juce::Array<BuiltinNodeSignature>& BuiltinsRegistry::getNodes() const
@@ -96,12 +100,16 @@ const juce::Array<BuiltinNodeSignature>& BuiltinsRegistry::getNodes() const
                  { { "frequency", "control<f32>" } }),
         makeNode("audio.oscillator",
                  ir::Domain::audio,
-                 { { "waveform", "string", true }, { "frequency", "control<f32>", false } },
+                 { BuiltinArgumentSignature{ "waveform", "string", {}, true },
+                   BuiltinArgumentSignature{ "frequency", "control<f32>", {}, false } },
                  { { "frequency", "control<f32>" } },
                  { { "out", "audio<mono>" } }),
         makeNode("control.envelope.adsr",
                  ir::Domain::control,
-                 { { "attack", "f32", true }, { "decay", "f32", true }, { "sustain", "f32", true }, { "release", "f32", true } },
+                 { BuiltinArgumentSignature{ "attack", "f32", {}, true },
+                   BuiltinArgumentSignature{ "decay", "f32", {}, true },
+                   BuiltinArgumentSignature{ "sustain", "f32", {}, true },
+                   BuiltinArgumentSignature{ "release", "f32", {}, true } },
                  { { "gate", "event.trigger" } },
                  { { "out", "control<f32>" } }),
         makeNode("audio.gain",
@@ -121,17 +129,20 @@ const juce::Array<BuiltinNodeSignature>& BuiltinsRegistry::getNodes() const
                  { { "out", "audio<mono>" } }),
         makeNode("control.constant",
                  ir::Domain::control,
-                 { { "value", "f32", true } },
+                 { BuiltinArgumentSignature{ "value", "f32", {}, true } },
                  {},
                  { { "out", "control<f32>" } }),
         makeNode("control.lfo",
                  ir::Domain::control,
-                 { { "rate_hz", "f32", true }, { "depth", "f32", true }, { "waveform", "string", false } },
+                 { BuiltinArgumentSignature{ "rate_hz", "f32", {}, true },
+                   BuiltinArgumentSignature{ "depth", "f32", {}, true },
+                   BuiltinArgumentSignature{ "waveform", "string", {}, false } },
                  {},
                  { { "out", "control<f32>" } }),
         makeNode("audio.filter.lowpass",
                  ir::Domain::audio,
-                 { { "cutoff", "control<f32>", false }, { "resonance", "f32", false } },
+                 { BuiltinArgumentSignature{ "cutoff", "control<f32>", {}, false },
+                   BuiltinArgumentSignature{ "resonance", "f32", {}, false } },
                  { { "in", "audio<mono>" }, { "cutoff", "control<f32>" } },
                  { { "out", "audio<mono>" } })
     };

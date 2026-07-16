@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PatinaTypes.h"
 
 namespace cw::patina::ir
 {
@@ -31,6 +32,7 @@ struct Parameter
 {
     juce::String name;
     juce::String typeText;
+    TypeSpec type;
     bool hasDefaultValue = false;
     ValueRef defaultValue;
 };
@@ -39,6 +41,13 @@ struct NodeArgument
 {
     juce::String name;
     ValueRef value;
+    TypeSpec valueType;
+};
+
+struct Port
+{
+    juce::String name;
+    TypeSpec type;
 };
 
 struct Node
@@ -47,6 +56,8 @@ struct Node
     juce::String kind;
     Domain domain = Domain::audio;
     juce::Array<NodeArgument> arguments;
+    juce::Array<Port> inputs;
+    juce::Array<Port> outputs;
     int line = 0;
 };
 
@@ -56,6 +67,7 @@ struct Edge
     juce::String sourcePort;
     juce::String destinationNode;
     juce::String destinationPort;
+    TypeSpec signalType;
     int line = 0;
 };
 
