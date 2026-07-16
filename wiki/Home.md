@@ -84,6 +84,12 @@ Creation Station will author patches that can be loaded by focused runtime plugi
 - [Patch Format and Export](Patch-Format-and-Export.md)
 - [Patch Schema Draft](Patch-Schema-Draft.md)
 
+## Patina Language Direction
+
+Creation Station is also becoming the proving ground for a deeper language and runtime platform:
+
+- [Patina Core and Audio Architecture](Patina-Core-and-Audio-Architecture.md)
+
 ## Cross-Platform Notes
 
 - [Linux Port Notes](Linux-Port-Notes.md)
