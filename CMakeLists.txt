@@ -68,6 +68,12 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/PatinaParser.cpp
     Source/Language/PatinaParser.h
     Source/Language/PatinaSurfaceAst.h
+    Source/Language/PatinaBinder.cpp
+    Source/Language/PatinaBinder.h
+    Source/Language/PatinaIr.cpp
+    Source/Language/PatinaIr.h
+    Source/Language/PatinaLowering.cpp
+    Source/Language/PatinaLowering.h
     Source/Language/SignalGraph.cpp
     Source/Language/SignalGraph.h
     Source/Views/AuthGateView.cpp

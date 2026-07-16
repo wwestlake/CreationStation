@@ -1,5 +1,8 @@
 #include "DslCompiler.h"
+#include "PatinaBinder.h"
+#include "PatinaIr.h"
 #include "PatinaLexer.h"
+#include "PatinaLowering.h"
 #include "PatinaParser.h"
 
 namespace cw
@@ -32,7 +35,27 @@ DslModule DslCompiler::compile(const juce::String& source) const
         return module;
     }
 
+    patina::Binder binder;
+    auto bindResult = binder.bind(parseResult.sourceFile);
+    if (! bindResult.diagnostics.isEmpty())
+    {
+        for (const auto& diagnostic : bindResult.diagnostics)
+            module.diagnostics.add({ diagnostic.line, diagnostic.message });
+        return module;
+    }
+
+    patina::Lowerer lowerer;
+    auto loweringResult = lowerer.lower(bindResult.sourceFile);
+    if (! loweringResult.diagnostics.isEmpty())
+    {
+        for (const auto& diagnostic : loweringResult.diagnostics)
+            module.diagnostics.add({ diagnostic.line, diagnostic.message });
+        return module;
+    }
+
     module.surfaceAst = parseResult.sourceFile;
+    module.boundAst = bindResult.sourceFile;
+    module.semanticIr = loweringResult.document;
     module.packageName = parseResult.sourceFile.packageName;
     module.version = parseResult.sourceFile.version;
     module.graphCount = parseResult.sourceFile.graphs.size();
@@ -77,6 +100,29 @@ DslModule DslCompiler::compile(const juce::String& source) const
     for (const auto& exportDeclaration : parseResult.sourceFile.exports)
         debugLines.add("Export " + exportDeclaration.kind + " " + exportDeclaration.graphName);
 
+    debugLines.add("");
+    debugLines.add("Semantic IR:");
+    for (const auto& graph : loweringResult.document.graphs)
+    {
+        debugLines.add("  graph " + graph.name + " {");
+        for (const auto& parameter : graph.parameters)
+        {
+            auto parameterLine = "    param " + parameter.name + ": " + parameter.typeText;
+            if (parameter.hasDefaultValue)
+                parameterLine += " = " + patina::ir::describeValueRef(parameter.defaultValue);
+            debugLines.add(parameterLine);
+        }
+        for (const auto& node : graph.nodes)
+        {
+            debugLines.add("    node " + node.id + " :: " + node.kind + " [" + patina::ir::toString(node.domain) + "]");
+            for (const auto& argument : node.arguments)
+                debugLines.add("      arg " + argument.name + " = " + patina::ir::describeValueRef(argument.value));
+        }
+        for (const auto& edge : graph.edges)
+            debugLines.add("    edge " + edge.sourceNode + "." + edge.sourcePort + " -> " + edge.destinationNode + "." + edge.destinationPort);
+        debugLines.add("  }");
+    }
+
     module.debugTree = debugLines.joinIntoString("\n");
     module.success = true;
     module.summary = juce::String("Patina parse OK\n")
@@ -86,6 +132,7 @@ DslModule DslCompiler::compile(const juce::String& source) const
                    + "  |  Params: " + juce::String(module.parameterCount)
                    + "  |  Lets: " + juce::String(module.letCount)
                    + "  |  Exports: " + juce::String(module.exportCount)
+                   + "\nStages: lex -> parse -> bind -> lower"
                    + "\n\n"
                    + module.debugTree;
     return module;

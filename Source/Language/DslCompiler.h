@@ -1,6 +1,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PatinaBinder.h"
+#include "PatinaIr.h"
+#include "PatinaLowering.h"
 #include "PatinaSurfaceAst.h"
 
 namespace cw
@@ -30,6 +33,8 @@ struct DslModule
     juce::String version;
     juce::String debugTree;
     patina::SourceFile surfaceAst;
+    patina::BoundSourceFile boundAst;
+    patina::ir::Document semanticIr;
 };
 
 class DslCompiler final
