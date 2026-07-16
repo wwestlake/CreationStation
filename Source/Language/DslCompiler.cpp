@@ -1,4 +1,5 @@
 #include "DslCompiler.h"
+#include "PatinaArtifactWriter.h"
 #include "PatinaBinder.h"
 #include "PatinaIr.h"
 #include "PatinaLexer.h"
@@ -56,6 +57,8 @@ DslModule DslCompiler::compile(const juce::String& source) const
     module.surfaceAst = parseResult.sourceFile;
     module.boundAst = bindResult.sourceFile;
     module.semanticIr = loweringResult.document;
+    patina::ArtifactWriter artifactWriter;
+    module.artifactJson = artifactWriter.writeJson(module.semanticIr);
     module.packageName = parseResult.sourceFile.packageName;
     module.version = parseResult.sourceFile.version;
     module.graphCount = parseResult.sourceFile.graphs.size();
@@ -134,7 +137,9 @@ DslModule DslCompiler::compile(const juce::String& source) const
                    + "  |  Exports: " + juce::String(module.exportCount)
                    + "\nStages: lex -> parse -> bind -> lower"
                    + "\n\n"
-                   + module.debugTree;
+                   + module.debugTree
+                   + "\n\nArtifact JSON:\n"
+                   + module.artifactJson;
     return module;
 }
 } // namespace cw

@@ -70,6 +70,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/PatinaSurfaceAst.h
     Source/Language/PatinaBinder.cpp
     Source/Language/PatinaBinder.h
+    Source/Language/PatinaArtifactWriter.cpp
+    Source/Language/PatinaArtifactWriter.h
     Source/Language/PatinaIr.cpp
     Source/Language/PatinaIr.h
     Source/Language/PatinaLowering.cpp

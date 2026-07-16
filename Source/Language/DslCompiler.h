@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "PatinaBinder.h"
+#include "PatinaArtifactWriter.h"
 #include "PatinaIr.h"
 #include "PatinaLowering.h"
 #include "PatinaSurfaceAst.h"
@@ -32,6 +33,7 @@ struct DslModule
     juce::String packageName;
     juce::String version;
     juce::String debugTree;
+    juce::String artifactJson;
     patina::SourceFile surfaceAst;
     patina::BoundSourceFile boundAst;
     patina::ir::Document semanticIr;
