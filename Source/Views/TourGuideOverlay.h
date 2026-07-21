@@ -11,6 +11,9 @@ public:
         juce::String body;
         std::function<juce::Rectangle<int>()> targetBounds;
         bool advanceOnTargetClick = true;
+        bool drawConnector = true;
+        juce::String nextButtonText;
+        std::function<void()> onStepEntered;
     };
 
     TourGuideOverlay();
@@ -31,6 +34,7 @@ private:
     void goToStep(int stepIndex);
     void updateButtons();
     juce::Rectangle<int> getTargetBounds() const;
+    juce::Rectangle<int> getInfoBounds() const;
 
     std::vector<Step> steps;
     juce::Label stepLabel;

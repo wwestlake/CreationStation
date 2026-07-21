@@ -22,8 +22,60 @@ constexpr int zoomNote = 0x64;
 constexpr int scrubNote = 0x65;
 constexpr int userANote = 0x66;
 constexpr int userBNote = 0x67;
+constexpr int assignmentTrack = 0x28;
+constexpr int assignmentSend = 0x29;
+constexpr int assignmentPan = 0x2A;
+constexpr int assignmentPlugin = 0x2B;
+constexpr int assignmentEq = 0x2C;
+constexpr int assignmentInstrument = 0x2D;
+constexpr int bankLeftFull = 0x2E;
+constexpr int bankRightFull = 0x2F;
+constexpr int channelLeft = 0x30;
+constexpr int channelRight = 0x31;
+constexpr int faderFlip = 0x32;
+constexpr int globalView = 0x33;
+constexpr int displayNameValue = 0x34;
+constexpr int displaySmpteBeats = 0x35;
+constexpr int functionF1 = 0x36;
+constexpr int functionF2 = 0x37;
+constexpr int functionF3 = 0x38;
+constexpr int functionF4 = 0x39;
+constexpr int functionF5 = 0x3A;
+constexpr int functionF6 = 0x3B;
+constexpr int functionF7 = 0x3C;
+constexpr int functionF8 = 0x3D;
+constexpr int globalMidiTracks = 0x3E;
+constexpr int globalInputs = 0x3F;
+constexpr int globalAudioTracks = 0x40;
+constexpr int globalAudioInstrument = 0x41;
+constexpr int globalAux = 0x42;
+constexpr int globalBusses = 0x43;
+constexpr int globalOutputs = 0x44;
+constexpr int globalUser = 0x45;
+constexpr int modifierShift = 0x46;
+constexpr int modifierOption = 0x47;
+constexpr int modifierControl = 0x48;
+constexpr int modifierAlt = 0x49;
+constexpr int automationRead = 0x4A;
+constexpr int automationWrite = 0x4B;
+constexpr int automationTrim = 0x4C;
+constexpr int automationTouch = 0x4D;
+constexpr int automationLatch = 0x4E;
+constexpr int automationGroup = 0x4F;
+constexpr int utilitySave = 0x50;
+constexpr int utilityUndo = 0x51;
+constexpr int utilityCancel = 0x52;
+constexpr int utilityEnter = 0x53;
+constexpr int transportMarker = 0x54;
+constexpr int transportNudge = 0x55;
+constexpr int transportCycle = 0x56;
+constexpr int transportDrop = 0x57;
+constexpr int transportReplace = 0x58;
+constexpr int transportClick = 0x59;
+constexpr int transportSolo = 0x5A;
 constexpr int scribbleStripWidth = 7;
 constexpr int scribbleStripHeight = 2;
+constexpr juce::uint8 scribbleDeviceId = 0x41;
 
 juce::String formatScribbleLine(juce::String text)
 {
@@ -34,7 +86,6 @@ juce::String formatScribbleLine(juce::String text)
 
     text = text.retainCharacters("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _-./");
     text = text.replaceCharacter('_', ' ');
-    text = text.replaceCharacter('-', ' ');
     text = text.replaceCharacter('.', ' ');
     text = text.replaceCharacter('/', ' ');
     text = text.replaceCharacter(',', ' ');
@@ -54,6 +105,39 @@ juce::String formatScribbleLine(juce::String text)
 
     return text.substring(0, scribbleStripWidth).paddedRight(' ', scribbleStripWidth);
 }
+
+juce::String forceScribbleWidth(juce::String text)
+{
+    text = formatScribbleLine(std::move(text));
+    if (text.length() > scribbleStripWidth)
+        text = text.substring(0, scribbleStripWidth);
+
+    while (text.length() < scribbleStripWidth)
+        text << " ";
+
+    return text;
+}
+
+juce::String makeTrackBankCode(int trackIndex, int bankOffset)
+{
+    auto trackNumber = juce::String(trackIndex + 1).paddedLeft('0', 3);
+    auto bankNumber = juce::String((bankOffset / 8) + 1).paddedLeft('0', 3);
+    return forceScribbleWidth(trackNumber + "-" + bankNumber);
+}
+
+std::array<juce::uint8, (size_t) scribbleStripWidth> makeScribbleBytes(const juce::String& text)
+{
+    auto fixed = forceScribbleWidth(text);
+    std::array<juce::uint8, (size_t) scribbleStripWidth> bytes {};
+
+    for (int characterIndex = 0; characterIndex < scribbleStripWidth; ++characterIndex)
+    {
+        auto character = fixed.getCharPointer()[characterIndex];
+        bytes[(size_t) characterIndex] = (juce::uint8) (character == 0 ? ' ' : character);
+    }
+
+    return bytes;
+}
 }
 
 bool XTouchControlSurface::matchesXTouchFamily(const juce::String& deviceName)
@@ -62,7 +146,10 @@ bool XTouchControlSurface::matchesXTouchFamily(const juce::String& deviceName)
     return lowered.contains("x-touch")
         || lowered.contains("xtouch")
         || lowered.contains("x touch")
-        || lowered.contains("mackie");
+        || lowered.contains("mackie")
+        || lowered.contains("bcr2000")
+        || lowered.contains("b-control rotary")
+        || lowered.contains("b-control");
 }
 
 float XTouchControlSurface::midi14BitToUnitFloat(int value)
@@ -131,13 +218,16 @@ void XTouchControlSurface::attachToDeviceManager(juce::AudioDeviceManager& devic
     if (activeDeviceName.isNotEmpty())
         reportStatus("MIDI: connected to " + activeDeviceName);
     else
-        reportStatus("MIDI: no X-Touch detected yet");
+        reportStatus("MIDI: no X-Touch or BCR2000 detected yet");
 
     refreshVisibleWindow();
 }
 
 void XTouchControlSurface::detachFromDeviceManager(juce::AudioDeviceManager& deviceManager)
 {
+    stopTimer();
+    pendingScribbleTracks.clear();
+    pendingScribbleIndex = 0;
     deviceManager.removeMidiInputDeviceCallback({}, this);
     midiOutput.reset();
 
@@ -150,7 +240,7 @@ void XTouchControlSurface::detachFromDeviceManager(juce::AudioDeviceManager& dev
 
 void XTouchControlSurface::setTrackCount(int newTrackCount)
 {
-    totalTrackCount = juce::jmax(1, newTrackCount);
+    totalTrackCount = juce::jmax(0, newTrackCount);
     while (channelNames.size() < totalTrackCount)
         channelNames.add({});
 
@@ -167,20 +257,39 @@ void XTouchControlSurface::setBankOffset(int newBankOffset)
 
 void XTouchControlSurface::refreshVisibleWindow()
 {
-    for (int trackIndex = bankOffset; trackIndex < juce::jmin(totalTrackCount, bankOffset + 8); ++trackIndex)
-        sendScribbleStripText(trackIndex, {}, {});
+    pendingScribbleTracks.clear();
+    pendingScribbleIndex = 0;
+    pendingScribbleBankOffset = bankOffset;
 
-    for (int trackIndex = bankOffset; trackIndex < juce::jmin(totalTrackCount, bankOffset + 8); ++trackIndex)
+    for (int slot = 0; slot < 8; ++slot)
+        pendingScribbleTracks.add(bankOffset + slot);
+
+    if (! isTimerRunning())
+        startTimer(35);
+}
+
+void XTouchControlSurface::timerCallback()
+{
+    if (midiOutput == nullptr || pendingScribbleIndex >= pendingScribbleTracks.size())
+    {
+        stopTimer();
+        return;
+    }
+
+    auto trackIndex = pendingScribbleTracks[(int) pendingScribbleIndex++];
+    if (juce::isPositiveAndBelow(trackIndex, totalTrackCount))
     {
         auto channelName = juce::isPositiveAndBelow(trackIndex, channelNames.size()) ? channelNames[(size_t) trackIndex]
                                                                                     : juce::String();
-        if (channelName.isEmpty())
-            channelName = "Track " + juce::String(trackIndex + 1);
-
-        sendScribbleStripText(trackIndex,
-                              formatScribbleLine(channelName),
-                              {});
+        sendScribbleStripText(trackIndex, channelName, makeTrackBankCode(trackIndex, pendingScribbleBankOffset));
     }
+    else
+    {
+        sendScribbleStripText(trackIndex, {}, {});
+    }
+
+    if (pendingScribbleIndex >= pendingScribbleTracks.size())
+        stopTimer();
 }
 
 void XTouchControlSurface::sendScribbleStripText(int trackIndex,
@@ -194,33 +303,31 @@ void XTouchControlSurface::sendScribbleStripText(int trackIndex,
         return;
 
     auto stripIndex = trackIndex - bankOffset;
-    auto upperText = formatScribbleLine(topLineText);
-    auto lowerText = formatScribbleLine(bottomLineText);
+    auto upperText = forceScribbleWidth(topLineText);
+    auto lowerText = forceScribbleWidth(bottomLineText);
+    juce::MemoryBlock data;
+    juce::MemoryOutputStream stream(data, false);
+    auto upperBytes = makeScribbleBytes(upperText);
+    auto lowerBytes = makeScribbleBytes(lowerText);
 
-    auto sendLine = [this](int lineOffset, const juce::String& lineText)
-    {
-        juce::MemoryBlock data;
-        juce::MemoryOutputStream stream(data, false);
+    stream.writeByte((juce::uint8) 0xF0);
+    stream.writeByte((juce::uint8) 0x00);
+    stream.writeByte((juce::uint8) 0x20);
+    stream.writeByte((juce::uint8) 0x32);
+    stream.writeByte(scribbleDeviceId);
+    stream.writeByte((juce::uint8) 0x4C);
+    stream.writeByte((juce::uint8) stripIndex);
+    stream.writeByte((juce::uint8) 0x00);
 
-        stream.writeByte((juce::uint8) 0x00);
-        stream.writeByte((juce::uint8) 0x00);
-        stream.writeByte((juce::uint8) 0x66);
-        stream.writeByte((juce::uint8) 0x14);
-        stream.writeByte((juce::uint8) 0x12);
-        stream.writeByte((juce::uint8) lineOffset);
+    for (auto character : upperBytes)
+        stream.writeByte(character);
 
-        auto textUtf8 = lineText.toRawUTF8();
-        for (int characterIndex = 0; characterIndex < scribbleStripWidth; ++characterIndex)
-            stream.writeByte((juce::uint8) textUtf8[characterIndex]);
+    for (auto character : lowerBytes)
+        stream.writeByte(character);
 
-        midiOutput->sendMessageNow(juce::MidiMessage::createSysExMessage(data.getData(), (int) data.getSize()));
-    };
+    stream.writeByte((juce::uint8) 0xF7);
 
-    auto upperOffset = stripIndex * scribbleStripWidth;
-    auto lowerOffset = 0x38 + (stripIndex * scribbleStripWidth);
-
-    sendLine(upperOffset, upperText);
-    sendLine(lowerOffset, lowerText);
+    midiOutput->sendMessageNow(juce::MidiMessage::createSysExMessage(data.getData(), (int) data.getSize()));
 }
 
 void XTouchControlSurface::sendFaderValue(int trackIndex, float gain)
@@ -252,10 +359,6 @@ void XTouchControlSurface::setChannelName(int trackIndex, const juce::String& na
 
         channelNames.set(trackIndex, name);
     }
-
-    sendScribbleStripText(trackIndex,
-                          formatScribbleLine(name),
-                          {});
 }
 
 void XTouchControlSurface::sendPanValue(int trackIndex, float pan)
@@ -417,25 +520,127 @@ void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput*, const juc
         if (juce::isPositiveAndBelow(trackIndex, totalTrackCount))
             onChannelSelected(trackIndex);
     }
-    else if (note == bankLeft && onBankStep)
+    else if (note == bankLeft && message.getVelocity() > 0 && onBankStep)
         onBankStep(-8);
-    else if (note == bankRight && onBankStep)
+    else if (note == bankRight && message.getVelocity() > 0 && onBankStep)
         onBankStep(8);
-    else if (note == cursorLeftNote && onSpecialButtonPressed)
+    else if (note == cursorLeftNote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("cursor_left");
-    else if (note == cursorRightNote && onSpecialButtonPressed)
+    else if (note == cursorRightNote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("cursor_right");
-    else if (note == cursorUpNote && onSpecialButtonPressed)
+    else if (note == cursorUpNote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("cursor_up");
-    else if (note == cursorDownNote && onSpecialButtonPressed)
+    else if (note == cursorDownNote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("cursor_down");
-    else if (note == zoomNote && onSpecialButtonPressed)
+    else if (note == zoomNote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("zoom");
-    else if (note == scrubNote && onSpecialButtonPressed)
+    else if (note == scrubNote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("scrub");
-    else if (note == userANote && onSpecialButtonPressed)
+    else if (note == assignmentTrack && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("assign_track");
+    else if (note == assignmentSend && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("assign_send");
+    else if (note == assignmentPan && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("assign_pan");
+    else if (note == assignmentPlugin && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("assign_plugin");
+    else if (note == assignmentEq && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("assign_eq");
+    else if (note == assignmentInstrument && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("assign_instrument");
+    else if (note == bankLeftFull && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("bank_left_full");
+    else if (note == bankRightFull && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("bank_right_full");
+    else if (note == channelLeft && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("channel_left");
+    else if (note == channelRight && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("channel_right");
+    else if (note == faderFlip && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("flip");
+    else if (note == globalView && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("global_view");
+    else if (note == displayNameValue && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("display_name_value");
+    else if (note == displaySmpteBeats && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("display_smpte_beats");
+    else if (note == functionF1 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f1");
+    else if (note == functionF2 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f2");
+    else if (note == functionF3 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f3");
+    else if (note == functionF4 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f4");
+    else if (note == functionF5 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f5");
+    else if (note == functionF6 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f6");
+    else if (note == functionF7 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f7");
+    else if (note == functionF8 && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("f8");
+    else if (note == globalMidiTracks && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_midi_tracks");
+    else if (note == globalInputs && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_inputs");
+    else if (note == globalAudioTracks && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_audio_tracks");
+    else if (note == globalAudioInstrument && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_audio_instrument");
+    else if (note == globalAux && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_aux");
+    else if (note == globalBusses && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_busses");
+    else if (note == globalOutputs && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_outputs");
+    else if (note == globalUser && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("view_user");
+    else if (note == modifierShift && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("modifier_shift");
+    else if (note == modifierOption && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("modifier_option");
+    else if (note == modifierControl && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("modifier_control");
+    else if (note == modifierAlt && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("modifier_alt");
+    else if (note == automationRead && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("automation_read");
+    else if (note == automationWrite && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("automation_write");
+    else if (note == automationTrim && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("automation_trim");
+    else if (note == automationTouch && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("automation_touch");
+    else if (note == automationLatch && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("automation_latch");
+    else if (note == automationGroup && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("automation_group");
+    else if (note == utilitySave && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("utility_save");
+    else if (note == utilityUndo && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("utility_undo");
+    else if (note == utilityCancel && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("utility_cancel");
+    else if (note == utilityEnter && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("utility_enter");
+    else if (note == transportMarker && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("transport_marker");
+    else if (note == transportNudge && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("transport_nudge");
+    else if (note == transportCycle && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("transport_cycle");
+    else if (note == transportDrop && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("transport_drop");
+    else if (note == transportReplace && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("transport_replace");
+    else if (note == transportClick && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("transport_click");
+    else if (note == transportSolo && message.getVelocity() > 0 && onSpecialButtonPressed)
+        onSpecialButtonPressed("transport_solo");
+    else if (note == userANote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("user_a");
-    else if (note == userBNote && onSpecialButtonPressed)
+    else if (note == userBNote && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("user_b");
 
     reportStatus("MIDI: " + message.getDescription());

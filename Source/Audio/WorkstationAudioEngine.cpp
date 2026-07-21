@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <array>
+#include <algorithm>
 
 namespace
 {
@@ -17,19 +18,10 @@ float panToRightGain(float pan) noexcept
 
 juce::String createDefaultTrackName(int trackIndex)
 {
-    static const std::array<const char*, 32> names
-    {
-        "Drums", "Kick", "Snare", "Hi-Hat", "Tom 1", "Tom 2", "OH L", "OH R",
-        "Bass", "Sub", "Keys", "Pad", "Lead", "Vox", "BGV 1", "BGV 2",
-        "Gtr 1", "Gtr 2", "Piano", "Organ", "Strings", "Brass", "FX 1", "FX 2",
-        "Perc 1", "Perc 2", "Returns", "Bus A", "Bus B", "Bus C", "Print", "Master FX"
-    };
-
-    if (juce::isPositiveAndBelow(trackIndex, static_cast<int>(names.size())))
-        return names[(size_t) trackIndex];
-
-    return "Track " + juce::String(trackIndex + 1);
+    return "Tk-" + juce::String(trackIndex + 1).paddedLeft('0', 4);
 }
+
+constexpr double foleySecondsPerBeat = 0.5;
 }
 
 WorkstationAudioEngine::DemoTrackSource::DemoTrackSource(juce::String trackName, double frequencyHz)
@@ -287,12 +279,14 @@ WorkstationAudioEngine::MasterOutputSource::MasterOutputSource(WorkstationAudioE
 void WorkstationAudioEngine::MasterOutputSource::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
 {
     source.prepareToPlay(samplesPerBlockExpected, newSampleRate);
+    owner.arrangementSource.prepareToPlay(samplesPerBlockExpected, newSampleRate);
     insert.prepareToPlay(samplesPerBlockExpected, newSampleRate);
     owner.prepareGraph(newSampleRate, samplesPerBlockExpected);
 }
 
 void WorkstationAudioEngine::MasterOutputSource::releaseResources()
 {
+    owner.arrangementSource.releaseResources();
     insert.releaseResources();
     source.releaseResources();
 }
@@ -302,7 +296,7 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
     if (bufferToFill.buffer == nullptr)
         return;
 
-    if (! owner.playing.load())
+    if (! owner.playing.load() && ! owner.assetPreviewSource.isPreviewing())
     {
         bufferToFill.clearActiveBufferRegion();
         return;
@@ -310,76 +304,651 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
 
     bufferToFill.clearActiveBufferRegion();
     source.getNextAudioBlock(bufferToFill);
+    owner.arrangementSource.getNextAudioBlock(bufferToFill);
     insert.getNextAudioBlock(bufferToFill);
     owner.processGraph(*bufferToFill.buffer);
     bufferToFill.buffer->applyGain(bufferToFill.startSample, bufferToFill.numSamples, owner.masterGain.load());
 }
 
+WorkstationAudioEngine::AssetPreviewSource::AssetPreviewSource()
+{
+    formatManager.registerBasicFormats();
+}
+
+void WorkstationAudioEngine::AssetPreviewSource::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
+{
+    blockSize = samplesPerBlockExpected;
+    sampleRate = newSampleRate;
+}
+
+void WorkstationAudioEngine::AssetPreviewSource::releaseResources()
+{
+}
+
+bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file,
+                                                          const PreviewSettings& settings,
+                                                          juce::String& errorMessage)
+{
+    stop();
+
+    if (! file.existsAsFile())
+    {
+        errorMessage = "That project sound does not exist.";
+        return false;
+    }
+
+    auto* reader = formatManager.createReaderFor(file);
+    if (reader == nullptr)
+    {
+        errorMessage = "That file could not be opened for preview.";
+        return false;
+    }
+
+    auto totalSamples = (int) reader->lengthInSamples;
+    if (totalSamples <= 0)
+    {
+        errorMessage = "That sound file is empty.";
+        delete reader;
+        return false;
+    }
+
+    auto safeStart = juce::jlimit(0.0, 1.0, settings.startNormalized);
+    auto safeEnd = juce::jlimit(safeStart + 0.001, 1.0, settings.endNormalized);
+    auto startSample = juce::jlimit(0, totalSamples - 1, juce::roundToInt((double) totalSamples * safeStart));
+    auto endSample = juce::jlimit(startSample + 1, totalSamples, juce::roundToInt((double) totalSamples * safeEnd));
+    auto sliceSamples = juce::jmax(1, endSample - startSample);
+    auto numChannels = juce::jmax(1, (int) reader->numChannels);
+
+    previewBuffer.setSize(juce::jmax(2, numChannels), sliceSamples, false, false, true);
+    previewBuffer.clear();
+    reader->read(&previewBuffer, 0, sliceSamples, startSample, true, true);
+    delete reader;
+
+    if (settings.normalize)
+    {
+        auto peak = previewBuffer.getMagnitude(0, sliceSamples);
+        if (peak > 0.0f)
+            previewBuffer.applyGain(0.95f / peak);
+    }
+
+    auto gain = juce::Decibels::decibelsToGain(settings.gainDecibels);
+    previewBuffer.applyGain(gain);
+
+    auto fadeInSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeInNormalized));
+    auto fadeOutSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeOutNormalized));
+
+    for (int channel = 0; channel < previewBuffer.getNumChannels(); ++channel)
+    {
+        if (fadeInSamples > 0)
+            previewBuffer.applyGainRamp(channel, 0, fadeInSamples, 0.0f, 1.0f);
+
+        if (fadeOutSamples > 0)
+            previewBuffer.applyGainRamp(channel, sliceSamples - fadeOutSamples, fadeOutSamples, 1.0f, 0.0f);
+    }
+
+    if (settings.reverse)
+    {
+        for (int channel = 0; channel < previewBuffer.getNumChannels(); ++channel)
+        {
+            auto* data = previewBuffer.getWritePointer(channel);
+            std::reverse(data, data + sliceSamples);
+        }
+    }
+
+    playbackPosition = 0;
+    previewFile = file;
+    previewing.store(true);
+    return true;
+}
+
+bool WorkstationAudioEngine::AssetPreviewSource::loadBuffer(const juce::AudioBuffer<float>& buffer,
+                                                            double,
+                                                            juce::String& errorMessage)
+{
+    stop();
+
+    if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
+    {
+        errorMessage = "That generated signal is empty.";
+        return false;
+    }
+
+    previewBuffer.setSize(juce::jmax(2, buffer.getNumChannels()), buffer.getNumSamples(), false, false, true);
+    previewBuffer.clear();
+
+    for (int channel = 0; channel < previewBuffer.getNumChannels(); ++channel)
+    {
+        auto sourceChannel = juce::jmin(channel, buffer.getNumChannels() - 1);
+        previewBuffer.copyFrom(channel, 0, buffer, sourceChannel, 0, buffer.getNumSamples());
+    }
+
+    playbackPosition = 0;
+    previewFile = {};
+    previewing.store(true);
+    return true;
+}
+
+void WorkstationAudioEngine::AssetPreviewSource::stop()
+{
+    previewBuffer.setSize(0, 0);
+    previewFile = {};
+    playbackPosition = 0;
+    previewing.store(false);
+}
+
+void WorkstationAudioEngine::AssetPreviewSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
+{
+    if (bufferToFill.buffer == nullptr)
+        return;
+
+    if (! previewing.load())
+        return;
+
+    auto remainingSamples = previewBuffer.getNumSamples() - playbackPosition;
+    if (remainingSamples <= 0)
+    {
+        stop();
+        return;
+    }
+
+    auto samplesToCopy = juce::jmin(bufferToFill.numSamples, remainingSamples);
+    for (int channel = 0; channel < juce::jmin(bufferToFill.buffer->getNumChannels(), previewBuffer.getNumChannels()); ++channel)
+        bufferToFill.buffer->addFrom(channel, bufferToFill.startSample, previewBuffer, channel, playbackPosition, samplesToCopy, 0.9f);
+
+    playbackPosition += samplesToCopy;
+
+    if (playbackPosition >= previewBuffer.getNumSamples())
+        stop();
+}
+
+WorkstationAudioEngine::ArrangementSource::ArrangementSource(WorkstationAudioEngine& sourceOwner)
+    : owner(sourceOwner)
+{
+}
+
+void WorkstationAudioEngine::ArrangementSource::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
+{
+    blockSize = samplesPerBlockExpected;
+    sampleRate = newSampleRate;
+    resetPlayback();
+}
+
+void WorkstationAudioEngine::ArrangementSource::releaseResources()
+{
+}
+
+void WorkstationAudioEngine::ArrangementSource::resetPlayback() noexcept
+{
+    playbackSamplePosition = 0;
+}
+
+void WorkstationAudioEngine::ArrangementSource::setPlaybackPositionSeconds(double seconds) noexcept
+{
+    playbackSamplePosition = juce::jmax<int64>(0, (int64) std::llround(seconds * sampleRate));
+}
+
+void WorkstationAudioEngine::ArrangementSource::setClips(juce::Array<Clip> newClips)
+{
+    const juce::ScopedLock scopedLock(lock);
+    clips = std::move(newClips);
+    playbackSamplePosition = 0;
+}
+
+void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
+{
+    if (bufferToFill.buffer == nullptr)
+        return;
+
+    const juce::ScopedLock scopedLock(lock);
+
+    const auto blockStart = playbackSamplePosition;
+    const auto blockEnd = playbackSamplePosition + bufferToFill.numSamples;
+
+    for (const auto& clip : clips)
+    {
+        if (! owner.shouldRenderTrack(clip.trackIndex))
+            continue;
+
+        const auto clipStart = clip.startSample;
+        const auto clipEnd = clip.startSample + clip.buffer.getNumSamples();
+
+        if (clipEnd <= blockStart || clipStart >= blockEnd)
+            continue;
+
+        const auto overlapStart = juce::jmax<int64>(clipStart, blockStart);
+        const auto overlapEnd = juce::jmin<int64>(clipEnd, blockEnd);
+        const auto clipOffset = (int) (overlapStart - clipStart);
+        const auto destOffset = (int) (overlapStart - blockStart);
+        const auto numSamples = (int) (overlapEnd - overlapStart);
+
+        for (int channel = 0; channel < juce::jmin(bufferToFill.buffer->getNumChannels(), clip.buffer.getNumChannels()); ++channel)
+            bufferToFill.buffer->addFrom(channel, bufferToFill.startSample + destOffset, clip.buffer, channel, clipOffset, numSamples);
+    }
+
+    playbackSamplePosition += bufferToFill.numSamples;
+}
+
 WorkstationAudioEngine::WorkstationAudioEngine()
-    : masterOutputSource(*this, mixerSource, masterInsertSource)
+    : arrangementSource(*this),
+      masterOutputSource(*this, mixerSource, masterInsertSource)
 {
     recordingThread.startThread();
 
-    for (int trackIndex = 0; trackIndex < trackCount; ++trackIndex)
-        tracks.add(new TrackChannelSource(createDefaultTrackName(trackIndex), 55.0 + (trackIndex * 17.5)));
-
-    for (auto* track : tracks)
-        mixerSource.addInputSource(track, false);
-
-    audioSourcePlayer.setSource(&masterOutputSource);
-    audioSourcePlayer.setGain(0.0f);
+    mixerSource.addInputSource(&assetPreviewSource, false);
 }
 
 void WorkstationAudioEngine::prepareGraph(double sampleRate, int blockSize)
 {
     graphSampleRate = sampleRate;
-    juce::ignoreUnused(blockSize);
+    graphBlockSize = blockSize;
     lowPassState = {};
     echoHistoryLeft.fill(0.0f);
     echoHistoryRight.fill(0.0f);
     echoWritePosition = 0;
     signalGraph.prepare(sampleRate, blockSize);
+    graphVstInsertSource.prepareToPlay(blockSize, sampleRate);
+}
+
+int WorkstationAudioEngine::addTrack(const juce::String& trackName)
+{
+    auto trackIndex = tracks.size();
+    auto resolvedName = trackName.isNotEmpty() ? trackName : createDefaultTrackName(trackIndex);
+    auto* track = tracks.add(new TrackChannelSource(resolvedName, 55.0 + (trackIndex * 17.5)));
+    track->setInputChannel(inputSources.isEmpty() ? -1 : 0);
+    mixerSource.addInputSource(track, false);
+
+    if (graphSampleRate > 0.0 && graphBlockSize > 0)
+        track->prepareToPlay(graphBlockSize, graphSampleRate);
+
+    return trackIndex;
+}
+
+bool WorkstationAudioEngine::removeTrack(int trackIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return false;
+
+    auto* track = tracks[(size_t) trackIndex];
+    mixerSource.removeInputSource(track);
+    tracks.remove(trackIndex);
+    return true;
+}
+
+void WorkstationAudioEngine::clearTracks()
+{
+    while (! tracks.isEmpty())
+    {
+        auto* track = tracks.getLast();
+        mixerSource.removeInputSource(track);
+        tracks.removeLast();
+    }
+}
+
+juce::Array<WorkstationAudioEngine::InputSourceDescriptor> WorkstationAudioEngine::getInputSources() const
+{
+    return inputSources;
+}
+
+int WorkstationAudioEngine::getTrackInputChannel(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->getInputChannel();
+
+    return -1;
+}
+
+void WorkstationAudioEngine::setTrackInputChannel(int trackIndex, int inputChannel)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setInputChannel(inputChannel);
+}
+
+void WorkstationAudioEngine::setTrackRecordingArmed(int trackIndex, bool armed)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setRecordingArmed(armed);
+}
+
+bool WorkstationAudioEngine::isTrackRecordingArmed(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->isRecordingArmed();
+
+    return false;
+}
+
+void WorkstationAudioEngine::setTrackMonitoringEnabled(int trackIndex, bool enabled)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setMonitoringEnabled(enabled);
+}
+
+bool WorkstationAudioEngine::isTrackMonitoringEnabled(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->isMonitoringEnabled();
+
+    return false;
+}
+
+void WorkstationAudioEngine::rebuildInputSources(int totalNumInputChannels)
+{
+    if (inputSources.size() == totalNumInputChannels)
+        return;
+
+    inputSources.clear();
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    {
+        InputSourceDescriptor source;
+        source.channelIndex = channel;
+        source.id = "input-" + juce::String(channel + 1);
+        source.name = "Input " + juce::String(channel + 1);
+
+        if (totalNumInputChannels == 2)
+            source.name << (channel == 0 ? " / Left" : " / Right");
+        else
+            source.name << " / Mono " << juce::String(channel + 1).paddedLeft('0', 2);
+
+        inputSources.add(source);
+    }
+
+    for (int trackIndex = 0; trackIndex < tracks.size(); ++trackIndex)
+    {
+        auto* track = tracks[(size_t) trackIndex];
+        if (track == nullptr)
+            continue;
+
+        auto inputChannel = track->getInputChannel();
+        if (! juce::isPositiveAndBelow(inputChannel, totalNumInputChannels))
+            track->setInputChannel(totalNumInputChannels > 0 ? 0 : -1);
+    }
+}
+
+void WorkstationAudioEngine::rebuildInputSources(juce::AudioIODevice& device)
+{
+    auto activeChannels = device.getActiveInputChannels();
+    auto channelNames = device.getInputChannelNames();
+    auto activeCount = activeChannels.countNumberOfSetBits();
+
+    inputSources.clear();
+
+    for (int physicalChannel = 0; physicalChannel <= activeChannels.getHighestBit(); ++physicalChannel)
+    {
+        if (! activeChannels[physicalChannel])
+            continue;
+
+        InputSourceDescriptor source;
+        source.channelIndex = inputSources.size();
+        source.id = device.getTypeName() + ":" + device.getName() + ":" + juce::String(physicalChannel);
+
+        auto channelName = juce::isPositiveAndBelow(physicalChannel, channelNames.size()) ? channelNames[physicalChannel] : juce::String();
+        source.name = device.getName();
+
+        if (channelName.isNotEmpty() && channelName != device.getName())
+            source.name << " / " << channelName;
+        else if (activeCount == 2)
+            source.name << (source.channelIndex == 0 ? " / Left" : " / Right");
+        else
+            source.name << " / Mono " << juce::String(source.channelIndex + 1).paddedLeft('0', 2);
+
+        inputSources.add(source);
+    }
+
+    for (int trackIndex = 0; trackIndex < static_cast<int>(tracks.size()); ++trackIndex)
+    {
+        auto* track = tracks[(size_t) trackIndex];
+        if (track == nullptr)
+            continue;
+
+        auto inputChannel = track->getInputChannel();
+        if (! juce::isPositiveAndBelow(inputChannel, inputSources.size()))
+            track->setInputChannel(inputSources.size() > 0 ? 0 : -1);
+    }
+}
+
+void WorkstationAudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
+{
+    auto sampleRate = device != nullptr ? device->getCurrentSampleRate() : graphSampleRate;
+    auto blockSize = device != nullptr ? device->getCurrentBufferSizeSamples() : graphBlockSize;
+
+    if (device != nullptr)
+        rebuildInputSources(*device);
+    else
+        rebuildInputSources(0);
+
+    masterOutputSource.prepareToPlay(blockSize, sampleRate);
+}
+
+void WorkstationAudioEngine::audioDeviceStopped()
+{
+    masterOutputSource.releaseResources();
+    callbackRenderBuffer.setSize(0, 0);
+    callbackRecordBuffer.setSize(0, 0);
+    rebuildInputSources(0);
+}
+
+void WorkstationAudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
+                                                              int totalNumInputChannels,
+                                                              float* const* outputChannelData,
+                                                              int totalNumOutputChannels,
+                                                              int numSamples,
+                                                              const juce::AudioIODeviceCallbackContext&)
+{
+    if (inputSources.size() != totalNumInputChannels)
+        rebuildInputSources(totalNumInputChannels);
+
+    callbackRenderBuffer.setSize(juce::jmax(2, totalNumOutputChannels),
+                                 numSamples,
+                                 false,
+                                 false,
+                                 true);
+    callbackRenderBuffer.clear();
+
+    juce::AudioSourceChannelInfo info(&callbackRenderBuffer, 0, numSamples);
+    masterOutputSource.getNextAudioBlock(info);
+
+    for (int channel = 0; channel < totalNumOutputChannels; ++channel)
+    {
+        if (outputChannelData[channel] == nullptr)
+            continue;
+
+        if (channel < callbackRenderBuffer.getNumChannels())
+            juce::FloatVectorOperations::copy(outputChannelData[channel], callbackRenderBuffer.getReadPointer(channel), numSamples);
+        else
+            juce::FloatVectorOperations::clear(outputChannelData[channel], numSamples);
+    }
+
+    processInputRouting(inputChannelData, totalNumInputChannels, outputChannelData, totalNumOutputChannels, numSamples);
+    renderMetronome(outputChannelData, totalNumOutputChannels, numSamples);
+}
+
+void WorkstationAudioEngine::processInputRouting(const float* const* inputChannelData,
+                                                 int totalNumInputChannels,
+                                                 float* const* outputChannelData,
+                                                 int totalNumOutputChannels,
+                                                 int numSamples)
+{
+    if (numSamples <= 0)
+        return;
+
+    callbackRecordBuffer.setSize(2, numSamples, false, false, true);
+    callbackRecordBuffer.clear();
+    auto anyRecordSignal = false;
+
+    for (int trackIndex = 0; trackIndex < static_cast<int>(tracks.size()); ++trackIndex)
+    {
+        auto* track = tracks[(size_t) trackIndex];
+        if (track == nullptr)
+            continue;
+
+        auto inputChannel = track->getInputChannel();
+        if (! juce::isPositiveAndBelow(inputChannel, totalNumInputChannels)
+            || inputChannelData == nullptr
+            || inputChannelData[inputChannel] == nullptr)
+        {
+            track->setInputLevel(0.0f);
+            continue;
+        }
+
+        auto* source = inputChannelData[inputChannel];
+        auto range = juce::FloatVectorOperations::findMinAndMax(source, numSamples);
+        auto peak = juce::jmax(std::abs(range.getStart()), std::abs(range.getEnd()));
+        track->setInputLevel(peak);
+
+        auto gain = track->getGain();
+        auto pan = track->getPan();
+        auto leftGain = panToLeftGain(pan) * gain;
+        auto rightGain = panToRightGain(pan) * gain;
+        auto muted = track->isMuted();
+
+        if (track->isMonitoringEnabled() && ! muted)
+        {
+            if (totalNumOutputChannels > 0 && outputChannelData[0] != nullptr)
+                juce::FloatVectorOperations::addWithMultiply(outputChannelData[0], source, leftGain, numSamples);
+            if (totalNumOutputChannels > 1 && outputChannelData[1] != nullptr)
+                juce::FloatVectorOperations::addWithMultiply(outputChannelData[1], source, rightGain, numSamples);
+        }
+
+        if (track->isRecordingArmed() && ! muted)
+        {
+            juce::ignoreUnused(leftGain, rightGain);
+            track->pushRecordingPeak(peak);
+            writeRecording(trackIndex, source, numSamples);
+            anyRecordSignal = true;
+        }
+    }
+
+    juce::ignoreUnused(anyRecordSignal);
+}
+
+void WorkstationAudioEngine::renderMetronome(float* const* outputChannelData,
+                                             int totalNumOutputChannels,
+                                             int numSamples)
+{
+    if (! metronomeEnabled.load() || ! playing.load() || outputChannelData == nullptr || totalNumOutputChannels <= 0 || numSamples <= 0)
+        return;
+
+    auto sampleRate = juce::jmax(1.0, graphSampleRate);
+    auto bpm = juce::jlimit(20.0, 320.0, metronomeBpm.load());
+    auto beatsPerMeasure = juce::jmax(1, metronomeBeatsPerMeasure.load());
+    auto samplesPerBeat = juce::jmax<int64>(1, static_cast<int64>(std::round(sampleRate * 60.0 / bpm)));
+    auto clickSamples = juce::jmax(1, static_cast<int>(sampleRate * 0.028));
+
+    for (int sample = 0; sample < numSamples; ++sample)
+    {
+        auto positionInBeat = metronomeSampleCounter % samplesPerBeat;
+
+        if (positionInBeat < clickSamples)
+        {
+            auto beatIndex = (metronomeSampleCounter / samplesPerBeat) % beatsPerMeasure;
+            auto accent = beatIndex == 0;
+            auto frequency = accent ? 1760.0 : 1040.0;
+            auto envelope = 1.0f - (static_cast<float>(positionInBeat) / static_cast<float>(clickSamples));
+            envelope *= envelope;
+            auto phase = juce::MathConstants<double>::twoPi * frequency * static_cast<double>(positionInBeat) / sampleRate;
+            auto click = static_cast<float>(std::sin(phase)) * envelope * (accent ? 0.34f : 0.22f);
+
+            for (int channel = 0; channel < juce::jmin(2, totalNumOutputChannels); ++channel)
+                if (outputChannelData[channel] != nullptr)
+                    outputChannelData[channel][sample] += click;
+        }
+
+        ++metronomeSampleCounter;
+    }
 }
 
 void WorkstationAudioEngine::processGraph(juce::AudioBuffer<float>& buffer)
 {
+    if (! playing.load())
+        return;
+
     signalGraph.setEnabled(graphEnabled.load());
     signalGraph.setSourceLevel(graphInput.load());
+    signalGraph.setSourceFrequency(graphSourceFrequency.load());
     signalGraph.setDrive(graphDrive.load());
     signalGraph.setTone(graphTone.load());
     signalGraph.setEcho(graphEcho.load());
     signalGraph.setWidth(graphWidth.load());
     signalGraph.setMasterGain(masterGain.load());
     signalGraph.render(buffer);
-    writeRecording(buffer);
+
+    if (graphVstEnabled.load() && graphVstInsertSource.hasPlugin())
+    {
+        auto mix = juce::jlimit(0.0f, 1.0f, graphVstMix.load());
+        if (mix > 0.0f)
+        {
+            juce::AudioBuffer<float> dryBuffer;
+            juce::AudioBuffer<float> wetBuffer;
+            dryBuffer.makeCopyOf(buffer, true);
+            wetBuffer.makeCopyOf(buffer, true);
+
+            juce::AudioSourceChannelInfo wetInfo(&wetBuffer, 0, wetBuffer.getNumSamples());
+            graphVstInsertSource.getNextAudioBlock(wetInfo);
+
+            auto dryMix = 1.0f - mix;
+            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            {
+                auto* dest = buffer.getWritePointer(channel);
+                auto* dry = dryBuffer.getReadPointer(channel);
+                auto* wet = wetBuffer.getReadPointer(channel);
+                for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+                    dest[sample] = (dry[sample] * dryMix) + (wet[sample] * mix);
+            }
+        }
+    }
+
 }
 
-void WorkstationAudioEngine::writeRecording(const juce::AudioBuffer<float>& buffer)
+bool WorkstationAudioEngine::shouldRenderTrack(int trackIndex) const noexcept
 {
-    if (! recording.load() || buffer.getNumChannels() < 2 || buffer.getNumSamples() <= 0)
+    if (! juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return true;
+
+    auto anySoloed = false;
+    for (auto* track : tracks)
+    {
+        if (track != nullptr && track->isSoloed())
+        {
+            anySoloed = true;
+            break;
+        }
+    }
+
+    auto* track = tracks[(size_t) trackIndex];
+    if (track == nullptr || track->isMuted())
+        return false;
+
+    return ! anySoloed || track->isSoloed();
+}
+
+void WorkstationAudioEngine::writeRecording(int trackIndex, const float* source, int numSamples)
+{
+    if (! recording.load() || source == nullptr || numSamples <= 0)
         return;
 
     const juce::ScopedTryLock lock(recordingLock);
-    if (! lock.isLocked() || recordingWriter == nullptr)
+    if (! lock.isLocked())
         return;
 
-    const float* channelData[] =
+    for (auto& recordingWriter : recordingWriters)
     {
-        buffer.getReadPointer(0),
-        buffer.getReadPointer(1)
-    };
+        if (recordingWriter.trackIndex != trackIndex || recordingWriter.writer == nullptr)
+            continue;
 
-    recordingWriter->write(channelData, buffer.getNumSamples());
+        const float* channelData[] = { source };
+        recordingWriter.writer->write(channelData, numSamples);
+        return;
+    }
 }
 
 void WorkstationAudioEngine::attachToDevice(juce::AudioDeviceManager& deviceManager)
 {
-    deviceManager.addAudioCallback(&audioSourcePlayer);
+    deviceManager.addAudioCallback(this);
 }
 
 void WorkstationAudioEngine::detachFromDevice(juce::AudioDeviceManager& deviceManager)
 {
-    deviceManager.removeAudioCallback(&audioSourcePlayer);
+    deviceManager.removeAudioCallback(this);
 }
 
 void WorkstationAudioEngine::setPlaying(bool shouldPlay)
@@ -387,50 +956,268 @@ void WorkstationAudioEngine::setPlaying(bool shouldPlay)
     playing.store(shouldPlay);
 
     for (auto* track : tracks)
-        track->setPlaying(shouldPlay);
+        track->setPlaying(false);
 
-    audioSourcePlayer.setGain(shouldPlay ? 1.0f : 0.0f);
+    if (shouldPlay)
+        metronomeSampleCounter = 0;
+}
+
+void WorkstationAudioEngine::setPlaybackPositionSeconds(double seconds)
+{
+    arrangementSource.setPlaybackPositionSeconds(seconds);
+}
+
+void WorkstationAudioEngine::setMetronomeTempo(double bpm, int numerator) noexcept
+{
+    metronomeBpm.store(juce::jlimit(20.0, 320.0, bpm));
+    metronomeBeatsPerMeasure.store(juce::jmax(1, numerator));
+}
+
+bool WorkstationAudioEngine::previewAssetFile(const juce::File& file, juce::String& errorMessage)
+{
+    return previewAssetFile(file, {}, errorMessage);
+}
+
+bool WorkstationAudioEngine::previewAssetFile(const juce::File& file,
+                                              const PreviewSettings& settings,
+                                              juce::String& errorMessage)
+{
+    auto loaded = assetPreviewSource.loadFile(file, settings, errorMessage);
+    return loaded;
+}
+
+bool WorkstationAudioEngine::previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer,
+                                                    double sampleRate,
+                                                    juce::String& errorMessage)
+{
+    juce::ignoreUnused(sampleRate);
+    auto loaded = assetPreviewSource.loadBuffer(buffer, sampleRate, errorMessage);
+    return loaded;
+}
+
+bool WorkstationAudioEngine::setFoleyArrangement(const juce::ValueTree& arrangementState,
+                                                 const juce::File& assetsDirectory,
+                                                 juce::String& errorMessage)
+{
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    juce::Array<ArrangementSource::Clip> clips;
+
+    for (int childIndex = 0; childIndex < arrangementState.getNumChildren(); ++childIndex)
+    {
+        auto clipState = arrangementState.getChild(childIndex);
+        if (! clipState.hasType("Clip"))
+            continue;
+
+        PreviewSettings settings;
+        settings.startNormalized = (double) clipState.getProperty("trimStart", 0.0);
+        settings.endNormalized = (double) clipState.getProperty("trimEnd", 1.0);
+        settings.gainDecibels = (float) clipState.getProperty("gainDecibels", 0.0f);
+        settings.fadeInNormalized = (float) clipState.getProperty("fadeInNormalized", 0.0f);
+        settings.fadeOutNormalized = (float) clipState.getProperty("fadeOutNormalized", 0.0f);
+        settings.reverse = (bool) clipState.getProperty("reverse", false);
+        settings.normalize = (bool) clipState.getProperty("normalize", false);
+
+        auto assetFile = assetsDirectory.getChildFile(clipState.getProperty("assetFileName").toString());
+        if (! assetFile.existsAsFile())
+            continue;
+
+        auto* reader = formatManager.createReaderFor(assetFile);
+        if (reader == nullptr)
+        {
+            errorMessage = "Could not open Foley asset: " + assetFile.getFileName();
+            continue;
+        }
+
+        auto totalSamples = (int) reader->lengthInSamples;
+        if (totalSamples <= 0)
+        {
+            delete reader;
+            continue;
+        }
+
+        auto safeStart = juce::jlimit(0.0, 1.0, settings.startNormalized);
+        auto safeEnd = juce::jlimit(safeStart + 0.001, 1.0, settings.endNormalized);
+        auto startSample = juce::jlimit(0, totalSamples - 1, juce::roundToInt((double) totalSamples * safeStart));
+        auto endSample = juce::jlimit(startSample + 1, totalSamples, juce::roundToInt((double) totalSamples * safeEnd));
+        auto sliceSamples = juce::jmax(1, endSample - startSample);
+        auto numChannels = juce::jmax(2, (int) reader->numChannels);
+
+        ArrangementSource::Clip clip;
+        clip.buffer.setSize(numChannels, sliceSamples, false, false, true);
+        clip.buffer.clear();
+        reader->read(&clip.buffer, 0, sliceSamples, startSample, true, true);
+        delete reader;
+
+        if (settings.normalize)
+        {
+            auto peak = clip.buffer.getMagnitude(0, sliceSamples);
+            if (peak > 0.0f)
+                clip.buffer.applyGain(0.95f / peak);
+        }
+
+        clip.buffer.applyGain(juce::Decibels::decibelsToGain(settings.gainDecibels));
+
+        auto fadeInSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeInNormalized));
+        auto fadeOutSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeOutNormalized));
+
+        for (int channel = 0; channel < clip.buffer.getNumChannels(); ++channel)
+        {
+            if (fadeInSamples > 0)
+                clip.buffer.applyGainRamp(channel, 0, fadeInSamples, 0.0f, 1.0f);
+            if (fadeOutSamples > 0)
+                clip.buffer.applyGainRamp(channel, sliceSamples - fadeOutSamples, fadeOutSamples, 1.0f, 0.0f);
+        }
+
+        if (settings.reverse)
+        {
+            for (int channel = 0; channel < clip.buffer.getNumChannels(); ++channel)
+            {
+                auto* data = clip.buffer.getWritePointer(channel);
+                std::reverse(data, data + sliceSamples);
+            }
+        }
+
+        auto startBeat = (int) clipState.getProperty("startBeat", 0);
+        clip.startSample = (int64) std::llround(startBeat * foleySecondsPerBeat * graphSampleRate);
+        clip.trackIndex = -1;
+        clips.add(std::move(clip));
+    }
+
+    arrangementSource.setClips(std::move(clips));
+    return true;
+}
+
+bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets,
+                                                     juce::String& errorMessage)
+{
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    juce::Array<ArrangementSource::Clip> clips;
+
+    for (const auto& target : targets)
+    {
+        if (! target.file.existsAsFile())
+            continue;
+
+        std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(target.file));
+        if (reader == nullptr)
+        {
+            errorMessage = "Could not open recorded clip: " + target.file.getFileName();
+            continue;
+        }
+
+        const auto totalSamples = (int) reader->lengthInSamples;
+        if (totalSamples <= 0)
+            continue;
+
+        ArrangementSource::Clip clip;
+        clip.buffer.setSize(juce::jmax(2, (int) reader->numChannels), totalSamples, false, false, true);
+        clip.buffer.clear();
+        reader->read(&clip.buffer, 0, totalSamples, 0, true, true);
+        clip.startSample = (int64) std::llround(target.startSeconds * graphSampleRate);
+        clip.trackIndex = target.trackIndex;
+        clips.add(std::move(clip));
+    }
+
+    if (clips.isEmpty() && ! targets.isEmpty())
+    {
+        errorMessage = "No tracker audio clips could be loaded for playback.";
+        return false;
+    }
+
+    arrangementSource.setClips(std::move(clips));
+    return true;
+}
+
+void WorkstationAudioEngine::stopAssetPreview()
+{
+    assetPreviewSource.stop();
+}
+
+bool WorkstationAudioEngine::isPreviewingAsset() const noexcept
+{
+    return assetPreviewSource.isPreviewing();
 }
 
 bool WorkstationAudioEngine::startRecordingToFile(const juce::File& file, juce::String& errorMessage)
 {
-    if (file.getFullPathName().isEmpty())
+    RecordingTarget target;
+    target.trackIndex = 0;
+    target.file = file;
+
+    juce::Array<RecordingTarget> targets;
+    targets.add(target);
+    return startRecordingToFiles(targets, errorMessage);
+}
+
+bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTarget>& targets, juce::String& errorMessage)
+{
+    if (targets.isEmpty())
     {
-        errorMessage = "Recording file path was empty.";
+        errorMessage = "No armed tracks were available for recording.";
         return false;
+    }
+
+    for (const auto& target : targets)
+    {
+        if (! juce::isPositiveAndBelow(target.trackIndex, tracks.size()))
+        {
+            errorMessage = "A recording target did not match a valid track.";
+            return false;
+        }
+
+        if (target.file.getFullPathName().isEmpty())
+        {
+            errorMessage = "A recording file path was empty.";
+            return false;
+        }
     }
 
     if (recording.load())
         stopRecording();
 
-    file.getParentDirectory().createDirectory();
-    if (file.existsAsFile())
-        file.deleteFile();
-
-    std::unique_ptr<juce::FileOutputStream> outputStream(file.createOutputStream());
-    if (outputStream == nullptr)
-    {
-        errorMessage = "Could not create the recording file.";
-        return false;
-    }
-
     juce::WavAudioFormat wavFormat;
-    auto* writer = wavFormat.createWriterFor(outputStream.release(),
-                                             graphSampleRate,
-                                             2,
-                                             24,
-                                             {},
-                                             0);
+    std::vector<TrackRecordingWriter> newWriters;
 
-    if (writer == nullptr)
+    for (const auto& target : targets)
     {
-        errorMessage = "Could not create the audio writer.";
-        return false;
+        target.file.getParentDirectory().createDirectory();
+        if (target.file.existsAsFile())
+            target.file.deleteFile();
+
+        std::unique_ptr<juce::FileOutputStream> outputStream(target.file.createOutputStream());
+        if (outputStream == nullptr)
+        {
+            errorMessage = "Could not create recording file: " + target.file.getFileName();
+            return false;
+        }
+
+        auto* writer = wavFormat.createWriterFor(outputStream.release(),
+                                                 graphSampleRate,
+                                                 1,
+                                                 24,
+                                                 {},
+                                                 0);
+
+        if (writer == nullptr)
+        {
+            errorMessage = "Could not create audio writer: " + target.file.getFileName();
+            return false;
+        }
+
+        TrackRecordingWriter recordingWriter;
+        recordingWriter.trackIndex = target.trackIndex;
+        recordingWriter.file = target.file;
+        recordingWriter.writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(writer, recordingThread, 32768);
+        newWriters.push_back(std::move(recordingWriter));
     }
 
     const juce::ScopedLock lock(recordingLock);
-    recordingWriter = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(writer, recordingThread, 32768);
-    recordingFile = file;
+    recordingWriters = std::move(newWriters);
+    recordingFile = recordingWriters.empty() ? juce::File{} : recordingWriters.front().file;
     recording = true;
     return true;
 }
@@ -438,73 +1225,106 @@ bool WorkstationAudioEngine::startRecordingToFile(const juce::File& file, juce::
 void WorkstationAudioEngine::stopRecording()
 {
     const juce::ScopedLock lock(recordingLock);
-    recordingWriter.reset();
+    recordingWriters.clear();
     recording = false;
     recordingFile = {};
 }
 
+juce::Array<juce::File> WorkstationAudioEngine::getRecordingFiles() const
+{
+    juce::Array<juce::File> files;
+    const juce::ScopedLock lock(recordingLock);
+
+    for (const auto& recordingWriter : recordingWriters)
+        files.add(recordingWriter.file);
+
+    return files;
+}
+
 juce::String WorkstationAudioEngine::getTrackName(int trackIndex) const
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        return track->getName();
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->getName();
 
     return {};
 }
 
+void WorkstationAudioEngine::setTrackName(int trackIndex, const juce::String& name)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setName(name.isNotEmpty() ? name : createDefaultTrackName(trackIndex));
+}
+
+float WorkstationAudioEngine::getTrackLevel(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->getLevel();
+
+    return 0.0f;
+}
+
+float WorkstationAudioEngine::consumeTrackRecordingPeak(int trackIndex)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->consumeRecordingPeak();
+
+    return 0.0f;
+}
+
 float WorkstationAudioEngine::getTrackGain(int trackIndex) const
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        return track->getGain();
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->getGain();
 
     return 0.0f;
 }
 
 float WorkstationAudioEngine::getTrackPan(int trackIndex) const
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        return track->getPan();
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->getPan();
 
     return 0.0f;
 }
 
 bool WorkstationAudioEngine::isTrackMuted(int trackIndex) const
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        return track->isMuted();
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->isMuted();
 
     return false;
 }
 
 bool WorkstationAudioEngine::isTrackSoloed(int trackIndex) const
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        return track->isSoloed();
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->isSoloed();
 
     return false;
 }
 
 void WorkstationAudioEngine::setTrackGain(int trackIndex, float gain)
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        track->setGain(gain);
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setGain(gain);
 }
 
 void WorkstationAudioEngine::setTrackPan(int trackIndex, float pan)
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        track->setPan(pan);
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setPan(pan);
 }
 
 void WorkstationAudioEngine::setTrackMuted(int trackIndex, bool shouldMute)
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        track->setMuted(shouldMute);
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setMuted(shouldMute);
 }
 
 void WorkstationAudioEngine::setTrackSoloed(int trackIndex, bool shouldSolo)
 {
-    if (auto* track = tracks[juce::jlimit(0, tracks.size() - 1, trackIndex)])
-        track->setSoloed(shouldSolo);
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setSoloed(shouldSolo);
 }
 
 void WorkstationAudioEngine::setMasterGain(float gain)
@@ -530,6 +1350,12 @@ void WorkstationAudioEngine::setGraphInput(float amount)
     signalGraph.setSourceLevel(amount);
 }
 
+void WorkstationAudioEngine::setGraphSourceFrequency(float hz)
+{
+    graphSourceFrequency.store(hz);
+    signalGraph.setSourceFrequency(hz);
+}
+
 void WorkstationAudioEngine::setGraphTone(float amount)
 {
     graphTone.store(amount);
@@ -546,6 +1372,46 @@ void WorkstationAudioEngine::setGraphWidth(float amount)
 {
     graphWidth.store(amount);
     signalGraph.setWidth(amount);
+}
+
+bool WorkstationAudioEngine::loadGraphVstPlugin(const juce::File& file, juce::String& errorMessage)
+{
+    return graphVstInsertSource.loadPlugin(file, errorMessage);
+}
+
+void WorkstationAudioEngine::unloadGraphVstPlugin()
+{
+    graphVstInsertSource.unloadPlugin();
+}
+
+juce::String WorkstationAudioEngine::getGraphVstPluginName() const
+{
+    return graphVstInsertSource.getPluginName();
+}
+
+juce::File WorkstationAudioEngine::getGraphVstPluginFile() const
+{
+    return graphVstInsertSource.getPluginFile();
+}
+
+bool WorkstationAudioEngine::hasGraphVstPlugin() const noexcept
+{
+    return graphVstInsertSource.hasPlugin();
+}
+
+void WorkstationAudioEngine::setGraphVstEnabled(bool shouldEnable)
+{
+    graphVstEnabled.store(shouldEnable);
+}
+
+void WorkstationAudioEngine::setGraphVstMix(float amount)
+{
+    graphVstMix.store(juce::jlimit(0.0f, 1.0f, amount));
+}
+
+juce::AudioProcessorEditor* WorkstationAudioEngine::createGraphVstPluginEditor()
+{
+    return graphVstInsertSource.createEditor();
 }
 
 bool WorkstationAudioEngine::loadMasterPlugin(const juce::File& file, juce::String& errorMessage)
@@ -669,6 +1535,9 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
         trackState.setProperty("pan", track->getPan(), nullptr);
         trackState.setProperty("muted", track->isMuted(), nullptr);
         trackState.setProperty("soloed", track->isSoloed(), nullptr);
+        trackState.setProperty("inputChannel", track->getInputChannel(), nullptr);
+        trackState.setProperty("recordingArmed", track->isRecordingArmed(), nullptr);
+        trackState.setProperty("monitoringEnabled", track->isMonitoringEnabled(), nullptr);
 
         juce::ValueTree insertState("Insert");
         insertState.setProperty("bypassed", track->insert.isBypassed(), nullptr);
@@ -695,6 +1564,18 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
         masterInsert.setProperty("state", juce::Base64::toBase64(masterState.getData(), masterState.getSize()), nullptr);
 
     state.addChild(masterInsert, -1, nullptr);
+
+    juce::ValueTree graphInsert("GraphInsert");
+    graphInsert.setProperty("enabled", graphVstEnabled.load(), nullptr);
+    graphInsert.setProperty("mix", graphVstMix.load(), nullptr);
+    graphInsert.setProperty("file", graphVstInsertSource.getPluginFile().getFullPathName(), nullptr);
+    graphInsert.setProperty("name", graphVstInsertSource.getPluginName(), nullptr);
+
+    juce::MemoryBlock graphState;
+    if (graphVstInsertSource.copyStateTo(graphState))
+        graphInsert.setProperty("state", juce::Base64::toBase64(graphState.getData(), graphState.getSize()), nullptr);
+
+    state.addChild(graphInsert, -1, nullptr);
     return state;
 }
 
@@ -708,20 +1589,28 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
 
     setMasterGain((float) sessionState.getProperty("masterGain", masterGain.load()));
     setPlaying((bool) sessionState.getProperty("playing", false));
+    clearTracks();
 
     if (auto tracksState = sessionState.getChildWithName("Tracks"); tracksState.isValid())
     {
         for (const auto child : tracksState)
         {
             auto trackIndex = (int) child.getProperty("index", -1);
-            if (! juce::isPositiveAndBelow(trackIndex, tracks.size()))
+            if (trackIndex < 0)
                 continue;
 
+            while (tracks.size() <= trackIndex)
+                addTrack();
+
             auto* track = tracks[(size_t) trackIndex];
+            track->setName(child.getProperty("name").toString());
             track->setGain((float) child.getProperty("gain", track->getGain()));
             track->setPan((float) child.getProperty("pan", track->getPan()));
             track->setMuted((bool) child.getProperty("muted", track->isMuted()));
             track->setSoloed((bool) child.getProperty("soloed", track->isSoloed()));
+            track->setInputChannel((int) child.getProperty("inputChannel", track->getInputChannel()));
+            track->setRecordingArmed((bool) child.getProperty("recordingArmed", false));
+            track->setMonitoringEnabled((bool) child.getProperty("monitoringEnabled", false));
 
             auto insertState = child.getChildWithName("Insert");
             auto filePath = insertState.getProperty("file").toString();
@@ -763,6 +1652,25 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
             {
                 masterInsertSource.setBypassed((bool) masterInsert.getProperty("bypassed", false));
             }
+        }
+    }
+
+    if (auto graphInsert = sessionState.getChildWithName("GraphInsert"); graphInsert.isValid())
+    {
+        graphVstEnabled.store((bool) graphInsert.getProperty("enabled", true));
+        graphVstMix.store((float) graphInsert.getProperty("mix", 0.5f));
+
+        auto filePath = graphInsert.getProperty("file").toString();
+        if (filePath.isNotEmpty())
+        {
+            juce::MemoryBlock graphState;
+            auto encoded = graphInsert.getProperty("state").toString();
+            if (encoded.isNotEmpty())
+                graphState.fromBase64Encoding(encoded);
+
+            juce::String loadError;
+            if (! graphVstInsertSource.loadPlugin(juce::File(filePath), graphState.getSize() > 0 ? &graphState : nullptr, loadError))
+                errorMessage = loadError;
         }
     }
 

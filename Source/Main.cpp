@@ -26,6 +26,16 @@ public:
 
     void systemRequestedQuit() override
     {
+        if (mainWindow != nullptr)
+        {
+            mainWindow->confirmCloseAsync([this](bool shouldQuit)
+            {
+                if (shouldQuit)
+                    quit();
+            });
+            return;
+        }
+
         quit();
     }
 
@@ -50,6 +60,18 @@ private:
         void closeButtonPressed() override
         {
             juce::JUCEApplication::getInstance()->systemRequestedQuit();
+        }
+
+        void confirmCloseAsync(const std::function<void(bool shouldClose)>& onDecision)
+        {
+            if (auto* mainComponent = dynamic_cast<MainComponent*> (getContentComponent()))
+            {
+                mainComponent->confirmCloseApplication(onDecision);
+                return;
+            }
+
+            if (onDecision)
+                onDecision(true);
         }
     };
 

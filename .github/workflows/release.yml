@@ -39,26 +39,8 @@ jobs:
               break
             }
 
-            '^djehuti-router-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
-              $productSlug = "djehuti-router"
-              $displayName = "Djehuti Router"
-              $kind = "app"
-              $cmakeTarget = "DjehutiRouter"
-              $componentName = "DjehutiRouter"
-              break
-            }
-
-            '^djehuti-drivers-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
-              $productSlug = "djehuti-drivers"
-              $displayName = "Djehuti Drivers"
-              $kind = "driver"
-              $cmakeTarget = ""
-              $componentName = ""
-              break
-            }
-
             default {
-              throw "Tag '$tag' must start with creation-station-v, djehuti-router-v, or djehuti-drivers-v."
+              throw "Tag '$tag' must start with creation-station-v."
             }
           }
 
@@ -109,25 +91,14 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "suffix=$suffix"
 
       - name: Configure CMake
-        if: steps.classify.outputs.kind != 'driver'
         shell: pwsh
         run: |
           cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE"
 
       - name: Build app
-        if: steps.classify.outputs.kind == 'app'
         shell: pwsh
         run: |
           cmake --build build --config Release --target ${{ steps.classify.outputs.cmake_target }}
-
-      - name: Build driver
-        if: steps.classify.outputs.kind == 'driver'
-        shell: pwsh
-        run: |
-          winget install Microsoft.WindowsSDK.10.0.28000 --accept-source-agreements --accept-package-agreements --disable-interactivity
-          winget install Microsoft.WindowsWDK.10.0.28000 --accept-source-agreements --accept-package-agreements --disable-interactivity
-          $driverBuildScript = Resolve-Path ".\Driver\Build\DriverBuild.ps1"
-          powershell.exe -ExecutionPolicy Bypass -File $driverBuildScript -Configuration Release
 
       - name: Stage release assets
         shell: pwsh
@@ -136,28 +107,14 @@ jobs:
           $stageRoot = Join-Path $PWD "artifacts\stage"
           New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
 
-          if ("${{ steps.classify.outputs.kind }}" -eq "app") {
-            $installRoot = Join-Path $stageRoot "${{ steps.classify.outputs.product_slug }}"
-            New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+          $installRoot = Join-Path $stageRoot "${{ steps.classify.outputs.product_slug }}"
+          New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 
-            cmake --install build --config Release --prefix $installRoot --component ${{ steps.classify.outputs.component_name }}
+          cmake --install build --config Release --prefix $installRoot --component ${{ steps.classify.outputs.component_name }}
 
-            $exe = Get-ChildItem $installRoot -Recurse -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
-            if (-not $exe) {
-              throw "Could not find the packaged executable for ${{ steps.classify.outputs.display_name }}."
-            }
-          }
-          else {
-            $installRoot = Join-Path $stageRoot "${{ steps.classify.outputs.product_slug }}"
-            New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
-
-            $driverSys = Get-ChildItem Driver\Build\out\Release\x64 -Filter 'DjehutiRouterDriver.sys' | Select-Object -First 1
-            if (-not $driverSys) { throw "Could not find the built driver binary." }
-
-            Copy-Item $driverSys.FullName $installRoot
-            Copy-Item Driver\INF\DjehutiRouter.inf $installRoot
-            Copy-Item Driver\README.md $installRoot
-            Copy-Item Driver\Contract\DjehutiRouterDriverContract.h $installRoot
+          $exe = Get-ChildItem $installRoot -Recurse -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
+          if (-not $exe) {
+            throw "Could not find the packaged executable for ${{ steps.classify.outputs.display_name }}."
           }
 
           $zipName = Join-Path $PWD ("artifacts\{0}.zip" -f "${{ steps.classify.outputs.tag }}")

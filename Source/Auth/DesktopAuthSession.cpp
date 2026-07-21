@@ -733,4 +733,34 @@ void DesktopAuthSession::loadSessionFromValueTree(const juce::ValueTree& tree)
     juce::StringArray entitlements;
     entitlements.addTokens(entitlementsJoined, "\n", "");
     session.user.entitlements = entitlements;
+
+    if (session.token.isNotEmpty()
+        && (session.user.role.isEmpty() || session.user.entitlements.isEmpty() || session.user.displayName.isEmpty()))
+    {
+        auto jwtPayload = decodeJwtPayload(session.token);
+        if (auto* jwtObject = jwtPayload.getDynamicObject())
+        {
+            if (session.user.role.isEmpty())
+                session.user.role = jwtObject->getProperty("role").toString();
+
+            if (session.user.displayName.isEmpty())
+            {
+                session.user.displayName = jwtObject->getProperty("displayName").toString();
+                if (session.user.displayName.isEmpty())
+                    session.user.displayName = jwtObject->getProperty("display_name").toString();
+            }
+
+            if (session.user.email.isEmpty())
+                session.user.email = jwtObject->getProperty("email").toString();
+
+            if (session.user.entitlements.isEmpty())
+            {
+                if (auto* entitlementsArray = jwtObject->getProperty("entitlements").getArray())
+                {
+                    for (const auto& entitlement : *entitlementsArray)
+                        session.user.entitlements.add(entitlement.toString());
+                }
+            }
+        }
+    }
 }

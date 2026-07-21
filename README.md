@@ -1,22 +1,16 @@
-# Creative Workstation
+# Creation Station
 
-A JUCE-based C++ audio workstation starter built around three layers:
+A JUCE-based C++ creative audio tool focused on sound design, effects, and programmable audio workflows.
 
-- a mixing console for hands-on audio work
-- a node graph for routing and modular DSP
-- a functional-style DSL for programmable audio behavior
-
-It now also includes a second executable, `Djehuti Router` (`DjeRoute`), for simple PC-wide audio patching and monitor switching.
-
-## Whatâ€™s in the starter
+## What’s in the starter
 
 - Mixer-style workspace foundation
+- Arrange view for clips and sketching ideas
 - Node graph canvas for routing and DSP
 - DSL editor scaffold for functional audio scripts
 - AI panel placeholder for assistant-driven patching
 - MIDI control-surface support with X-Touch / Mackie-style faders and transport
-- Separate `Djehuti Router` companion app for sources, sinks, and BYOK routing help
-- Windows virtual driver scaffold under `Driver/` for the future OBS/Reaper device layer
+- VST3 hosting groundwork for building sounds with plugins
 
 ## Build
 
@@ -32,16 +26,11 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
-## Release tracks
+## Release tags
 
-This repo publishes three separate products from one codebase, and releases are routed by product-prefixed tags:
+This repo publishes `Creation Station` with product-prefixed tags such as:
 
 - `creation-station-v0.1.2`
-- `djehuti-router-v0.1.2`
-- `djehuti-drivers-v0.1.2`
-
-See `Release-Products.md` for the release mapping.
-See `Versioning.md` for how the three products can stay version-synced when we want them to move together.
 
 ## DSL direction
 
@@ -54,8 +43,8 @@ The DSL scaffold is intentionally small right now, but it points toward:
 
 ## Next ideas
 
-- Add real audio routing and clip transport
+- Grow the app into a focused sound-design workstation
 - Add project and session persistence
 - Expand the DSL into a parser, type checker, and execution backend
 - Connect AI to patch generation and code synthesis
-- Grow the MIDI layer into full learned mapping, banking, and motor-fader feedback
+- Deepen plugin workflows for creating layered effects and textures
