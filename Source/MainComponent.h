@@ -149,38 +149,70 @@ private:
     public:
         FxStackPanel();
 
-        std::function<void()> onAddPlugin;
-        std::function<void(int)> onInsertPlugin;
+        std::function<void(const VstPluginCatalog::Entry&)> onAddPlugin;
+        std::function<void(int, const VstPluginCatalog::Entry&)> onInsertPlugin;
         std::function<void(int)> onRemovePlugin;
         std::function<void(int, int)> onMovePlugin;
         std::function<void(int)> onOpenPluginEditor;
         std::function<void(int, bool)> onBypassChanged;
+        std::function<void()> onRescanRequested;
 
         void setTrackName(const juce::String& name);
         void setPlugins(const juce::StringArray& names, const juce::Array<bool>& bypassStates);
+        void setCatalog(const juce::Array<VstPluginCatalog::Entry>& entries);
         int getSelectedSlot() const noexcept;
 
         void resized() override;
         void paint(juce::Graphics&) override;
 
     private:
+        class CatalogListBoxModel final : public juce::ListBoxModel
+        {
+        public:
+            void setEntries(const juce::Array<VstPluginCatalog::Entry>& newEntries);
+            void setFilterText(const juce::String& filterText);
+            const VstPluginCatalog::Entry* getEntry(int row) const noexcept;
+
+            std::function<void(int)> onRowDoubleClicked;
+
+            int getNumRows() override;
+            void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override;
+            void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
+
+        private:
+            void applyFilter();
+
+            juce::Array<VstPluginCatalog::Entry> allEntries;
+            juce::Array<VstPluginCatalog::Entry> filteredEntries;
+            juce::String filter;
+        };
+
         int getNumRows() override;
         void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override;
         void selectedRowsChanged(int lastRowSelected) override;
         void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
 
         void refreshButtonState();
+        void addSelectedCatalogEntry();
+        void insertSelectedCatalogEntry();
 
         juce::Label titleLabel;
         juce::Label trackLabel;
         juce::ListBox pluginList { "Track FX Stack", this };
-        juce::TextButton addButton { "+ Add" };
-        juce::TextButton insertButton { "Insert" };
         juce::TextButton removeButton { "Remove" };
         juce::TextButton upButton { "Up" };
         juce::TextButton downButton { "Down" };
         juce::TextButton bypassButton { "Bypass" };
         juce::TextButton openButton { "Open UI" };
+
+        juce::Label catalogLabel;
+        juce::TextEditor searchBox;
+        CatalogListBoxModel catalogModel;
+        juce::ListBox catalogList { "Available Plugins", &catalogModel };
+        juce::TextButton addButton { "+ Add" };
+        juce::TextButton insertButton { "Insert" };
+        juce::TextButton rescanButton { "Rescan" };
+
         juce::StringArray pluginNames;
         juce::Array<bool> pluginBypassStates;
     };
