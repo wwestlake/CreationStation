@@ -51,7 +51,7 @@ When building prompts for the model, keep the context compact and retrieve only 
 CreationStationAppManifest CreationStationAppManifest::createDefault(const juce::String& version)
 {
     CreationStationAppManifest manifest;
-    manifest.version = version.isNotEmpty() ? version : "0.1.2";
+    manifest.version = version.isNotEmpty() ? version : "0.5.0";
     manifest.instructions = makeDefaultInstructions();
     manifest.examples = makeDefaultExamples();
     return manifest;
