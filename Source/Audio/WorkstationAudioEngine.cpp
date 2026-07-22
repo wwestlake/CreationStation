@@ -242,6 +242,125 @@ void WorkstationAudioEngine::PluginInsertSource::getNextAudioBlock(const juce::A
         bufferToFill.buffer->copyFrom(channel, bufferToFill.startSample, pluginBuffer, channel, 0, bufferToFill.numSamples);
 }
 
+void WorkstationAudioEngine::PluginInsertChain::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
+{
+    sampleRate = newSampleRate;
+    blockSize = samplesPerBlockExpected;
+
+    for (auto* insert : inserts)
+        if (insert != nullptr)
+            insert->prepareToPlay(blockSize, sampleRate);
+}
+
+void WorkstationAudioEngine::PluginInsertChain::releaseResources()
+{
+    for (auto* insert : inserts)
+        if (insert != nullptr)
+            insert->releaseResources();
+}
+
+void WorkstationAudioEngine::PluginInsertChain::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
+{
+    for (auto* insert : inserts)
+        if (insert != nullptr && insert->hasPlugin())
+            insert->getNextAudioBlock(bufferToFill);
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::addPlugin(const juce::File& file, juce::String& errorMessage)
+{
+    return addPlugin(file, nullptr, false, errorMessage);
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::addPlugin(const juce::File& file,
+                                                          const juce::MemoryBlock* savedState,
+                                                          bool bypassed,
+                                                          juce::String& errorMessage)
+{
+    auto insert = std::make_unique<PluginInsertSource>();
+    insert->prepareToPlay(blockSize, sampleRate);
+
+    if (! insert->loadPlugin(file, savedState, errorMessage))
+        return false;
+
+    insert->setBypassed(bypassed);
+    inserts.add(insert.release());
+    return true;
+}
+
+void WorkstationAudioEngine::PluginInsertChain::removeLastPlugin()
+{
+    if (! inserts.isEmpty())
+        inserts.removeLast();
+}
+
+void WorkstationAudioEngine::PluginInsertChain::clear()
+{
+    inserts.clear(true);
+}
+
+juce::String WorkstationAudioEngine::PluginInsertChain::getPluginName(int slotIndex) const
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->getPluginName();
+
+    return {};
+}
+
+juce::String WorkstationAudioEngine::PluginInsertChain::getSummaryName() const
+{
+    if (inserts.isEmpty())
+        return {};
+
+    juce::StringArray names;
+    for (auto* insert : inserts)
+        if (insert != nullptr && insert->getPluginName().isNotEmpty())
+            names.add(insert->getPluginName());
+
+    return names.joinIntoString(" -> ");
+}
+
+juce::File WorkstationAudioEngine::PluginInsertChain::getPluginFile(int slotIndex) const
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->getPluginFile();
+
+    return {};
+}
+
+void WorkstationAudioEngine::PluginInsertChain::setLastBypassed(bool shouldBypass) noexcept
+{
+    if (auto* insert = inserts.getLast())
+        insert->setBypassed(shouldBypass);
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::isLastBypassed() const noexcept
+{
+    if (auto* insert = inserts.getLast())
+        return insert->isBypassed();
+
+    return false;
+}
+
+juce::AudioProcessorEditor* WorkstationAudioEngine::PluginInsertChain::createLastEditor()
+{
+    if (auto* insert = inserts.getLast())
+        return insert->createEditor();
+
+    return nullptr;
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::copyStateTo(int slotIndex, juce::MemoryBlock& destination) const
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->copyStateTo(destination);
+
+    destination.reset();
+    return false;
+}
+
 WorkstationAudioEngine::TrackChannelSource::TrackChannelSource(juce::String trackName, double frequencyHz)
     : source(std::move(trackName), frequencyHz)
 {
@@ -250,12 +369,12 @@ WorkstationAudioEngine::TrackChannelSource::TrackChannelSource(juce::String trac
 void WorkstationAudioEngine::TrackChannelSource::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
 {
     source.prepareToPlay(samplesPerBlockExpected, newSampleRate);
-    insert.prepareToPlay(samplesPerBlockExpected, newSampleRate);
+    insertChain.prepareToPlay(samplesPerBlockExpected, newSampleRate);
 }
 
 void WorkstationAudioEngine::TrackChannelSource::releaseResources()
 {
-    insert.releaseResources();
+    insertChain.releaseResources();
     source.releaseResources();
 }
 
@@ -266,7 +385,7 @@ void WorkstationAudioEngine::TrackChannelSource::getNextAudioBlock(const juce::A
 
     bufferToFill.clearActiveBufferRegion();
     source.getNextAudioBlock(bufferToFill);
-    insert.getNextAudioBlock(bufferToFill);
+    insertChain.getNextAudioBlock(bufferToFill);
 }
 
 WorkstationAudioEngine::MasterOutputSource::MasterOutputSource(WorkstationAudioEngine& ownerRef,
@@ -559,10 +678,10 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
         if (trackIndex >= 0 && juce::isPositiveAndBelow(trackIndex, owner.tracks.size()))
         {
             auto* track = owner.tracks[(size_t) trackIndex];
-            if (track != nullptr && track->insert.hasPlugin())
+            if (track != nullptr && track->insertChain.hasPlugin())
             {
                 juce::AudioSourceChannelInfo trackInfo(&trackRenderBuffer, 0, bufferToFill.numSamples);
-                track->insert.getNextAudioBlock(trackInfo);
+                track->insertChain.getNextAudioBlock(trackInfo);
             }
         }
 
@@ -1645,19 +1764,19 @@ bool WorkstationAudioEngine::loadTrackPlugin(int trackIndex, const juce::File& f
         return false;
     }
 
-    return tracks[(size_t) trackIndex]->insert.loadPlugin(file, errorMessage);
+    return tracks[(size_t) trackIndex]->insertChain.addPlugin(file, errorMessage);
 }
 
 void WorkstationAudioEngine::unloadTrackPlugin(int trackIndex)
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        tracks[(size_t) trackIndex]->insert.unloadPlugin();
+        tracks[(size_t) trackIndex]->insertChain.removeLastPlugin();
 }
 
 juce::String WorkstationAudioEngine::getTrackPluginName(int trackIndex) const
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        return tracks[(size_t) trackIndex]->insert.getPluginName();
+        return tracks[(size_t) trackIndex]->insertChain.getSummaryName();
 
     return {};
 }
@@ -1665,7 +1784,11 @@ juce::String WorkstationAudioEngine::getTrackPluginName(int trackIndex) const
 juce::File WorkstationAudioEngine::getTrackPluginFile(int trackIndex) const
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        return tracks[(size_t) trackIndex]->insert.getPluginFile();
+    {
+        const auto count = tracks[(size_t) trackIndex]->insertChain.getPluginCount();
+        return count > 0 ? tracks[(size_t) trackIndex]->insertChain.getPluginFile(count - 1)
+                         : juce::File();
+    }
 
     return {};
 }
@@ -1673,21 +1796,29 @@ juce::File WorkstationAudioEngine::getTrackPluginFile(int trackIndex) const
 bool WorkstationAudioEngine::hasTrackPlugin(int trackIndex) const noexcept
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        return tracks[(size_t) trackIndex]->insert.hasPlugin();
+        return tracks[(size_t) trackIndex]->insertChain.hasPlugin();
 
     return false;
+}
+
+int WorkstationAudioEngine::getTrackPluginCount(int trackIndex) const noexcept
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.getPluginCount();
+
+    return 0;
 }
 
 void WorkstationAudioEngine::setTrackPluginBypassed(int trackIndex, bool shouldBypass)
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        tracks[(size_t) trackIndex]->insert.setBypassed(shouldBypass);
+        tracks[(size_t) trackIndex]->insertChain.setLastBypassed(shouldBypass);
 }
 
 bool WorkstationAudioEngine::isTrackPluginBypassed(int trackIndex) const noexcept
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        return tracks[(size_t) trackIndex]->insert.isBypassed();
+        return tracks[(size_t) trackIndex]->insertChain.isLastBypassed();
 
     return false;
 }
@@ -1695,7 +1826,7 @@ bool WorkstationAudioEngine::isTrackPluginBypassed(int trackIndex) const noexcep
 juce::AudioProcessorEditor* WorkstationAudioEngine::createTrackPluginEditor(int trackIndex)
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        return tracks[(size_t) trackIndex]->insert.createEditor();
+        return tracks[(size_t) trackIndex]->insertChain.createLastEditor();
 
     return nullptr;
 }
@@ -1723,16 +1854,28 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
         trackState.setProperty("monitoringEnabled", track->isMonitoringEnabled(), nullptr);
         trackState.setProperty("stereoEnabled", track->isStereoEnabled(), nullptr);
 
-        juce::ValueTree insertState("Insert");
-        insertState.setProperty("bypassed", track->insert.isBypassed(), nullptr);
-        insertState.setProperty("file", track->insert.getPluginFile().getFullPathName(), nullptr);
-        insertState.setProperty("name", track->insert.getPluginName(), nullptr);
+        juce::ValueTree insertChainState("InsertChain");
+        insertChainState.setProperty("count", track->insertChain.getPluginCount(), nullptr);
+        for (int slotIndex = 0; slotIndex < track->insertChain.getPluginCount(); ++slotIndex)
+        {
+            juce::ValueTree slotState("Insert");
+            slotState.setProperty("slot", slotIndex, nullptr);
+            slotState.setProperty("file", track->insertChain.getPluginFile(slotIndex).getFullPathName(), nullptr);
+            slotState.setProperty("name", track->insertChain.getPluginName(slotIndex), nullptr);
 
-        juce::MemoryBlock pluginState;
-        if (track->insert.copyStateTo(pluginState))
-            insertState.setProperty("state", juce::Base64::toBase64(pluginState.getData(), pluginState.getSize()), nullptr);
+            juce::MemoryBlock pluginState;
+            if (track->insertChain.copyStateTo(slotIndex, pluginState))
+                slotState.setProperty("state", juce::Base64::toBase64(pluginState.getData(), pluginState.getSize()), nullptr);
 
-        trackState.addChild(insertState, -1, nullptr);
+            if (slotIndex == track->insertChain.getPluginCount() - 1)
+                slotState.setProperty("bypassed", track->insertChain.isLastBypassed(), nullptr);
+            else
+                slotState.setProperty("bypassed", false, nullptr);
+
+            insertChainState.addChild(slotState, -1, nullptr);
+        }
+
+        trackState.addChild(insertChainState, -1, nullptr);
         tracksState.addChild(trackState, -1, nullptr);
     }
 
@@ -1797,23 +1940,52 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
             track->setMonitoringEnabled((bool) child.getProperty("monitoringEnabled", false));
             track->setStereoEnabled((bool) child.getProperty("stereoEnabled", false));
 
-            auto insertState = child.getChildWithName("Insert");
-            auto filePath = insertState.getProperty("file").toString();
-            if (filePath.isNotEmpty())
+            if (auto insertChainState = child.getChildWithName("InsertChain"); insertChainState.isValid())
             {
+                track->insertChain.clear();
+                for (const auto slotState : insertChainState)
+                {
+                    auto filePath = slotState.getProperty("file").toString();
+                    if (filePath.isEmpty())
+                        continue;
+
+                    juce::MemoryBlock pluginState;
+                    auto encoded = slotState.getProperty("state").toString();
+                    if (encoded.isNotEmpty())
+                        pluginState.fromBase64Encoding(encoded);
+
+                    juce::String loadError;
+                    if (! track->insertChain.addPlugin(juce::File(filePath),
+                                                       pluginState.getSize() > 0 ? &pluginState : nullptr,
+                                                       (bool) slotState.getProperty("bypassed", false),
+                                                       loadError))
+                    {
+                        errorMessage = loadError;
+                        continue;
+                    }
+                }
+            }
+            else if (auto insertState = child.getChildWithName("Insert"); insertState.isValid())
+            {
+                auto filePath = insertState.getProperty("file").toString();
+                if (filePath.isEmpty())
+                    continue;
+
                 juce::MemoryBlock pluginState;
                 auto encoded = insertState.getProperty("state").toString();
                 if (encoded.isNotEmpty())
                     pluginState.fromBase64Encoding(encoded);
 
                 juce::String loadError;
-                if (! track->insert.loadPlugin(juce::File(filePath), pluginState.getSize() > 0 ? &pluginState : nullptr, loadError))
+                track->insertChain.clear();
+                if (! track->insertChain.addPlugin(juce::File(filePath),
+                                                   pluginState.getSize() > 0 ? &pluginState : nullptr,
+                                                   (bool) insertState.getProperty("bypassed", false),
+                                                   loadError))
                 {
                     errorMessage = loadError;
                     continue;
                 }
-
-                track->insert.setBypassed((bool) insertState.getProperty("bypassed", false));
             }
         }
     }

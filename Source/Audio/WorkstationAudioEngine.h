@@ -146,6 +146,7 @@ public:
     juce::String getTrackPluginName(int trackIndex) const;
     juce::File getTrackPluginFile(int trackIndex) const;
     bool hasTrackPlugin(int trackIndex) const noexcept;
+    int getTrackPluginCount(int trackIndex) const noexcept;
     void setTrackPluginBypassed(int trackIndex, bool shouldBypass);
     bool isTrackPluginBypassed(int trackIndex) const noexcept;
     juce::AudioProcessorEditor* createTrackPluginEditor(int trackIndex);
@@ -230,6 +231,35 @@ private:
         int blockSize = 512;
     };
 
+    struct PluginInsertChain final : public juce::AudioSource
+    {
+        void prepareToPlay(int samplesPerBlockExpected, double newSampleRate) override;
+        void releaseResources() override;
+        void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
+
+        bool addPlugin(const juce::File& file, juce::String& errorMessage);
+        bool addPlugin(const juce::File& file,
+                       const juce::MemoryBlock* savedState,
+                       bool bypassed,
+                       juce::String& errorMessage);
+        void removeLastPlugin();
+        void clear();
+        int getPluginCount() const noexcept { return inserts.size(); }
+        bool hasPlugin() const noexcept { return ! inserts.isEmpty(); }
+        juce::String getPluginName(int slotIndex) const;
+        juce::String getSummaryName() const;
+        juce::File getPluginFile(int slotIndex) const;
+        void setLastBypassed(bool shouldBypass) noexcept;
+        bool isLastBypassed() const noexcept;
+        juce::AudioProcessorEditor* createLastEditor();
+        bool copyStateTo(int slotIndex, juce::MemoryBlock& destination) const;
+
+    private:
+        juce::OwnedArray<PluginInsertSource> inserts;
+        double sampleRate = 44100.0;
+        int blockSize = 512;
+    };
+
     struct TrackChannelSource final : public juce::AudioSource
     {
         TrackChannelSource(juce::String trackName, double frequencyHz);
@@ -264,7 +294,7 @@ private:
         float consumeRecordingPeak() noexcept { return recordingPeak.exchange(0.0f); }
 
         DemoTrackSource source;
-        PluginInsertSource insert;
+        PluginInsertChain insertChain;
         std::atomic<int> inputChannel { -1 };
         std::atomic<bool> recordingArmed { false };
         std::atomic<bool> monitoringEnabled { false };
