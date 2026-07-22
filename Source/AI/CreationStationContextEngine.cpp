@@ -163,7 +163,15 @@ CreationStationContextEngine::ContextPacket CreationStationContextEngine::buildP
                                                   : 72.0);
         auto freshnessBoost = (float) juce::jmap(juce::jlimit(0.0, 72.0, freshnessHours), 72.0, 0.0, 0.0, 0.15);
         auto modeBoost = document.tags.contains(request.workspaceMode.toLowerCase()) ? 0.10f : 0.0f;
-        auto score = tokenScore + freshnessBoost + modeBoost;
+
+        // Freshness/mode boosts are tie-breakers, not a substitute for relevance: without this
+        // guard, session-scoped documents that get re-stamped to "now" on every prompt (the
+        // workspace-mode and Patina-source-buffer documents) win the ranking on every request
+        // regardless of what was actually asked, crowding out genuinely relevant snippets.
+        constexpr float minimumTokenScoreForBoost = 0.05f;
+        auto score = tokenScore;
+        if (tokenScore >= minimumTokenScoreForBoost)
+            score += freshnessBoost + modeBoost;
 
         if (score <= 0.01f)
             continue;

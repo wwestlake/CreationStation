@@ -2148,10 +2148,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         transportBar.setStatusText("AI provider: " + aiProviderSettings.providerName + ".");
     };
 
-    aiPanel.onPromptSubmitted = [this](const juce::String&)
+    aiPanel.onPromptSubmitted = [this](const juce::String& submittedPrompt)
     {
         refreshAiContextStore();
-        pendingAiPrompt = aiPanel.buildSubmissionPrompt();
+        pendingAiPrompt = submittedPrompt;
 
         CreationStationContextEngine::RetrievalRequest request;
         request.prompt = pendingAiPrompt;
@@ -4523,16 +4523,20 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     auto systemPrompt = appManifest.instructions;
     auto userPrompt = pendingAiPrompt;
 
+    // Only pass along project context that scored as genuinely relevant to this prompt.
+    // (packet.summary carries internal ISD tuning metrics for the app's own debugging UI —
+    // it is not useful grounding for the model and was previously drowning out the user's
+    // actual question, causing generic app-orientation answers regardless of what was asked.)
     juce::String contextBlock;
-    contextBlock << "Context packet summary:\n" << packet.summary << "\n\n";
     if (! packet.snippets.isEmpty())
     {
-        contextBlock << "Relevant snippets:\n";
+        contextBlock << "Project context (use only if directly relevant to the request below):\n";
         for (const auto& snippet : packet.snippets)
             contextBlock << "- " << snippet.title << " (" << snippet.category << "): " << snippet.excerpt << "\n";
+        contextBlock << "\n";
     }
 
-    userPrompt = contextBlock + "\nPrompt:\n" + userPrompt;
+    userPrompt = contextBlock + userPrompt;
 
     std::thread([safeThis = juce::Component::SafePointer<MainComponent>(this),
                  systemPrompt = std::move(systemPrompt),
