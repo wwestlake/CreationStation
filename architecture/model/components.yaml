@@ -1,0 +1,170 @@
+components:
+  main_application:
+    file_hints:
+      - Source/Main.cpp
+      - Source/MainComponent.cpp
+      - Source/MainComponent.h
+    role: application shell and workflow coordinator
+    responsibilities:
+      - boot the desktop app
+      - compose panels and workspaces
+      - connect audio, auth, content, tutorial, and control surface flows
+      - persist and restore session state
+
+  audio_engine:
+    file_hints:
+      - Source/Audio/WorkstationAudioEngine.cpp
+      - Source/Audio/SignalGraphRuntime.cpp
+      - Source/Audio/PatchRuntimePlayer.cpp
+    role: real-time audio processing core
+    responsibilities:
+      - manage transport and playback
+      - render signal graphs
+      - host patch runtime audio
+      - control graph enablement and routing
+
+  signal_graph_language:
+    file_hints:
+      - Source/Language/SignalGraph.cpp
+      - Source/Language/PatinaLexer.cpp
+      - Source/Language/PatinaParser.cpp
+      - Source/Language/PatinaLowering.cpp
+      - Source/Language/DslCompiler.cpp
+    role: language and compilation pipeline
+    responsibilities:
+      - parse Patina surface syntax
+      - lower to internal IR
+      - compile to runnable artifacts
+      - support signal-lab and future DSL workflows
+
+  patch_system:
+    file_hints:
+      - Source/Patch/PatchModel.cpp
+      - Source/Views/GraphPanel.cpp
+    role: node graph and patch editing
+    responsibilities:
+      - create nodes
+      - connect sources, effects, and sinks
+      - host oscillator, delay, VST, and output nodes
+      - persist patch layouts
+
+  vst_catalog:
+    file_hints:
+      - Source/Audio/VstPluginCatalog.cpp
+      - Source/Views/PluginsPanel.cpp
+      - Source/Plugins/CreationStationInstrumentProcessor.cpp
+    role: plugin discovery and hosting
+    responsibilities:
+      - scan user-selected VST paths
+      - index available plugins
+      - load/unload hosted plugins
+      - expose plugins as patch nodes
+
+  control_surface:
+    file_hints:
+      - Source/ControlSurface/XTouchControlSurface.cpp
+      - Source/Views/MixerPanel.cpp
+    role: hardware mixer control integration
+    responsibilities:
+      - track bank switching
+      - fader feedback
+      - scribble strip labels
+      - transport controls
+      - channel select, mute, solo, and nav buttons
+
+  authentication:
+    file_hints:
+      - Source/Auth/DesktopAuthSession.cpp
+      - Source/Views/AuthGateView.cpp
+    role: desktop sign-in and entitlement gate
+    responsibilities:
+      - launch browser-based sign-in
+      - exchange loopback code for JWT
+      - decode claims locally
+      - unlock app capabilities based on role and entitlements
+
+  content_system:
+    file_hints:
+      - Source/Content/ContentApiClient.cpp
+      - Source/Content/ContentLibrary.cpp
+      - Source/Views/ContentPanel.cpp
+      - Source/Project/ProjectManager.cpp
+    role: local and remote content management
+    responsibilities:
+      - load downloaded and bundled content
+      - sync remote content library
+      - publish admin content
+      - store local project assets
+
+  ai_system:
+    file_hints:
+      - Source/AI/CreationStationContextEngine.cpp
+      - Source/AI/CreationStationContextStore.cpp
+      - Source/AI/CreationStationTaskPlanner.cpp
+      - Source/Views/AiPanel.cpp
+    role: AI context and task orchestration
+    responsibilities:
+      - maintain project context
+      - generate task steps
+      - support guided operations and future tool automations
+      - prepare context for other AI sessions
+
+  tutorial_system:
+    file_hints:
+      - Source/Tutorial/GuidedTutorial.cpp
+      - Source/Tutorial/TutorialScriptCompiler.cpp
+      - Source/Views/TourGuideOverlay.cpp
+    role: guided onboarding and walkthroughs
+    responsibilities:
+      - display step-by-step tours
+      - highlight UI targets
+      - run scripted tutorials
+      - support user-triggered walkthroughs
+
+  ui_workspaces:
+    file_hints:
+      - Source/Views/DockingWorkspace.cpp
+      - Source/Views/ArrangeView.cpp
+      - Source/Views/SignalLabPanel.cpp
+      - Source/Views/ScorePanel.cpp
+      - Source/Views/RecordView.cpp
+      - Source/Views/DslPanel.cpp
+      - Source/Views/PluginsPanel.cpp
+    role: mode-based workspace UI
+    responsibilities:
+      - switch between creative modes
+      - host panels for audio, patch, score, and content tasks
+      - provide tool-specific editing surfaces
+
+relationships:
+  - from: main_application
+    to: audio_engine
+    kind: owns
+  - from: main_application
+    to: control_surface
+    kind: coordinates
+  - from: main_application
+    to: authentication
+    kind: gates
+  - from: main_application
+    to: content_system
+    kind: loads
+  - from: main_application
+    to: ai_system
+    kind: feeds_context
+  - from: main_application
+    to: tutorial_system
+    kind: launches
+  - from: ui_workspaces
+    to: patch_system
+    kind: edits
+  - from: patch_system
+    to: vst_catalog
+    kind: hosts_plugins_from
+  - from: signal_graph_language
+    to: audio_engine
+    kind: compiles_into
+  - from: control_surface
+    to: ui_workspaces
+    kind: drives_navigation
+

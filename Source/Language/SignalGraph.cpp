@@ -14,11 +14,12 @@ juce::Array<NodeTemplate> makeTemplates()
     templates.add({ NodeCategory::source, "File Player", "Streams a file into the graph.", "Path", 0.5f });
     templates.add({ NodeCategory::source, "Mic In", "Live input from the audio device.", "Gain", 0.7f });
     templates.add({ NodeCategory::source, "App Loopback", "Captures audio from another app.", "Mix", 0.6f });
-    templates.add({ NodeCategory::source, "Oscillator", "Continuous generated tone source.", "Freq", 0.35f });
+    templates.add({ NodeCategory::source, "Oscillator", "Continuous generated tone source.", "Level", 0.0f });
     templates.add({ NodeCategory::effect, "Drive", "Soft saturation and color.", "Amount", 0.2f });
     templates.add({ NodeCategory::effect, "Filter", "Shapes brightness and body.", "Cutoff", 0.55f });
     templates.add({ NodeCategory::effect, "Delay", "Repeating spatial smear.", "Time", 0.18f });
     templates.add({ NodeCategory::effect, "Modulator", "LFO / automation target.", "Rate", 0.42f });
+    templates.add({ NodeCategory::effect, "VST Host", "Loads a third-party VST into the patch chain.", "Mix", 0.5f });
     templates.add({ NodeCategory::sink, "Speakers", "Main output to your audio device.", "Level", 1.0f });
     templates.add({ NodeCategory::sink, "File Capture", "Records to disk or a render target.", "Format", 0.5f });
     return templates;

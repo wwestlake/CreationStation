@@ -89,7 +89,10 @@ void TourGuideOverlay::goToStep(int stepIndex)
     stepLabel.setText("Step " + juce::String(currentStepIndex + 1) + " of " + juce::String((int) steps.size()), juce::dontSendNotification);
     titleLabel.setText(step.title, juce::dontSendNotification);
     bodyEditor.setText(step.body, juce::dontSendNotification);
+    nextButton.setButtonText(step.nextButtonText.isNotEmpty() ? step.nextButtonText : "Next");
     updateButtons();
+    if (step.onStepEntered)
+        step.onStepEntered();
     repaint();
 }
 
@@ -111,6 +114,11 @@ juce::Rectangle<int> TourGuideOverlay::getTargetBounds() const
     return {};
 }
 
+juce::Rectangle<int> TourGuideOverlay::getInfoBounds() const
+{
+    return getLocalBounds().withSizeKeepingCentre(620, 200).translated(0, 180);
+}
+
 void TourGuideOverlay::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xaa05070a));
@@ -124,16 +132,38 @@ void TourGuideOverlay::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff8fd3ff));
     g.drawRoundedRectangle(target.toFloat(), 18.0f, 3.0f);
 
-    auto infoArea = getLocalBounds().withSizeKeepingCentre(620, 200).translated(0, 180);
+    auto infoArea = getInfoBounds();
     g.setColour(juce::Colour(0xff121821));
     g.fillRoundedRectangle(infoArea.toFloat(), 20.0f);
     g.setColour(juce::Colour(0xff2d3949));
     g.drawRoundedRectangle(infoArea.toFloat(), 20.0f, 1.0f);
+
+    if (active && juce::isPositiveAndBelow(currentStepIndex, (int) steps.size()))
+    {
+        const auto& step = steps[(size_t) currentStepIndex];
+        if (step.drawConnector)
+        {
+            juce::Point<float> source((float) infoArea.getCentreX(), (float) infoArea.getY());
+            juce::Point<float> destination((float) target.getCentreX(), (float) target.getBottom());
+            auto distance = std::abs(source.y - destination.y);
+
+            juce::Path connector;
+            connector.startNewSubPath(source);
+            connector.cubicTo(source.x, source.y - distance * 0.22f,
+                              destination.x, destination.y + distance * 0.22f,
+                              destination.x, destination.y);
+
+            g.setColour(juce::Colour(0xff8fd3ff).withAlpha(0.95f));
+            g.strokePath(connector, juce::PathStrokeType(3.0f));
+            g.drawLine(destination.x - 8.0f, destination.y - 10.0f, destination.x, destination.y, 3.0f);
+            g.drawLine(destination.x + 8.0f, destination.y - 10.0f, destination.x, destination.y, 3.0f);
+        }
+    }
 }
 
 void TourGuideOverlay::resized()
 {
-    auto infoArea = getLocalBounds().withSizeKeepingCentre(620, 200).translated(0, 180).reduced(18);
+    auto infoArea = getInfoBounds().reduced(18);
     stepLabel.setBounds(infoArea.removeFromTop(20));
     titleLabel.setBounds(infoArea.removeFromTop(34));
     bodyEditor.setBounds(infoArea.removeFromTop(88));

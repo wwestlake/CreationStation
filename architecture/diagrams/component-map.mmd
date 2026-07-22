@@ -1,0 +1,25 @@
+```mermaid
+flowchart TB
+    main["Main Application"]
+    audio["Audio Engine"]
+    graph["Patch Graph"]
+    dsl["Patina DSL"]
+    vst["VST Catalog"]
+    xtouch["X-Touch Control Surface"]
+    content["Content Library"]
+    ai["AI Context + Planner"]
+    tut["Tutorial System"]
+    ui["Workspace UI"]
+
+    main --> audio
+    main --> graph
+    main --> vst
+    main --> xtouch
+    main --> content
+    main --> ai
+    main --> tut
+    main --> ui
+    dsl --> audio
+    graph --> vst
+    xtouch --> ui
+```

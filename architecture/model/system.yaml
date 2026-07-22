@@ -1,0 +1,65 @@
+project:
+  name: Creation Station
+  slug: creation-station
+  kind: desktop-audio-workstation
+  language: C++
+  framework: JUCE
+
+purpose:
+  summary: >
+    A creative audio workstation for building, arranging, patching, teaching,
+    recording, and controlling sound through a DAW-like desktop experience.
+  focus:
+    - sound design and signal construction
+    - content library and guided workflows
+    - Patina DSL authoring and compilation
+    - VST hosting and patch graph routing
+    - X-Touch control surface support
+    - AI-assisted task planning and context management
+
+runtime:
+  primary_executable: Creative Workstation.exe
+  desktop_app: true
+  plugin_outputs:
+    - VST3 instrument/plugin
+  storage:
+    local_project_root: D:\CreationStationProjects
+    content_cache: local project content folder selected by user
+
+external_systems:
+  auth_site:
+    name: LagDaemon
+    url: https://lagdaemon.com
+    purpose:
+      - desktop sign-in
+      - entitlement lookup via JWT claims
+      - content library synchronization
+  release_host:
+    name: GitHub Releases
+    repo: wwestlake/CreationStation
+    purpose:
+      - desktop downloads
+      - release publishing
+  audio_devices:
+    primary_targets:
+      - X-Touch control surface
+      - ASIO4ALL
+      - local audio interfaces
+
+architecture_style:
+  - modular desktop application
+  - signal graph runtime
+  - content-driven workflows
+  - AI-assisted orchestration
+  - plugin-first extensibility
+
+top_level_views:
+  - UI workspace
+  - signal lab
+  - patch workspace
+  - score workspace
+  - plugin workspace
+  - content library
+  - tutorial system
+  - AI panel
+

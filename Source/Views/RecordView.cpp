@@ -52,12 +52,12 @@ void RecordView::TrackRow::resized()
 
 RecordView::RecordView()
 {
-    titleLabel.setText("Record View", juce::dontSendNotification);
+    titleLabel.setText("Capture Booth", juce::dontSendNotification);
     titleLabel.setFont(juce::Font(24.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
-    subtitleLabel.setText("Arm takes, monitor inputs, and prep sessions.", juce::dontSendNotification);
+    subtitleLabel.setText("Arm source lanes, monitor inputs, and grab fresh material for Foley and sound design.", juce::dontSendNotification);
     subtitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
     addAndMakeVisible(subtitleLabel);
 
@@ -70,7 +70,7 @@ RecordView::RecordView()
     recentTakesEditor.setScrollbarsShown(true);
     recentTakesEditor.setCaretVisible(false);
     recentTakesEditor.setPopupMenuEnabled(false);
-    recentTakesEditor.setText("Recent takes will appear here.");
+    recentTakesEditor.setText("Fresh captures will appear here.");
     recentTakesEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff171d27));
     recentTakesEditor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff2d384a));
     recentTakesEditor.setColour(juce::TextEditor::textColourId, juce::Colour(0xffd7deea));
@@ -121,7 +121,7 @@ void RecordView::setRecordingState(bool shouldRecord, const juce::String& takeNa
     if (recording)
         recordStateLabel.setText("Recording: " + currentTakeName, juce::dontSendNotification);
     else
-        recordStateLabel.setText("Recording stopped.", juce::dontSendNotification);
+        recordStateLabel.setText("Capture stopped.", juce::dontSendNotification);
 }
 
 void RecordView::setRecentTakes(const juce::StringArray& takeNames)
@@ -130,7 +130,7 @@ void RecordView::setRecentTakes(const juce::StringArray& takeNames)
     juce::String text;
     if (recentTakes.isEmpty())
     {
-        text = "No recorded clips yet.";
+        text = "No captures yet.";
     }
     else
     {

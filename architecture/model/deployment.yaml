@@ -1,0 +1,35 @@
+deployment:
+  desktop_app:
+    name: Creation Station
+    artifact: Creative Workstation.exe
+    install_form:
+      - local executable
+      - future installer package
+    dependencies:
+      - LagDaemon auth
+      - content library API
+      - local VST folders
+      - local audio device stack
+
+  release_pipeline:
+    source_repo: wwestlake/CreationStation
+    outputs:
+      - GitHub release assets
+      - ZIP packages
+      - future MSI or installer format
+    versioning:
+      current_track: 0.1.x alpha releases
+      note: release family may grow to include multiple products later
+
+  remote_services:
+    auth_and_entitlements:
+      endpoint_family: https://lagdaemon.com/djehuti
+    content_delivery:
+      endpoint_family: https://lagdaemon.com/djehuti/api/content
+
+  hardware_targets:
+    - X-Touch
+    - MIDI keyboard
+    - VST hosts
+    - audio interfaces and virtual routing devices
+

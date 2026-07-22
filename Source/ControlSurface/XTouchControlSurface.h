@@ -3,7 +3,8 @@
 #include <JuceHeader.h>
 #include <functional>
 
-class XTouchControlSurface final : public juce::MidiInputCallback
+class XTouchControlSurface final : public juce::MidiInputCallback,
+                                   private juce::Timer
 {
 public:
     enum class TransportCommand
@@ -58,13 +59,17 @@ private:
     void sendMuteValue(int trackIndex, bool muted);
     void sendSoloValue(int trackIndex, bool soloed);
     void sendTransportValue(int noteNumber, bool active);
+    void timerCallback() override;
 
     juce::String activeDeviceName;
     juce::StringArray enabledDeviceIds;
     juce::StringArray channelNames;
+    juce::Array<int> pendingScribbleTracks;
     std::unique_ptr<juce::MidiOutput> midiOutput;
     int bankOffset = 0;
-    int totalTrackCount = 32;
+    int pendingScribbleBankOffset = 0;
+    int pendingScribbleIndex = 0;
+    int totalTrackCount = 0;
     bool transportPlaying = false;
     bool transportRecording = false;
 

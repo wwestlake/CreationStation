@@ -180,7 +180,7 @@ MixerPanel::MixerPanel()
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 
-    bankLabel.setText("Bank 1-8", juce::dontSendNotification);
+    bankLabel.setText("Bank 0-0", juce::dontSendNotification);
     bankLabel.setJustificationType(juce::Justification::centredRight);
     bankLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
     addAndMakeVisible(bankLabel);
@@ -246,7 +246,7 @@ void MixerPanel::resized()
 
 void MixerPanel::setChannelCount(int newTotalChannelCount)
 {
-    totalChannelCount = juce::jmax(visibleChannelCount, newTotalChannelCount);
+    totalChannelCount = juce::jmax(0, newTotalChannelCount);
     setBankOffset(bankOffset);
 }
 
@@ -256,9 +256,14 @@ void MixerPanel::setBankOffset(int newBankOffset)
     bankOffset = juce::jlimit(0, maxBankOffset, newBankOffset);
     refreshVisibleStripLabels();
 
-    auto bankStart = bankOffset + 1;
-    auto bankEnd = juce::jmin(totalChannelCount, bankOffset + visibleChannelCount);
-    bankLabel.setText("Bank " + juce::String(bankStart) + "-" + juce::String(bankEnd), juce::dontSendNotification);
+    if (totalChannelCount == 0)
+        bankLabel.setText("Bank 0-0", juce::dontSendNotification);
+    else
+    {
+        auto bankStart = bankOffset + 1;
+        auto bankEnd = juce::jmin(totalChannelCount, bankOffset + visibleChannelCount);
+        bankLabel.setText("Bank " + juce::String(bankStart) + "-" + juce::String(bankEnd), juce::dontSendNotification);
+    }
     repaint();
 }
 
@@ -325,6 +330,7 @@ void MixerPanel::setChannelInsertBypassed(int channelIndex, bool isBypassed)
 
 void MixerPanel::setSelectedChannel(int channelIndex)
 {
+    selectedChannel = channelIndex;
     for (int slot = 0; slot < strips.size(); ++slot)
     {
         auto absoluteIndex = bankOffset + slot;

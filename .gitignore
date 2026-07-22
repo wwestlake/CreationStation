@@ -1,4 +1,5 @@
 build/
+build-*/
 wiki/
 .vs/
 .idea/
@@ -20,5 +21,3 @@ VoiceMeterPotato.xml
 .codex-remote-attachments/
 VoiceMeterBanana.xml-disabled
 VoicemeeterRemoteAPI.pdf
-Driver/**/x64/
-Driver/**/ARM64/

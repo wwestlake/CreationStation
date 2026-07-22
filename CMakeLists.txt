@@ -10,6 +10,9 @@ if(NOT DEFINED JUCE_DIR)
     message(FATAL_ERROR "Set JUCE_DIR to your JUCE root directory before configuring.")
 endif()
 
+option(CREATION_STATION_ENABLE_ASIO "Enable Steinberg ASIO support in Creation Station" OFF)
+set(CREATION_STATION_ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK folder containing iasiodrv.h")
+
 add_subdirectory("${JUCE_DIR}" juce)
 
 juce_add_gui_app(CreativeWorkstation
@@ -42,24 +45,46 @@ target_sources(CreativeWorkstation PRIVATE
     Source/AI/CreationStationContextEngine.h
     Source/AI/CreationStationContextStore.cpp
     Source/AI/CreationStationContextStore.h
+    Source/AI/CreationStationAppManifest.cpp
+    Source/AI/CreationStationAppManifest.h
+    Source/AI/LiteSemRagApiClient.cpp
+    Source/AI/LiteSemRagApiClient.h
+    Source/AI/OpenAiChatClient.cpp
+    Source/AI/OpenAiChatClient.h
+    Source/AI/OpenAiModelCatalogClient.cpp
+    Source/AI/OpenAiModelCatalogClient.h
+    Source/AI/CreationStationTaskPlanner.cpp
+    Source/AI/CreationStationTaskPlanner.h
     Source/Audio/WorkstationAudioEngine.cpp
     Source/Audio/WorkstationAudioEngine.h
+    Source/Audio/StudioIOModel.cpp
+    Source/Audio/StudioIOModel.h
     Source/Audio/PatchRuntimePlayer.cpp
     Source/Audio/PatchRuntimePlayer.h
     Source/Audio/SignalGraphRuntime.cpp
     Source/Audio/SignalGraphRuntime.h
+    Source/Audio/VstPluginCatalog.cpp
+    Source/Audio/VstPluginCatalog.h
     Source/Auth/DesktopAuthSession.cpp
     Source/Auth/DesktopAuthSession.h
     Source/Branding.cpp
     Source/Branding.h
     Source/ControlSurface/XTouchControlSurface.cpp
     Source/ControlSurface/XTouchControlSurface.h
+    Source/ControlSurface/ControlSurfaceMappingStore.cpp
+    Source/ControlSurface/ControlSurfaceMappingStore.h
     Source/Content/ContentLibrary.cpp
     Source/Content/ContentLibrary.h
     Source/Content/ContentApiClient.cpp
     Source/Content/ContentApiClient.h
     Source/Project/ProjectManager.cpp
     Source/Project/ProjectManager.h
+    Source/Tutorial/GuidedTutorial.cpp
+    Source/Tutorial/GuidedTutorial.h
+    Source/Tutorial/TutorialScriptCompiler.cpp
+    Source/Tutorial/TutorialScriptCompiler.h
+    Source/Timeline/TimelineModel.cpp
+    Source/Timeline/TimelineModel.h
     Source/Patch/PatchModel.cpp
     Source/Patch/PatchModel.h
     Source/Main.cpp
@@ -104,10 +129,18 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/TourGuideOverlay.h
     Source/Views/MixerPanel.cpp
     Source/Views/MixerPanel.h
+    Source/Views/PluginsPanel.cpp
+    Source/Views/PluginsPanel.h
     Source/Views/RecordView.cpp
     Source/Views/RecordView.h
+    Source/Views/SettingsPanel.cpp
+    Source/Views/SettingsPanel.h
+    Source/Views/ScorePanel.cpp
+    Source/Views/ScorePanel.h
     Source/Views/SignalLabPanel.cpp
     Source/Views/SignalLabPanel.h
+    Source/Views/TrackerPanel.cpp
+    Source/Views/TrackerPanel.h
 )
 
 target_sources(CreationStationInstrument PRIVATE
@@ -124,6 +157,15 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_VERSION>"
 )
+
+if(CREATION_STATION_ENABLE_ASIO)
+    if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
+        message(FATAL_ERROR "CREATION_STATION_ENABLE_ASIO is ON, but iasiodrv.h was not found in CREATION_STATION_ASIO_SDK_DIR.")
+    endif()
+
+    target_compile_definitions(CreativeWorkstation PRIVATE JUCE_ASIO=1)
+    target_include_directories(CreativeWorkstation PRIVATE "${CREATION_STATION_ASIO_SDK_DIR}")
+endif()
 
 target_compile_definitions(CreationStationInstrument PRIVATE
     JUCE_WEB_BROWSER=0

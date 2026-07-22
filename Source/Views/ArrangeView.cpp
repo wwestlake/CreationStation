@@ -6,6 +6,7 @@ juce::Colour panelColour() { return juce::Colour(0xff11151c); }
 juce::Colour laneColour() { return juce::Colour(0xff1a2030); }
 juce::Colour laneAltColour() { return juce::Colour(0xff181d2a); }
 juce::Colour accentColour() { return juce::Colour(0xff5f93ff); }
+
 juce::Colour clipColourForIndex(int index)
 {
     static const juce::Colour colours[] =
@@ -20,8 +21,11 @@ juce::Colour clipColourForIndex(int index)
     return colours[(size_t) (index % (int) (sizeof(colours) / sizeof(colours[0])))];
 }
 
-constexpr int laneNameWidth = 180;
+constexpr int laneNameWidth = 340;
 constexpr int laneBeatWidth = 90;
+constexpr int laneHeight = 100;
+constexpr int rulerHeight = 56;
+constexpr int foleyTotalBeats = 64;
 
 juce::Rectangle<int> getLaneClipArea(const juce::Component& lane)
 {
@@ -36,6 +40,59 @@ juce::Rectangle<int> getClipBoundsForState(const juce::Component& lane, int star
                                 juce::jmax(1, lengthBeats) * laneBeatWidth - 8,
                                 clipArea.getHeight() - 24);
 }
+
+juce::String formatPercent(double value)
+{
+    return juce::String(juce::roundToInt(value * 100.0)) + "%";
+}
+
+juce::String formatDecibels(float value)
+{
+    return juce::String(value, 1) + " dB";
+}
+}
+
+ArrangeView::WaveformPanel::WaveformPanel()
+    : thumbnail(512, formatManager, thumbnailCache)
+{
+    formatManager.registerBasicFormats();
+}
+
+void ArrangeView::WaveformPanel::setAudioFile(const juce::File& file)
+{
+    thumbnail.clear();
+
+    if (file.existsAsFile())
+    {
+        thumbnail.setSource(new juce::FileInputSource(file));
+        emptyText = file.getFileName();
+    }
+    else
+    {
+        emptyText = "Select a Foley sound to shape it.";
+    }
+
+    repaint();
+}
+
+void ArrangeView::WaveformPanel::paint(juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+    g.setColour(juce::Colour(0xff171d27));
+    g.fillRoundedRectangle(bounds, 10.0f);
+    g.setColour(juce::Colour(0xff2d384a));
+    g.drawRoundedRectangle(bounds, 10.0f, 1.0f);
+
+    if (thumbnail.getTotalLength() > 0.0)
+    {
+        g.setColour(juce::Colour(0xff6fa8ff));
+        thumbnail.drawChannels(g, getLocalBounds().reduced(10), 0.0, thumbnail.getTotalLength(), 1.0f);
+    }
+    else
+    {
+        g.setColour(juce::Colour(0xff8ea0b7));
+        g.drawFittedText(emptyText, getLocalBounds().reduced(12), juce::Justification::centred, 2);
+    }
 }
 
 ArrangeView::Lane::Lane(int newTrackIndex, const juce::String& newTrackName)
@@ -44,52 +101,50 @@ ArrangeView::Lane::Lane(int newTrackIndex, const juce::String& newTrackName)
     setRepaintsOnMouseActivity(true);
 }
 
-void ArrangeView::Lane::ClipBlock::setClipName(const juce::String& name)
+void ArrangeView::Lane::ClipBlock::setClipData(const ClipPlacement& placementData, int newModelIndex, juce::Colour newColour)
 {
-    clipName = name;
+    placement = placementData;
+    modelIndex = newModelIndex;
+    colour = newColour;
     repaint();
 }
 
-void ArrangeView::Lane::ClipBlock::setLaneIndex(int newLaneIndex)
+void ArrangeView::Lane::ClipBlock::setSelected(bool shouldSelect)
 {
-    laneIndex = newLaneIndex;
-}
-
-void ArrangeView::Lane::ClipBlock::setStartBeat(int newStartBeat)
-{
-    startBeat = juce::jmax(0, newStartBeat);
-    updateBoundsFromState();
-}
-
-void ArrangeView::Lane::ClipBlock::setLengthBeats(int newLengthBeats)
-{
-    lengthBeats = juce::jmax(1, newLengthBeats);
-    updateBoundsFromState();
-}
-
-void ArrangeView::Lane::ClipBlock::setColour(juce::Colour newColour)
-{
-    colour = newColour;
+    selected = shouldSelect;
     repaint();
 }
 
 void ArrangeView::Lane::ClipBlock::updateBoundsFromState()
 {
     if (auto* parentLane = dynamic_cast<Lane*>(getParentComponent()))
-        setBounds(getClipBoundsForState(*parentLane, startBeat, lengthBeats));
+        setBounds(getClipBoundsForState(*parentLane, placement.startBeat, placement.lengthBeats));
 }
 
 void ArrangeView::Lane::ClipBlock::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    g.setColour(colour.withAlpha(0.88f));
-    g.fillRoundedRectangle(bounds, 10.0f);
-    g.setColour(juce::Colours::white.withAlpha(0.85f));
-    g.drawRoundedRectangle(bounds, 10.0f, 1.0f);
+    g.setColour(colour.withAlpha(0.82f));
+    g.fillRoundedRectangle(bounds, 7.0f);
+    g.setColour(juce::Colours::white.withAlpha(0.80f));
+    g.drawRoundedRectangle(bounds, 7.0f, 1.2f);
+
+    if (selected)
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.95f));
+        g.drawRoundedRectangle(bounds.reduced(2.0f), 6.0f, 2.0f);
+    }
 
     g.setColour(juce::Colours::white);
     g.setFont(juce::Font(12.0f).boldened());
-    g.drawText(clipName, getLocalBounds().reduced(10), juce::Justification::centredLeft, true);
+    auto textArea = getLocalBounds().reduced(10, 6);
+    g.drawText(placement.displayName, textArea.removeFromTop(18), juce::Justification::centredLeft, true);
+    g.setFont(juce::Font(11.0f));
+    g.setColour(juce::Colours::white.withAlpha(0.70f));
+    g.drawText("beat " + juce::String(placement.startBeat + 1) + "  |  len " + juce::String(placement.lengthBeats),
+               textArea.removeFromTop(16),
+               juce::Justification::centredLeft,
+               true);
 
     g.setColour(juce::Colours::white.withAlpha(0.12f));
     auto handle = getLocalBounds().removeFromRight(8).reduced(2, 8);
@@ -99,8 +154,11 @@ void ArrangeView::Lane::ClipBlock::paint(juce::Graphics& g)
 void ArrangeView::Lane::ClipBlock::mouseDown(const juce::MouseEvent& event)
 {
     dragStart = event.getPosition();
-    startBeatOnDrag = startBeat;
+    startBeatOnDrag = placement.startBeat;
     toFront(true);
+
+    if (onSelected)
+        onSelected(modelIndex);
 }
 
 void ArrangeView::Lane::ClipBlock::mouseDrag(const juce::MouseEvent& event)
@@ -111,9 +169,9 @@ void ArrangeView::Lane::ClipBlock::mouseDrag(const juce::MouseEvent& event)
 
     auto clipArea = getLaneClipArea(*parentLane);
     auto deltaBeats = juce::roundToInt((float) event.getDistanceFromDragStartX() / (float) laneBeatWidth);
-    startBeat = juce::jmax(0, startBeatOnDrag + deltaBeats);
+    placement.startBeat = juce::jmax(0, startBeatOnDrag + deltaBeats);
 
-    auto newBounds = getClipBoundsForState(*parentLane, startBeat, lengthBeats);
+    auto newBounds = getClipBoundsForState(*parentLane, placement.startBeat, placement.lengthBeats);
     auto maxX = clipArea.getRight() - newBounds.getWidth();
     newBounds.setX(juce::jlimit(clipArea.getX(), maxX, newBounds.getX()));
     setBounds(newBounds);
@@ -122,10 +180,14 @@ void ArrangeView::Lane::ClipBlock::mouseDrag(const juce::MouseEvent& event)
 void ArrangeView::Lane::ClipBlock::mouseUp(const juce::MouseEvent&)
 {
     updateBoundsFromState();
+
+    if (onMoved)
+        onMoved(modelIndex, placement.startBeat);
+
     if (auto* parentLane = dynamic_cast<Lane*>(getParentComponent()))
         if (auto* parentCanvas = dynamic_cast<Canvas*>(parentLane->getParentComponent()))
             if (parentCanvas->onTrackSelected)
-                parentCanvas->onTrackSelected(laneIndex);
+                parentCanvas->onTrackSelected(placement.trackIndex);
 }
 
 void ArrangeView::Lane::setTrackIndex(int newTrackIndex)
@@ -140,9 +202,18 @@ void ArrangeView::Lane::setTrackName(const juce::String& newTrackName)
     repaint();
 }
 
-void ArrangeView::Lane::setClipNames(const juce::StringArray& newClipNames)
+void ArrangeView::Lane::setTrackKind(cs::TrackKind kind)
 {
-    clipNames = newClipNames;
+    trackKind = kind;
+    repaint();
+}
+
+void ArrangeView::Lane::setClips(const juce::Array<LaneClipView>& newClips, int newSelectedClipIndex)
+{
+    clips = newClips;
+    selectedClipIndex = newSelectedClipIndex;
+    for (int index = 0; index < clips.size(); ++index)
+        clips.getReference(index).colour = clipColourForIndex(index + trackIndex * 3);
     rebuildClipBlocks();
 }
 
@@ -155,23 +226,50 @@ void ArrangeView::Lane::setSelected(bool shouldSelect)
 void ArrangeView::Lane::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
-    g.setColour(trackIndex % 2 == 0 ? laneColour() : laneAltColour());
+    g.setColour(selected ? juce::Colour(0xff223653) : (trackIndex % 2 == 0 ? laneColour() : laneAltColour()));
     g.fillRect(bounds);
 
-    auto nameArea = getLocalBounds().removeFromLeft(180);
-    g.setColour(juce::Colour(0xff222a3a));
+    auto nameArea = getLocalBounds().removeFromLeft(laneNameWidth);
+    g.setColour(selected ? juce::Colour(0xff223653) : juce::Colour(0xff17202c));
     g.fillRect(nameArea);
+    g.setColour(selected ? accentColour() : juce::Colour(0xff2d3b51));
+    g.drawRect(nameArea, selected ? 2 : 1);
 
     g.setColour(juce::Colour(0xffd7deea));
     g.setFont(juce::Font(15.0f).boldened());
-    g.drawText(juce::String(trackIndex + 1) + ". " + trackName, nameArea.reduced(14, 0), juce::Justification::centredLeft, true);
+    auto labelArea = nameArea.reduced(16, 12);
+    g.drawText(trackName.isNotEmpty() ? trackName : "Track " + juce::String(trackIndex + 1),
+               labelArea.removeFromTop(24),
+               juce::Justification::centredLeft,
+               true);
+
+    g.setColour(juce::Colour(0xff9fb0c8));
+    g.setFont(juce::Font(12.0f));
+    g.drawText(cs::toDisplayName(trackKind) + " lane " + juce::String(trackIndex + 1),
+               labelArea.removeFromTop(20),
+               juce::Justification::centredLeft,
+               true);
+
+    g.setColour(juce::Colour(0xff67e8a5));
+    g.drawText("slices / variations / timing",
+               labelArea.removeFromTop(20),
+               juce::Justification::centredLeft,
+               true);
 
     auto clipArea = getLaneClipArea(*this);
     g.setColour(juce::Colour(0xff283144));
-    for (int beat = 0; beat < 24; ++beat)
+    for (int beat = 0; beat <= foleyTotalBeats; ++beat)
     {
         auto x = clipArea.getX() + beat * laneBeatWidth;
-        g.drawLine(static_cast<float>(x), static_cast<float>(clipArea.getY()), static_cast<float>(x), static_cast<float>(clipArea.getBottom()), 1.0f);
+        g.setColour(beat % 4 == 0 ? juce::Colour(0xff334c6e) : juce::Colour(0xff283144));
+        g.drawLine((float) x, (float) clipArea.getY() - 4.0f, (float) x, (float) clipArea.getBottom() + 4.0f, 1.0f);
+    }
+
+    if (clips.isEmpty())
+    {
+        g.setColour(juce::Colour(0x339fb0c8));
+        g.setFont(juce::Font(13.0f));
+        g.drawText("place Foley slices here", clipArea.withHeight(24).withY(clipArea.getCentreY() - 12), juce::Justification::centredLeft, true);
     }
 
     if (selected)
@@ -196,23 +294,15 @@ void ArrangeView::Lane::rebuildClipBlocks()
 {
     clipBlocks.clear(true);
 
-    juce::StringArray namesToUse = clipNames;
-    if (namesToUse.isEmpty())
-    {
-        namesToUse.add("Intro");
-        namesToUse.add("Build");
-        namesToUse.add("Drop");
-        namesToUse.add("Outro");
-    }
-
-    for (int clipIndex = 0; clipIndex < namesToUse.size(); ++clipIndex)
+    for (int clipIndex = 0; clipIndex < clips.size(); ++clipIndex)
     {
         auto* block = new ClipBlock();
-        block->setClipName(namesToUse[clipIndex]);
-        block->setLaneIndex(trackIndex);
-        block->setStartBeat(1 + clipIndex * 4);
-        block->setLengthBeats(3 + (clipIndex % 3));
-        block->setColour(clipColourForIndex(clipIndex));
+        block->setClipData(clips.getReference(clipIndex).placement,
+                           clips.getReference(clipIndex).modelIndex,
+                           clips.getReference(clipIndex).colour);
+        block->onMoved = onClipMoved;
+        block->onSelected = onClipSelected;
+        block->setSelected(clips.getReference(clipIndex).modelIndex == selectedClipIndex);
         clipBlocks.add(block);
         addAndMakeVisible(block);
     }
@@ -230,6 +320,7 @@ void ArrangeView::Canvas::setTrackCount(int newTrackCount, const juce::StringArr
 {
     trackCount = juce::jmax(0, newTrackCount);
     trackNames = newTrackNames;
+    trackKinds.resize((size_t) trackCount, cs::TrackKind::foley);
 
     while (lanes.size() < trackCount)
         lanes.add(new Lane(lanes.size(), "Track " + juce::String(lanes.size() + 1)));
@@ -240,12 +331,16 @@ void ArrangeView::Canvas::setTrackCount(int newTrackCount, const juce::StringArr
     for (int index = 0; index < lanes.size(); ++index)
     {
         lanes[index]->setTrackIndex(index);
+        lanes[index]->onClipMoved = onClipMoved;
+        lanes[index]->onClipSelected = onClipSelected;
         if (juce::isPositiveAndBelow(index, trackNames.size()) && trackNames[index].isNotEmpty())
             lanes[index]->setTrackName(trackNames[index]);
+        if (juce::isPositiveAndBelow(index, (int) trackKinds.size()))
+            lanes[index]->setTrackKind(trackKinds[(size_t) index]);
         addAndMakeVisible(lanes[index]);
     }
 
-    setSize(2400, 100 + trackCount * 88);
+    setSize(laneNameWidth + foleyTotalBeats * laneBeatWidth + 80, rulerHeight + trackCount * laneHeight);
     rebuildLaneClips();
     resized();
 }
@@ -256,16 +351,33 @@ void ArrangeView::Canvas::setTrackName(int trackIndex, const juce::String& name)
         lanes[trackIndex]->setTrackName(name);
 }
 
-void ArrangeView::Canvas::setRecordedClips(const juce::StringArray& clipNames)
+void ArrangeView::Canvas::setTrackKind(int trackIndex, cs::TrackKind kind)
 {
-    recordedClips = clipNames;
+    if (! juce::isPositiveAndBelow(trackIndex, lanes.size()))
+        return;
+
+    if ((int) trackKinds.size() <= trackIndex)
+        trackKinds.resize((size_t) trackIndex + 1, cs::TrackKind::foley);
+
+    trackKinds[(size_t) trackIndex] = kind;
+    lanes[trackIndex]->setTrackKind(kind);
+}
+
+void ArrangeView::Canvas::setSeedClips(const juce::StringArray& clipNames)
+{
+    seedClips = clipNames;
+    repaint();
+}
+
+void ArrangeView::Canvas::setPlacedClips(const juce::Array<ClipPlacement>& clipPlacements, int newSelectedClipIndex)
+{
+    placedClips = clipPlacements;
+    this->selectedClipIndex = newSelectedClipIndex;
     rebuildLaneClips();
 }
 
 void ArrangeView::Canvas::setSelectedTrack(int trackIndex)
 {
-    selectedTrack = trackIndex;
-
     for (int index = 0; index < lanes.size(); ++index)
         lanes[index]->setSelected(index == trackIndex);
 }
@@ -275,76 +387,346 @@ void ArrangeView::Canvas::rebuildLaneClips()
     if (lanes.isEmpty())
         return;
 
-    juce::Array<juce::StringArray> perLaneClips;
-    perLaneClips.resize(lanes.size());
+    juce::Array<juce::Array<Lane::LaneClipView>> clipsByLane;
+    clipsByLane.resize(lanes.size());
 
-    for (int clipIndex = 0; clipIndex < recordedClips.size(); ++clipIndex)
+    for (int clipIndex = 0; clipIndex < placedClips.size(); ++clipIndex)
     {
-        auto laneIndex = clipIndex % lanes.size();
-        perLaneClips[(size_t) laneIndex].add(recordedClips[clipIndex]);
+        const auto& placement = placedClips.getReference(clipIndex);
+        if (! juce::isPositiveAndBelow(placement.trackIndex, lanes.size()))
+            continue;
+
+        Lane::LaneClipView view;
+        view.placement = placement;
+        view.modelIndex = clipIndex;
+        view.colour = clipColourForIndex(clipIndex);
+        clipsByLane.getReference(placement.trackIndex).add(view);
     }
 
     for (int laneIndex = 0; laneIndex < lanes.size(); ++laneIndex)
-        lanes[laneIndex]->setClipNames(perLaneClips[(size_t) laneIndex]);
+        lanes[laneIndex]->setClips(clipsByLane[(size_t) laneIndex], selectedClipIndex);
 }
 
 void ArrangeView::Canvas::paint(juce::Graphics& g)
 {
     g.fillAll(panelColour());
 
-    auto header = getLocalBounds().removeFromTop(44);
+    auto header = getLocalBounds().removeFromTop(rulerHeight);
     g.setColour(juce::Colour(0xff1e2533));
     g.fillRect(header);
 
-    auto ruler = header.withTrimmedLeft(180);
+    auto ruler = header.withTrimmedLeft(laneNameWidth);
     g.setColour(juce::Colour(0xff8ea0b7));
     g.setFont(juce::Font(13.0f));
 
-    auto beatWidth = 90;
-    for (int beat = 0; beat < 24; ++beat)
+    if (trackCount == 0)
     {
-        auto x = ruler.getX() + beat * beatWidth;
-        g.drawLine(static_cast<float>(x), static_cast<float>(ruler.getY()), static_cast<float>(x), static_cast<float>(getHeight()), 1.0f);
-        g.drawText(juce::String(beat + 1), x + 4, ruler.getY() + 4, 40, 18, juce::Justification::centredLeft);
+        g.setColour(juce::Colour(0xff9fb0c8));
+        g.setFont(juce::Font(18.0f).boldened());
+        g.drawText("No Foley layers yet", getLocalBounds().reduced(24), juce::Justification::centred);
+        g.setFont(juce::Font(14.0f));
+        g.drawText("Add a track in the Tracker, then use it here as a Foley layer.", getLocalBounds().reduced(24).translated(0, 28), juce::Justification::centred);
+        return;
+    }
+
+    auto layerHeader = header.removeFromLeft(laneNameWidth);
+    g.setColour(juce::Colour(0xff2d3b51));
+    g.fillRect(layerHeader);
+    g.setColour(juce::Colour(0xffaebbd0));
+    g.setFont(juce::Font(13.0f).boldened());
+    g.drawText("120.0 BPM  |  4/4", layerHeader.reduced(16, 0).removeFromTop(24), juce::Justification::centredLeft, true);
+    g.setFont(juce::Font(12.0f));
+    g.drawText("Foley Layers / Beats / Time", layerHeader.reduced(16, 0).withTrimmedTop(24), juce::Justification::centredLeft, true);
+
+    for (int beat = 0; beat <= foleyTotalBeats; ++beat)
+    {
+        auto x = ruler.getX() + beat * laneBeatWidth;
+        auto isMeasure = beat % 4 == 0;
+        g.setColour(isMeasure ? juce::Colour(0xff74caff) : juce::Colour(0xff3a465a));
+        g.drawLine((float) x, (float) ruler.getY(), (float) x, (float) getHeight(), 1.0f);
+
+        auto measure = beat / 4 + 1;
+        auto beatInMeasure = beat % 4 + 1;
+        auto seconds = beat * 0.5;
+        auto millis = juce::roundToInt(seconds * 1000.0) % 1000;
+        auto wholeSeconds = static_cast<int>(seconds);
+        auto timeText = juce::String(wholeSeconds / 60) + ":"
+                      + juce::String(wholeSeconds % 60).paddedLeft('0', 2) + "."
+                      + juce::String(millis).paddedLeft('0', 3);
+
+        g.setColour(isMeasure ? juce::Colour(0xfff0f5ff) : juce::Colour(0xff9fb0c8));
+        g.setFont(juce::Font(isMeasure ? 13.0f : 11.0f).boldened());
+        g.drawText(isMeasure ? ("M" + juce::String(measure)) : juce::String(beatInMeasure),
+                   x + 4,
+                   ruler.getY() + 3,
+                   laneBeatWidth - 8,
+                   16,
+                   juce::Justification::centredLeft,
+                   true);
+        g.setFont(juce::Font(11.0f));
+        g.drawText(juce::String(measure) + "." + juce::String(beatInMeasure),
+                   x + 4,
+                   ruler.getY() + 20,
+                   laneBeatWidth - 8,
+                   14,
+                   juce::Justification::centredLeft,
+                   true);
+        g.drawText(timeText,
+                   x + 4,
+                   ruler.getY() + 36,
+                   laneBeatWidth - 8,
+                   14,
+                   juce::Justification::centredLeft,
+                   true);
     }
 }
 
 void ArrangeView::Canvas::resized()
 {
-    auto y = 44;
+    auto y = rulerHeight;
     for (auto* lane : lanes)
     {
-        lane->setBounds(0, y, getWidth(), 88);
+        lane->setBounds(0, y, getWidth(), laneHeight);
         lane->layoutClipBlocks();
-        y += 88;
+        y += laneHeight;
     }
 }
 
 ArrangeView::ArrangeView()
 {
-    setName("DAW");
+    setName("Foley");
 
-    titleLabel.setText("Arrange View", juce::dontSendNotification);
+    titleLabel.setText("Foley Composer", juce::dontSendNotification);
     titleLabel.setFont(juce::Font(24.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
-    hintLabel.setText("Timeline, lanes, clips, and track selection.", juce::dontSendNotification);
+    hintLabel.setText("Build layered sound effects from named project sounds, slices, timing, and variation-ready clips.", juce::dontSendNotification);
     hintLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
     addAndMakeVisible(hintLabel);
 
+    assetLabel.setText("Foley Sounds", juce::dontSendNotification);
+    assetLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(assetLabel);
+
+    trimLabel.setText("Sound Slice", juce::dontSendNotification);
+    trimLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(trimLabel);
+
+    clipInspectorLabel.setText("Foley Clip", juce::dontSendNotification);
+    clipInspectorLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(clipInspectorLabel);
+
+    clipNameLabel.setText("Name", juce::dontSendNotification);
+    clipNameLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(clipNameLabel);
+
+    clipNameEditor.onTextChange = [this]
+    {
+        if (suppressInspectorCallbacks)
+            return;
+
+        applyEditorValuesToSelectedClip();
+    };
+    addAndMakeVisible(clipNameEditor);
+
+    clipTrackLabel.setText("Layer", juce::dontSendNotification);
+    clipTrackLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(clipTrackLabel);
+
+    clipTrackSelector.onChange = [this]
+    {
+        if (suppressInspectorCallbacks)
+            return;
+
+        applyEditorValuesToSelectedClip();
+    };
+    addAndMakeVisible(clipTrackSelector);
+
+    clipStartBeatLabel.setText("Start Beat", juce::dontSendNotification);
+    clipStartBeatLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(clipStartBeatLabel);
+
+    clipStartBeatSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    clipStartBeatSlider.setRange(0.0, 64.0, 1.0);
+    clipStartBeatSlider.onValueChange = [this]
+    {
+        if (suppressInspectorCallbacks)
+            return;
+
+        applyEditorValuesToSelectedClip();
+    };
+    addAndMakeVisible(clipStartBeatSlider);
+
+    clipLengthLabel.setText("Length", juce::dontSendNotification);
+    clipLengthLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(clipLengthLabel);
+
+    clipLengthSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    clipLengthSlider.setRange(1.0, 16.0, 1.0);
+    clipLengthSlider.onValueChange = [this]
+    {
+        if (suppressInspectorCallbacks)
+            return;
+
+        applyEditorValuesToSelectedClip();
+    };
+    addAndMakeVisible(clipLengthSlider);
+
+    clipSelectionLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(clipSelectionLabel);
+
+    actionLabel.setText("Shape", juce::dontSendNotification);
+    actionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(actionLabel);
+
+    trimInfoLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(trimInfoLabel);
+
+    trimStartSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    trimStartSlider.setRange(0.0, 0.99, 0.001);
+    trimStartSlider.onValueChange = [this]
+    {
+        trimStart = trimStartSlider.getValue();
+        if (trimStart > trimEnd - 0.01)
+            trimStart = trimEnd - 0.01;
+        trimStartSlider.setValue(trimStart, juce::dontSendNotification);
+        applyEditorValuesToSelectedClip();
+        refreshTrimUi();
+    };
+    addAndMakeVisible(trimStartSlider);
+
+    trimEndSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    trimEndSlider.setRange(0.01, 1.0, 0.001);
+    trimEndSlider.onValueChange = [this]
+    {
+        trimEnd = trimEndSlider.getValue();
+        if (trimEnd < trimStart + 0.01)
+            trimEnd = trimStart + 0.01;
+        trimEndSlider.setValue(trimEnd, juce::dontSendNotification);
+        applyEditorValuesToSelectedClip();
+        refreshTrimUi();
+    };
+    addAndMakeVisible(trimEndSlider);
+
+    gainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    gainSlider.setRange(-18.0, 18.0, 0.1);
+    gainSlider.onValueChange = [this]
+    {
+        gainDecibels = (float) gainSlider.getValue();
+        applyEditorValuesToSelectedClip();
+        refreshTrimUi();
+    };
+    addAndMakeVisible(gainSlider);
+
+    fadeInSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    fadeInSlider.setRange(0.0, 0.5, 0.001);
+    fadeInSlider.onValueChange = [this]
+    {
+        fadeInNormalized = (float) fadeInSlider.getValue();
+        applyEditorValuesToSelectedClip();
+        refreshTrimUi();
+    };
+    addAndMakeVisible(fadeInSlider);
+
+    fadeOutSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    fadeOutSlider.setRange(0.0, 0.5, 0.001);
+    fadeOutSlider.onValueChange = [this]
+    {
+        fadeOutNormalized = (float) fadeOutSlider.getValue();
+        applyEditorValuesToSelectedClip();
+        refreshTrimUi();
+    };
+    addAndMakeVisible(fadeOutSlider);
+
+    reverseButton.onClick = [this]
+    {
+        applyEditorValuesToSelectedClip();
+        refreshTrimUi();
+    };
+    addAndMakeVisible(reverseButton);
+
+    normalizeButton.onClick = [this]
+    {
+        applyEditorValuesToSelectedClip();
+        refreshTrimUi();
+    };
+    addAndMakeVisible(normalizeButton);
+
+    importAssetButton.onClick = [this]
+    {
+        if (onImportAssetRequested)
+            onImportAssetRequested();
+    };
+    addAndMakeVisible(importAssetButton);
+
+    previewSliceButton.onClick = [this]
+    {
+        if (juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size()) && onAssetPreviewRequested)
+            onAssetPreviewRequested(assetFiles[(size_t) selectedAssetIndex]);
+    };
+    addAndMakeVisible(previewSliceButton);
+
+    placeAssetButton.onClick = [this]
+    {
+        placeSelectedAssetOnCurrentLayer();
+    };
+    addAndMakeVisible(placeAssetButton);
+
+    duplicateClipButton.onClick = [this]
+    {
+        if (! juce::isPositiveAndBelow(selectedClipIndex, placedClips.size()))
+            return;
+
+        auto duplicate = placedClips.getReference(selectedClipIndex);
+        duplicate.startBeat += juce::jmax(1, duplicate.lengthBeats);
+        duplicate.displayName += " copy";
+        placedClips.insert(selectedClipIndex + 1, duplicate);
+        ++selectedClipIndex;
+        canvas.setPlacedClips(placedClips, selectedClipIndex);
+        refreshClipActionButtons();
+        refreshClipInspector();
+        notifyArrangementChanged();
+    };
+    addAndMakeVisible(duplicateClipButton);
+
+    deleteClipButton.onClick = [this]
+    {
+        if (! juce::isPositiveAndBelow(selectedClipIndex, placedClips.size()))
+            return;
+
+        placedClips.remove(selectedClipIndex);
+        selectedClipIndex = placedClips.isEmpty() ? -1 : juce::jlimit(0, placedClips.size() - 1, selectedClipIndex);
+        canvas.setPlacedClips(placedClips, selectedClipIndex);
+        refreshClipActionButtons();
+        refreshClipInspector();
+        notifyArrangementChanged();
+    };
+    addAndMakeVisible(deleteClipButton);
+
+    addTrackButton.setTooltip("Add Foley Layer");
     addTrackButton.onClick = [this]
     {
-        if (visibleTrackCount < totalTrackCount)
-        {
-            ++visibleTrackCount;
-            updateCanvasTrackCount();
-        }
-
         if (onAddTrackRequested)
             onAddTrackRequested();
     };
     addAndMakeVisible(addTrackButton);
+
+    removeTrackButton.setTooltip("Remove Selected Foley Layer");
+    removeTrackButton.onClick = [this]
+    {
+        if (onRemoveTrackRequested)
+            onRemoveTrackRequested(selectedTrack);
+    };
+    addAndMakeVisible(removeTrackButton);
+
+    assetSelector.onChange = [this]
+    {
+        selectAssetIndex(assetSelector.getSelectedItemIndex());
+    };
+    addAndMakeVisible(assetSelector);
+
+    addAndMakeVisible(waveformPanel);
 
     viewport.setViewedComponent(&canvas, false);
     viewport.setScrollBarsShown(true, true);
@@ -357,13 +739,65 @@ ArrangeView::ArrangeView()
             onTrackSelected(trackIndex);
     };
 
+    canvas.onClipMoved = [this](int modelIndex, int newStartBeat)
+    {
+        if (juce::isPositiveAndBelow(modelIndex, placedClips.size()))
+        {
+            placedClips.getReference(modelIndex).startBeat = newStartBeat;
+            selectedClipIndex = modelIndex;
+            canvas.setPlacedClips(placedClips, selectedClipIndex);
+            refreshClipActionButtons();
+            refreshClipInspector();
+            notifyArrangementChanged();
+        }
+    };
+
+    canvas.onClipSelected = [this](int modelIndex)
+    {
+        selectedClipIndex = modelIndex;
+        canvas.setPlacedClips(placedClips, selectedClipIndex);
+        refreshClipActionButtons();
+        refreshClipInspector();
+    };
+
+    trimStartSlider.setValue(0.0, juce::dontSendNotification);
+    trimEndSlider.setValue(1.0, juce::dontSendNotification);
+    gainSlider.setValue(0.0, juce::dontSendNotification);
+    fadeInSlider.setValue(0.0, juce::dontSendNotification);
+    fadeOutSlider.setValue(0.0, juce::dontSendNotification);
+    refreshTrimUi();
     updateCanvasTrackCount();
+    refreshAssetSelector();
+    refreshClipActionButtons();
+    refreshClipInspector();
 }
 
 void ArrangeView::setTotalTrackCount(int newTrackCount)
 {
-    totalTrackCount = juce::jlimit(1, 128, newTrackCount);
+    totalTrackCount = juce::jmax(0, newTrackCount);
     visibleTrackCount = juce::jmin(visibleTrackCount, totalTrackCount);
+    if (totalTrackCount == 0)
+    {
+        selectedTrack = 0;
+        placedClips.clear();
+        selectedClipIndex = -1;
+    }
+    else
+    {
+        selectedTrack = juce::jlimit(0, totalTrackCount - 1, selectedTrack);
+        for (int clipIndex = placedClips.size(); --clipIndex >= 0;)
+        {
+            if (placedClips.getReference(clipIndex).trackIndex >= totalTrackCount)
+            {
+                placedClips.remove(clipIndex);
+                if (selectedClipIndex == clipIndex)
+                    selectedClipIndex = -1;
+                else if (selectedClipIndex > clipIndex)
+                    --selectedClipIndex;
+            }
+        }
+    }
+
     juce::StringArray resizedNames;
     for (int index = 0; index < totalTrackCount; ++index)
     {
@@ -374,12 +808,16 @@ void ArrangeView::setTotalTrackCount(int newTrackCount)
     }
 
     trackNames = resizedNames;
+    trackKinds.resize((size_t) totalTrackCount, cs::TrackKind::audio);
     updateCanvasTrackCount();
+    canvas.setPlacedClips(placedClips, selectedClipIndex);
+    refreshClipActionButtons();
+    refreshClipInspector();
 }
 
 void ArrangeView::setVisibleTrackCount(int newVisibleTrackCount)
 {
-    visibleTrackCount = juce::jlimit(1, totalTrackCount, newVisibleTrackCount);
+    visibleTrackCount = totalTrackCount == 0 ? 0 : juce::jlimit(1, totalTrackCount, newVisibleTrackCount);
     updateCanvasTrackCount();
 }
 
@@ -387,23 +825,366 @@ void ArrangeView::setTrackName(int trackIndex, const juce::String& name)
 {
     if (juce::isPositiveAndBelow(trackIndex, trackNames.size()))
         trackNames.set(trackIndex, name);
+
     canvas.setTrackName(trackIndex, name);
+}
+
+void ArrangeView::setTrackKind(int trackIndex, cs::TrackKind kind)
+{
+    if ((int) trackKinds.size() <= trackIndex)
+        trackKinds.resize((size_t) trackIndex + 1, cs::TrackKind::audio);
+
+    if (juce::isPositiveAndBelow(trackIndex, (int) trackKinds.size()))
+        trackKinds[(size_t) trackIndex] = kind;
+
+    canvas.setTrackKind(trackIndex, kind);
 }
 
 void ArrangeView::setRecordedClips(const juce::StringArray& clipNames)
 {
-    canvas.setRecordedClips(clipNames);
+    canvas.setSeedClips(clipNames);
+}
+
+void ArrangeView::setAssetFiles(const juce::Array<juce::File>& files)
+{
+    assetFiles = files;
+    refreshAssetSelector();
 }
 
 void ArrangeView::setSelectedTrack(int trackIndex)
 {
-    canvas.setSelectedTrack(trackIndex);
+    selectedTrack = totalTrackCount == 0 ? 0 : juce::jlimit(0, juce::jmax(0, visibleTrackCount - 1), trackIndex);
+    canvas.setSelectedTrack(selectedTrack);
+}
+
+void ArrangeView::addAssetClipToSelectedTrack(const juce::String& clipName)
+{
+    auto targetIndex = -1;
+    for (int index = 0; index < assetFiles.size(); ++index)
+    {
+        auto& file = assetFiles.getReference(index);
+        if (file.getFileNameWithoutExtension() == clipName || file.getFileName() == clipName)
+        {
+            targetIndex = index;
+            break;
+        }
+    }
+
+    if (! juce::isPositiveAndBelow(targetIndex, assetFiles.size()))
+        return;
+
+    selectedAssetIndex = targetIndex;
+    assetSelector.setSelectedItemIndex(targetIndex, juce::dontSendNotification);
+    waveformPanel.setAudioFile(assetFiles[(size_t) targetIndex]);
+    placeAssetButton.setEnabled(true);
+
+    placeSelectedAssetOnCurrentLayer();
+}
+
+juce::ValueTree ArrangeView::createState() const
+{
+    juce::ValueTree state("ArrangeView");
+    state.setProperty("selectedTrack", selectedTrack, nullptr);
+    state.setProperty("selectedAssetName", juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size())
+                                             ? assetFiles[(size_t) selectedAssetIndex].getFileName()
+                                             : juce::String(),
+                      nullptr);
+    state.setProperty("trimStart", trimStart, nullptr);
+    state.setProperty("trimEnd", trimEnd, nullptr);
+    state.setProperty("gainDecibels", gainDecibels, nullptr);
+    state.setProperty("fadeInNormalized", fadeInNormalized, nullptr);
+    state.setProperty("fadeOutNormalized", fadeOutNormalized, nullptr);
+    state.setProperty("reverse", reverseButton.getToggleState(), nullptr);
+    state.setProperty("normalize", normalizeButton.getToggleState(), nullptr);
+
+    for (int clipIndex = 0; clipIndex < placedClips.size(); ++clipIndex)
+    {
+        const auto& clip = placedClips.getReference(clipIndex);
+        juce::ValueTree clipState("Clip");
+        clipState.setProperty("displayName", clip.displayName, nullptr);
+        clipState.setProperty("assetFileName", clip.assetFileName, nullptr);
+        clipState.setProperty("trackIndex", clip.trackIndex, nullptr);
+        clipState.setProperty("startBeat", clip.startBeat, nullptr);
+        clipState.setProperty("lengthBeats", clip.lengthBeats, nullptr);
+        clipState.setProperty("trimStart", clip.trimStart, nullptr);
+        clipState.setProperty("trimEnd", clip.trimEnd, nullptr);
+        clipState.setProperty("gainDecibels", clip.gainDecibels, nullptr);
+        clipState.setProperty("fadeInNormalized", clip.fadeInNormalized, nullptr);
+        clipState.setProperty("fadeOutNormalized", clip.fadeOutNormalized, nullptr);
+        clipState.setProperty("reverse", clip.reverse, nullptr);
+        clipState.setProperty("normalize", clip.normalize, nullptr);
+        state.addChild(clipState, -1, nullptr);
+    }
+
+    return state;
+}
+
+void ArrangeView::restoreState(const juce::ValueTree& state)
+{
+    placedClips.clear();
+
+    trimStart = (double) state.getProperty("trimStart", 0.0);
+    trimEnd = (double) state.getProperty("trimEnd", 1.0);
+    gainDecibels = (float) state.getProperty("gainDecibels", 0.0f);
+    fadeInNormalized = (float) state.getProperty("fadeInNormalized", 0.0f);
+    fadeOutNormalized = (float) state.getProperty("fadeOutNormalized", 0.0f);
+    trimStartSlider.setValue(trimStart, juce::dontSendNotification);
+    trimEndSlider.setValue(trimEnd, juce::dontSendNotification);
+    gainSlider.setValue(gainDecibels, juce::dontSendNotification);
+    fadeInSlider.setValue(fadeInNormalized, juce::dontSendNotification);
+    fadeOutSlider.setValue(fadeOutNormalized, juce::dontSendNotification);
+    reverseButton.setToggleState((bool) state.getProperty("reverse", false), juce::dontSendNotification);
+    normalizeButton.setToggleState((bool) state.getProperty("normalize", false), juce::dontSendNotification);
+    refreshTrimUi();
+
+    for (int childIndex = 0; childIndex < state.getNumChildren(); ++childIndex)
+    {
+        auto clipState = state.getChild(childIndex);
+        if (! clipState.hasType("Clip"))
+            continue;
+
+        ClipPlacement clip;
+        clip.displayName = clipState.getProperty("displayName").toString();
+        clip.assetFileName = clipState.getProperty("assetFileName").toString();
+        clip.trackIndex = (int) clipState.getProperty("trackIndex", 0);
+        clip.startBeat = (int) clipState.getProperty("startBeat", 0);
+        clip.lengthBeats = (int) clipState.getProperty("lengthBeats", 4);
+        clip.trimStart = (double) clipState.getProperty("trimStart", 0.0);
+        clip.trimEnd = (double) clipState.getProperty("trimEnd", 1.0);
+        clip.gainDecibels = (float) clipState.getProperty("gainDecibels", 0.0f);
+        clip.fadeInNormalized = (float) clipState.getProperty("fadeInNormalized", 0.0f);
+        clip.fadeOutNormalized = (float) clipState.getProperty("fadeOutNormalized", 0.0f);
+        clip.reverse = (bool) clipState.getProperty("reverse", false);
+        clip.normalize = (bool) clipState.getProperty("normalize", false);
+        placedClips.add(clip);
+    }
+
+    selectedClipIndex = placedClips.isEmpty() ? -1 : 0;
+    canvas.setPlacedClips(placedClips, selectedClipIndex);
+    refreshClipActionButtons();
+    refreshClipInspector();
+    setSelectedTrack((int) state.getProperty("selectedTrack", 0));
+
+    auto selectedAssetName = state.getProperty("selectedAssetName").toString();
+    if (selectedAssetName.isNotEmpty())
+    {
+        for (int index = 0; index < assetFiles.size(); ++index)
+        {
+            if (assetFiles[(size_t) index].getFileName() == selectedAssetName)
+            {
+                assetSelector.setSelectedItemIndex(index, juce::dontSendNotification);
+                selectAssetIndex(index);
+                break;
+            }
+        }
+    }
 }
 
 void ArrangeView::updateCanvasTrackCount()
 {
     canvas.setTrackCount(visibleTrackCount, trackNames);
+    canvas.setPlacedClips(placedClips, selectedClipIndex);
+    clipTrackSelector.clear(juce::dontSendNotification);
+    for (int index = 0; index < visibleTrackCount; ++index)
+    {
+        auto label = juce::isPositiveAndBelow(index, trackNames.size()) && trackNames[index].isNotEmpty()
+                   ? trackNames[index]
+                   : "Layer " + juce::String(index + 1);
+        clipTrackSelector.addItem(label, index + 1);
+    }
+    refreshClipInspector();
     viewport.setViewPosition(0, 0);
+    setSelectedTrack(selectedTrack);
+}
+
+void ArrangeView::refreshAssetSelector()
+{
+    assetSelector.clear(juce::dontSendNotification);
+
+    for (int index = 0; index < assetFiles.size(); ++index)
+        assetSelector.addItem(assetFiles[(size_t) index].getFileName(), index + 1);
+
+    if (assetFiles.isEmpty())
+    {
+        selectedAssetIndex = -1;
+        assetSelector.setTextWhenNoChoicesAvailable("Import or render a Foley sound to begin");
+        assetSelector.setText({}, juce::dontSendNotification);
+        waveformPanel.setAudioFile({});
+        previewSliceButton.setEnabled(false);
+        placeAssetButton.setEnabled(false);
+    }
+    else
+    {
+        assetSelector.setSelectedItemIndex(0, juce::dontSendNotification);
+        selectAssetIndex(0);
+    }
+}
+
+void ArrangeView::refreshTrimUi()
+{
+    auto text = "Slice: " + formatPercent(trimStart) + " -> " + formatPercent(trimEnd)
+              + "  |  Gain " + formatDecibels(gainDecibels)
+              + "  |  Fade In " + formatPercent(fadeInNormalized)
+              + "  |  Fade Out " + formatPercent(fadeOutNormalized);
+
+    if (reverseButton.getToggleState())
+        text += "  |  Reverse";
+
+    if (normalizeButton.getToggleState())
+        text += "  |  Normalize";
+
+    trimInfoLabel.setText(text, juce::dontSendNotification);
+}
+
+void ArrangeView::selectAssetIndex(int index)
+{
+    if (! juce::isPositiveAndBelow(index, assetFiles.size()))
+    {
+        selectedAssetIndex = -1;
+        waveformPanel.setAudioFile({});
+        previewSliceButton.setEnabled(false);
+        placeAssetButton.setEnabled(false);
+        return;
+    }
+
+    selectedAssetIndex = index;
+    waveformPanel.setAudioFile(assetFiles[(size_t) index]);
+    previewSliceButton.setEnabled(true);
+    placeAssetButton.setEnabled(true);
+}
+
+juce::String ArrangeView::makePlacedClipLabel() const
+{
+    if (! juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size()))
+        return {};
+
+    return assetFiles[(size_t) selectedAssetIndex].getFileNameWithoutExtension()
+         + " ["
+         + formatPercent(trimStart)
+         + "-"
+         + formatPercent(trimEnd)
+         + ", " + formatDecibels(gainDecibels)
+         + (reverseButton.getToggleState() ? ", rev" : "")
+         + (normalizeButton.getToggleState() ? ", norm" : "")
+         + "]";
+}
+
+void ArrangeView::placeSelectedAssetOnCurrentLayer()
+{
+    if (! juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size()))
+        return;
+
+    ClipPlacement placement;
+    placement.displayName = makePlacedClipLabel();
+    placement.assetFileName = assetFiles[(size_t) selectedAssetIndex].getFileName();
+    placement.trackIndex = selectedTrack;
+    placement.trimStart = trimStart;
+    placement.trimEnd = trimEnd;
+    placement.gainDecibels = gainDecibels;
+    placement.fadeInNormalized = fadeInNormalized;
+    placement.fadeOutNormalized = fadeOutNormalized;
+    placement.reverse = reverseButton.getToggleState();
+    placement.normalize = normalizeButton.getToggleState();
+    placement.lengthBeats = juce::jlimit(1, 8, juce::roundToInt((placement.trimEnd - placement.trimStart) * 12.0));
+
+    auto nextBeat = 1;
+    for (const auto& existing : placedClips)
+        if (existing.trackIndex == selectedTrack)
+            nextBeat = juce::jmax(nextBeat, existing.startBeat + existing.lengthBeats + 1);
+
+    placement.startBeat = nextBeat;
+    placedClips.add(placement);
+    selectedClipIndex = placedClips.size() - 1;
+    canvas.setPlacedClips(placedClips, selectedClipIndex);
+    refreshClipActionButtons();
+    refreshClipInspector();
+    notifyArrangementChanged();
+}
+
+void ArrangeView::notifyArrangementChanged()
+{
+    if (onArrangementChanged)
+        onArrangementChanged();
+}
+
+void ArrangeView::refreshClipActionButtons()
+{
+    auto hasSelection = juce::isPositiveAndBelow(selectedClipIndex, placedClips.size());
+    duplicateClipButton.setEnabled(hasSelection);
+    deleteClipButton.setEnabled(hasSelection);
+}
+
+void ArrangeView::refreshClipInspector()
+{
+    suppressInspectorCallbacks = true;
+
+    auto hasSelection = juce::isPositiveAndBelow(selectedClipIndex, placedClips.size());
+    clipNameEditor.setEnabled(hasSelection);
+    clipTrackSelector.setEnabled(hasSelection);
+    clipStartBeatSlider.setEnabled(hasSelection);
+    clipLengthSlider.setEnabled(hasSelection);
+
+    if (hasSelection)
+    {
+        const auto& clip = placedClips.getReference(selectedClipIndex);
+        clipSelectionLabel.setText("Editing placed clip: " + clip.displayName, juce::dontSendNotification);
+        clipNameEditor.setText(clip.displayName, juce::dontSendNotification);
+        clipTrackSelector.setSelectedItemIndex(clip.trackIndex, juce::dontSendNotification);
+        clipStartBeatSlider.setValue((double) clip.startBeat, juce::dontSendNotification);
+        clipLengthSlider.setValue((double) clip.lengthBeats, juce::dontSendNotification);
+
+        trimStart = clip.trimStart;
+        trimEnd = clip.trimEnd;
+        gainDecibels = clip.gainDecibels;
+        fadeInNormalized = clip.fadeInNormalized;
+        fadeOutNormalized = clip.fadeOutNormalized;
+        trimStartSlider.setValue(trimStart, juce::dontSendNotification);
+        trimEndSlider.setValue(trimEnd, juce::dontSendNotification);
+        gainSlider.setValue(gainDecibels, juce::dontSendNotification);
+        fadeInSlider.setValue(fadeInNormalized, juce::dontSendNotification);
+        fadeOutSlider.setValue(fadeOutNormalized, juce::dontSendNotification);
+        reverseButton.setToggleState(clip.reverse, juce::dontSendNotification);
+        normalizeButton.setToggleState(clip.normalize, juce::dontSendNotification);
+    }
+    else
+    {
+        clipSelectionLabel.setText("No placed clip selected. Slice controls below affect the next placement.", juce::dontSendNotification);
+        clipNameEditor.setText({}, juce::dontSendNotification);
+        clipTrackSelector.setSelectedItemIndex(-1, juce::dontSendNotification);
+        clipStartBeatSlider.setValue(0.0, juce::dontSendNotification);
+        clipLengthSlider.setValue(1.0, juce::dontSendNotification);
+    }
+
+    suppressInspectorCallbacks = false;
+    refreshTrimUi();
+}
+
+void ArrangeView::applyEditorValuesToSelectedClip()
+{
+    if (suppressInspectorCallbacks)
+        return;
+
+    if (! juce::isPositiveAndBelow(selectedClipIndex, placedClips.size()))
+        return;
+
+    auto& clip = placedClips.getReference(selectedClipIndex);
+    auto trimmedName = clipNameEditor.getText().trim();
+    if (trimmedName.isNotEmpty())
+        clip.displayName = trimmedName;
+
+    clip.trackIndex = juce::jlimit(0, juce::jmax(0, visibleTrackCount - 1), clipTrackSelector.getSelectedItemIndex());
+    clip.startBeat = juce::jmax(0, juce::roundToInt(clipStartBeatSlider.getValue()));
+    clip.lengthBeats = juce::jlimit(1, 16, juce::roundToInt(clipLengthSlider.getValue()));
+    clip.trimStart = trimStart;
+    clip.trimEnd = trimEnd;
+    clip.gainDecibels = gainDecibels;
+    clip.fadeInNormalized = fadeInNormalized;
+    clip.fadeOutNormalized = fadeOutNormalized;
+    clip.reverse = reverseButton.getToggleState();
+    clip.normalize = normalizeButton.getToggleState();
+
+    canvas.setPlacedClips(placedClips, selectedClipIndex);
+    notifyArrangementChanged();
 }
 
 void ArrangeView::paint(juce::Graphics& g)
@@ -417,8 +1198,68 @@ void ArrangeView::resized()
     titleLabel.setBounds(area.removeFromTop(32));
     hintLabel.setBounds(area.removeFromTop(22));
     area.removeFromTop(8);
-    addTrackButton.setBounds(area.removeFromTop(34).removeFromRight(160));
-    area.removeFromTop(8);
+
+    auto toolbar = area.removeFromTop(34);
+    assetLabel.setBounds(toolbar.removeFromLeft(105));
+    assetSelector.setBounds(toolbar.removeFromLeft(320));
+    toolbar.removeFromLeft(10);
+    importAssetButton.setBounds(toolbar.removeFromLeft(120));
+    toolbar.removeFromLeft(10);
+    previewSliceButton.setBounds(toolbar.removeFromLeft(90));
+    toolbar.removeFromLeft(10);
+    placeAssetButton.setBounds(toolbar.removeFromLeft(80));
+    toolbar.removeFromLeft(10);
+    duplicateClipButton.setBounds(toolbar.removeFromLeft(100));
+    toolbar.removeFromLeft(10);
+    deleteClipButton.setBounds(toolbar.removeFromLeft(80));
+    removeTrackButton.setBounds(toolbar.removeFromRight(88));
+    toolbar.removeFromRight(8);
+    addTrackButton.setBounds(toolbar.removeFromRight(88));
+
+    area.removeFromTop(10);
+
+    auto editorArea = area.removeFromTop(320);
+    auto inspectorArea = editorArea.removeFromLeft(area.getWidth() / 2).reduced(0, 0);
+    inspectorArea.removeFromRight(8);
+    auto sliceArea = editorArea.reduced(0, 0);
+    sliceArea.removeFromLeft(8);
+
+    clipInspectorLabel.setBounds(inspectorArea.removeFromTop(22));
+    clipSelectionLabel.setBounds(inspectorArea.removeFromTop(22));
+    inspectorArea.removeFromTop(6);
+    clipNameLabel.setBounds(inspectorArea.removeFromTop(18));
+    clipNameEditor.setBounds(inspectorArea.removeFromTop(26));
+    inspectorArea.removeFromTop(6);
+    clipTrackLabel.setBounds(inspectorArea.removeFromTop(18));
+    clipTrackSelector.setBounds(inspectorArea.removeFromTop(26));
+    inspectorArea.removeFromTop(6);
+    clipStartBeatLabel.setBounds(inspectorArea.removeFromTop(18));
+    clipStartBeatSlider.setBounds(inspectorArea.removeFromTop(24));
+    inspectorArea.removeFromTop(6);
+    clipLengthLabel.setBounds(inspectorArea.removeFromTop(18));
+    clipLengthSlider.setBounds(inspectorArea.removeFromTop(24));
+
+    trimLabel.setBounds(sliceArea.removeFromTop(22));
+    waveformPanel.setBounds(sliceArea.removeFromTop(98));
+    sliceArea.removeFromTop(6);
+    trimStartSlider.setBounds(sliceArea.removeFromTop(24));
+    sliceArea.removeFromTop(4);
+    trimEndSlider.setBounds(sliceArea.removeFromTop(24));
+    sliceArea.removeFromTop(8);
+    actionLabel.setBounds(sliceArea.removeFromTop(22));
+    gainSlider.setBounds(sliceArea.removeFromTop(24));
+    sliceArea.removeFromTop(4);
+    fadeInSlider.setBounds(sliceArea.removeFromTop(24));
+    sliceArea.removeFromTop(4);
+    fadeOutSlider.setBounds(sliceArea.removeFromTop(24));
+    sliceArea.removeFromTop(6);
+    auto toggles = sliceArea.removeFromTop(24);
+    reverseButton.setBounds(toggles.removeFromLeft(120));
+    normalizeButton.setBounds(toggles.removeFromLeft(120));
+    sliceArea.removeFromTop(4);
+    trimInfoLabel.setBounds(sliceArea.removeFromTop(20));
+
+    area.removeFromTop(10);
     viewport.setBounds(area);
-    canvas.setSize(2400, 44 + visibleTrackCount * 88);
+    canvas.setSize(2400, 56 + visibleTrackCount * laneHeight);
 }

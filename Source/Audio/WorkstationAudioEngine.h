@@ -4,9 +4,50 @@
 #include <atomic>
 #include "SignalGraphRuntime.h"
 
-class WorkstationAudioEngine final
+class WorkstationAudioEngine final : public juce::AudioIODeviceCallback
 {
 public:
+    struct InputSourceDescriptor
+    {
+        int channelIndex = -1;
+        juce::String id;
+        juce::String name;
+    };
+
+    struct PreviewSettings
+    {
+        double startNormalized = 0.0;
+        double endNormalized = 1.0;
+        float gainDecibels = 0.0f;
+        float fadeInNormalized = 0.0f;
+        float fadeOutNormalized = 0.0f;
+        bool reverse = false;
+        bool normalize = false;
+    };
+
+    struct RecordingTarget
+    {
+        int trackIndex = -1;
+        juce::File file;
+    };
+
+    struct PlaybackClipTarget
+    {
+        int trackIndex = -1;
+        juce::File file;
+        double startSeconds = 0.0;
+        double sourceStartSeconds = 0.0;
+        double durationSeconds = 0.0;
+    };
+
+    struct RenderSettings
+    {
+        double sampleRate = 48000.0;
+        int blockSize = 512;
+        bool normalizePeak = false;
+        float peakTargetDecibels = -1.0f;
+    };
+
     WorkstationAudioEngine();
 
     void attachToDevice(juce::AudioDeviceManager& deviceManager);
@@ -14,15 +55,47 @@ public:
 
     void setPlaying(bool shouldPlay);
     bool isPlaying() const noexcept { return playing; }
+    void setPlaybackPositionSeconds(double seconds);
+    void setMetronomeEnabled(bool shouldEnable) noexcept { metronomeEnabled.store(shouldEnable); }
+    bool isMetronomeEnabled() const noexcept { return metronomeEnabled.load(); }
+    void setMetronomeTempo(double bpm, int numerator) noexcept;
     bool isRecording() const noexcept { return recording; }
     bool startRecordingToFile(const juce::File& file, juce::String& errorMessage);
+    bool startRecordingToFiles(const juce::Array<RecordingTarget>& targets, juce::String& errorMessage);
     void stopRecording();
     juce::File getRecordingFile() const { return recordingFile; }
+    juce::Array<juce::File> getRecordingFiles() const;
+    bool previewAssetFile(const juce::File& file, juce::String& errorMessage);
+    bool previewAssetFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
+    bool previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer, double sampleRate, juce::String& errorMessage);
+    bool setFoleyArrangement(const juce::ValueTree& arrangementState, const juce::File& assetsDirectory, juce::String& errorMessage);
+    bool setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets, juce::String& errorMessage);
+    bool renderTrackerMixToBuffer(const juce::Array<PlaybackClipTarget>& targets,
+                                  double durationSeconds,
+                                  const RenderSettings& settings,
+                                  juce::AudioBuffer<float>& outputBuffer,
+                                  juce::String& errorMessage);
+    void stopAssetPreview();
+    bool isPreviewingAsset() const noexcept;
 
     static constexpr int getVisibleChannelCount() noexcept { return visibleChannelCount; }
-    static constexpr int getTrackCount() noexcept { return trackCount; }
+    int getTrackCount() const noexcept { return tracks.size(); }
+    int addTrack(const juce::String& trackName = {});
+    bool removeTrack(int trackIndex);
+    juce::Array<InputSourceDescriptor> getInputSources() const;
+    int getTrackInputChannel(int trackIndex) const;
+    void setTrackInputChannel(int trackIndex, int inputChannel);
+    void setTrackRecordingArmed(int trackIndex, bool armed);
+    bool isTrackRecordingArmed(int trackIndex) const;
+    void setTrackMonitoringEnabled(int trackIndex, bool enabled);
+    bool isTrackMonitoringEnabled(int trackIndex) const;
+    void setTrackStereoEnabled(int trackIndex, bool enabled);
+    bool isTrackStereoEnabled(int trackIndex) const;
 
     juce::String getTrackName(int trackIndex) const;
+    void setTrackName(int trackIndex, const juce::String& name);
+    float getTrackLevel(int trackIndex) const;
+    float consumeTrackRecordingPeak(int trackIndex);
     float getTrackGain(int trackIndex) const;
     float getTrackPan(int trackIndex) const;
     bool isTrackMuted(int trackIndex) const;
@@ -40,12 +113,24 @@ public:
     float getGraphDrive() const noexcept { return graphDrive.load(); }
     void setGraphInput(float amount);
     float getGraphInput() const noexcept { return graphInput.load(); }
+    void setGraphSourceFrequency(float hz);
+    float getGraphSourceFrequency() const noexcept { return graphSourceFrequency.load(); }
     void setGraphTone(float amount);
     float getGraphTone() const noexcept { return graphTone.load(); }
     void setGraphEcho(float amount);
     float getGraphEcho() const noexcept { return graphEcho.load(); }
     void setGraphWidth(float amount);
     float getGraphWidth() const noexcept { return graphWidth.load(); }
+    bool loadGraphVstPlugin(const juce::File& file, juce::String& errorMessage);
+    void unloadGraphVstPlugin();
+    juce::String getGraphVstPluginName() const;
+    juce::File getGraphVstPluginFile() const;
+    bool hasGraphVstPlugin() const noexcept;
+    void setGraphVstEnabled(bool shouldEnable);
+    bool isGraphVstEnabled() const noexcept { return graphVstEnabled.load(); }
+    void setGraphVstMix(float amount);
+    float getGraphVstMix() const noexcept { return graphVstMix.load(); }
+    juce::AudioProcessorEditor* createGraphVstPluginEditor();
 
     bool loadMasterPlugin(const juce::File& file, juce::String& errorMessage);
     void unloadMasterPlugin();
@@ -64,6 +149,15 @@ public:
     void setTrackPluginBypassed(int trackIndex, bool shouldBypass);
     bool isTrackPluginBypassed(int trackIndex) const noexcept;
     juce::AudioProcessorEditor* createTrackPluginEditor(int trackIndex);
+
+    void audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
+                                          int totalNumInputChannels,
+                                          float* const* outputChannelData,
+                                          int totalNumOutputChannels,
+                                          int numSamples,
+                                          const juce::AudioIODeviceCallbackContext& context) override;
+    void audioDeviceAboutToStart(juce::AudioIODevice* device) override;
+    void audioDeviceStopped() override;
 
     juce::ValueTree createSessionState() const;
     bool restoreSessionState(const juce::ValueTree& sessionState, juce::String& errorMessage);
@@ -149,14 +243,34 @@ private:
         void setMuted(bool shouldMute) noexcept { source.setMuted(shouldMute); }
         void setSoloed(bool shouldSolo) noexcept { source.setSoloed(shouldSolo); }
         void setPlaying(bool shouldPlay) noexcept { source.setPlaying(shouldPlay); }
+        void setName(const juce::String& newName) { source.name = newName; }
         juce::String getName() const { return source.name; }
+        float getLevel() const noexcept { return source.getLevel(); }
         float getGain() const noexcept { return source.getGain(); }
         float getPan() const noexcept { return source.getPan(); }
         bool isMuted() const noexcept { return source.isMuted(); }
         bool isSoloed() const noexcept { return source.isSoloed(); }
+        void setInputChannel(int channel) noexcept { inputChannel.store(channel); }
+        int getInputChannel() const noexcept { return inputChannel.load(); }
+        void setRecordingArmed(bool shouldArm) noexcept { recordingArmed.store(shouldArm); }
+        bool isRecordingArmed() const noexcept { return recordingArmed.load(); }
+        void setMonitoringEnabled(bool shouldMonitor) noexcept { monitoringEnabled.store(shouldMonitor); }
+        bool isMonitoringEnabled() const noexcept { return monitoringEnabled.load(); }
+        void setStereoEnabled(bool shouldUseStereo) noexcept { stereoEnabled.store(shouldUseStereo); }
+        bool isStereoEnabled() const noexcept { return stereoEnabled.load(); }
+        void setInputLevel(float newLevel) noexcept { inputLevel.store(newLevel); }
+        float getInputLevel() const noexcept { return inputLevel.load(); }
+        void pushRecordingPeak(float peak) noexcept { recordingPeak.store(juce::jmax(recordingPeak.load(), peak)); }
+        float consumeRecordingPeak() noexcept { return recordingPeak.exchange(0.0f); }
 
         DemoTrackSource source;
         PluginInsertSource insert;
+        std::atomic<int> inputChannel { -1 };
+        std::atomic<bool> recordingArmed { false };
+        std::atomic<bool> monitoringEnabled { false };
+        std::atomic<bool> stereoEnabled { false };
+        std::atomic<float> inputLevel { 0.0f };
+        std::atomic<float> recordingPeak { 0.0f };
     };
 
     struct MasterOutputSource final : public juce::AudioSource
@@ -173,17 +287,85 @@ private:
         PluginInsertSource& insert;
     };
 
-    static constexpr int trackCount = 32;
+    struct AssetPreviewSource final : public juce::AudioSource
+    {
+        AssetPreviewSource();
+
+        void prepareToPlay(int samplesPerBlockExpected, double newSampleRate) override;
+        void releaseResources() override;
+        void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
+
+        bool loadFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
+        bool loadBuffer(const juce::AudioBuffer<float>& buffer, double sourceSampleRate, juce::String& errorMessage);
+        void stop();
+        bool isPreviewing() const noexcept { return previewing.load(); }
+        juce::File getPreviewFile() const { return previewFile; }
+
+    private:
+        juce::AudioFormatManager formatManager;
+        juce::AudioBuffer<float> previewBuffer;
+        juce::File previewFile;
+        std::atomic<bool> previewing { false };
+        int playbackPosition = 0;
+        double sampleRate = 44100.0;
+        int blockSize = 512;
+    };
+
+    struct ArrangementSource final : public juce::AudioSource
+    {
+        struct Clip
+        {
+            juce::AudioBuffer<float> buffer;
+            int64 startSample = 0;
+            int trackIndex = -1;
+        };
+
+        explicit ArrangementSource(WorkstationAudioEngine& owner);
+
+        void prepareToPlay(int samplesPerBlockExpected, double newSampleRate) override;
+        void releaseResources() override;
+        void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
+        void resetPlayback() noexcept;
+        void setPlaybackPositionSeconds(double seconds) noexcept;
+        void setClips(juce::Array<Clip> newClips);
+
+    private:
+        WorkstationAudioEngine& owner;
+        juce::CriticalSection lock;
+        juce::Array<Clip> clips;
+        juce::AudioBuffer<float> trackRenderBuffer;
+        int64 playbackSamplePosition = 0;
+        double sampleRate = 44100.0;
+        int blockSize = 512;
+    };
+
     static constexpr int visibleChannelCount = 8;
     static constexpr int echoBufferSize = 4410;
 
     void prepareGraph(double sampleRate, int blockSize);
     void processGraph(juce::AudioBuffer<float>& buffer);
-    void writeRecording(const juce::AudioBuffer<float>& buffer);
+    bool shouldRenderTrack(int trackIndex) const noexcept;
+    void writeRecording(int trackIndex, const float* leftSource, const float* rightSource, int numSamples);
+    void clearTracks();
+    void rebuildInputSources(int totalNumInputChannels);
+    void rebuildInputSources(juce::AudioIODevice& device);
+    void processInputRouting(const float* const* inputChannelData,
+                             int totalNumInputChannels,
+                             float* const* outputChannelData,
+                             int totalNumOutputChannels,
+                             int numSamples);
+    void renderMetronome(float* const* outputChannelData,
+                         int totalNumOutputChannels,
+                         int numSamples);
 
-    juce::AudioSourcePlayer audioSourcePlayer;
+    juce::AudioBuffer<float> callbackRenderBuffer;
+    juce::AudioBuffer<float> callbackRecordBuffer;
+    juce::Array<InputSourceDescriptor> inputSources;
     juce::MixerAudioSource mixerSource;
+    AssetPreviewSource assetPreviewSource;
+    ArrangementSource arrangementSource;
     PluginInsertSource masterInsertSource;
+    PluginInsertSource graphVstInsertSource;
     MasterOutputSource masterOutputSource;
     juce::OwnedArray<TrackChannelSource> tracks;
     std::array<float, 2> lowPassState {};
@@ -191,18 +373,34 @@ private:
     std::array<float, echoBufferSize> echoHistoryRight {};
     int echoWritePosition = 0;
     double graphSampleRate = 44100.0;
+    int graphBlockSize = 512;
     SignalGraphRuntime signalGraph;
     std::atomic<bool> playing { false };
     std::atomic<bool> recording { false };
+    std::atomic<bool> metronomeEnabled { false };
+    std::atomic<double> metronomeBpm { 120.0 };
+    std::atomic<int> metronomeBeatsPerMeasure { 4 };
+    int64 metronomeSampleCounter = 0;
     std::atomic<float> masterGain { 0.8f };
     std::atomic<bool> graphEnabled { true };
-    std::atomic<float> graphInput { 0.85f };
+    std::atomic<float> graphInput { 0.0f };
+    std::atomic<float> graphSourceFrequency { 220.0f };
     std::atomic<float> graphDrive { 0.15f };
     std::atomic<float> graphTone { 0.55f };
     std::atomic<float> graphEcho { 0.08f };
     std::atomic<float> graphWidth { 0.5f };
+    std::atomic<bool> graphVstEnabled { true };
+    std::atomic<float> graphVstMix { 0.5f };
     juce::TimeSliceThread recordingThread { "CreationStationRecorder" };
-    juce::CriticalSection recordingLock;
-    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> recordingWriter;
+    mutable juce::CriticalSection recordingLock;
+    struct TrackRecordingWriter
+    {
+        int trackIndex = -1;
+        int numChannels = 1;
+        juce::File file;
+        std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
+    };
+
+    std::vector<TrackRecordingWriter> recordingWriters;
     juce::File recordingFile;
 };

@@ -13,6 +13,7 @@ public:
     void setBankOffset(int newBankOffset);
     int getBankOffset() const noexcept { return bankOffset; }
     int getVisibleChannelCount() const noexcept { return visibleChannelCount; }
+    int getSelectedChannel() const noexcept { return selectedChannel; }
 
     void setChannelName(int channelIndex, const juce::String& name);
     void setChannelInsertName(int channelIndex, const juce::String& name);
@@ -75,8 +76,9 @@ private:
     juce::TextButton bankRightButton { "Bank +" };
     juce::OwnedArray<ChannelStrip> strips;
     std::unique_ptr<ChannelStrip> masterStrip;
-    int totalChannelCount = 32;
+    int totalChannelCount = 0;
     int bankOffset = 0;
+    int selectedChannel = -1;
     static constexpr int visibleChannelCount = 8;
 
     void refreshVisibleStripLabels();
