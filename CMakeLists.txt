@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(CreativeWorkstation VERSION 0.1.2 LANGUAGES CXX)
+set(CREATION_STATION_VERSION "0.1.3" CACHE STRING "Creation Station product version")
+project(CreativeWorkstation VERSION ${CREATION_STATION_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
