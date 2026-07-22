@@ -23,6 +23,15 @@ jobs:
         run: |
           git clone --depth 1 --branch 7.0.12 https://github.com/juce-framework/JUCE.git "$env:RUNNER_TEMP\JUCE"
 
+      - name: Fetch ASIO SDK
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/audiosdk/asio.git "$env:RUNNER_TEMP\ASIO"
+
+          if (-not (Test-Path "$env:RUNNER_TEMP\ASIO\common\iasiodrv.h")) {
+            throw "Could not find iasiodrv.h in fetched ASIO SDK."
+          }
+
       - name: Classify release
         id: classify
         shell: pwsh
@@ -93,7 +102,7 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}"
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common"
 
       - name: Build app
         shell: pwsh

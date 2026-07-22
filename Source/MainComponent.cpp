@@ -1194,7 +1194,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     appManifest = CreationStationAppManifest::createDefault(
         juce::JUCEApplicationBase::getInstance() != nullptr
             ? juce::JUCEApplicationBase::getInstance()->getApplicationVersion()
-            : "0.5.0");
+            : "0.5.1");
 
     reportStartup("Opening audio engine...", 0.18f);
     deviceManager.initialise(32, 2, nullptr, true, {}, nullptr);
