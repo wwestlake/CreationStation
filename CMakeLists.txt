@@ -18,14 +18,14 @@ add_subdirectory("${JUCE_DIR}" juce)
 
 juce_add_gui_app(CreativeWorkstation
     PRODUCT_NAME "Creative Workstation"
-    COMPANY_NAME "Creation Station"
-    BUNDLE_ID "com.creationstation.creativeworkstation"
+    COMPANY_NAME "LagDaemon Software"
+    BUNDLE_ID "com.lagdaemon.creationstation"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconBig.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconSmall.png"
 )
 
 juce_add_plugin(CreationStationInstrument
-    COMPANY_NAME "Creation Station"
+    COMPANY_NAME "LagDaemon Software"
     PRODUCT_NAME "Creation Station Instrument"
     BUNDLE_ID "com.creationstation.instrument"
     IS_SYNTH TRUE
@@ -204,15 +204,19 @@ install(TARGETS CreativeWorkstation
 )
 install(FILES README.md LICENSE DESTINATION . COMPONENT CreativeWorkstation)
 
-set(CPACK_PACKAGE_NAME "CreativeWorkstation")
-set(CPACK_PACKAGE_VENDOR "Creation Station")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Creative Workstation")
+set(CPACK_PACKAGE_NAME "Creation Station")
+set(CPACK_PACKAGE_VENDOR "LagDaemon Software")
+set(CPACK_PACKAGE_CONTACT "LagDaemon Software")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Creation Station")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-win64")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "Creative Workstation")
+set(CPACK_PACKAGE_FILE_NAME "creation-station-${CPACK_PACKAGE_VERSION}-win64")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Creation Station")
 set(CPACK_GENERATOR "ZIP;WIX")
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_WIX_COMPONENT_INSTALL ON)
+set(CPACK_WIX_PROGRAM_MENU_FOLDER "Creation Station")
+set(CPACK_PACKAGE_EXECUTABLES "Creative Workstation" "Creation Station")
+set(CPACK_CREATE_DESKTOP_LINKS "Creative Workstation")
 set(CPACK_COMPONENTS_ALL CreativeWorkstation)
 set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")
 set(CPACK_STRIP_FILES TRUE)

@@ -1,5 +1,6 @@
 build/
 build-*/
+_CPack_Packages/
 wiki/
 .vs/
 .idea/
