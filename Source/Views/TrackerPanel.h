@@ -22,6 +22,7 @@ public:
     std::function<void(int, bool)> onTrackStereoChanged;
     std::function<void(int, float)> onTrackGainChanged;
     std::function<void(int, int)> onTrackInputChanged;
+    std::function<void(int)> onTrackFxRequested;
     std::function<void()> onZoomOutRequested;
     std::function<void()> onZoomInRequested;
     std::function<void(double)> onPlayheadPositionChanged;
@@ -48,6 +49,7 @@ public:
     void setTrackGain(int trackIndex, float gain);
     void setInputSources(const juce::Array<juce::String>& sourceNames);
     void setTrackInput(int trackIndex, int inputChannel);
+    void setTrackFxSummary(int trackIndex, int pluginCount);
     void setSelectedTrack(int trackIndex);
     void setSelectedClip(int clipIndex);
     void setTimingInfo(double bpm, int numerator, int denominator, const juce::String& key);
@@ -75,6 +77,7 @@ private:
         std::function<void(int, bool)> onTrackStereoChanged;
         std::function<void(int, float)> onTrackGainChanged;
         std::function<void(int, int)> onTrackInputChanged;
+        std::function<void(int)> onTrackFxRequested;
         std::function<void(double)> onPlayheadPositionChanged;
         std::function<void(int, int, double)> onClipMoved;
         std::function<void()> onClipMoveCommitted;
@@ -96,6 +99,7 @@ private:
         void setTrackGain(int trackIndex, float gain);
         void setInputSources(const juce::Array<juce::String>& sourceNames);
         void setTrackInput(int trackIndex, int inputChannel);
+        void setTrackFxSummary(int trackIndex, int pluginCount);
         void setSelectedTrack(int trackIndex);
         void setSelectedClip(int clipIndex);
         void setLaneHeight(int newLaneHeight);
@@ -132,6 +136,7 @@ private:
             std::function<void(int, bool)> onStereoChanged;
             std::function<void(int, float)> onGainChanged;
             std::function<void(int, int)> onInputChanged;
+            std::function<void(int)> onFxRequested;
 
             void setTrackIndex(int newTrackIndex);
             void setTrackName(const juce::String& name);
@@ -146,6 +151,7 @@ private:
             void setGain(float gain);
             void setInputSources(const juce::Array<juce::String>& sourceNames);
             void setInputChannel(int inputChannel);
+            void setFxSummary(int pluginCount);
 
             void paint(juce::Graphics& g) override;
             void paintOverChildren(juce::Graphics& g) override;
@@ -165,7 +171,7 @@ private:
             juce::TextButton monitorButton { "Mon" };
             juce::TextButton stereoButton { "Mono" };
             juce::ComboBox inputSelector;
-            juce::Label fxLabel;
+            juce::TextButton fxButton { "FX" };
             juce::Label dbLabel;
             juce::Slider gainSlider;
         };

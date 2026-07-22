@@ -1567,6 +1567,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         selectTrack(trackIndex);
     };
 
+    trackerPanel.onTrackFxRequested = [this, selectTrack](int trackIndex)
+    {
+        selectTrack(trackIndex);
+        showFxStackWindow();
+    };
+
     trackerPanel.onAddTrackRequested = [this]
     {
         addTrack();
@@ -6294,6 +6300,7 @@ void MainComponent::syncTrackViews()
         trackerPanel.setTrackArmed(index, juce::isPositiveAndBelow(index, (int) armedTracks.size()) && armedTracks[(size_t) index]);
         trackerPanel.setTrackMonitored(index, juce::isPositiveAndBelow(index, (int) monitoredTracks.size()) && monitoredTracks[(size_t) index]);
         trackerPanel.setTrackInput(index, studioIOModel.getInputIndexForChannel(engine.getTrackInputChannel(index)));
+        trackerPanel.setTrackFxSummary(index, engine.getTrackPluginCount(index));
         engine.setTrackRecordingArmed(index, juce::isPositiveAndBelow(index, (int) armedTracks.size()) && armedTracks[(size_t) index]);
         engine.setTrackMonitoringEnabled(index, juce::isPositiveAndBelow(index, (int) monitoredTracks.size()) && monitoredTracks[(size_t) index]);
         trackerPanel.setTrackLevel(index, engine.getTrackLevel(index));

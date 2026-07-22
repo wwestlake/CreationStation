@@ -296,6 +296,11 @@ TrackerPanel::TrackerPanel()
         if (onTrackInputChanged)
             onTrackInputChanged(trackIndex, inputChannel);
     };
+    canvas.onTrackFxRequested = [this](int trackIndex)
+    {
+        if (onTrackFxRequested)
+            onTrackFxRequested(trackIndex);
+    };
     canvas.onPlayheadPositionChanged = [this](double seconds)
     {
         if (onPlayheadPositionChanged)
@@ -398,6 +403,11 @@ void TrackerPanel::setTrackLevel(int trackIndex, float level)
 void TrackerPanel::setTrackGain(int trackIndex, float gain)
 {
     canvas.setTrackGain(trackIndex, gain);
+}
+
+void TrackerPanel::setTrackFxSummary(int trackIndex, int pluginCount)
+{
+    canvas.setTrackFxSummary(trackIndex, pluginCount);
 }
 
 void TrackerPanel::setInputSources(const juce::Array<juce::String>& sourceNames)
@@ -620,6 +630,11 @@ void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
             if (onTrackInputChanged)
                 onTrackInputChanged(index, inputChannel);
         };
+        header->onFxRequested = [this](int index)
+        {
+            if (onTrackFxRequested)
+                onTrackFxRequested(index);
+        };
         addAndMakeVisible(header);
         header->setInputSources(inputSourceNames);
         trackHeaders.add(header);
@@ -745,6 +760,12 @@ void TrackerPanel::TimelineCanvas::setTrackGain(int trackIndex, float gain)
         header->setGain(trackGains[(size_t) trackIndex]);
 }
 
+void TrackerPanel::TimelineCanvas::setTrackFxSummary(int trackIndex, int pluginCount)
+{
+    if (auto* header = trackHeaders[trackIndex])
+        header->setFxSummary(pluginCount);
+}
+
 void TrackerPanel::TimelineCanvas::setInputSources(const juce::Array<juce::String>& sourceNames)
 {
     inputSourceNames = sourceNames;
@@ -803,7 +824,7 @@ double TrackerPanel::TimelineCanvas::getTransportSeconds() const noexcept
 
 double TrackerPanel::TimelineCanvas::getVisibleDurationSeconds() const noexcept
 {
-    auto labelWidth = juce::jmin(340, juce::jmax(260, getWidth() / 4));
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
     auto timelineWidth = juce::jmax(1, getWidth() - labelWidth - 20);
     auto pixelsPerSecond = timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0;
     return (double) timelineWidth / pixelsPerSecond;
@@ -821,7 +842,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
 
     constexpr int rulerHeight = 56;
 
-    auto labelWidth = juce::jmin(340, juce::jmax(260, bounds.getWidth() / 4));
+    auto labelWidth = juce::jmin(340, juce::jmax(290, bounds.getWidth() / 4));
     auto timelineWidth = juce::jmax(1, getWidth() - labelWidth - 20);
     auto tempoBpm = timelineModel != nullptr ? timelineModel->getTempoBpm() : 120.0;
     auto beatsPerMeasure = timelineModel != nullptr ? timelineModel->getTimeSignatureNumerator() : 4;
@@ -1038,7 +1059,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
 void TrackerPanel::TimelineCanvas::resized()
 {
     constexpr int rulerHeight = 56;
-    auto labelWidth = juce::jmin(340, juce::jmax(260, getWidth() / 4));
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
 
     for (int trackIndex = 0; trackIndex < trackHeaders.size(); ++trackIndex)
     {
@@ -1053,7 +1074,7 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
         return;
 
     auto laneStart = 56;
-    auto labelWidth = juce::jmin(340, juce::jmax(260, getWidth() / 4));
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
 
     if (event.x >= labelWidth + 12 && timelineModel != nullptr)
     {
@@ -1134,7 +1155,7 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
 
 void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
 {
-    auto labelWidth = juce::jmin(340, juce::jmax(260, getWidth() / 4));
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
     if (timelineModel == nullptr)
         return;
 
@@ -1186,7 +1207,7 @@ void TrackerPanel::TimelineCanvas::mouseUp(const juce::MouseEvent&)
 
 double TrackerPanel::TimelineCanvas::xToTimelineSeconds(int x) const noexcept
 {
-    auto labelWidth = juce::jmin(340, juce::jmax(260, getWidth() / 4));
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
     auto timelineOriginX = labelWidth + 12;
     auto pixelsPerSecond = timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0;
     return juce::jmax(0.0, scrollSeconds + static_cast<double>(x - timelineOriginX) / juce::jmax(1.0, pixelsPerSecond));
@@ -1204,7 +1225,7 @@ int TrackerPanel::TimelineCanvas::hitTestClip(juce::Point<int> position) const
         return -1;
 
     constexpr int rulerHeight = 56;
-    auto labelWidth = juce::jmin(340, juce::jmax(260, getWidth() / 4));
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
     auto timelineOriginX = labelWidth + 12;
     auto pixelsPerSecond = timelineModel->getPixelsPerSecond();
     const auto& clips = timelineModel->getClips();
@@ -1350,11 +1371,15 @@ TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)
     };
     addAndMakeVisible(inputSelector);
 
-    fxLabel.setText("   FX bay", juce::dontSendNotification);
-    fxLabel.setJustificationType(juce::Justification::centredLeft);
-    fxLabel.setColour(juce::Label::textColourId, juce::Colour(0xff67e8a5));
-    fxLabel.setTooltip("Track effects bay placeholder");
-    addAndMakeVisible(fxLabel);
+    fxButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff263341));
+    fxButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff8fa0b8));
+    fxButton.setTooltip("No plugins loaded - click to open this track's effects chain");
+    fxButton.onClick = [this]
+    {
+        if (onFxRequested)
+            onFxRequested(trackIndex);
+    };
+    addAndMakeVisible(fxButton);
 
     dbLabel.setText("-inf dB", juce::dontSendNotification);
     dbLabel.setJustificationType(juce::Justification::centredRight);
@@ -1452,6 +1477,19 @@ void TrackerPanel::TimelineCanvas::TrackHeader::setGain(float gain)
     gainSlider.setValue(juce::jlimit(0.0f, 1.0f, gain), juce::dontSendNotification);
 }
 
+void TrackerPanel::TimelineCanvas::TrackHeader::setFxSummary(int pluginCount)
+{
+    const bool hasPlugins = pluginCount > 0;
+    fxButton.setColour(juce::TextButton::buttonColourId,
+                       hasPlugins ? juce::Colour(0xff1e3629) : juce::Colour(0xff263341));
+    fxButton.setColour(juce::TextButton::textColourOffId,
+                       hasPlugins ? juce::Colour(0xff67e8a5) : juce::Colour(0xff8fa0b8));
+    fxButton.setTooltip(hasPlugins
+                             ? (juce::String(pluginCount) + (pluginCount == 1 ? " plugin loaded - click to edit"
+                                                                              : " plugins loaded - click to edit"))
+                             : "No plugins loaded - click to open this track's effects chain");
+}
+
 void TrackerPanel::TimelineCanvas::TrackHeader::setInputSources(const juce::Array<juce::String>& sourceNames)
 {
     auto selectedId = inputSelector.getSelectedId();
@@ -1496,16 +1534,6 @@ void TrackerPanel::TimelineCanvas::TrackHeader::paint(juce::Graphics& g)
     auto meterFill = meter.withTrimmedTop(meter.getHeight() * (1.0f - meterAmount));
     g.fillRoundedRectangle(meterFill, 2.0f);
     drawDbMeterTicks(g, meter);
-
-    auto fxArea = fxLabel.getBounds().toFloat().reduced(0.0f, 2.0f);
-    if (! fxArea.isEmpty())
-    {
-        auto lamp = fxArea.removeFromLeft(15.0f).reduced(2.0f).withSizeKeepingCentre(8.0f, 8.0f);
-        g.setColour(juce::Colour(0x3367e8a5));
-        g.fillEllipse(lamp.expanded(3.0f));
-        g.setColour(juce::Colour(0xff67e8a5));
-        g.fillEllipse(lamp);
-    }
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::paintOverChildren(juce::Graphics& g)
@@ -1534,15 +1562,25 @@ void TrackerPanel::TimelineCanvas::TrackHeader::resized()
     soloButton.setBounds(buttons.removeFromLeft(27));
     buttons.removeFromLeft(4);
     monitorButton.setBounds(buttons.removeFromLeft(27));
+    buttons.removeFromLeft(4);
+    fxButton.setBounds(buttons.removeFromLeft(30));
     buttons.removeFromLeft(8);
     inputSelector.setBounds(buttons);
 
+    // The gain slider is the lowest-priority row: show it only when there's genuinely
+    // legible room left (Comfort/Tall), rather than letting removeFromTop silently hand
+    // it a zero-height sliver in Compact.
     area.removeFromTop(8);
-    auto gainRow = area.removeFromTop(22);
-    gainSlider.setBounds(gainRow);
-
-    area.removeFromTop(4);
-    fxLabel.setBounds(area.removeFromTop(22));
+    constexpr int minimumLegibleGainHeight = 14;
+    if (area.getHeight() >= minimumLegibleGainHeight)
+    {
+        gainSlider.setVisible(true);
+        gainSlider.setBounds(area.removeFromTop(juce::jmin(area.getHeight(), 22)));
+    }
+    else
+    {
+        gainSlider.setVisible(false);
+    }
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseDown(const juce::MouseEvent&)
