@@ -153,7 +153,7 @@ jobs:
             throw "MSI packaging failed."
           }
 
-          $msi = Get-ChildItem build -Recurse -File -Filter *.msi | Select-Object -First 1
+          $msi = Get-ChildItem $PWD -Recurse -File -Filter *.msi | Select-Object -First 1
           if (-not $msi) {
             throw "Could not find the packaged MSI for ${{ steps.classify.outputs.display_name }}."
           }
