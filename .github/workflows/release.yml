@@ -93,12 +93,17 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE"
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}
 
       - name: Build app
         shell: pwsh
         run: |
           cmake --build build --config Release --target ${{ steps.classify.outputs.cmake_target }}
+
+      - name: Install MSI packaging tools
+        shell: pwsh
+        run: |
+          choco install wixtoolset --no-progress -y
 
       - name: Stage release assets
         shell: pwsh
@@ -124,15 +129,51 @@ jobs:
 
           Compress-Archive -Path (Join-Path $stageRoot "${{ steps.classify.outputs.product_slug }}\*") -DestinationPath $zipName -Force
 
+      - name: Build MSI installer
+        shell: pwsh
+        run: |
+          $wixBins = @(
+            "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin",
+            "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
+          )
+
+          foreach ($wixBin in $wixBins) {
+            if (Test-Path $wixBin) {
+              $env:PATH = "$wixBin;$env:PATH"
+            }
+          }
+
+          $cpack = "${env:ProgramFiles}\CMake\bin\cpack.exe"
+          if (-not (Test-Path $cpack)) {
+            $cpack = "cpack"
+          }
+
+          & $cpack -C Release -G WIX --config build\CPackConfig.cmake
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSI packaging failed."
+          }
+
+          $msi = Get-ChildItem build -Recurse -File -Filter *.msi | Select-Object -First 1
+          if (-not $msi) {
+            throw "Could not find the packaged MSI for ${{ steps.classify.outputs.display_name }}."
+          }
+
+          $msiName = Join-Path $PWD ("artifacts\{0}.msi" -f "${{ steps.classify.outputs.tag }}")
+          if (Test-Path $msiName) {
+            Remove-Item $msiName -Force
+          }
+
+          Move-Item -Path $msi.FullName -Destination $msiName -Force
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ steps.classify.outputs.product_slug }}
-          path: artifacts/*.zip
+          path: artifacts/*
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ steps.classify.outputs.display_name }} ${{ steps.classify.outputs.version }}${{ steps.classify.outputs.suffix }}
           prerelease: ${{ steps.classify.outputs.prerelease }}
-          files: artifacts/*.zip
+          files: artifacts/*
