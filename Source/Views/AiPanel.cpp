@@ -159,7 +159,7 @@ namespace
 
             if (trimmed.startsWith("- ") || trimmed.startsWith("* "))
             {
-                auto bulletText = "• " + trimmed.fromFirstOccurrenceOf(" ", false, false).trimStart();
+                auto bulletText = "- " + trimmed.fromFirstOccurrenceOf(" ", false, false).trimStart();
                 appendInlineMarkdown(text, bulletText, style, userMessage);
             }
             else

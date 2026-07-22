@@ -304,7 +304,10 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
 
     bufferToFill.clearActiveBufferRegion();
     source.getNextAudioBlock(bufferToFill);
-    owner.arrangementSource.getNextAudioBlock(bufferToFill);
+
+    if (owner.playing.load())
+        owner.arrangementSource.getNextAudioBlock(bufferToFill);
+
     insert.getNextAudioBlock(bufferToFill);
     owner.processGraph(*bufferToFill.buffer);
     bufferToFill.buffer->applyGain(bufferToFill.startSample, bufferToFill.numSamples, owner.masterGain.load());
@@ -503,26 +506,83 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
 
     const auto blockStart = playbackSamplePosition;
     const auto blockEnd = playbackSamplePosition + bufferToFill.numSamples;
+    const auto outputChannels = bufferToFill.buffer->getNumChannels();
 
-    for (const auto& clip : clips)
+    for (int trackIndex = -1; trackIndex < owner.getTrackCount(); ++trackIndex)
     {
-        if (! owner.shouldRenderTrack(clip.trackIndex))
+        if (trackIndex >= 0 && ! owner.shouldRenderTrack(trackIndex))
             continue;
 
-        const auto clipStart = clip.startSample;
-        const auto clipEnd = clip.startSample + clip.buffer.getNumSamples();
+        trackRenderBuffer.setSize(juce::jmax(2, outputChannels), bufferToFill.numSamples, false, false, true);
+        trackRenderBuffer.clear();
 
-        if (clipEnd <= blockStart || clipStart >= blockEnd)
+        auto renderedAnyClip = false;
+
+        for (const auto& clip : clips)
+        {
+            if (clip.trackIndex != trackIndex)
+                continue;
+
+            const auto clipStart = clip.startSample;
+            const auto clipEnd = clip.startSample + clip.buffer.getNumSamples();
+
+            if (clipEnd <= blockStart || clipStart >= blockEnd)
+                continue;
+
+            const auto overlapStart = juce::jmax<int64>(clipStart, blockStart);
+            const auto overlapEnd = juce::jmin<int64>(clipEnd, blockEnd);
+            const auto clipOffset = (int) (overlapStart - clipStart);
+            const auto destOffset = (int) (overlapStart - blockStart);
+            const auto numSamples = (int) (overlapEnd - overlapStart);
+            const auto clipChannels = clip.buffer.getNumChannels();
+
+            if (clipChannels == 1)
+            {
+                for (int channel = 0; channel < trackRenderBuffer.getNumChannels(); ++channel)
+                    trackRenderBuffer.addFrom(channel, destOffset, clip.buffer, 0, clipOffset, numSamples);
+            }
+            else
+            {
+                for (int channel = 0; channel < trackRenderBuffer.getNumChannels(); ++channel)
+                {
+                    auto sourceChannel = juce::jmin(channel, clipChannels - 1);
+                    trackRenderBuffer.addFrom(channel, destOffset, clip.buffer, sourceChannel, clipOffset, numSamples);
+                }
+            }
+
+            renderedAnyClip = true;
+        }
+
+        if (! renderedAnyClip)
             continue;
 
-        const auto overlapStart = juce::jmax<int64>(clipStart, blockStart);
-        const auto overlapEnd = juce::jmin<int64>(clipEnd, blockEnd);
-        const auto clipOffset = (int) (overlapStart - clipStart);
-        const auto destOffset = (int) (overlapStart - blockStart);
-        const auto numSamples = (int) (overlapEnd - overlapStart);
+        if (trackIndex >= 0 && juce::isPositiveAndBelow(trackIndex, owner.tracks.size()))
+        {
+            auto* track = owner.tracks[(size_t) trackIndex];
+            if (track != nullptr && track->insert.hasPlugin())
+            {
+                juce::AudioSourceChannelInfo trackInfo(&trackRenderBuffer, 0, bufferToFill.numSamples);
+                track->insert.getNextAudioBlock(trackInfo);
+            }
+        }
 
-        for (int channel = 0; channel < juce::jmin(bufferToFill.buffer->getNumChannels(), clip.buffer.getNumChannels()); ++channel)
-            bufferToFill.buffer->addFrom(channel, bufferToFill.startSample + destOffset, clip.buffer, channel, clipOffset, numSamples);
+        const auto trackGain = trackIndex >= 0 ? juce::jlimit(0.0f, 2.0f, owner.getTrackGain(trackIndex)) : 1.0f;
+        const auto trackPan = trackIndex >= 0 ? juce::jlimit(-1.0f, 1.0f, owner.getTrackPan(trackIndex)) : 0.0f;
+
+        for (int channel = 0; channel < outputChannels; ++channel)
+        {
+            auto channelGain = trackGain;
+            if (outputChannels >= 2)
+            {
+                if (channel == 0)
+                    channelGain *= trackPan <= 0.0f ? 1.0f : 1.0f - trackPan;
+                else if (channel == 1)
+                    channelGain *= trackPan >= 0.0f ? 1.0f : 1.0f + trackPan;
+            }
+
+            auto sourceChannel = juce::jmin(channel, trackRenderBuffer.getNumChannels() - 1);
+            bufferToFill.buffer->addFrom(channel, bufferToFill.startSample, trackRenderBuffer, sourceChannel, 0, bufferToFill.numSamples, channelGain);
+        }
     }
 
     playbackSamplePosition += bufferToFill.numSamples;
@@ -627,6 +687,20 @@ bool WorkstationAudioEngine::isTrackMonitoringEnabled(int trackIndex) const
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
         return tracks[(size_t) trackIndex]->isMonitoringEnabled();
+
+    return false;
+}
+
+void WorkstationAudioEngine::setTrackStereoEnabled(int trackIndex, bool enabled)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setStereoEnabled(enabled);
+}
+
+bool WorkstationAudioEngine::isTrackStereoEnabled(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->isStereoEnabled();
 
     return false;
 }
@@ -790,9 +864,20 @@ void WorkstationAudioEngine::processInputRouting(const float* const* inputChanne
             continue;
         }
 
-        auto* source = inputChannelData[inputChannel];
-        auto range = juce::FloatVectorOperations::findMinAndMax(source, numSamples);
-        auto peak = juce::jmax(std::abs(range.getStart()), std::abs(range.getEnd()));
+        auto* leftSource = inputChannelData[inputChannel];
+        auto* rightSource = leftSource;
+        if (track->isStereoEnabled()
+            && juce::isPositiveAndBelow(inputChannel + 1, totalNumInputChannels)
+            && inputChannelData[inputChannel + 1] != nullptr)
+            rightSource = inputChannelData[inputChannel + 1];
+
+        auto leftRange = juce::FloatVectorOperations::findMinAndMax(leftSource, numSamples);
+        auto peak = juce::jmax(std::abs(leftRange.getStart()), std::abs(leftRange.getEnd()));
+        if (rightSource != leftSource)
+        {
+            auto rightRange = juce::FloatVectorOperations::findMinAndMax(rightSource, numSamples);
+            peak = juce::jmax(peak, std::abs(rightRange.getStart()), std::abs(rightRange.getEnd()));
+        }
         track->setInputLevel(peak);
 
         auto gain = track->getGain();
@@ -804,16 +889,16 @@ void WorkstationAudioEngine::processInputRouting(const float* const* inputChanne
         if (track->isMonitoringEnabled() && ! muted)
         {
             if (totalNumOutputChannels > 0 && outputChannelData[0] != nullptr)
-                juce::FloatVectorOperations::addWithMultiply(outputChannelData[0], source, leftGain, numSamples);
+                juce::FloatVectorOperations::addWithMultiply(outputChannelData[0], leftSource, leftGain, numSamples);
             if (totalNumOutputChannels > 1 && outputChannelData[1] != nullptr)
-                juce::FloatVectorOperations::addWithMultiply(outputChannelData[1], source, rightGain, numSamples);
+                juce::FloatVectorOperations::addWithMultiply(outputChannelData[1], rightSource, rightGain, numSamples);
         }
 
         if (track->isRecordingArmed() && ! muted)
         {
             juce::ignoreUnused(leftGain, rightGain);
             track->pushRecordingPeak(peak);
-            writeRecording(trackIndex, source, numSamples);
+            writeRecording(trackIndex, leftSource, track->isStereoEnabled() ? rightSource : nullptr, numSamples);
             anyRecordSignal = true;
         }
     }
@@ -921,9 +1006,9 @@ bool WorkstationAudioEngine::shouldRenderTrack(int trackIndex) const noexcept
     return ! anySoloed || track->isSoloed();
 }
 
-void WorkstationAudioEngine::writeRecording(int trackIndex, const float* source, int numSamples)
+void WorkstationAudioEngine::writeRecording(int trackIndex, const float* leftSource, const float* rightSource, int numSamples)
 {
-    if (! recording.load() || source == nullptr || numSamples <= 0)
+    if (! recording.load() || leftSource == nullptr || numSamples <= 0)
         return;
 
     const juce::ScopedTryLock lock(recordingLock);
@@ -935,7 +1020,7 @@ void WorkstationAudioEngine::writeRecording(int trackIndex, const float* source,
         if (recordingWriter.trackIndex != trackIndex || recordingWriter.writer == nullptr)
             continue;
 
-        const float* channelData[] = { source };
+        const float* channelData[] = { leftSource, rightSource != nullptr ? rightSource : leftSource };
         recordingWriter.writer->write(channelData, numSamples);
         return;
     }
@@ -1109,14 +1194,22 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
             continue;
         }
 
-        const auto totalSamples = (int) reader->lengthInSamples;
+        const auto totalSamples = (int64) reader->lengthInSamples;
         if (totalSamples <= 0)
             continue;
 
         ArrangementSource::Clip clip;
-        clip.buffer.setSize(juce::jmax(2, (int) reader->numChannels), totalSamples, false, false, true);
+        const auto sourceStartSample = juce::jlimit<int64>(0,
+                                                           totalSamples - 1,
+                                                           (int64) std::llround(target.sourceStartSeconds * reader->sampleRate));
+        const auto requestedSamples = target.durationSeconds > 0.0
+                                        ? (int64) std::llround(target.durationSeconds * reader->sampleRate)
+                                        : totalSamples - sourceStartSample;
+        const auto samplesToRead = juce::jlimit<int64>(1, totalSamples - sourceStartSample, requestedSamples);
+
+        clip.buffer.setSize(juce::jmax(2, (int) reader->numChannels), (int) samplesToRead, false, false, true);
         clip.buffer.clear();
-        reader->read(&clip.buffer, 0, totalSamples, 0, true, true);
+        reader->read(&clip.buffer, 0, (int) samplesToRead, sourceStartSample, true, true);
         clip.startSample = (int64) std::llround(target.startSeconds * graphSampleRate);
         clip.trackIndex = target.trackIndex;
         clips.add(std::move(clip));
@@ -1129,6 +1222,93 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
     }
 
     arrangementSource.setClips(std::move(clips));
+    return true;
+}
+
+bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<PlaybackClipTarget>& targets,
+                                                      double durationSeconds,
+                                                      const RenderSettings& settings,
+                                                      juce::AudioBuffer<float>& outputBuffer,
+                                                      juce::String& errorMessage)
+{
+    if (targets.isEmpty())
+    {
+        errorMessage = "There are no tracker clips to render.";
+        return false;
+    }
+
+    const auto safeSampleRate = juce::jmax(8000.0, settings.sampleRate);
+    const auto safeBlockSize = juce::jmax(64, settings.blockSize);
+    const auto totalSamples = (int) std::ceil(juce::jmax(0.01, durationSeconds) * safeSampleRate);
+
+    if (totalSamples <= 0)
+    {
+        errorMessage = "The render range is empty.";
+        return false;
+    }
+
+    const auto wasPlaying = playing.load();
+    playing.store(false);
+
+    const auto previousSampleRate = graphSampleRate;
+    const auto previousBlockSize = graphBlockSize;
+    prepareGraph(safeSampleRate, safeBlockSize);
+
+    for (auto* track : tracks)
+        if (track != nullptr)
+            track->prepareToPlay(safeBlockSize, safeSampleRate);
+
+    masterInsertSource.prepareToPlay(safeBlockSize, safeSampleRate);
+
+    if (! setTrackerPlaybackClips(targets, errorMessage))
+    {
+        prepareGraph(previousSampleRate, previousBlockSize);
+        playing.store(wasPlaying);
+        return false;
+    }
+
+    arrangementSource.prepareToPlay(safeBlockSize, safeSampleRate);
+    arrangementSource.setPlaybackPositionSeconds(0.0);
+
+    outputBuffer.setSize(2, totalSamples, false, false, true);
+    outputBuffer.clear();
+
+    juce::AudioBuffer<float> blockBuffer(2, safeBlockSize);
+    auto renderedSamples = 0;
+
+    while (renderedSamples < totalSamples)
+    {
+        const auto samplesThisBlock = juce::jmin(safeBlockSize, totalSamples - renderedSamples);
+        blockBuffer.clear();
+
+        juce::AudioSourceChannelInfo blockInfo(&blockBuffer, 0, samplesThisBlock);
+        arrangementSource.getNextAudioBlock(blockInfo);
+        masterInsertSource.getNextAudioBlock(blockInfo);
+        blockBuffer.applyGain(0, samplesThisBlock, masterGain.load());
+
+        for (int channel = 0; channel < outputBuffer.getNumChannels(); ++channel)
+            outputBuffer.copyFrom(channel, renderedSamples, blockBuffer, channel, 0, samplesThisBlock);
+
+        renderedSamples += samplesThisBlock;
+    }
+
+    if (settings.normalizePeak)
+    {
+        const auto peak = outputBuffer.getMagnitude(0, outputBuffer.getNumSamples());
+        if (peak > 0.0f)
+        {
+            const auto targetGain = juce::Decibels::decibelsToGain(settings.peakTargetDecibels);
+            outputBuffer.applyGain(targetGain / peak);
+        }
+    }
+
+    arrangementSource.setPlaybackPositionSeconds(0.0);
+    prepareGraph(previousSampleRate, previousBlockSize);
+    for (auto* track : tracks)
+        if (track != nullptr)
+            track->prepareToPlay(previousBlockSize, previousSampleRate);
+    masterInsertSource.prepareToPlay(previousBlockSize, previousSampleRate);
+    playing.store(wasPlaying);
     return true;
 }
 
@@ -1195,9 +1375,10 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
             return false;
         }
 
+        auto numChannels = tracks[(size_t) target.trackIndex]->isStereoEnabled() ? 2 : 1;
         auto* writer = wavFormat.createWriterFor(outputStream.release(),
                                                  graphSampleRate,
-                                                 1,
+                                                 (unsigned int) numChannels,
                                                  24,
                                                  {},
                                                  0);
@@ -1210,6 +1391,7 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
 
         TrackRecordingWriter recordingWriter;
         recordingWriter.trackIndex = target.trackIndex;
+        recordingWriter.numChannels = numChannels;
         recordingWriter.file = target.file;
         recordingWriter.writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(writer, recordingThread, 32768);
         newWriters.push_back(std::move(recordingWriter));
@@ -1258,7 +1440,8 @@ void WorkstationAudioEngine::setTrackName(int trackIndex, const juce::String& na
 float WorkstationAudioEngine::getTrackLevel(int trackIndex) const
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
-        return tracks[(size_t) trackIndex]->getLevel();
+        return juce::jmax(tracks[(size_t) trackIndex]->getLevel(),
+                          tracks[(size_t) trackIndex]->getInputLevel());
 
     return 0.0f;
 }
@@ -1538,6 +1721,7 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
         trackState.setProperty("inputChannel", track->getInputChannel(), nullptr);
         trackState.setProperty("recordingArmed", track->isRecordingArmed(), nullptr);
         trackState.setProperty("monitoringEnabled", track->isMonitoringEnabled(), nullptr);
+        trackState.setProperty("stereoEnabled", track->isStereoEnabled(), nullptr);
 
         juce::ValueTree insertState("Insert");
         insertState.setProperty("bypassed", track->insert.isBypassed(), nullptr);
@@ -1611,6 +1795,7 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
             track->setInputChannel((int) child.getProperty("inputChannel", track->getInputChannel()));
             track->setRecordingArmed((bool) child.getProperty("recordingArmed", false));
             track->setMonitoringEnabled((bool) child.getProperty("monitoringEnabled", false));
+            track->setStereoEnabled((bool) child.getProperty("stereoEnabled", false));
 
             auto insertState = child.getChildWithName("Insert");
             auto filePath = insertState.getProperty("file").toString();

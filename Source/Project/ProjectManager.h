@@ -43,18 +43,32 @@ public:
     bool shouldAutoloadLastProject() const;
     bool setAutoloadLastProject(bool shouldAutoload, juce::String& errorMessage) const;
     bool createProject(const juce::String& projectName, juce::String& errorMessage);
+    bool saveCurrentProjectAs(const juce::String& projectName, juce::String& errorMessage);
     bool openProject(const juce::File& projectDirectory, juce::String& errorMessage);
+    bool openProjectPackage(const juce::File& packageFile, juce::ValueTree& restoredState, juce::String& errorMessage);
     bool updateProjectMetadata(const ProjectInfo& metadata, juce::String& errorMessage);
     bool loadLastProject();
     void clearProject();
     void saveProjectState(const juce::ValueTree& state) const;
     juce::ValueTree loadProjectState() const;
     bool saveProjectPackage(const juce::ValueTree& state, juce::String& errorMessage) const;
+    bool saveTemplatePackage(const juce::ValueTree& state,
+                             const juce::String& templateName,
+                             juce::File& templateFile,
+                             juce::String& errorMessage) const;
+    bool createProjectFromTemplate(const juce::File& templateFile,
+                                   const juce::String& projectName,
+                                   juce::ValueTree& restoredState,
+                                   juce::String& errorMessage);
     juce::File importAssetFile(const juce::File& sourceFile, juce::String& errorMessage) const;
     juce::File saveGeneratedAssetFile(const juce::AudioBuffer<float>& buffer,
                                       double sampleRate,
                                       const juce::String& suggestedName,
                                       juce::String& errorMessage) const;
+    juce::File saveRenderFile(const juce::AudioBuffer<float>& buffer,
+                              double sampleRate,
+                              const juce::String& suggestedName,
+                              juce::String& errorMessage) const;
     juce::File savePatchFile(const juce::String& patchJson,
                              const juce::String& suggestedName,
                              juce::String& errorMessage) const;
@@ -93,8 +107,10 @@ public:
     juce::File getWorkspaceRoot() const;
     juce::File getLayoutsRoot() const;
     juce::File getProjectsRoot() const;
+    juce::File getTemplatesRoot() const;
     juce::File getProjectManifestFile() const;
     juce::File getProjectPackageFile() const;
+    juce::File getTemplatePackageFile(const juce::String& templateName) const;
     juce::File getLayoutPackageFile(const juce::String& layoutName) const;
 
 private:
@@ -108,6 +124,7 @@ private:
     bool readManifest(const juce::File& projectDirectory, juce::String& errorMessage);
     juce::ValueTree createManifestTree() const;
     juce::String createProjectJson() const;
+    juce::String createTemplateJson(const juce::String& templateName) const;
     juce::String createPackageManifestJson(const juce::Array<juce::File>& packagedFiles) const;
 
     juce::File storageRoot;

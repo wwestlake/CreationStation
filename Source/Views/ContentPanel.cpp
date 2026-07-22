@@ -103,12 +103,21 @@ ContentPanel::ProjectAssetCard::ProjectAssetCard()
             onPlaceRequested(asset);
     };
     addAndMakeVisible(placeButton);
+
+    exportButton.onClick = [this]
+    {
+        if (onExportRequested)
+            onExportRequested(asset);
+    };
+    addAndMakeVisible(exportButton);
 }
 
 void ContentPanel::ProjectAssetCard::setAsset(const ProjectManager::ProjectAsset& newAsset)
 {
     asset = newAsset;
-    placeButton.setVisible(asset.type == "audioFile" || asset.type == "render");
+    const auto isAudioAsset = asset.type == "audioFile" || asset.type == "render";
+    placeButton.setVisible(isAudioAsset);
+    exportButton.setVisible(isAudioAsset);
     repaint();
 }
 
@@ -122,7 +131,7 @@ void ContentPanel::ProjectAssetCard::paint(juce::Graphics& g)
 
     auto area = getLocalBounds().reduced(14);
     auto textArea = area;
-    textArea.removeFromRight(190);
+    textArea.removeFromRight(286);
 
     g.setColour(juce::Colours::white);
     g.setFont(juce::Font(17.0f).boldened());
@@ -139,10 +148,12 @@ void ContentPanel::ProjectAssetCard::paint(juce::Graphics& g)
 
 void ContentPanel::ProjectAssetCard::resized()
 {
-    auto buttons = getLocalBounds().removeFromRight(184).reduced(14, 18);
-    openButton.setBounds(buttons.removeFromLeft(78));
+    auto buttons = getLocalBounds().removeFromRight(280).reduced(14, 18);
+    openButton.setBounds(buttons.removeFromLeft(70));
     buttons.removeFromLeft(8);
-    placeButton.setBounds(buttons.removeFromLeft(78));
+    placeButton.setBounds(buttons.removeFromLeft(70));
+    buttons.removeFromLeft(8);
+    exportButton.setBounds(buttons.removeFromLeft(96));
 }
 
 ContentPanel::ItemCard::ItemCard()
@@ -322,6 +333,11 @@ void ContentPanel::setProjectAssets(const juce::Array<ProjectManager::ProjectAss
         {
             if (onPlaceProjectAssetRequested)
                 onPlaceProjectAssetRequested(selectedAsset);
+        };
+        card->onExportRequested = [this](const ProjectManager::ProjectAsset& selectedAsset)
+        {
+            if (onExportProjectAssetRequested)
+                onExportProjectAssetRequested(selectedAsset);
         };
         card->setAsset(asset);
         projectAssetsHost.addAndMakeVisible(card);

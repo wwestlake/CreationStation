@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "../Timeline/TimelineTypes.h"
 
 class ArrangeView final : public juce::Component
 {
@@ -28,6 +29,7 @@ public:
     int getVisibleTrackCount() const noexcept { return visibleTrackCount; }
     int getTotalTrackCount() const noexcept { return totalTrackCount; }
     void setTrackName(int trackIndex, const juce::String& name);
+    void setTrackKind(int trackIndex, cs::TrackKind kind);
     void setRecordedClips(const juce::StringArray& clipNames);
     void setAssetFiles(const juce::Array<juce::File>& files);
     void setSelectedTrack(int trackIndex);
@@ -92,6 +94,7 @@ private:
 
         void setTrackIndex(int newTrackIndex);
         void setTrackName(const juce::String& newTrackName);
+        void setTrackKind(cs::TrackKind kind);
         void setClips(const juce::Array<LaneClipView>& newClips, int selectedClipIndex);
         void setSelected(bool shouldSelect);
         void layoutClipBlocks();
@@ -106,6 +109,7 @@ private:
     private:
         int trackIndex = 0;
         juce::String trackName;
+        cs::TrackKind trackKind = cs::TrackKind::foley;
         juce::Array<LaneClipView> clips;
         juce::OwnedArray<ClipBlock> clipBlocks;
         bool selected = false;
@@ -119,6 +123,7 @@ private:
     public:
         void setTrackCount(int newTrackCount, const juce::StringArray& trackNames);
         void setTrackName(int trackIndex, const juce::String& name);
+        void setTrackKind(int trackIndex, cs::TrackKind kind);
         void setSeedClips(const juce::StringArray& clipNames);
         void setPlacedClips(const juce::Array<ClipPlacement>& clipPlacements, int selectedClipIndex);
         void setSelectedTrack(int trackIndex);
@@ -133,6 +138,7 @@ private:
     private:
         juce::OwnedArray<Lane> lanes;
         juce::StringArray trackNames;
+        std::vector<cs::TrackKind> trackKinds;
         juce::StringArray seedClips;
         juce::Array<ClipPlacement> placedClips;
         int trackCount = 0;
@@ -153,20 +159,20 @@ private:
         juce::AudioFormatManager formatManager;
         juce::AudioThumbnailCache thumbnailCache { 8 };
         juce::AudioThumbnail thumbnail;
-        juce::String emptyText { "Select a project sound to shape it." };
+        juce::String emptyText { "Select a Foley sound to shape it." };
     };
 
     juce::Label titleLabel;
     juce::Label hintLabel;
     juce::Label assetLabel;
     juce::ComboBox assetSelector;
-    juce::TextButton importAssetButton { "Import Sound" };
-    juce::TextButton previewSliceButton { "Preview Slice" };
-    juce::TextButton placeAssetButton { "Place Slice" };
-    juce::TextButton duplicateClipButton { "Duplicate Clip" };
-    juce::TextButton deleteClipButton { "Delete Clip" };
-    juce::TextButton addTrackButton { "+" };
-    juce::TextButton removeTrackButton { "-" };
+    juce::TextButton importAssetButton { "Import Foley" };
+    juce::TextButton previewSliceButton { "Audition" };
+    juce::TextButton placeAssetButton { "Place" };
+    juce::TextButton duplicateClipButton { "Duplicate" };
+    juce::TextButton deleteClipButton { "Delete" };
+    juce::TextButton addTrackButton { "+ Layer" };
+    juce::TextButton removeTrackButton { "- Layer" };
     juce::Label trimLabel;
     juce::Label clipInspectorLabel;
     juce::Label clipNameLabel;
@@ -191,6 +197,7 @@ private:
     juce::Viewport viewport;
     Canvas canvas;
     juce::StringArray trackNames;
+    std::vector<cs::TrackKind> trackKinds;
     juce::Array<juce::File> assetFiles;
     int totalTrackCount = 0;
     int visibleTrackCount = 0;
@@ -210,6 +217,7 @@ private:
     void refreshTrimUi();
     void selectAssetIndex(int index);
     juce::String makePlacedClipLabel() const;
+    void placeSelectedAssetOnCurrentLayer();
     void notifyArrangementChanged();
     void refreshClipActionButtons();
     void refreshClipInspector();

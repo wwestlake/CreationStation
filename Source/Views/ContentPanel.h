@@ -31,6 +31,7 @@ public:
     std::function<void(const ContentLibrary::Item&)> onRevealItemRequested;
     std::function<void(const ProjectManager::ProjectAsset&)> onOpenProjectAssetRequested;
     std::function<void(const ProjectManager::ProjectAsset&)> onPlaceProjectAssetRequested;
+    std::function<void(const ProjectManager::ProjectAsset&)> onExportProjectAssetRequested;
     std::function<void(const TutorialItem&)> onLaunchTutorialRequested;
     std::function<void(const TutorialItem&)> onRevealTutorialRequested;
 
@@ -86,11 +87,13 @@ private:
 
         std::function<void(const ProjectManager::ProjectAsset&)> onOpenRequested;
         std::function<void(const ProjectManager::ProjectAsset&)> onPlaceRequested;
+        std::function<void(const ProjectManager::ProjectAsset&)> onExportRequested;
 
     private:
         ProjectManager::ProjectAsset asset;
         juce::TextButton openButton { "Open" };
         juce::TextButton placeButton { "Place" };
+        juce::TextButton exportButton { "Export Raw" };
     };
 
     juce::Label titleLabel;

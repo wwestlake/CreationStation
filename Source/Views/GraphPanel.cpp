@@ -944,7 +944,7 @@ void GraphPanel::refreshSelectionSummary()
     {
         selectionTitleLabel.setText("No node selected", juce::dontSendNotification);
         selectionBodyLabel.setText("Add a node from the toolbox, then click it to inspect and adjust it here.", juce::dontSendNotification);
-        selectionMetaLabel.setText("Toolbox on the left • canvas on the right", juce::dontSendNotification);
+        selectionMetaLabel.setText("Toolbox on the left - canvas on the right", juce::dontSendNotification);
         detailControlLabel.setVisible(false);
         detailControlSlider.setVisible(false);
         resized();

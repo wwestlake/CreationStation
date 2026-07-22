@@ -262,6 +262,11 @@ juce::File ProjectManager::getProjectsRoot() const
     return getWorkspaceRoot();
 }
 
+juce::File ProjectManager::getTemplatesRoot() const
+{
+    return storageRoot.getChildFile("Templates");
+}
+
 juce::File ProjectManager::getProjectManifestFile() const
 {
     return currentProject.rootDirectory.getChildFile("project.xml");
@@ -273,6 +278,14 @@ juce::File ProjectManager::getProjectPackageFile() const
         return {};
 
     return getProjectsRoot().getChildFile(currentProject.slug + ".csp");
+}
+
+juce::File ProjectManager::getTemplatePackageFile(const juce::String& templateName) const
+{
+    if (! hasStorageRoot())
+        return {};
+
+    return getTemplatesRoot().getChildFile(makeSlug(templateName) + ".cst");
 }
 
 juce::File ProjectManager::getLayoutPackageFile(const juce::String& layoutName) const
@@ -462,6 +475,70 @@ juce::File ProjectManager::saveGeneratedAssetFile(const juce::AudioBuffer<float>
     if (! writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples()))
     {
         errorMessage = "The generated sound could not be written to disk.";
+        return {};
+    }
+
+    return destination;
+}
+
+juce::File ProjectManager::saveRenderFile(const juce::AudioBuffer<float>& buffer,
+                                          double sampleRate,
+                                          const juce::String& suggestedName,
+                                          juce::String& errorMessage) const
+{
+    if (! hasProject())
+    {
+        errorMessage = "Open or create a project before rendering a mix.";
+        return {};
+    }
+
+    if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
+    {
+        errorMessage = "There is no rendered audio to save.";
+        return {};
+    }
+
+    if (! currentProject.rendersDirectory.exists() && ! currentProject.rendersDirectory.createDirectory())
+    {
+        errorMessage = "Could not create the Renders folder.";
+        return {};
+    }
+
+    auto baseName = makeSlug(suggestedName.isNotEmpty() ? suggestedName : "full-mix-render");
+    auto destination = currentProject.rendersDirectory.getChildFile(baseName + ".wav");
+    auto suffix = 2;
+
+    while (destination.existsAsFile())
+    {
+        destination = currentProject.rendersDirectory.getChildFile(baseName + "-" + juce::String(suffix) + ".wav");
+        ++suffix;
+    }
+
+    juce::WavAudioFormat wavFormat;
+    auto outputStream = std::unique_ptr<juce::FileOutputStream>(destination.createOutputStream());
+    if (outputStream == nullptr)
+    {
+        errorMessage = "Could not open the render file for writing.";
+        return {};
+    }
+
+    auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(outputStream.get(),
+                                                                                      sampleRate,
+                                                                                      (unsigned int) buffer.getNumChannels(),
+                                                                                      24,
+                                                                                      {},
+                                                                                      0));
+    if (writer == nullptr)
+    {
+        errorMessage = "Could not create a WAV writer for this render.";
+        return {};
+    }
+
+    outputStream.release();
+
+    if (! writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples()))
+    {
+        errorMessage = "The rendered mix could not be written to disk.";
         return {};
     }
 
@@ -775,6 +852,23 @@ juce::String ProjectManager::createProjectJson() const
     return juce::JSON::toString(juce::var(root), true);
 }
 
+juce::String ProjectManager::createTemplateJson(const juce::String& templateName) const
+{
+    auto* root = new juce::DynamicObject();
+    root->setProperty("format", "creation-station-template");
+    root->setProperty("formatVersion", 1);
+    root->setProperty("application", "Creation Station");
+    root->setProperty("templateName", sanitiseName(templateName));
+    root->setProperty("sourceProjectName", currentProject.name);
+    root->setProperty("sourceProjectSlug", currentProject.slug);
+    root->setProperty("description", currentProject.description);
+    root->setProperty("author", currentProject.author);
+    root->setProperty("copyright", currentProject.copyright);
+    root->setProperty("distributionRights", currentProject.distributionRights);
+    root->setProperty("savedAt", juce::Time::getCurrentTime().toISO8601(true));
+    return juce::JSON::toString(juce::var(root), true);
+}
+
 juce::String ProjectManager::createPackageManifestJson(const juce::Array<juce::File>& packagedFiles) const
 {
     juce::Array<juce::var> entries;
@@ -829,7 +923,8 @@ bool ProjectManager::readManifest(const juce::File& projectDirectory, juce::Stri
 
     auto state = juce::ValueTree::fromXml(*xml);
     currentProject.name = sanitiseName(state.getProperty("name").toString());
-    currentProject.slug = makeSlug(currentProject.name);
+    currentProject.slug = projectDirectory.getFileName().isNotEmpty() ? projectDirectory.getFileName()
+                                                                      : makeSlug(currentProject.name);
     currentProject.description = state.getProperty("description").toString();
     currentProject.author = state.getProperty("author").toString();
     currentProject.copyright = state.getProperty("copyright").toString();
@@ -864,6 +959,62 @@ bool ProjectManager::createProject(const juce::String& projectName, juce::String
     return writeManifest(errorMessage);
 }
 
+bool ProjectManager::saveCurrentProjectAs(const juce::String& projectName, juce::String& errorMessage)
+{
+    if (! hasProject() || ! hasStorageRoot())
+    {
+        errorMessage = "Open or create a project before using Save As.";
+        return false;
+    }
+
+    auto sourceProject = currentProject;
+    auto newName = sanitiseName(projectName);
+    auto baseSlug = makeSlug(newName);
+    auto destinationRoot = getProjectsRoot().getChildFile(baseSlug);
+    auto suffix = 2;
+
+    while (destinationRoot.exists())
+    {
+        destinationRoot = getProjectsRoot().getChildFile(baseSlug + "-" + juce::String(suffix));
+        ++suffix;
+    }
+
+    currentProject.name = newName;
+    currentProject.slug = destinationRoot.getFileName();
+    currentProject.description = sourceProject.description;
+    currentProject.author = sourceProject.author;
+    currentProject.copyright = sourceProject.copyright;
+    currentProject.distributionRights = sourceProject.distributionRights;
+    currentProject.rootDirectory = destinationRoot;
+    currentProject.audioDirectory = currentProject.rootDirectory.getChildFile("Audio");
+    currentProject.dslDirectory = currentProject.rootDirectory.getChildFile("DSL");
+    currentProject.rendersDirectory = currentProject.rootDirectory.getChildFile("Renders");
+    currentProject.assetsDirectory = currentProject.rootDirectory.getChildFile("Assets");
+
+    if (! ensureDirectories(errorMessage))
+    {
+        currentProject = sourceProject;
+        return false;
+    }
+
+    for (auto folderName : { "Audio", "Assets", "DSL", "Renders" })
+    {
+        auto source = sourceProject.rootDirectory.getChildFile(folderName);
+        auto destination = currentProject.rootDirectory.getChildFile(folderName);
+        if (source.isDirectory())
+            source.copyDirectoryTo(destination);
+    }
+
+    if (! writeManifest(errorMessage))
+    {
+        currentProject = sourceProject;
+        errorMessage = "Could not save the new project manifest.";
+        return false;
+    }
+
+    return true;
+}
+
 bool ProjectManager::openProject(const juce::File& projectDirectory, juce::String& errorMessage)
 {
     if (! projectDirectory.exists() || ! projectDirectory.isDirectory())
@@ -875,6 +1026,92 @@ bool ProjectManager::openProject(const juce::File& projectDirectory, juce::Strin
     if (! readManifest(projectDirectory, errorMessage))
         return false;
 
+    return true;
+}
+
+bool ProjectManager::openProjectPackage(const juce::File& packageFile, juce::ValueTree& restoredState, juce::String& errorMessage)
+{
+    if (! hasStorageRoot())
+    {
+        errorMessage = "Choose a local storage folder before opening projects.";
+        return false;
+    }
+
+    if (! packageFile.existsAsFile())
+    {
+        errorMessage = "That project package does not exist.";
+        return false;
+    }
+
+    auto tempDirectory = getConfigDirectory().getChildFile("ProjectImport-" + juce::Uuid().toString());
+    tempDirectory.deleteRecursively();
+    tempDirectory.createDirectory();
+
+    juce::ZipFile zip(packageFile);
+    auto unzipResult = zip.uncompressTo(tempDirectory, true);
+    if (unzipResult.failed())
+    {
+        tempDirectory.deleteRecursively();
+        errorMessage = "Could not unpack the project: " + unzipResult.getErrorMessage();
+        return false;
+    }
+
+    auto unpackedProjectRoot = tempDirectory.getChildFile("project");
+    auto unpackedManifest = unpackedProjectRoot.getChildFile("project.xml");
+    if (! unpackedManifest.existsAsFile())
+    {
+        tempDirectory.deleteRecursively();
+        errorMessage = "That package does not contain a Creation Station project.";
+        return false;
+    }
+
+    juce::String readError;
+    ProjectInfo importedProject;
+    {
+        auto previousProject = currentProject;
+        if (! readManifest(unpackedProjectRoot, readError))
+        {
+            currentProject = previousProject;
+            tempDirectory.deleteRecursively();
+            errorMessage = readError;
+            return false;
+        }
+
+        importedProject = currentProject;
+        currentProject = previousProject;
+    }
+
+    auto baseSlug = makeSlug(importedProject.name);
+    auto destinationRoot = getProjectsRoot().getChildFile(baseSlug);
+    auto suffix = 2;
+    while (destinationRoot.exists())
+    {
+        destinationRoot = getProjectsRoot().getChildFile(baseSlug + "-" + juce::String(suffix));
+        ++suffix;
+    }
+
+    if (! unpackedProjectRoot.copyDirectoryTo(destinationRoot))
+    {
+        tempDirectory.deleteRecursively();
+        errorMessage = "Could not copy the project into your project folder.";
+        return false;
+    }
+
+    if (! openProject(destinationRoot, errorMessage))
+    {
+        tempDirectory.deleteRecursively();
+        return false;
+    }
+
+    auto sessionXml = tempDirectory.getChildFile("state").getChildFile("session.xml");
+    if (sessionXml.existsAsFile())
+    {
+        auto xml = juce::parseXML(sessionXml);
+        if (xml != nullptr)
+            restoredState = juce::ValueTree::fromXml(*xml);
+    }
+
+    tempDirectory.deleteRecursively();
     return true;
 }
 
@@ -992,6 +1229,138 @@ bool ProjectManager::saveProjectPackage(const juce::ValueTree& state, juce::Stri
     return true;
 }
 
+bool ProjectManager::saveTemplatePackage(const juce::ValueTree& state,
+                                         const juce::String& templateName,
+                                         juce::File& templateFile,
+                                         juce::String& errorMessage) const
+{
+    if (! hasProject() || ! hasStorageRoot())
+    {
+        errorMessage = "Open or create a project before saving a template.";
+        return false;
+    }
+
+    templateFile = getTemplatePackageFile(templateName);
+    if (templateFile.getFullPathName().isEmpty())
+    {
+        errorMessage = "Could not resolve the template package file.";
+        return false;
+    }
+
+    templateFile.getParentDirectory().createDirectory();
+    auto tempFile = templateFile.getSiblingFile(templateFile.getFileName() + ".tmp");
+    if (tempFile.existsAsFile())
+        tempFile.deleteFile();
+
+    juce::ZipFile::Builder builder;
+    juce::Array<juce::File> packagedFiles;
+
+    addTextEntry(builder, "template.json", createTemplateJson(templateName));
+    if (auto xml = state.createXml())
+        addTextEntry(builder, "state/session.xml", xml->toString());
+
+    addDirectoryToPackage(builder, currentProject.rootDirectory, currentProject.audioDirectory, "project", packagedFiles);
+    addDirectoryToPackage(builder, currentProject.rootDirectory, currentProject.assetsDirectory, "project", packagedFiles);
+    addDirectoryToPackage(builder, currentProject.rootDirectory, currentProject.dslDirectory, "project", packagedFiles);
+    addDirectoryToPackage(builder, currentProject.rootDirectory, currentProject.rendersDirectory, "project", packagedFiles);
+
+    auto projectXml = getProjectManifestFile();
+    if (projectXml.existsAsFile())
+    {
+        builder.addFile(projectXml, 6, "project/source-project.xml");
+        packagedFiles.add(projectXml);
+    }
+
+    addTextEntry(builder, "manifest.json", createPackageManifestJson(packagedFiles));
+
+    std::unique_ptr<juce::FileOutputStream> output(tempFile.createOutputStream());
+    if (output == nullptr)
+    {
+        errorMessage = "Could not create the template package file.";
+        return false;
+    }
+
+    double progress = 0.0;
+    if (! builder.writeToStream(*output, &progress))
+    {
+        errorMessage = "Could not write the template package.";
+        return false;
+    }
+
+    output.reset();
+
+    if (templateFile.existsAsFile() && ! templateFile.deleteFile())
+    {
+        errorMessage = "Could not replace the previous template package.";
+        return false;
+    }
+
+    if (! tempFile.moveFileTo(templateFile))
+    {
+        errorMessage = "Could not finalize the template package.";
+        return false;
+    }
+
+    return true;
+}
+
+bool ProjectManager::createProjectFromTemplate(const juce::File& templateFile,
+                                               const juce::String& projectName,
+                                               juce::ValueTree& restoredState,
+                                               juce::String& errorMessage)
+{
+    if (! hasStorageRoot())
+    {
+        errorMessage = "Choose a local storage folder before creating projects.";
+        return false;
+    }
+
+    if (! templateFile.existsAsFile())
+    {
+        errorMessage = "That template file does not exist.";
+        return false;
+    }
+
+    auto tempDirectory = getConfigDirectory().getChildFile("TemplateImport-" + juce::Uuid().toString());
+    tempDirectory.deleteRecursively();
+    tempDirectory.createDirectory();
+
+    juce::ZipFile zip(templateFile);
+    auto unzipResult = zip.uncompressTo(tempDirectory, true);
+    if (unzipResult.failed())
+    {
+        tempDirectory.deleteRecursively();
+        errorMessage = "Could not unpack the template: " + unzipResult.getErrorMessage();
+        return false;
+    }
+
+    if (! createProject(projectName, errorMessage))
+    {
+        tempDirectory.deleteRecursively();
+        return false;
+    }
+
+    auto templateProjectRoot = tempDirectory.getChildFile("project");
+    for (auto folderName : { "Audio", "Assets", "DSL", "Renders" })
+    {
+        auto source = templateProjectRoot.getChildFile(folderName);
+        auto destination = currentProject.rootDirectory.getChildFile(folderName);
+        if (source.isDirectory())
+            source.copyDirectoryTo(destination);
+    }
+
+    auto sessionXml = tempDirectory.getChildFile("state").getChildFile("session.xml");
+    if (sessionXml.existsAsFile())
+    {
+        auto xml = juce::parseXML(sessionXml);
+        if (xml != nullptr)
+            restoredState = juce::ValueTree::fromXml(*xml);
+    }
+
+    tempDirectory.deleteRecursively();
+    return true;
+}
+
 bool ProjectManager::updateProjectMetadata(const ProjectInfo& metadata, juce::String& errorMessage)
 {
     if (! hasProject())
@@ -1036,5 +1405,5 @@ juce::String ProjectManager::getDisplayLabel() const
     if (! hasProject())
         return "No project open";
 
-    return currentProject.name + " · " + currentProject.rootDirectory.getFullPathName();
+    return currentProject.name;
 }

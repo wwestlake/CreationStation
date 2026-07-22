@@ -55,7 +55,10 @@ public:
         settings
     };
 
+    using StartupProgressCallback = std::function<void(const juce::String& statusText, float progress)>;
+
     MainComponent();
+    explicit MainComponent(StartupProgressCallback startupProgressCallback);
     ~MainComponent() override;
 
     void confirmCloseApplication(const std::function<void(bool shouldClose)>& onDecision);
@@ -161,8 +164,10 @@ private:
         void setProfile(const DesktopAuthSession::SessionData& session);
         void clearProfile();
         void setProjectLabel(const juce::String& label);
+        juce::Rectangle<int> getProjectButtonScreenBounds() const;
         void setStatusText(const juce::String& text);
         void setMidiStatusText(const juce::String& text);
+        void setPlaybackVisualState(bool playing, bool recording);
 
         void resized() override;
         void paint(juce::Graphics&) override;
@@ -239,6 +244,8 @@ private:
     std::unique_ptr<juce::FileChooser> storageRootChooser;
     std::unique_ptr<juce::FileChooser> projectChooser;
     std::unique_ptr<juce::FileChooser> assetChooser;
+    std::unique_ptr<juce::FileChooser> renderExportChooser;
+    std::unique_ptr<juce::FileChooser> rawAssetExportChooser;
     std::unique_ptr<juce::FileChooser> patchChooser;
     std::unique_ptr<juce::FileChooser> patinaArtifactChooser;
     std::unique_ptr<juce::FileChooser> contentUploadChooser;
@@ -268,12 +275,33 @@ private:
     double transportStartTimelineSeconds = 0.0;
     bool metronomeEnabled = false;
     int activeRecordingTrack = -1;
+    int selectedClipIndex = -1;
+    bool clipDragUndoCaptured = false;
+    std::vector<juce::ValueTree> timelineUndoStack;
+    std::vector<juce::ValueTree> timelineRedoStack;
 
     void timerCallback() override;
+    bool keyPressed(const juce::KeyPress& key) override;
     juce::File getSessionFile() const;
+    juce::ValueTree createProjectStateForSave();
+    void remapTemplateStateFilesToCurrentProject(juce::ValueTree& state) const;
     void saveSessionToDisk(bool userInitiated = false);
     void loadSessionFromDisk();
     bool prepareTrackerPlayback();
+    bool buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
+                                     double& durationSeconds,
+                                     juce::String& errorMessage) const;
+    bool renderFullMixToProject();
+    void exportFullMixAsWav();
+    void pushTimelineUndoState();
+    void pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit);
+    void undoTimelineEdit();
+    void redoTimelineEdit();
+    void restoreTimelineEditState(const juce::ValueTree& state, const juce::String& statusText);
+    void splitClipAt(int clipIndex, double splitSeconds);
+    void duplicateClip(int clipIndex);
+    void deleteClip(int clipIndex);
+    void renameClip(int clipIndex);
     juce::File getAppSettingsFile() const;
     void saveAppSettings();
     void loadAppSettings();
@@ -303,8 +331,15 @@ private:
     void openLagDaemonProfile();
     void showProjectMenu();
     void createNewProject();
+    void beginCreateNewProject();
+    void createProjectFromTemplate();
+    void beginCreateProjectFromTemplate();
     void openProject();
+    void beginOpenProject();
     void saveProject();
+    void saveProjectAs();
+    void saveProjectAsTemplate();
+    void guardUnsavedProjectChange(const juce::String& actionName, const std::function<void()>& action);
     void revealProjectFolder();
     void showAudioSettings();
     void configureVstSearchPaths();
@@ -325,6 +360,7 @@ private:
     void activateContentItem(const ContentLibrary::Item& item);
     void openProjectAsset(const ProjectManager::ProjectAsset& asset);
     void placeProjectAssetOnTracker(const ProjectManager::ProjectAsset& asset);
+    void exportProjectAssetRaw(const ProjectManager::ProjectAsset& asset);
     void launchTutorialItem(const ContentPanel::TutorialItem& item);
     bool chooseStorageRoot(bool promptWhenAlreadyConfigured = false);
     bool ensureStorageRootConfigured();

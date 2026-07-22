@@ -14,10 +14,12 @@ public:
     std::function<void(int)> onRemoveTrackRequested;
     std::function<void(int)> onTrackSelected;
     std::function<void(int, const juce::String&)> onTrackNameChanged;
+    std::function<void(int, cs::TrackKind)> onTrackKindChanged;
     std::function<void(int, bool)> onTrackArmChanged;
     std::function<void(int, bool)> onTrackMuteChanged;
     std::function<void(int, bool)> onTrackSoloChanged;
     std::function<void(int, bool)> onTrackMonitorChanged;
+    std::function<void(int, bool)> onTrackStereoChanged;
     std::function<void(int, float)> onTrackGainChanged;
     std::function<void(int, int)> onTrackInputChanged;
     std::function<void()> onZoomOutRequested;
@@ -25,18 +27,30 @@ public:
     std::function<void(double)> onPlayheadPositionChanged;
     std::function<void(int, int, double)> onClipMoved;
     std::function<void()> onClipMoveCommitted;
+    std::function<void(int)> onClipSelected;
+    std::function<void(int)> onClipRenameRequested;
+    std::function<void(int, double)> onClipSplitRequested;
+    std::function<void(int)> onClipDuplicateRequested;
+    std::function<void(int)> onClipDeleteRequested;
+    std::function<void(double)> onTempoChanged;
+    std::function<void(int, int)> onTimeSignatureChanged;
+    std::function<void(const juce::String&)> onKeyChanged;
 
     void setTrackCount(int newTrackCount);
     void setTrackName(int trackIndex, const juce::String& name);
+    void setTrackKind(int trackIndex, cs::TrackKind kind);
     void setTrackArmed(int trackIndex, bool armed);
     void setTrackMuted(int trackIndex, bool muted);
     void setTrackSoloed(int trackIndex, bool soloed);
     void setTrackMonitored(int trackIndex, bool monitored);
+    void setTrackStereo(int trackIndex, bool stereo);
     void setTrackLevel(int trackIndex, float level);
     void setTrackGain(int trackIndex, float gain);
     void setInputSources(const juce::Array<juce::String>& sourceNames);
     void setTrackInput(int trackIndex, int inputChannel);
     void setSelectedTrack(int trackIndex);
+    void setSelectedClip(int clipIndex);
+    void setTimingInfo(double bpm, int numerator, int denominator, const juce::String& key);
     void setTimelineModel(const cs::TimelineModel* model);
     void refreshTimelineView();
     void centerTransportInView();
@@ -53,27 +67,37 @@ private:
     public:
         std::function<void(int)> onTrackSelected;
         std::function<void(int, const juce::String&)> onTrackNameChanged;
+        std::function<void(int, cs::TrackKind)> onTrackKindChanged;
         std::function<void(int, bool)> onTrackArmChanged;
         std::function<void(int, bool)> onTrackMuteChanged;
         std::function<void(int, bool)> onTrackSoloChanged;
         std::function<void(int, bool)> onTrackMonitorChanged;
+        std::function<void(int, bool)> onTrackStereoChanged;
         std::function<void(int, float)> onTrackGainChanged;
         std::function<void(int, int)> onTrackInputChanged;
         std::function<void(double)> onPlayheadPositionChanged;
         std::function<void(int, int, double)> onClipMoved;
         std::function<void()> onClipMoveCommitted;
+        std::function<void(int)> onClipSelected;
+        std::function<void(int)> onClipRenameRequested;
+        std::function<void(int, double)> onClipSplitRequested;
+        std::function<void(int)> onClipDuplicateRequested;
+        std::function<void(int)> onClipDeleteRequested;
 
         void setTrackCount(int newTrackCount);
         void setTrackName(int trackIndex, const juce::String& name);
+        void setTrackKind(int trackIndex, cs::TrackKind kind);
         void setTrackArmed(int trackIndex, bool armed);
         void setTrackMuted(int trackIndex, bool muted);
         void setTrackSoloed(int trackIndex, bool soloed);
         void setTrackMonitored(int trackIndex, bool monitored);
+        void setTrackStereo(int trackIndex, bool stereo);
         void setTrackLevel(int trackIndex, float level);
         void setTrackGain(int trackIndex, float gain);
         void setInputSources(const juce::Array<juce::String>& sourceNames);
         void setTrackInput(int trackIndex, int inputChannel);
         void setSelectedTrack(int trackIndex);
+        void setSelectedClip(int clipIndex);
         void setLaneHeight(int newLaneHeight);
         void setTimelineModel(const cs::TimelineModel* model);
         void setScrollSeconds(double seconds);
@@ -100,20 +124,24 @@ private:
 
             std::function<void(int)> onSelected;
             std::function<void(int, const juce::String&)> onNameChanged;
+            std::function<void(int, cs::TrackKind)> onKindChanged;
             std::function<void(int, bool)> onArmChanged;
             std::function<void(int, bool)> onMuteChanged;
             std::function<void(int, bool)> onSoloChanged;
             std::function<void(int, bool)> onMonitorChanged;
+            std::function<void(int, bool)> onStereoChanged;
             std::function<void(int, float)> onGainChanged;
             std::function<void(int, int)> onInputChanged;
 
             void setTrackIndex(int newTrackIndex);
             void setTrackName(const juce::String& name);
+            void setTrackKind(cs::TrackKind kind);
             void setSelected(bool selected);
             void setArmed(bool armed);
             void setMuted(bool muted);
             void setSoloed(bool soloed);
             void setMonitored(bool monitored);
+            void setStereo(bool stereo);
             void setLevel(float level);
             void setGain(float gain);
             void setInputSources(const juce::Array<juce::String>& sourceNames);
@@ -129,11 +157,13 @@ private:
             float inputLevel = 0.0f;
             bool selected = false;
             juce::TextEditor nameEditor;
+            cs::TrackKind trackKind = cs::TrackKind::audio;
+            juce::TextButton kindButton;
             juce::TextButton armButton { "Arm" };
             juce::TextButton muteButton { "M" };
             juce::TextButton soloButton { "S" };
             juce::TextButton monitorButton { "Mon" };
-            juce::Label stereoLabel;
+            juce::TextButton stereoButton { "Mono" };
             juce::ComboBox inputSelector;
             juce::Label fxLabel;
             juce::Label dbLabel;
@@ -142,6 +172,7 @@ private:
 
         int trackCount = 0;
         int selectedTrack = -1;
+        int selectedClipIndex = -1;
         int laneHeight = 100;
         int draggingClipIndex = -1;
         int draggingOriginalTrack = -1;
@@ -150,10 +181,12 @@ private:
         double scrollSeconds = 0.0;
         const cs::TimelineModel* timelineModel = nullptr;
         juce::StringArray trackNames;
+        std::vector<cs::TrackKind> trackKinds;
         std::vector<bool> trackArmed;
         std::vector<bool> trackMuted;
         std::vector<bool> trackSoloed;
         std::vector<bool> trackMonitored;
+        std::vector<bool> trackStereo;
         std::vector<float> trackLevels;
         std::vector<float> trackGains;
         juce::Array<juce::String> inputSourceNames;
@@ -163,6 +196,10 @@ private:
     juce::Label titleLabel;
     juce::Label hintLabel;
     juce::Label selectionLabel;
+    juce::Label timingLabel;
+    juce::TextEditor bpmEditor;
+    juce::TextEditor timeSignatureEditor;
+    juce::ComboBox keySelector;
     juce::TextButton addTrackButton { "+ Add Track" };
     juce::TextButton removeTrackButton { "- Remove" };
     juce::TextButton compactButton { "Compact" };
@@ -174,7 +211,9 @@ private:
     TimelineCanvas canvas;
 
     int selectedTrack = -1;
+    int selectedClipIndex = -1;
 
     void refreshSelectionLabel();
     void refreshTimelineScrollBar();
+    void commitTimingEdits();
 };

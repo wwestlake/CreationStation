@@ -38,28 +38,38 @@ public:
                               bool isMouseOverButton,
                               bool isButtonDown) override
     {
+        juce::ignoreUnused(backgroundColour);
+
         auto bounds = button.getLocalBounds().toFloat().reduced(1.5f);
-        auto isToggle = button.getClickingTogglesState() && button.getToggleState();
-        auto fill = backgroundColour;
+        auto isToggle = button.getToggleState();
+        auto isRecord = button.getButtonText() == "record";
+        auto isPrimaryActive = isToggle && (button.getButtonText() == "play" || isRecord);
+        auto accent = isRecord ? juce::Colour(0xffff4f5f) : juce::Colour(0xff59dfff);
+        auto fill = juce::Colour(0xff17222c);
 
         if (isToggle)
-            fill = juce::Colour(0xff1e2c45);
+            fill = accent.withAlpha(isPrimaryActive ? 0.48f : 0.25f).overlaidWith(juce::Colour(0xff13202b));
         else if (isButtonDown)
-            fill = backgroundColour.brighter(0.22f);
+            fill = accent.withAlpha(0.20f).overlaidWith(fill);
         else if (isMouseOverButton)
-            fill = backgroundColour.brighter(0.12f);
+            fill = accent.withAlpha(0.12f).overlaidWith(fill);
 
+        g.setColour(accent.withAlpha(isToggle ? (isPrimaryActive ? 0.62f : 0.35f)
+                                               : isMouseOverButton ? 0.35f : 0.14f));
+        g.fillRoundedRectangle(bounds.expanded(isPrimaryActive ? 4.0f : 2.0f), 13.0f);
         g.setColour(fill);
         g.fillRoundedRectangle(bounds, 11.0f);
 
-        g.setColour(isToggle ? juce::Colour(0xff7cc8ff) : juce::Colour(0xff3a4658));
-        g.drawRoundedRectangle(bounds, 11.0f, isToggle ? 2.0f : 1.0f);
+        g.setColour(accent.withAlpha(isToggle ? 1.0f : 0.62f));
+        g.drawRoundedRectangle(bounds, 11.0f, isToggle ? (isPrimaryActive ? 2.8f : 2.0f) : 1.3f);
 
-        if (isToggle)
+        auto ring = bounds.reduced(7.0f, 5.0f);
+        if (ring.getWidth() > 18.0f && ring.getHeight() > 18.0f)
         {
-            auto accent = juce::Rectangle<float>(4.0f, bounds.getY() + 4.0f, 4.0f, bounds.getHeight() - 8.0f);
-            g.setColour(juce::Colour(0xff7cc8ff));
-            g.fillRoundedRectangle(accent, 2.0f);
+            auto diameter = juce::jmin(ring.getWidth(), ring.getHeight());
+            auto circle = juce::Rectangle<float>(diameter, diameter).withCentre(ring.getCentre());
+            g.setColour(accent.withAlpha(isToggle ? 0.96f : 0.36f));
+            g.drawEllipse(circle, isPrimaryActive ? 3.0f : 2.0f);
         }
     }
 
@@ -68,15 +78,119 @@ public:
                         bool isMouseOverButton,
                         bool isButtonDown) override
     {
-        auto bounds = button.getLocalBounds().reduced(6, 0);
+        auto bounds = button.getLocalBounds().toFloat().reduced(8.0f, 7.0f);
         auto text = button.getButtonText();
 
         g.setColour(button.getToggleState() ? juce::Colours::white
                                             : (isButtonDown ? juce::Colour(0xffeaf6ff)
                                                             : isMouseOverButton ? juce::Colour(0xffdcecff)
                                                                                 : juce::Colour(0xffb8c4d5)));
-        g.setFont(juce::Font(18.0f).boldened());
-        g.drawText(text, bounds, juce::Justification::centred, true);
+        if (button.getToggleState() && button.getButtonText() == "play")
+            g.setColour(juce::Colour(0xffffffff));
+        if (button.getButtonText() == "record")
+            g.setColour(juce::Colour(0xffff4f5f));
+
+        drawTransportIcon(g, bounds, text);
+    }
+
+    void drawToggleButton(juce::Graphics& g,
+                          juce::ToggleButton& button,
+                          bool isMouseOverButton,
+                          bool isButtonDown) override
+    {
+        drawButtonBackground(g,
+                             button,
+                             button.findColour(juce::TextButton::buttonColourId),
+                             isMouseOverButton,
+                             isButtonDown);
+
+        auto bounds = button.getLocalBounds().toFloat().reduced(8.0f, 7.0f);
+        g.setColour(button.getToggleState() ? juce::Colours::white : juce::Colour(0xffb8c4d5));
+        if (button.getToggleState())
+            g.setColour(juce::Colour(0xff5ce8ff));
+
+        drawTransportIcon(g, bounds, button.getButtonText());
+    }
+
+private:
+    static void drawTransportIcon(juce::Graphics& g, juce::Rectangle<float> bounds, const juce::String& iconName)
+    {
+        auto centre = bounds.getCentre();
+        auto size = juce::jmin(bounds.getWidth(), bounds.getHeight());
+
+        if (iconName == "play")
+        {
+            juce::Path path;
+            path.addTriangle(centre.x - size * 0.22f, centre.y - size * 0.32f,
+                             centre.x - size * 0.22f, centre.y + size * 0.32f,
+                             centre.x + size * 0.32f, centre.y);
+            g.fillPath(path);
+            return;
+        }
+
+        if (iconName == "pause")
+        {
+            auto barWidth = size * 0.17f;
+            auto gap = size * 0.10f;
+            auto height = size * 0.62f;
+            g.fillRoundedRectangle(centre.x - gap - barWidth, centre.y - height * 0.5f, barWidth, height, 1.5f);
+            g.fillRoundedRectangle(centre.x + gap, centre.y - height * 0.5f, barWidth, height, 1.5f);
+            return;
+        }
+
+        if (iconName == "stop")
+        {
+            auto square = juce::Rectangle<float>(size * 0.55f, size * 0.55f).withCentre(centre);
+            g.fillRoundedRectangle(square, 2.0f);
+            return;
+        }
+
+        if (iconName == "record")
+        {
+            g.setColour(juce::Colour(0xffff5f6d));
+            g.fillEllipse(juce::Rectangle<float>(size * 0.58f, size * 0.58f).withCentre(centre));
+            return;
+        }
+
+        if (iconName == "prev" || iconName == "next")
+        {
+            auto direction = iconName == "prev" ? 1.0f : -1.0f;
+            auto barX = centre.x + direction * size * 0.33f;
+            g.fillRoundedRectangle(barX - size * 0.04f, centre.y - size * 0.33f, size * 0.08f, size * 0.66f, 1.5f);
+
+            for (auto offset : { -0.08f, 0.18f })
+            {
+                juce::Path path;
+                path.addTriangle(centre.x - direction * size * (0.24f + offset), centre.y,
+                                 centre.x + direction * size * (0.02f - offset), centre.y - size * 0.30f,
+                                 centre.x + direction * size * (0.02f - offset), centre.y + size * 0.30f);
+                g.fillPath(path);
+            }
+            return;
+        }
+
+        if (iconName == "loop")
+        {
+            auto arc = bounds.reduced(size * 0.12f);
+            g.drawEllipse(arc, 2.0f);
+            juce::Path arrow;
+            arrow.addTriangle(arc.getRight() - size * 0.02f, arc.getCentreY() - size * 0.20f,
+                              arc.getRight() + size * 0.16f, arc.getCentreY() - size * 0.06f,
+                              arc.getRight() - size * 0.02f, arc.getCentreY() + size * 0.08f);
+            g.fillPath(arrow);
+            return;
+        }
+
+        if (iconName == "click")
+        {
+            g.fillEllipse(juce::Rectangle<float>(size * 0.18f, size * 0.18f).withCentre({ centre.x, centre.y - size * 0.18f }));
+            g.fillEllipse(juce::Rectangle<float>(size * 0.18f, size * 0.18f).withCentre({ centre.x - size * 0.18f, centre.y + size * 0.14f }));
+            g.fillEllipse(juce::Rectangle<float>(size * 0.18f, size * 0.18f).withCentre({ centre.x + size * 0.18f, centre.y + size * 0.14f }));
+            return;
+        }
+
+        g.setFont(juce::Font(13.0f).boldened());
+        g.drawText(iconName, bounds.toNearestInt(), juce::Justification::centred, true);
     }
 };
 
@@ -114,9 +228,52 @@ juce::String profileDetailText(const DesktopAuthSession::SessionData& session)
     auto tierName = branding::getPatreonTierDisplayName(tierId);
 
     if (tierName.isNotEmpty())
-        return session.user.email + " • " + tierName;
+        return session.user.email + " - " + tierName;
 
     return session.user.email;
+}
+
+bool writeWavFile(const juce::File& destination,
+                  const juce::AudioBuffer<float>& buffer,
+                  double sampleRate,
+                  juce::String& errorMessage)
+{
+    if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
+    {
+        errorMessage = "There is no audio to export.";
+        return false;
+    }
+
+    destination.getParentDirectory().createDirectory();
+
+    juce::WavAudioFormat wavFormat;
+    auto outputStream = std::unique_ptr<juce::FileOutputStream>(destination.createOutputStream());
+    if (outputStream == nullptr)
+    {
+        errorMessage = "Could not open the export file for writing.";
+        return false;
+    }
+
+    auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(outputStream.get(),
+                                                                                      sampleRate,
+                                                                                      (unsigned int) buffer.getNumChannels(),
+                                                                                      24,
+                                                                                      {},
+                                                                                      0));
+    if (writer == nullptr)
+    {
+        errorMessage = "Could not create a WAV writer for this export.";
+        return false;
+    }
+
+    outputStream.release();
+    if (! writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples()))
+    {
+        errorMessage = "Could not write the WAV export.";
+        return false;
+    }
+
+    return true;
 }
 
 juce::String workspaceModeName(MainComponent::WorkspaceMode mode)
@@ -280,14 +437,14 @@ MainComponent::TransportBar::TransportBar()
     rewindButton.setLookAndFeel(&getTransportButtonLookAndFeel());
     fastForwardButton.setLookAndFeel(&getTransportButtonLookAndFeel());
 
-    playButton.setButtonText(juce::String::charToString((juce_wchar) 0x25B6));
-    pauseButton.setButtonText(juce::String::charToString((juce_wchar) 0x23F8));
-    stopButton.setButtonText(juce::String::charToString((juce_wchar) 0x25A0));
-    recordButton.setButtonText(juce::String::charToString((juce_wchar) 0x25CF));
-    loopButton.setButtonText(juce::String::charToString((juce_wchar) 0x21BB));
-    clickButton.setButtonText("Click");
-    rewindButton.setButtonText("Prev");
-    fastForwardButton.setButtonText("Next");
+    playButton.setButtonText("play");
+    pauseButton.setButtonText("pause");
+    stopButton.setButtonText("stop");
+    recordButton.setButtonText("record");
+    loopButton.setButtonText("loop");
+    clickButton.setButtonText("click");
+    rewindButton.setButtonText("prev");
+    fastForwardButton.setButtonText("next");
 
     playButton.setTooltip("Play");
     pauseButton.setTooltip("Pause");
@@ -519,11 +676,25 @@ void MainComponent::TransportBar::setMidiStatusText(const juce::String& text)
     midiStatusLabel.setText(text, juce::dontSendNotification);
 }
 
+void MainComponent::TransportBar::setPlaybackVisualState(bool playing, bool recording)
+{
+    playButton.setToggleState(playing && ! recording, juce::dontSendNotification);
+    pauseButton.setToggleState(false, juce::dontSendNotification);
+    stopButton.setToggleState(! playing && ! recording, juce::dontSendNotification);
+    recordButton.setToggleState(recording, juce::dontSendNotification);
+    repaint();
+}
+
 void MainComponent::TransportBar::setProjectLabel(const juce::String& label)
 {
     projectText = label;
     projectButton.setButtonText(projectText);
     repaint();
+}
+
+juce::Rectangle<int> MainComponent::TransportBar::getProjectButtonScreenBounds() const
+{
+    return localAreaToGlobal(projectButton.getBounds());
 }
 
 void MainComponent::TransportBar::setProfile(const DesktopAuthSession::SessionData& session)
@@ -574,11 +745,16 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
 
     if (! transportControlBounds.isEmpty())
     {
-        auto panel = transportControlBounds.toFloat().expanded(10.0f, 8.0f);
+        auto panel = transportControlBounds.toFloat().expanded(12.0f, 9.0f);
+        juce::ColourGradient glow(juce::Colour(0x4426d9ff), panel.getCentreX(), panel.getY(),
+                                  juce::Colour(0x00101820), panel.getCentreX(), panel.getBottom(), false);
+        g.setGradientFill(glow);
+        g.fillRoundedRectangle(panel.expanded(4.0f), 18.0f);
+
         g.setColour(juce::Colour(0xff151b23));
         g.fillRoundedRectangle(panel, 16.0f);
-        g.setColour(juce::Colour(0xff2b3748));
-        g.drawRoundedRectangle(panel, 16.0f, 1.0f);
+        g.setColour(juce::Colour(0xff36506b));
+        g.drawRoundedRectangle(panel, 16.0f, 1.4f);
     }
 
     if (profileVisible)
@@ -604,7 +780,7 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
         {
             g.setColour(juce::Colour(0xfff2cc60));
             g.setFont(juce::Font(12.0f).boldened());
-            g.drawText("★", badgeArea, juce::Justification::centred, false);
+            g.drawText("*", badgeArea, juce::Justification::centred, false);
         }
     }
 }
@@ -653,19 +829,25 @@ void MainComponent::TransportBar::resized()
     titleLabel.setBounds(topRow.removeFromLeft(290));
     midiStatusLabel.setBounds(topRow.removeFromLeft(230));
 
-    auto transportRow = bottomRow.removeFromLeft(592);
+    auto transportRow = bottomRow.removeFromLeft(662);
     projectButton.setBounds(bottomRow.removeFromLeft(260));
     audioButton.setBounds(bottomRow.removeFromLeft(82));
     tourButton.setBounds(bottomRow.removeFromLeft(78));
 
-    rewindButton.setBounds(transportRow.removeFromLeft(58));
-    fastForwardButton.setBounds(transportRow.removeFromLeft(58));
-    stopButton.setBounds(transportRow.removeFromLeft(72));
-    pauseButton.setBounds(transportRow.removeFromLeft(72));
-    playButton.setBounds(transportRow.removeFromLeft(86));
-    loopButton.setBounds(transportRow.removeFromLeft(70));
-    clickButton.setBounds(transportRow.removeFromLeft(58));
-    recordButton.setBounds(transportRow.removeFromLeft(84));
+    auto placeTransportButton = [&transportRow](juce::Button& button, int width)
+    {
+        button.setBounds(transportRow.removeFromLeft(width));
+        transportRow.removeFromLeft(7);
+    };
+
+    placeTransportButton(rewindButton, 62);
+    placeTransportButton(fastForwardButton, 62);
+    placeTransportButton(stopButton, 66);
+    placeTransportButton(pauseButton, 66);
+    placeTransportButton(playButton, 82);
+    placeTransportButton(loopButton, 64);
+    placeTransportButton(clickButton, 64);
+    placeTransportButton(recordButton, 82);
     statusLabel.setBounds(bottomRow.removeFromRight(220));
 
     auto combineBounds = [](juce::Rectangle<int> left, juce::Rectangle<int> right)
@@ -830,16 +1012,33 @@ void MainComponent::PluginRackBar::resized()
 }
 
 MainComponent::MainComponent()
+    : MainComponent(StartupProgressCallback{})
 {
+}
+
+MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
+{
+    auto reportStartup = [&startupProgressCallback](const juce::String& statusText, float progress)
+    {
+        if (startupProgressCallback)
+            startupProgressCallback(statusText, juce::jlimit(0.0f, 1.0f, progress));
+    };
+
+    reportStartup("Preparing application shell...", 0.08f);
+    setWantsKeyboardFocus(true);
+
     appManifest = CreationStationAppManifest::createDefault(
         juce::JUCEApplicationBase::getInstance() != nullptr
             ? juce::JUCEApplicationBase::getInstance()->getApplicationVersion()
             : "0.1.2");
 
+    reportStartup("Opening audio engine...", 0.18f);
     deviceManager.initialise(32, 2, nullptr, true, {}, nullptr);
     engine.attachToDevice(deviceManager);
     engine.setPlaying(false);
+    transportBar.setPlaybackVisualState(false, false);
 
+    reportStartup("Building the studio surface...", 0.28f);
     setSize(1400, 900);
     addAndMakeVisible(authGateView);
     transportBarSafe = &transportBar;
@@ -914,15 +1113,19 @@ MainComponent::MainComponent()
         authGateView.setStatusText("Restored your saved login.");
     }
 
+    reportStartup("Loading storage and settings...", 0.40f);
     juce::String storageError;
     if (! projectManager.loadStorageConfiguration(storageError))
         ensureStorageRootConfigured();
 
     loadAppSettings();
+    reportStartup("Applying audio device settings...", 0.50f);
     applySelectedAudioDeviceSettings();
 
+    reportStartup("Scanning VST plugin folders...", 0.60f);
     rescanVstCatalog();
 
+    reportStartup("Opening project workspace...", 0.72f);
     auto loadedAutoloadProject = false;
     if (projectManager.hasStorageRoot() && autoloadLastProject)
     {
@@ -949,8 +1152,12 @@ MainComponent::MainComponent()
     refreshAiModelCatalog();
 
     if (loadedAutoloadProject)
+    {
+        reportStartup("Restoring project tracks and clips...", 0.80f);
         loadSessionFromDisk();
+    }
 
+    reportStartup("Loading control-surface maps...", 0.86f);
     ControlSurfaceMappingStore controlSurfaceMappings;
     juce::String controlSurfaceError;
     if (! projectManager.loadControlSurfaceMappings(controlSurfaceMappings, controlSurfaceError)
@@ -972,6 +1179,7 @@ MainComponent::MainComponent()
         popOutActiveWorkspace();
     };
 
+    reportStartup("Creating studio panels...", 0.92f);
     addAndMakeVisible(transportBar);
     addAndMakeVisible(viewModeBar);
     addAndMakeVisible(pluginRackBar);
@@ -1027,12 +1235,15 @@ MainComponent::MainComponent()
         engine.setPlaybackPositionSeconds(transportStartTimelineSeconds);
         engine.setPlaying(true);
         midiSurface.setTransportState(true, false);
+        transportBar.setPlaybackVisualState(true, false);
     };
     transportBar.onPause = [this]
     {
         engine.stopAssetPreview();
         engine.setPlaying(false);
+        transportBar.setPlaybackVisualState(false, false);
         midiSurface.setTransportState(false, false);
+        transportBar.setPlaybackVisualState(false, false);
     };
     transportBar.onStop = [this]
     {
@@ -1040,6 +1251,7 @@ MainComponent::MainComponent()
         engine.stopAssetPreview();
         engine.setPlaying(false);
         midiSurface.setTransportState(false, false);
+        transportBar.setPlaybackVisualState(false, false);
     };
     transportBar.onRecord = [this]
     {
@@ -1052,6 +1264,7 @@ MainComponent::MainComponent()
             transportStartTimelineSeconds = timelineModel.getTransportSeconds();
             engine.setPlaying(true);
             midiSurface.setTransportState(true, true);
+            transportBar.setPlaybackVisualState(true, true);
         }
     };
     transportBar.onRewind = [this]
@@ -1060,6 +1273,8 @@ MainComponent::MainComponent()
         timelineModel.setTransportSeconds(previousSeconds);
         transportStartTimelineSeconds = previousSeconds;
         transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        engine.setPlaybackPositionSeconds(previousSeconds);
+        trackerPanel.centerTransportInView();
         trackerPanel.refreshTimelineView();
         saveSessionToDisk();
         transportBar.setStatusText("Transport: previous boundary");
@@ -1070,6 +1285,8 @@ MainComponent::MainComponent()
         timelineModel.setTransportSeconds(nextSeconds);
         transportStartTimelineSeconds = nextSeconds;
         transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        engine.setPlaybackPositionSeconds(nextSeconds);
+        trackerPanel.centerTransportInView();
         trackerPanel.refreshTimelineView();
         saveSessionToDisk();
         transportBar.setStatusText("Transport: next boundary");
@@ -1202,8 +1419,20 @@ MainComponent::MainComponent()
             return;
 
         engine.setTrackName(trackIndex, name);
+        timelineModel.setTrackName(trackIndex, name);
         syncTrackViews();
         midiSurface.refreshVisibleWindow();
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onTrackKindChanged = [this](int trackIndex, cs::TrackKind kind)
+    {
+        if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
+            return;
+
+        timelineModel.setTrackKind(trackIndex, kind);
+        trackerPanel.setTrackKind(trackIndex, kind);
+        arrangeView.setTrackKind(trackIndex, kind);
         saveSessionToDisk();
     };
 
@@ -1252,6 +1481,18 @@ MainComponent::MainComponent()
         saveSessionToDisk();
     };
 
+    trackerPanel.onTrackStereoChanged = [this](int trackIndex, bool stereo)
+    {
+        if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
+            return;
+
+        engine.setTrackStereoEnabled(trackIndex, stereo);
+        timelineModel.setTrackChannelMode(trackIndex, stereo ? cs::TrackChannelMode::stereo
+                                                             : cs::TrackChannelMode::mono);
+        trackerPanel.setTrackStereo(trackIndex, stereo);
+        saveSessionToDisk();
+    };
+
     trackerPanel.onTrackGainChanged = [this](int trackIndex, float gain)
     {
         if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
@@ -1297,6 +1538,12 @@ MainComponent::MainComponent()
 
     trackerPanel.onClipMoved = [this](int clipIndex, int trackIndex, double startSeconds)
     {
+        if (! clipDragUndoCaptured)
+        {
+            pushTimelineUndoState();
+            clipDragUndoCaptured = true;
+        }
+
         if (! timelineModel.moveClip(clipIndex, trackIndex, startSeconds))
             return;
 
@@ -1312,6 +1559,67 @@ MainComponent::MainComponent()
 
     trackerPanel.onClipMoveCommitted = [this]
     {
+        clipDragUndoCaptured = false;
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onClipSelected = [this](int clipIndex)
+    {
+        selectedClipIndex = clipIndex;
+        trackerPanel.setSelectedClip(clipIndex);
+    };
+
+    trackerPanel.onClipRenameRequested = [this](int clipIndex)
+    {
+        renameClip(clipIndex);
+    };
+
+    trackerPanel.onClipSplitRequested = [this](int clipIndex, double splitSeconds)
+    {
+        splitClipAt(clipIndex, splitSeconds);
+    };
+
+    trackerPanel.onClipDuplicateRequested = [this](int clipIndex)
+    {
+        duplicateClip(clipIndex);
+    };
+
+    trackerPanel.onClipDeleteRequested = [this](int clipIndex)
+    {
+        deleteClip(clipIndex);
+    };
+
+    trackerPanel.onTempoChanged = [this](double bpm)
+    {
+        timelineModel.setTempo(bpm, timelineModel.getTimeSignatureNumerator(), timelineModel.getTimeSignatureDenominator());
+        engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
+        trackerPanel.setTimingInfo(timelineModel.getTempoBpm(),
+                                   timelineModel.getTimeSignatureNumerator(),
+                                   timelineModel.getTimeSignatureDenominator(),
+                                   timelineModel.getMusicalKey());
+        trackerPanel.refreshTimelineView();
+        projectDirty = true;
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onTimeSignatureChanged = [this](int numerator, int denominator)
+    {
+        timelineModel.setTempo(timelineModel.getTempoBpm(), numerator, denominator);
+        engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
+        trackerPanel.setTimingInfo(timelineModel.getTempoBpm(),
+                                   timelineModel.getTimeSignatureNumerator(),
+                                   timelineModel.getTimeSignatureDenominator(),
+                                   timelineModel.getMusicalKey());
+        trackerPanel.refreshTimelineView();
+        projectDirty = true;
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onKeyChanged = [this](const juce::String& key)
+    {
+        timelineModel.setMusicalKey(key);
+        trackerPanel.refreshTimelineView();
+        projectDirty = true;
         saveSessionToDisk();
     };
 
@@ -1397,7 +1705,15 @@ MainComponent::MainComponent()
                 targetTrack = 0;
 
             juce::String clipError;
-            auto clipIndex = timelineModel.addAudioClip(targetTrack, renderedFile, timelineModel.getTransportSeconds(), clipError);
+            auto clipIndex = timelineModel.addClip(cs::ClipKind::audio,
+                                                   targetTrack,
+                                                   suggestedName,
+                                                   renderedFile.getFileName(),
+                                                   "signal",
+                                                   renderedFile,
+                                                   timelineModel.getTransportSeconds(),
+                                                   0.05,
+                                                   clipError);
             if (clipIndex < 0)
             {
                 transportBar.setStatusText(clipError.isNotEmpty() ? clipError
@@ -1916,6 +2232,11 @@ MainComponent::MainComponent()
     contentPanel.onPlaceProjectAssetRequested = [this](const ProjectManager::ProjectAsset& asset)
     {
         placeProjectAssetOnTracker(asset);
+    };
+
+    contentPanel.onExportProjectAssetRequested = [this](const ProjectManager::ProjectAsset& asset)
+    {
+        exportProjectAssetRaw(asset);
     };
 
     contentPanel.onLaunchTutorialRequested = [this](const ContentPanel::TutorialItem& item)
@@ -2589,7 +2910,10 @@ MainComponent::MainComponent()
                     juce::MessageManager::callAsync([safeBar]
                     {
                         if (safeBar != nullptr)
+                        {
                             safeBar->setStatusText("Transport: play");
+                            safeBar->setPlaybackVisualState(true, false);
+                        }
                     });
                 break;
             case XTouchControlSurface::TransportCommand::stop:
@@ -2600,7 +2924,10 @@ MainComponent::MainComponent()
                     juce::MessageManager::callAsync([safeBar]
                     {
                         if (safeBar != nullptr)
+                        {
                             safeBar->setStatusText("Transport: stop");
+                            safeBar->setPlaybackVisualState(false, false);
+                        }
                     });
                 break;
             case XTouchControlSurface::TransportCommand::record:
@@ -2616,7 +2943,10 @@ MainComponent::MainComponent()
                         juce::MessageManager::callAsync([safeBar]
                     {
                         if (safeBar != nullptr)
+                        {
                             safeBar->setStatusText("Transport: record armed");
+                            safeBar->setPlaybackVisualState(true, true);
+                        }
                     });
                 }
                 break;
@@ -2684,6 +3014,7 @@ MainComponent::MainComponent()
     midiSurface.setMasterFaderValue(0.5f);
     engine.setPlaying(false);
     midiSurface.setTransportState(false, false);
+    transportBar.setPlaybackVisualState(false, false);
 
     refreshVisibleBank();
     refreshInsertRack();
@@ -2694,6 +3025,7 @@ MainComponent::MainComponent()
 
     configureTutorialOverlay();
     loadLayoutFromDisk();
+    reportStartup("Creation Station is ready.", 1.0f);
     startTimerHz(30);
 }
 
@@ -2738,9 +3070,18 @@ void MainComponent::confirmCloseApplication(const std::function<void(bool should
 
                                      if (result == 1)
                                      {
+                                         if (! safeThis->projectManager.hasProject())
+                                         {
+                                             safeThis->createNewProject();
+                                             safeThis->transportBar.setStatusText("Create the project, then close again to save and quit.");
+                                             if (onDecision)
+                                                 onDecision(false);
+                                             return;
+                                         }
+
                                          safeThis->saveProject();
                                          if (onDecision)
-                                             onDecision(true);
+                                             onDecision(! safeThis->projectDirty);
                                          return;
                                      }
 
@@ -2799,7 +3140,7 @@ void MainComponent::paint(juce::Graphics& g)
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
-    auto transportArea = area.removeFromTop(72);
+    auto transportArea = area.removeFromTop(92);
     transportBar.setBounds(transportArea);
 
     auto pluginArea = area.removeFromTop(48);
@@ -4186,11 +4527,203 @@ void MainComponent::placeProjectAssetOnTracker(const ProjectManager::ProjectAsse
         return;
     }
 
+    if (engine.getTrackCount() == 0)
+        addTrack();
+
+    auto targetTrack = trackerPanel.getSelectedTrack();
+    if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
+        targetTrack = 0;
+
+    juce::String errorMessage;
+    auto sourceTool = asset.type == "render" ? "signal" : "project-audio";
+    auto clipIndex = timelineModel.addClip(cs::ClipKind::audio,
+                                           targetTrack,
+                                           asset.name,
+                                           asset.file.getFileName(),
+                                           sourceTool,
+                                           asset.file,
+                                           timelineModel.getTransportSeconds(),
+                                           0.05,
+                                           errorMessage);
+
+    if (clipIndex < 0)
+    {
+        contentPanel.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not place that asset on the Tracker.");
+        return;
+    }
+
+    trackerPanel.setSelectedTrack(targetTrack);
+    trackerPanel.refreshTimelineView();
+    setWorkspaceMode(WorkspaceMode::tracker);
+    saveSessionToDisk();
+    transportBar.setStatusText("Placed project asset on Tracker: " + asset.name);
+}
+
+void MainComponent::exportProjectAssetRaw(const ProjectManager::ProjectAsset& asset)
+{
+    if (! asset.file.existsAsFile())
+    {
+        contentPanel.setStatusText("That project asset is missing on disk.");
+        return;
+    }
+
+    if (asset.type != "audioFile" && asset.type != "render")
+    {
+        contentPanel.setStatusText("Only project WAV/render audio can be exported raw right now.");
+        return;
+    }
+
+    rawAssetExportChooser = std::make_unique<juce::FileChooser>("Export raw project audio",
+                                                                juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                                                    .getChildFile(asset.file.getFileName()),
+                                                                "*.wav",
+                                                                true);
+    auto chooser = rawAssetExportChooser.get();
+    chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                         [this, chooser, asset](const juce::FileChooser& result)
+                         {
+                             auto destination = result.getResult();
+                             if (chooser == rawAssetExportChooser.get())
+                                 rawAssetExportChooser.reset();
+
+                             if (destination.getFullPathName().isEmpty())
+                                 return;
+
+                             if (destination.getFileExtension().isEmpty())
+                                 destination = destination.withFileExtension(asset.file.getFileExtension());
+
+                             if (destination.existsAsFile() && ! destination.deleteFile())
+                             {
+                                 contentPanel.setStatusText("Could not replace the existing export file.");
+                                 return;
+                             }
+
+                             if (! asset.file.copyFileTo(destination))
+                             {
+                                 contentPanel.setStatusText("Could not export the raw audio file.");
+                                 return;
+                             }
+
+                             contentPanel.setStatusText("Exported raw audio: " + destination.getFileName());
+                         });
+}
+
+bool MainComponent::renderFullMixToProject()
+{
+    if (engine.isRecording() || engine.isPlaying())
+    {
+        transportBar.setStatusText("Stop playback or recording before rendering.");
+        return false;
+    }
+
+    if (! projectManager.hasProject())
+    {
+        transportBar.setStatusText("Create or open a project before rendering.");
+        return false;
+    }
+
+    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
+    double durationSeconds = 0.0;
+    juce::String errorMessage;
+    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage))
+    {
+        transportBar.setStatusText(errorMessage);
+        return false;
+    }
+
+    auto* currentDevice = deviceManager.getCurrentAudioDevice();
+    WorkstationAudioEngine::RenderSettings settings;
+    settings.sampleRate = currentDevice != nullptr ? currentDevice->getCurrentSampleRate() : 48000.0;
+    settings.blockSize = currentDevice != nullptr ? currentDevice->getCurrentBufferSizeSamples() : 512;
+
+    juce::AudioBuffer<float> renderedMix;
+    transportBar.setStatusText("Rendering full mix...");
+    if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage))
+    {
+        transportBar.setStatusText(errorMessage);
+        return false;
+    }
+
+    auto renderName = projectManager.getCurrentProject().slug + "-full-mix";
+    auto renderFile = projectManager.saveRenderFile(renderedMix, settings.sampleRate, renderName, errorMessage);
+    if (! renderFile.existsAsFile())
+    {
+        transportBar.setStatusText(errorMessage);
+        return false;
+    }
+
     refreshProjectAssets();
-    arrangeView.addAssetClipToSelectedTrack(asset.file.getFileName());
-    refreshFoleyArrangement();
-    setWorkspaceMode(WorkspaceMode::arrange);
-    transportBar.setStatusText("Placed project asset on Foley/Tracker: " + asset.name);
+    saveSessionToDisk();
+    transportBar.setStatusText("Rendered full mix to project: " + renderFile.getFileName());
+    return true;
+}
+
+void MainComponent::exportFullMixAsWav()
+{
+    if (engine.isRecording() || engine.isPlaying())
+    {
+        transportBar.setStatusText("Stop playback or recording before exporting.");
+        return;
+    }
+
+    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
+    double durationSeconds = 0.0;
+    juce::String errorMessage;
+    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage))
+    {
+        transportBar.setStatusText(errorMessage);
+        return;
+    }
+
+    auto defaultName = projectManager.hasProject() ? projectManager.getCurrentProject().slug + "-full-mix.wav"
+                                                   : "creation-station-full-mix.wav";
+    renderExportChooser = std::make_unique<juce::FileChooser>("Export full mix as WAV",
+                                                              juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                                                  .getChildFile(defaultName),
+                                                              "*.wav",
+                                                              true);
+    auto chooser = renderExportChooser.get();
+    chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                         [this, chooser, targets, durationSeconds](const juce::FileChooser& result)
+                         {
+                             auto destination = result.getResult();
+                             if (chooser == renderExportChooser.get())
+                                 renderExportChooser.reset();
+
+                             if (destination.getFullPathName().isEmpty())
+                                 return;
+
+                             if (destination.getFileExtension().isEmpty())
+                                 destination = destination.withFileExtension(".wav");
+
+                             auto* currentDevice = deviceManager.getCurrentAudioDevice();
+                             WorkstationAudioEngine::RenderSettings settings;
+                             settings.sampleRate = currentDevice != nullptr ? currentDevice->getCurrentSampleRate() : 48000.0;
+                             settings.blockSize = currentDevice != nullptr ? currentDevice->getCurrentBufferSizeSamples() : 512;
+
+                             juce::String errorMessage;
+                             juce::AudioBuffer<float> renderedMix;
+                             transportBar.setStatusText("Exporting full mix...");
+                             if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage))
+                             {
+                                 transportBar.setStatusText(errorMessage);
+                                 return;
+                             }
+
+                             if (destination.existsAsFile() && ! destination.deleteFile())
+                             {
+                                 transportBar.setStatusText("Could not replace the existing export file.");
+                                 return;
+                             }
+
+                             if (! writeWavFile(destination, renderedMix, settings.sampleRate, errorMessage))
+                             {
+                                 transportBar.setStatusText(errorMessage);
+                                 return;
+                             }
+
+                             transportBar.setStatusText("Exported full mix: " + destination.getFileName());
+                         });
 }
 
 void MainComponent::refreshFoleyArrangement()
@@ -4210,24 +4743,35 @@ void MainComponent::showProjectMenu()
 {
     juce::PopupMenu menu;
     menu.addItem(1, "New Project");
-    menu.addItem(2, "Open Project…");
+    menu.addItem(2, "New Project From Template...");
+    menu.addItem(3, "Open Project...");
     menu.addSeparator();
-    menu.addItem(3, "Save Project");
-    menu.addItem(4, "Open Project Folder");
+    menu.addItem(4, "Save Project");
+    menu.addItem(5, "Save Project As...");
+    menu.addItem(6, "Save Project As Template...");
+    menu.addItem(7, "Open Project Folder");
     menu.addSeparator();
-    menu.addItem(5, "Autoload Last Project", true, autoloadLastProject);
+    menu.addItem(8, "Render Full Mix to Project");
+    menu.addItem(9, "Export Full Mix as WAV...");
+    menu.addSeparator();
+    menu.addItem(10, "Autoload Last Project", true, autoloadLastProject);
 
-    auto screenArea = transportBar.getScreenBounds();
+    auto screenArea = transportBar.getProjectButtonScreenBounds();
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(screenArea),
                        [this](int result)
                        {
                            switch (result)
                            {
                                case 1: createNewProject(); break;
-                               case 2: openProject(); break;
-                               case 3: saveProject(); break;
-                               case 4: revealProjectFolder(); break;
-                               case 5:
+                               case 2: createProjectFromTemplate(); break;
+                               case 3: openProject(); break;
+                               case 4: saveProject(); break;
+                               case 5: saveProjectAs(); break;
+                               case 6: saveProjectAsTemplate(); break;
+                               case 7: revealProjectFolder(); break;
+                               case 8: renderFullMixToProject(); break;
+                               case 9: exportFullMixAsWav(); break;
+                               case 10:
                                {
                                    autoloadLastProject = ! autoloadLastProject;
                                    settingsPanel.setAutoloadEnabled(autoloadLastProject);
@@ -4240,6 +4784,11 @@ void MainComponent::showProjectMenu()
 }
 
 void MainComponent::createNewProject()
+{
+    guardUnsavedProjectChange("creating a new project", [this] { beginCreateNewProject(); });
+}
+
+void MainComponent::beginCreateNewProject()
 {
     if (! ensureStorageRootConfigured())
         return;
@@ -4278,29 +4827,47 @@ void MainComponent::createNewProject()
 
 void MainComponent::openProject()
 {
+    guardUnsavedProjectChange("opening another project", [this] { beginOpenProject(); });
+}
+
+void MainComponent::beginOpenProject()
+{
     if (! ensureStorageRootConfigured())
         return;
 
     projectChooser = std::make_unique<juce::FileChooser>("Open a Creation Station project",
                                                          projectManager.getProjectsRoot(),
-                                                         "*",
+                                                         "*.csp",
                                                          true);
 
     auto chooser = projectChooser.get();
-    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+    chooser->launchAsync(juce::FileBrowserComponent::openMode
+                             | juce::FileBrowserComponent::canSelectFiles
+                             | juce::FileBrowserComponent::canSelectDirectories,
                          [this, chooser](const juce::FileChooser& result)
                          {
-                             auto directory = result.getResult();
-                             if (! directory.exists())
+                             auto selected = result.getResult();
+                             if (! selected.exists())
                                  return;
 
                              juce::String errorMessage;
-                             if (! projectManager.openProject(directory, errorMessage))
+                             juce::ValueTree restoredState;
+                             auto opened = selected.isDirectory()
+                                               ? projectManager.openProject(selected, errorMessage)
+                                               : projectManager.openProjectPackage(selected, restoredState, errorMessage);
+
+                             if (! opened)
                              {
                                  juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                                                                         "Project Error",
                                                                         errorMessage);
                                  return;
+                             }
+
+                             if (restoredState.isValid())
+                             {
+                                 remapTemplateStateFilesToCurrentProject(restoredState);
+                                 projectManager.saveProjectState(restoredState);
                              }
 
                              transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
@@ -4321,6 +4888,198 @@ void MainComponent::saveProject()
     saveSessionToDisk(true);
     if (! projectDirty)
         transportBar.setStatusText("Project saved: " + projectManager.getProjectPackageFile().getFileName());
+}
+
+void MainComponent::saveProjectAs()
+{
+    if (! projectManager.hasProject())
+    {
+        createNewProject();
+        return;
+    }
+
+    auto* nameEditor = new juce::AlertWindow("Save Project As",
+                                             "Give the copied project a new name.",
+                                             juce::MessageBoxIconType::QuestionIcon);
+    nameEditor->addTextEditor("projectName", projectManager.getCurrentProject().name + " Copy");
+    nameEditor->addButton("Save As", 1);
+    nameEditor->addButton("Cancel", 0);
+
+    auto options = juce::Component::SafePointer<MainComponent>(this);
+    nameEditor->enterModalState(true, juce::ModalCallbackFunction::create([options, nameEditor](int result) mutable
+    {
+        std::unique_ptr<juce::AlertWindow> dialog(nameEditor);
+        if (result != 1 || options == nullptr)
+            return;
+
+        auto state = options->createProjectStateForSave();
+        auto projectName = dialog->getTextEditorContents("projectName").trim();
+        juce::String errorMessage;
+        if (! options->projectManager.saveCurrentProjectAs(projectName, errorMessage))
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                   "Project Error",
+                                                   errorMessage);
+            return;
+        }
+
+        options->remapTemplateStateFilesToCurrentProject(state);
+        options->projectManager.saveProjectState(state);
+        options->transportBar.setProjectLabel("Project: " + options->projectManager.getDisplayLabel());
+        options->settingsPanel.setProjectMetadata(options->projectManager.getCurrentProject());
+        options->refreshProjectAssets();
+        options->loadSessionFromDisk();
+        options->saveSessionToDisk(true);
+        options->transportBar.setStatusText("Saved project as: " + options->projectManager.getProjectPackageFile().getFileName());
+    }), true);
+}
+
+void MainComponent::createProjectFromTemplate()
+{
+    guardUnsavedProjectChange("creating a project from a template", [this] { beginCreateProjectFromTemplate(); });
+}
+
+void MainComponent::beginCreateProjectFromTemplate()
+{
+    if (! ensureStorageRootConfigured())
+        return;
+
+    projectChooser = std::make_unique<juce::FileChooser>("Create a project from a Creation Station template",
+                                                         projectManager.getTemplatesRoot(),
+                                                         "*.cst",
+                                                         true);
+
+    auto chooser = projectChooser.get();
+    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                         [this, chooser](const juce::FileChooser& result)
+                         {
+                             auto templateFile = result.getResult();
+                             if (! templateFile.existsAsFile())
+                                 return;
+
+                             auto* nameEditor = new juce::AlertWindow("New Project From Template",
+                                                                      "Give the new project a name.",
+                                                                      juce::MessageBoxIconType::QuestionIcon);
+                             nameEditor->addTextEditor("projectName", templateFile.getFileNameWithoutExtension());
+                             nameEditor->addButton("Create", 1);
+                             nameEditor->addButton("Cancel", 0);
+
+                             auto options = juce::Component::SafePointer<MainComponent>(this);
+                             nameEditor->enterModalState(true, juce::ModalCallbackFunction::create([options, nameEditor, templateFile](int modalResult) mutable
+                             {
+                                 std::unique_ptr<juce::AlertWindow> dialog(nameEditor);
+                                 if (modalResult != 1 || options == nullptr)
+                                     return;
+
+                                 auto projectName = dialog->getTextEditorContents("projectName").trim();
+                                 juce::ValueTree restoredState;
+                                 juce::String errorMessage;
+                                 if (! options->projectManager.createProjectFromTemplate(templateFile, projectName, restoredState, errorMessage))
+                                 {
+                                     juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                                            "Template Error",
+                                                                            errorMessage);
+                                     return;
+                                 }
+
+                                 if (restoredState.isValid())
+                                 {
+                                     options->remapTemplateStateFilesToCurrentProject(restoredState);
+                                     options->projectManager.saveProjectState(restoredState);
+                                 }
+
+                                 options->transportBar.setProjectLabel("Project: " + options->projectManager.getDisplayLabel());
+                                 options->settingsPanel.setProjectMetadata(options->projectManager.getCurrentProject());
+                                 options->refreshProjectAssets();
+                                 options->loadSessionFromDisk();
+                                 options->saveSessionToDisk(true);
+                                 options->transportBar.setStatusText("Project created from template.");
+                             }), true);
+                         });
+}
+
+void MainComponent::saveProjectAsTemplate()
+{
+    if (! projectManager.hasProject())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+                                               "Template Needs A Project",
+                                               "Create or open a project first, then save it as a template.");
+        return;
+    }
+
+    auto* nameEditor = new juce::AlertWindow("Save Project As Template",
+                                             "Name this reusable studio setup.",
+                                             juce::MessageBoxIconType::QuestionIcon);
+    nameEditor->addTextEditor("templateName", projectManager.getCurrentProject().name + " Template");
+    nameEditor->addButton("Save Template", 1);
+    nameEditor->addButton("Cancel", 0);
+
+    auto options = juce::Component::SafePointer<MainComponent>(this);
+    nameEditor->enterModalState(true, juce::ModalCallbackFunction::create([options, nameEditor](int result) mutable
+    {
+        std::unique_ptr<juce::AlertWindow> dialog(nameEditor);
+        if (result != 1 || options == nullptr)
+            return;
+
+        auto templateName = dialog->getTextEditorContents("templateName").trim();
+        auto state = options->createProjectStateForSave();
+        juce::File templateFile;
+        juce::String errorMessage;
+        if (! options->projectManager.saveTemplatePackage(state, templateName, templateFile, errorMessage))
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                   "Template Error",
+                                                   errorMessage);
+            return;
+        }
+
+        options->transportBar.setStatusText("Template saved: " + templateFile.getFileName());
+    }), true);
+}
+
+void MainComponent::guardUnsavedProjectChange(const juce::String& actionName, const std::function<void()>& action)
+{
+    if (! projectDirty)
+    {
+        if (action)
+            action();
+        return;
+    }
+
+    auto options = juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::QuestionIcon)
+        .withTitle("Save changes?")
+        .withMessage("Save this project before " + actionName + "?")
+        .withButton("Save")
+        .withButton("Don't Save")
+        .withButton("Cancel");
+
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    juce::AlertWindow::showAsync(options,
+                                 [safeThis, action](int result)
+                                 {
+                                     if (safeThis == nullptr)
+                                         return;
+
+                                     if (result == 1)
+                                     {
+                                         if (! safeThis->projectManager.hasProject())
+                                         {
+                                             safeThis->beginCreateNewProject();
+                                             safeThis->transportBar.setStatusText("Create the project first, then choose that action again.");
+                                             return;
+                                         }
+
+                                         safeThis->saveProject();
+                                         if (! safeThis->projectDirty && action)
+                                             action();
+                                         return;
+                                     }
+
+                                     if (result == 2 && action)
+                                         action();
+                                 });
 }
 
 juce::String MainComponent::createRecordingTakeName() const
@@ -4668,17 +5427,8 @@ void MainComponent::applySelectedAudioDeviceSettings()
         transportBar.setStatusText("Audio restore: " + error);
 }
 
-void MainComponent::saveSessionToDisk(bool userInitiated)
+juce::ValueTree MainComponent::createProjectStateForSave()
 {
-    if (! userInitiated)
-    {
-        projectDirty = true;
-        return;
-    }
-
-    if (! projectManager.hasStorageRoot())
-        return;
-
     auto state = engine.createSessionState();
     state.setProperty("bankOffset", mixerPanel.getBankOffset(), nullptr);
     state.setProperty("insertContext", pluginRackBar.isTrackContext() ? "track" : "master", nullptr);
@@ -4693,11 +5443,75 @@ void MainComponent::saveSessionToDisk(bool userInitiated)
     state.setProperty("arrangeVisibleTracks", arrangeView.getVisibleTrackCount(), nullptr);
     state.setProperty("workspaceMode", static_cast<int>(activeMode), nullptr);
     state.setProperty("dslSource", dslPanel.getSourceText(), nullptr);
+    state.setProperty("selectedClipIndex", selectedClipIndex, nullptr);
     state.addChild(arrangeView.createState(), -1, nullptr);
     state.addChild(signalLabPanel.createState(), -1, nullptr);
     state.addChild(graphPanel.createState(), -1, nullptr);
     state.addChild(scorePanel.createState(), -1, nullptr);
     state.addChild(timelineModel.createState(), -1, nullptr);
+    juce::ValueTree undoState("TimelineUndoStack");
+    for (const auto& undoTimelineState : timelineUndoStack)
+        undoState.addChild(undoTimelineState.createCopy(), -1, nullptr);
+    state.addChild(undoState, -1, nullptr);
+    juce::ValueTree redoState("TimelineRedoStack");
+    for (const auto& redoTimelineState : timelineRedoStack)
+        redoState.addChild(redoTimelineState.createCopy(), -1, nullptr);
+    state.addChild(redoState, -1, nullptr);
+
+    return state;
+}
+
+void MainComponent::remapTemplateStateFilesToCurrentProject(juce::ValueTree& state) const
+{
+    if (! projectManager.hasProject())
+        return;
+
+    juce::StringPairArray filesByName;
+    const auto& project = projectManager.getCurrentProject();
+    for (const auto& directory : { project.audioDirectory, project.assetsDirectory, project.dslDirectory, project.rendersDirectory })
+    {
+        juce::Array<juce::File> files;
+        directory.findChildFiles(files, juce::File::findFiles, true, "*");
+        for (const auto& file : files)
+        {
+            auto key = file.getFileName().toLowerCase();
+            if (! filesByName.containsKey(key))
+                filesByName.set(key, file.getFullPathName());
+        }
+    }
+
+    std::function<void(juce::ValueTree&)> remapTree = [&](juce::ValueTree& tree)
+    {
+        if (tree.hasProperty("file"))
+        {
+            auto oldFileName = juce::File(tree.getProperty("file").toString()).getFileName().toLowerCase();
+            auto newPath = filesByName[oldFileName];
+            if (newPath.isNotEmpty())
+                tree.setProperty("file", newPath, nullptr);
+        }
+
+        for (int index = 0; index < tree.getNumChildren(); ++index)
+        {
+            auto child = tree.getChild(index);
+            remapTree(child);
+        }
+    };
+
+    remapTree(state);
+}
+
+void MainComponent::saveSessionToDisk(bool userInitiated)
+{
+    if (! userInitiated)
+    {
+        projectDirty = true;
+        return;
+    }
+
+    if (! projectManager.hasStorageRoot())
+        return;
+
+    auto state = createProjectStateForSave();
 
     projectManager.saveProjectState(state);
 
@@ -4720,24 +5534,20 @@ void MainComponent::saveSessionToDisk(bool userInitiated)
 bool MainComponent::prepareTrackerPlayback()
 {
     juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
-    auto firstClipStart = std::numeric_limits<double>::max();
-    auto lastClipEnd = 0.0;
+    double lastClipEnd = 0.0;
+    juce::String errorMessage;
 
-    for (const auto& clip : timelineModel.getClips())
+    if (! buildTrackerPlaybackTargets(targets, lastClipEnd, errorMessage))
     {
-        if (clip.recording || ! clip.file.existsAsFile())
-            continue;
-
-        WorkstationAudioEngine::PlaybackClipTarget target;
-        target.trackIndex = clip.trackIndex;
-        target.file = clip.file;
-        target.startSeconds = clip.startSeconds;
-        targets.add(target);
-        firstClipStart = juce::jmin(firstClipStart, clip.startSeconds);
-        lastClipEnd = juce::jmax(lastClipEnd, clip.startSeconds + clip.durationSeconds);
+        transportBar.setStatusText(errorMessage);
+        return false;
     }
 
-    juce::String errorMessage;
+    auto firstClipStart = std::numeric_limits<double>::max();
+
+    for (const auto& target : targets)
+        firstClipStart = juce::jmin(firstClipStart, target.startSeconds);
+
     if (! engine.setTrackerPlaybackClips(targets, errorMessage))
     {
         transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not prepare tracker playback.");
@@ -4760,6 +5570,231 @@ bool MainComponent::prepareTrackerPlayback()
     return true;
 }
 
+bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
+                                                double& durationSeconds,
+                                                juce::String& errorMessage) const
+{
+    targets.clear();
+    durationSeconds = 0.0;
+
+    for (const auto& clip : timelineModel.getClips())
+    {
+        if (clip.recording || ! clip.file.existsAsFile())
+            continue;
+
+        WorkstationAudioEngine::PlaybackClipTarget target;
+        target.trackIndex = clip.trackIndex;
+        target.file = clip.file;
+        target.startSeconds = clip.startSeconds;
+        target.sourceStartSeconds = clip.sourceStartSeconds;
+        target.durationSeconds = clip.durationSeconds;
+        targets.add(target);
+        durationSeconds = juce::jmax(durationSeconds, clip.startSeconds + clip.durationSeconds);
+    }
+
+    if (targets.isEmpty())
+    {
+        errorMessage = "No recorded or rendered clips are available.";
+        return false;
+    }
+
+    return true;
+}
+
+void MainComponent::pushTimelineUndoState()
+{
+    pushTimelineUndoState(timelineModel.createState());
+}
+
+void MainComponent::pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit)
+{
+    timelineUndoStack.push_back(stateBeforeEdit.createCopy());
+    if (timelineUndoStack.size() > 100)
+        timelineUndoStack.erase(timelineUndoStack.begin());
+
+    timelineRedoStack.clear();
+}
+
+void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const juce::String& statusText)
+{
+    timelineModel.restoreState(state);
+    selectedClipIndex = -1;
+    syncTrackViews();
+    trackerPanel.setSelectedClip(-1);
+    trackerPanel.refreshTimelineView();
+    projectDirty = true;
+    saveSessionToDisk();
+    transportBar.setStatusText(statusText);
+}
+
+void MainComponent::undoTimelineEdit()
+{
+    if (timelineUndoStack.empty())
+        return;
+
+    timelineRedoStack.push_back(timelineModel.createState());
+    if (timelineRedoStack.size() > 100)
+        timelineRedoStack.erase(timelineRedoStack.begin());
+
+    auto stateToRestore = timelineUndoStack.back().createCopy();
+    timelineUndoStack.pop_back();
+    restoreTimelineEditState(stateToRestore, "Tracker edit undone.");
+}
+
+void MainComponent::redoTimelineEdit()
+{
+    if (timelineRedoStack.empty())
+        return;
+
+    timelineUndoStack.push_back(timelineModel.createState());
+    if (timelineUndoStack.size() > 100)
+        timelineUndoStack.erase(timelineUndoStack.begin());
+
+    auto stateToRestore = timelineRedoStack.back().createCopy();
+    timelineRedoStack.pop_back();
+    restoreTimelineEditState(stateToRestore, "Tracker edit redone.");
+}
+
+void MainComponent::splitClipAt(int clipIndex, double splitSeconds)
+{
+    auto stateBeforeEdit = timelineModel.createState();
+    if (! timelineModel.splitClip(clipIndex, splitSeconds))
+    {
+        transportBar.setStatusText("Split needs the playhead inside a clip.");
+        return;
+    }
+
+    pushTimelineUndoState(stateBeforeEdit);
+    selectedClipIndex = juce::jmin(clipIndex + 1, static_cast<int>(timelineModel.getClips().size()) - 1);
+    trackerPanel.setSelectedClip(selectedClipIndex);
+    trackerPanel.refreshTimelineView();
+    projectDirty = true;
+    saveSessionToDisk();
+    transportBar.setStatusText("Clip split.");
+}
+
+void MainComponent::duplicateClip(int clipIndex)
+{
+    auto stateBeforeEdit = timelineModel.createState();
+    if (! timelineModel.duplicateClip(clipIndex))
+    {
+        transportBar.setStatusText("No clip selected to duplicate.");
+        return;
+    }
+
+    pushTimelineUndoState(stateBeforeEdit);
+    selectedClipIndex = static_cast<int>(timelineModel.getClips().size()) - 1;
+    trackerPanel.setSelectedClip(selectedClipIndex);
+    trackerPanel.refreshTimelineView();
+    projectDirty = true;
+    saveSessionToDisk();
+    transportBar.setStatusText("Clip duplicated.");
+}
+
+void MainComponent::deleteClip(int clipIndex)
+{
+    auto stateBeforeEdit = timelineModel.createState();
+    if (! timelineModel.deleteClip(clipIndex))
+    {
+        transportBar.setStatusText("No clip selected to delete.");
+        return;
+    }
+
+    pushTimelineUndoState(stateBeforeEdit);
+    selectedClipIndex = -1;
+    trackerPanel.setSelectedClip(-1);
+    trackerPanel.refreshTimelineView();
+    projectDirty = true;
+    saveSessionToDisk();
+    transportBar.setStatusText("Clip deleted.");
+}
+
+void MainComponent::renameClip(int clipIndex)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(timelineModel.getClips().size())))
+    {
+        transportBar.setStatusText("No clip selected to rename.");
+        return;
+    }
+
+    const auto& clip = timelineModel.getClips()[(size_t) clipIndex];
+    auto* renameDialog = new juce::AlertWindow("Rename Clip",
+                                               "Give this clip a useful name.",
+                                               juce::MessageBoxIconType::QuestionIcon);
+    renameDialog->addTextEditor("clipName", clip.displayName);
+    renameDialog->addButton("Rename", 1);
+    renameDialog->addButton("Cancel", 0);
+
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    renameDialog->enterModalState(true,
+                                  juce::ModalCallbackFunction::create([safeThis, renameDialog, clipIndex](int result) mutable
+                                  {
+                                      std::unique_ptr<juce::AlertWindow> dialog(renameDialog);
+                                      if (result != 1 || safeThis == nullptr)
+                                          return;
+
+                                      auto newName = dialog->getTextEditorContents("clipName").trim();
+                                      if (newName.isEmpty())
+                                          return;
+
+                                      auto stateBeforeEdit = safeThis->timelineModel.createState();
+                                      safeThis->timelineModel.setClipDisplayName(clipIndex, newName);
+                                      safeThis->pushTimelineUndoState(stateBeforeEdit);
+                                      safeThis->selectedClipIndex = clipIndex;
+                                      safeThis->trackerPanel.setSelectedClip(clipIndex);
+                                      safeThis->trackerPanel.refreshTimelineView();
+                                      safeThis->projectDirty = true;
+                                      safeThis->saveSessionToDisk();
+                                      safeThis->transportBar.setStatusText("Clip renamed.");
+                                  }),
+                                  true);
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    auto mods = key.getModifiers();
+    auto code = key.getKeyCode();
+
+    if (mods.isCommandDown() && ! mods.isShiftDown() && code == 'z')
+    {
+        undoTimelineEdit();
+        return true;
+    }
+
+    if ((mods.isCommandDown() && ! mods.isShiftDown() && code == 'y')
+        || (mods.isCommandDown() && mods.isShiftDown() && code == 'z'))
+    {
+        redoTimelineEdit();
+        return true;
+    }
+
+    if (mods.isCommandDown() && ! mods.isShiftDown() && code == 'd' && selectedClipIndex >= 0)
+    {
+        duplicateClip(selectedClipIndex);
+        return true;
+    }
+
+    if ((code == juce::KeyPress::deleteKey || code == juce::KeyPress::backspaceKey) && selectedClipIndex >= 0)
+    {
+        deleteClip(selectedClipIndex);
+        return true;
+    }
+
+    if (code == juce::KeyPress::F2Key && selectedClipIndex >= 0)
+    {
+        renameClip(selectedClipIndex);
+        return true;
+    }
+
+    if (mods.isCommandDown() && mods.isShiftDown() && code == 's' && selectedClipIndex >= 0)
+    {
+        splitClipAt(selectedClipIndex, timelineModel.getTransportSeconds());
+        return true;
+    }
+
+    return false;
+}
+
 void MainComponent::loadSessionFromDisk()
 {
     if (! projectManager.hasStorageRoot())
@@ -4777,6 +5812,28 @@ void MainComponent::loadSessionFromDisk()
 
     if (auto timelineState = state.getChildWithName("Timeline"); timelineState.isValid())
         timelineModel.restoreState(timelineState);
+
+    timelineUndoStack.clear();
+    if (auto undoState = state.getChildWithName("TimelineUndoStack"); undoState.isValid())
+    {
+        for (const auto child : undoState)
+            if (child.hasType("Timeline"))
+                timelineUndoStack.push_back(child.createCopy());
+
+        while (timelineUndoStack.size() > 100)
+            timelineUndoStack.erase(timelineUndoStack.begin());
+    }
+
+    timelineRedoStack.clear();
+    if (auto redoState = state.getChildWithName("TimelineRedoStack"); redoState.isValid())
+    {
+        for (const auto child : redoState)
+            if (child.hasType("Timeline"))
+                timelineRedoStack.push_back(child.createCopy());
+
+        while (timelineRedoStack.size() > 100)
+            timelineRedoStack.erase(timelineRedoStack.begin());
+    }
 
     auto bankOffset = (int) state.getProperty("bankOffset", 0);
     mixerPanel.setBankOffset(bankOffset);
@@ -4842,6 +5899,11 @@ void MainComponent::loadSessionFromDisk()
 
     syncTrackViews();
 
+    selectedClipIndex = (int) state.getProperty("selectedClipIndex", -1);
+    if (! juce::isPositiveAndBelow(selectedClipIndex, static_cast<int>(timelineModel.getClips().size())))
+        selectedClipIndex = -1;
+    trackerPanel.setSelectedClip(selectedClipIndex);
+
     armedTracks.resize((size_t) engine.getTrackCount(), false);
     monitoredTracks.resize((size_t) engine.getTrackCount(), false);
     for (int index = 0; index < engine.getTrackCount(); ++index)
@@ -4882,6 +5944,11 @@ void MainComponent::syncTrackViews()
     auto trackCount = engine.getTrackCount();
 
     refreshTrackInputSources();
+    trackerPanel.setTimingInfo(timelineModel.getTempoBpm(),
+                               timelineModel.getTimeSignatureNumerator(),
+                               timelineModel.getTimeSignatureDenominator(),
+                               timelineModel.getMusicalKey());
+    timelineModel.setTrackCount(trackCount);
     trackerPanel.setTrackCount(trackCount);
     arrangeView.setTotalTrackCount(trackCount);
     recordView.setTrackCount(trackCount);
@@ -4900,8 +5967,14 @@ void MainComponent::syncTrackViews()
     for (int index = 0; index < trackCount; ++index)
     {
         auto trackName = engine.getTrackName(index);
+        timelineModel.setTrackName(index, trackName);
+        timelineModel.setTrackChannelMode(index, engine.isTrackStereoEnabled(index) ? cs::TrackChannelMode::stereo
+                                                                                    : cs::TrackChannelMode::mono);
         trackerPanel.setTrackName(index, trackName);
+        trackerPanel.setTrackKind(index, timelineModel.getTrackKind(index));
+        trackerPanel.setTrackStereo(index, engine.isTrackStereoEnabled(index));
         arrangeView.setTrackName(index, trackName);
+        arrangeView.setTrackKind(index, timelineModel.getTrackKind(index));
         recordView.setTrackName(index, trackName);
         mixerPanel.setChannelName(index, trackName);
         midiSurface.setChannelName(index, trackName);
