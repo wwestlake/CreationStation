@@ -925,6 +925,13 @@ MainComponent::PluginRackBar::PluginRackBar()
     };
     addAndMakeVisible(openEditorButton);
 
+    fxStackButton.onClick = [this]
+    {
+        if (onOpenFxStack)
+            onOpenFxStack();
+    };
+    addAndMakeVisible(fxStackButton);
+
     loadButton.onClick = [this]
     {
         if (onLoadPlugin)
@@ -949,6 +956,7 @@ void MainComponent::PluginRackBar::setContextMaster()
     selectedTrackIndex = -1;
     titleLabel.setText("Master Insert", juce::dontSendNotification);
     contextLabel.setText("Master", juce::dontSendNotification);
+    fxStackButton.setEnabled(false);
 }
 
 void MainComponent::PluginRackBar::setContextTrack(int trackIndex, const juce::String& trackName)
@@ -959,6 +967,7 @@ void MainComponent::PluginRackBar::setContextTrack(int trackIndex, const juce::S
     contextLabel.setText(trackName.isNotEmpty() ? ("Track " + juce::String(trackIndex + 1) + " - " + trackName)
                                                 : ("Track " + juce::String(trackIndex + 1)),
                          juce::dontSendNotification);
+    fxStackButton.setEnabled(true);
 }
 
 void MainComponent::PluginRackBar::setPluginName(const juce::String& name)
@@ -968,6 +977,7 @@ void MainComponent::PluginRackBar::setPluginName(const juce::String& name)
     openEditorButton.setEnabled(hasPlugin);
     bypassButton.setEnabled(hasPlugin);
     unloadButton.setEnabled(hasPlugin);
+    fxStackButton.setEnabled(context == Context::track);
 }
 
 void MainComponent::PluginRackBar::setCatalogSummary(const juce::String& summary)
@@ -989,6 +999,7 @@ void MainComponent::PluginRackBar::setHasPlugin(bool shouldHavePlugin)
         bypassButton.setEnabled(false);
         unloadButton.setEnabled(false);
     }
+    fxStackButton.setEnabled(context == Context::track);
 }
 
 void MainComponent::PluginRackBar::paint(juce::Graphics& g)
@@ -1008,7 +1019,160 @@ void MainComponent::PluginRackBar::resized()
     catalogLabel.setBounds(centerArea.removeFromTop(18));
     unloadButton.setBounds(area.removeFromRight(90));
     openEditorButton.setBounds(area.removeFromRight(110));
+    fxStackButton.setBounds(area.removeFromRight(100).reduced(4, 0));
     bypassButton.setBounds(area.removeFromRight(100));
+}
+
+MainComponent::FxStackPanel::FxStackPanel()
+{
+    titleLabel.setText("Track FX Stack", juce::dontSendNotification);
+    titleLabel.setFont(juce::Font(20.0f).boldened());
+    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(titleLabel);
+
+    trackLabel.setText("No track selected", juce::dontSendNotification);
+    trackLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9fb2cc));
+    addAndMakeVisible(trackLabel);
+
+    pluginList.setRowHeight(34);
+    pluginList.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff0d141d));
+    addAndMakeVisible(pluginList);
+
+    addButton.onClick = [this] { if (onAddPlugin) onAddPlugin(); };
+    insertButton.onClick = [this] { if (onInsertPlugin) onInsertPlugin(getSelectedSlot()); };
+    removeButton.onClick = [this] { if (onRemovePlugin) onRemovePlugin(getSelectedSlot()); };
+    upButton.onClick = [this]
+    {
+        const auto slot = getSelectedSlot();
+        if (onMovePlugin && slot > 0)
+            onMovePlugin(slot, slot - 1);
+    };
+    downButton.onClick = [this]
+    {
+        const auto slot = getSelectedSlot();
+        if (onMovePlugin && slot >= 0 && slot < pluginNames.size() - 1)
+            onMovePlugin(slot, slot + 1);
+    };
+    bypassButton.onClick = [this]
+    {
+        const auto slot = getSelectedSlot();
+        if (onBypassChanged && juce::isPositiveAndBelow(slot, pluginBypassStates.size()))
+            onBypassChanged(slot, ! pluginBypassStates[slot]);
+    };
+    openButton.onClick = [this]
+    {
+        const auto slot = getSelectedSlot();
+        if (onOpenPluginEditor && slot >= 0)
+            onOpenPluginEditor(slot);
+    };
+
+    for (auto* button : { &addButton, &insertButton, &removeButton, &upButton, &downButton, &bypassButton, &openButton })
+        addAndMakeVisible(button);
+
+    refreshButtonState();
+}
+
+void MainComponent::FxStackPanel::setTrackName(const juce::String& name)
+{
+    trackLabel.setText(name.isNotEmpty() ? name : "Selected track", juce::dontSendNotification);
+}
+
+void MainComponent::FxStackPanel::setPlugins(const juce::StringArray& names, const juce::Array<bool>& bypassStates)
+{
+    const auto oldSelection = getSelectedSlot();
+    pluginNames = names;
+    pluginBypassStates = bypassStates;
+    pluginList.updateContent();
+    if (pluginNames.isEmpty())
+        pluginList.deselectAllRows();
+    else
+        pluginList.selectRow(juce::jlimit(0, pluginNames.size() - 1, oldSelection), false, true);
+    refreshButtonState();
+    repaint();
+}
+
+int MainComponent::FxStackPanel::getSelectedSlot() const noexcept
+{
+    return pluginList.getSelectedRow();
+}
+
+void MainComponent::FxStackPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour(0xff101820));
+    g.setColour(juce::Colour(0xff27364a));
+    g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 10.0f, 1.0f);
+}
+
+void MainComponent::FxStackPanel::resized()
+{
+    auto area = getLocalBounds().reduced(14);
+    titleLabel.setBounds(area.removeFromTop(28));
+    trackLabel.setBounds(area.removeFromTop(24));
+    area.removeFromTop(8);
+
+    auto buttonRow = area.removeFromBottom(38);
+    addButton.setBounds(buttonRow.removeFromLeft(86).reduced(3));
+    insertButton.setBounds(buttonRow.removeFromLeft(86).reduced(3));
+    removeButton.setBounds(buttonRow.removeFromLeft(96).reduced(3));
+    upButton.setBounds(buttonRow.removeFromLeft(70).reduced(3));
+    downButton.setBounds(buttonRow.removeFromLeft(76).reduced(3));
+    bypassButton.setBounds(buttonRow.removeFromLeft(96).reduced(3));
+    openButton.setBounds(buttonRow.removeFromLeft(100).reduced(3));
+
+    pluginList.setBounds(area.reduced(0, 8));
+}
+
+int MainComponent::FxStackPanel::getNumRows()
+{
+    return pluginNames.size();
+}
+
+void MainComponent::FxStackPanel::paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected)
+{
+    auto row = juce::Rectangle<int>(0, 0, width, height).reduced(5, 3);
+    g.setColour(rowIsSelected ? juce::Colour(0xff1f5f86) : juce::Colour(0xff172332));
+    g.fillRoundedRectangle(row.toFloat(), 6.0f);
+
+    const auto bypassed = juce::isPositiveAndBelow(rowNumber, pluginBypassStates.size()) && pluginBypassStates[rowNumber];
+    g.setColour(bypassed ? juce::Colour(0xffff7d7d) : juce::Colour(0xff6fe7ff));
+    g.fillEllipse((float) row.getX() + 10.0f, (float) row.getCentreY() - 4.0f, 8.0f, 8.0f);
+
+    g.setColour(juce::Colours::white);
+    g.setFont(juce::Font(14.0f).boldened());
+    g.drawText(juce::String(rowNumber + 1).paddedLeft('0', 2) + "  " + pluginNames[rowNumber],
+               row.reduced(28, 0),
+               juce::Justification::centredLeft,
+               true);
+
+    if (bypassed)
+    {
+        g.setColour(juce::Colour(0xffffa0a0));
+        g.setFont(juce::Font(12.0f));
+        g.drawText("bypassed", row.reduced(8), juce::Justification::centredRight, true);
+    }
+}
+
+void MainComponent::FxStackPanel::selectedRowsChanged(int)
+{
+    refreshButtonState();
+}
+
+void MainComponent::FxStackPanel::listBoxItemDoubleClicked(int row, const juce::MouseEvent&)
+{
+    if (onOpenPluginEditor && juce::isPositiveAndBelow(row, pluginNames.size()))
+        onOpenPluginEditor(row);
+}
+
+void MainComponent::FxStackPanel::refreshButtonState()
+{
+    const auto slot = getSelectedSlot();
+    const auto hasSelection = juce::isPositiveAndBelow(slot, pluginNames.size());
+    insertButton.setEnabled(hasSelection);
+    removeButton.setEnabled(hasSelection);
+    upButton.setEnabled(hasSelection && slot > 0);
+    downButton.setEnabled(hasSelection && slot < pluginNames.size() - 1);
+    bypassButton.setEnabled(hasSelection);
+    openButton.setEnabled(hasSelection);
 }
 
 MainComponent::MainComponent()
@@ -2352,6 +2516,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
     };
 
+    pluginRackBar.onOpenFxStack = [this]
+    {
+        showFxStackWindow();
+    };
+
     graphPanel.onEnabledChanged = [this](bool shouldEnable)
     {
         engine.setGraphEnabled(shouldEnable);
@@ -3522,6 +3691,143 @@ void MainComponent::showAudioSettings()
     window->centreWithSize(720, 540);
     window->setVisible(true);
     audioDeviceWindow = std::move(window);
+}
+
+void MainComponent::showFxStackWindow()
+{
+    if (! pluginRackBar.isTrackContext())
+    {
+        transportBar.setStatusText("Select a track to edit its FX stack.");
+        return;
+    }
+
+    if (fxStackWindow != nullptr)
+    {
+        fxStackWindow->toFront(true);
+        refreshFxStackWindow();
+        return;
+    }
+
+    auto panel = std::make_unique<FxStackPanel>();
+    fxStackPanel = panel.get();
+
+    panel->onAddPlugin = [this]
+    {
+        const auto trackIndex = pluginRackBar.getTrackIndex();
+        showPluginLoadMenu([this, trackIndex](const juce::File& file)
+        {
+            juce::String errorMessage;
+            if (! engine.loadTrackPlugin(trackIndex, file, errorMessage))
+                transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not add plugin.");
+
+            refreshInsertRack();
+            syncTrackViews();
+            projectDirty = true;
+        });
+    };
+
+    panel->onInsertPlugin = [this](int slotIndex)
+    {
+        const auto trackIndex = pluginRackBar.getTrackIndex();
+        showPluginLoadMenu([this, trackIndex, slotIndex](const juce::File& file)
+        {
+            juce::String errorMessage;
+            if (! engine.insertTrackPlugin(trackIndex, slotIndex, file, errorMessage))
+                transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not insert plugin.");
+
+            refreshInsertRack();
+            syncTrackViews();
+            projectDirty = true;
+        });
+    };
+
+    panel->onRemovePlugin = [this](int slotIndex)
+    {
+        engine.unloadTrackPlugin(pluginRackBar.getTrackIndex(), slotIndex);
+        refreshInsertRack();
+        syncTrackViews();
+        projectDirty = true;
+    };
+
+    panel->onMovePlugin = [this](int fromSlot, int toSlot)
+    {
+        if (engine.moveTrackPlugin(pluginRackBar.getTrackIndex(), fromSlot, toSlot))
+        {
+            refreshInsertRack();
+            syncTrackViews();
+            projectDirty = true;
+        }
+    };
+
+    panel->onBypassChanged = [this](int slotIndex, bool shouldBypass)
+    {
+        engine.setTrackPluginBypassed(pluginRackBar.getTrackIndex(), slotIndex, shouldBypass);
+        refreshInsertRack();
+        syncTrackViews();
+        projectDirty = true;
+    };
+
+    panel->onOpenPluginEditor = [this](int slotIndex)
+    {
+        openTrackPluginEditor(pluginRackBar.getTrackIndex(), slotIndex);
+    };
+
+    auto window = std::make_unique<ManagedDocumentWindow>("Creation Station - Track FX Stack",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::closeButton,
+                                                          [this]
+                                                          {
+                                                              fxStackPanel = nullptr;
+                                                              fxStackWindow.reset();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(720, 500);
+    window->setVisible(true);
+    fxStackWindow = std::move(window);
+    refreshFxStackWindow();
+}
+
+void MainComponent::refreshFxStackWindow()
+{
+    if (fxStackPanel == nullptr || ! pluginRackBar.isTrackContext())
+        return;
+
+    const auto trackIndex = pluginRackBar.getTrackIndex();
+    fxStackPanel->setTrackName("Track " + juce::String(trackIndex + 1) + " - " + engine.getTrackName(trackIndex));
+    fxStackPanel->setPlugins(engine.getTrackPluginNames(trackIndex),
+                             engine.getTrackPluginBypassStates(trackIndex));
+}
+
+void MainComponent::openTrackPluginEditor(int trackIndex, int slotIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
+        return;
+
+    if (pluginEditorWindow != nullptr)
+        pluginEditorWindow.reset();
+
+    auto* editor = engine.createTrackPluginEditor(trackIndex, slotIndex);
+    if (editor == nullptr)
+        return;
+
+    auto pluginNames = engine.getTrackPluginNames(trackIndex);
+    auto pluginName = juce::isPositiveAndBelow(slotIndex, pluginNames.size()) ? pluginNames[slotIndex]
+                                                                              : "Plugin";
+    auto window = std::make_unique<ManagedDocumentWindow>("Track " + juce::String(trackIndex + 1) + " - " + pluginName,
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::closeButton,
+                                                          [this]
+                                                          {
+                                                              pluginEditorWindow.reset();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setContentOwned(editor, true);
+    window->centreWithSize(900, 650);
+    window->setVisible(true);
+    pluginEditorWindow = std::move(window);
 }
 
 void MainComponent::configureVstSearchPaths()
@@ -6324,5 +6630,6 @@ void MainComponent::refreshInsertRack()
     if (engine.hasGraphVstPlugin())
         graphPanel.setAssignedVstPlugin(engine.getGraphVstPluginName(), engine.getGraphVstPluginFile().getFullPathName());
 
+    refreshFxStackWindow();
     refreshPluginsPanel();
 }

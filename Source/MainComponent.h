@@ -110,6 +110,7 @@ private:
         std::function<void()> onManagePluginPaths;
         std::function<void()> onUnloadPlugin;
         std::function<void()> onOpenPluginEditor;
+        std::function<void()> onOpenFxStack;
         std::function<void(bool)> onBypassChanged;
 
         void setContextMaster();
@@ -132,6 +133,7 @@ private:
         juce::ToggleButton bypassButton { "Bypass" };
         juce::TextButton pathsButton { "VST Paths" };
         juce::TextButton openEditorButton { "Open UI" };
+        juce::TextButton fxStackButton { "FX Stack" };
         juce::TextButton loadButton { "Load VST3" };
         juce::TextButton unloadButton { "Unload" };
 
@@ -139,6 +141,48 @@ private:
         Context context = Context::master;
         int selectedTrackIndex = -1;
         bool hasPlugin = false;
+    };
+
+    class FxStackPanel final : public juce::Component,
+                               private juce::ListBoxModel
+    {
+    public:
+        FxStackPanel();
+
+        std::function<void()> onAddPlugin;
+        std::function<void(int)> onInsertPlugin;
+        std::function<void(int)> onRemovePlugin;
+        std::function<void(int, int)> onMovePlugin;
+        std::function<void(int)> onOpenPluginEditor;
+        std::function<void(int, bool)> onBypassChanged;
+
+        void setTrackName(const juce::String& name);
+        void setPlugins(const juce::StringArray& names, const juce::Array<bool>& bypassStates);
+        int getSelectedSlot() const noexcept;
+
+        void resized() override;
+        void paint(juce::Graphics&) override;
+
+    private:
+        int getNumRows() override;
+        void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override;
+        void selectedRowsChanged(int lastRowSelected) override;
+        void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override;
+
+        void refreshButtonState();
+
+        juce::Label titleLabel;
+        juce::Label trackLabel;
+        juce::ListBox pluginList { "Track FX Stack", this };
+        juce::TextButton addButton { "+ Add" };
+        juce::TextButton insertButton { "Insert" };
+        juce::TextButton removeButton { "Remove" };
+        juce::TextButton upButton { "Up" };
+        juce::TextButton downButton { "Down" };
+        juce::TextButton bypassButton { "Bypass" };
+        juce::TextButton openButton { "Open UI" };
+        juce::StringArray pluginNames;
+        juce::Array<bool> pluginBypassStates;
     };
 
     class TransportBar final : public juce::Component
@@ -232,6 +276,8 @@ private:
     TourGuideOverlay tourOverlay;
     std::unique_ptr<juce::FileChooser> pluginChooser;
     std::unique_ptr<juce::DocumentWindow> pluginEditorWindow;
+    std::unique_ptr<juce::DocumentWindow> fxStackWindow;
+    juce::Component::SafePointer<FxStackPanel> fxStackPanel;
     std::array<std::unique_ptr<juce::DocumentWindow>, 11> workspacePopoutWindows;
     juce::Label poppedWorkspacePlaceholder;
     juce::Component::SafePointer<TransportBar> transportBarSafe;
@@ -348,6 +394,9 @@ private:
     void showPluginLoadMenu(const std::function<void(const juce::File&)>& onPluginChosen);
     void refreshPluginsPanel();
     void loadPluginIntoCurrentInsert(const juce::File& file);
+    void showFxStackWindow();
+    void refreshFxStackWindow();
+    void openTrackPluginEditor(int trackIndex, int slotIndex);
     void assignPluginToGraphNode(const juce::File& file);
     void showTour();
     void importProjectSounds();

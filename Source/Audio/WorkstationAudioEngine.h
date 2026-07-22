@@ -142,14 +142,22 @@ public:
     juce::AudioProcessorEditor* createMasterPluginEditor();
 
     bool loadTrackPlugin(int trackIndex, const juce::File& file, juce::String& errorMessage);
+    bool insertTrackPlugin(int trackIndex, int slotIndex, const juce::File& file, juce::String& errorMessage);
     void unloadTrackPlugin(int trackIndex);
+    void unloadTrackPlugin(int trackIndex, int slotIndex);
+    bool moveTrackPlugin(int trackIndex, int fromSlotIndex, int toSlotIndex);
     juce::String getTrackPluginName(int trackIndex) const;
+    juce::StringArray getTrackPluginNames(int trackIndex) const;
+    juce::Array<bool> getTrackPluginBypassStates(int trackIndex) const;
     juce::File getTrackPluginFile(int trackIndex) const;
     bool hasTrackPlugin(int trackIndex) const noexcept;
     int getTrackPluginCount(int trackIndex) const noexcept;
     void setTrackPluginBypassed(int trackIndex, bool shouldBypass);
+    void setTrackPluginBypassed(int trackIndex, int slotIndex, bool shouldBypass);
     bool isTrackPluginBypassed(int trackIndex) const noexcept;
+    bool isTrackPluginBypassed(int trackIndex, int slotIndex) const noexcept;
     juce::AudioProcessorEditor* createTrackPluginEditor(int trackIndex);
+    juce::AudioProcessorEditor* createTrackPluginEditor(int trackIndex, int slotIndex);
 
     void audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
                                           int totalNumInputChannels,
@@ -242,16 +250,28 @@ private:
                        const juce::MemoryBlock* savedState,
                        bool bypassed,
                        juce::String& errorMessage);
+        bool insertPlugin(int slotIndex,
+                          const juce::File& file,
+                          const juce::MemoryBlock* savedState,
+                          bool bypassed,
+                          juce::String& errorMessage);
         void removeLastPlugin();
+        void removePlugin(int slotIndex);
+        bool movePlugin(int fromSlotIndex, int toSlotIndex);
         void clear();
         int getPluginCount() const noexcept { return inserts.size(); }
         bool hasPlugin() const noexcept { return ! inserts.isEmpty(); }
         juce::String getPluginName(int slotIndex) const;
+        juce::StringArray getPluginNames() const;
+        juce::Array<bool> getBypassStates() const;
         juce::String getSummaryName() const;
         juce::File getPluginFile(int slotIndex) const;
         void setLastBypassed(bool shouldBypass) noexcept;
+        void setBypassed(int slotIndex, bool shouldBypass) noexcept;
         bool isLastBypassed() const noexcept;
+        bool isBypassed(int slotIndex) const noexcept;
         juce::AudioProcessorEditor* createLastEditor();
+        juce::AudioProcessorEditor* createEditor(int slotIndex);
         bool copyStateTo(int slotIndex, juce::MemoryBlock& destination) const;
 
     private:

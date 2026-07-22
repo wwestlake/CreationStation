@@ -276,6 +276,15 @@ bool WorkstationAudioEngine::PluginInsertChain::addPlugin(const juce::File& file
                                                           bool bypassed,
                                                           juce::String& errorMessage)
 {
+    return insertPlugin(inserts.size(), file, savedState, bypassed, errorMessage);
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::insertPlugin(int slotIndex,
+                                                             const juce::File& file,
+                                                             const juce::MemoryBlock* savedState,
+                                                             bool bypassed,
+                                                             juce::String& errorMessage)
+{
     auto insert = std::make_unique<PluginInsertSource>();
     insert->prepareToPlay(blockSize, sampleRate);
 
@@ -283,7 +292,7 @@ bool WorkstationAudioEngine::PluginInsertChain::addPlugin(const juce::File& file
         return false;
 
     insert->setBypassed(bypassed);
-    inserts.add(insert.release());
+    inserts.insert(juce::jlimit(0, inserts.size(), slotIndex), insert.release());
     return true;
 }
 
@@ -291,6 +300,27 @@ void WorkstationAudioEngine::PluginInsertChain::removeLastPlugin()
 {
     if (! inserts.isEmpty())
         inserts.removeLast();
+}
+
+void WorkstationAudioEngine::PluginInsertChain::removePlugin(int slotIndex)
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        inserts.remove(slotIndex);
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::movePlugin(int fromSlotIndex, int toSlotIndex)
+{
+    if (! juce::isPositiveAndBelow(fromSlotIndex, inserts.size()))
+        return false;
+
+    if (! juce::isPositiveAndBelow(toSlotIndex, inserts.size()))
+        return false;
+
+    if (fromSlotIndex == toSlotIndex)
+        return true;
+
+    inserts.move(fromSlotIndex, toSlotIndex);
+    return true;
 }
 
 void WorkstationAudioEngine::PluginInsertChain::clear()
@@ -305,6 +335,25 @@ juce::String WorkstationAudioEngine::PluginInsertChain::getPluginName(int slotIn
             return insert->getPluginName();
 
     return {};
+}
+
+juce::StringArray WorkstationAudioEngine::PluginInsertChain::getPluginNames() const
+{
+    juce::StringArray names;
+    for (auto* insert : inserts)
+        names.add(insert != nullptr && insert->getPluginName().isNotEmpty() ? insert->getPluginName()
+                                                                            : "Unnamed plugin");
+
+    return names;
+}
+
+juce::Array<bool> WorkstationAudioEngine::PluginInsertChain::getBypassStates() const
+{
+    juce::Array<bool> states;
+    for (auto* insert : inserts)
+        states.add(insert != nullptr && insert->isBypassed());
+
+    return states;
 }
 
 juce::String WorkstationAudioEngine::PluginInsertChain::getSummaryName() const
@@ -335,6 +384,13 @@ void WorkstationAudioEngine::PluginInsertChain::setLastBypassed(bool shouldBypas
         insert->setBypassed(shouldBypass);
 }
 
+void WorkstationAudioEngine::PluginInsertChain::setBypassed(int slotIndex, bool shouldBypass) noexcept
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            insert->setBypassed(shouldBypass);
+}
+
 bool WorkstationAudioEngine::PluginInsertChain::isLastBypassed() const noexcept
 {
     if (auto* insert = inserts.getLast())
@@ -343,10 +399,28 @@ bool WorkstationAudioEngine::PluginInsertChain::isLastBypassed() const noexcept
     return false;
 }
 
+bool WorkstationAudioEngine::PluginInsertChain::isBypassed(int slotIndex) const noexcept
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->isBypassed();
+
+    return false;
+}
+
 juce::AudioProcessorEditor* WorkstationAudioEngine::PluginInsertChain::createLastEditor()
 {
     if (auto* insert = inserts.getLast())
         return insert->createEditor();
+
+    return nullptr;
+}
+
+juce::AudioProcessorEditor* WorkstationAudioEngine::PluginInsertChain::createEditor(int slotIndex)
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->createEditor();
 
     return nullptr;
 }
@@ -1758,13 +1832,18 @@ juce::AudioProcessorEditor* WorkstationAudioEngine::createMasterPluginEditor()
 
 bool WorkstationAudioEngine::loadTrackPlugin(int trackIndex, const juce::File& file, juce::String& errorMessage)
 {
+    return insertTrackPlugin(trackIndex, getTrackPluginCount(trackIndex), file, errorMessage);
+}
+
+bool WorkstationAudioEngine::insertTrackPlugin(int trackIndex, int slotIndex, const juce::File& file, juce::String& errorMessage)
+{
     if (! juce::isPositiveAndBelow(trackIndex, tracks.size()))
     {
         errorMessage = "Track index is out of range.";
         return false;
     }
 
-    return tracks[(size_t) trackIndex]->insertChain.addPlugin(file, errorMessage);
+    return tracks[(size_t) trackIndex]->insertChain.insertPlugin(slotIndex, file, nullptr, false, errorMessage);
 }
 
 void WorkstationAudioEngine::unloadTrackPlugin(int trackIndex)
@@ -1773,10 +1852,40 @@ void WorkstationAudioEngine::unloadTrackPlugin(int trackIndex)
         tracks[(size_t) trackIndex]->insertChain.removeLastPlugin();
 }
 
+void WorkstationAudioEngine::unloadTrackPlugin(int trackIndex, int slotIndex)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->insertChain.removePlugin(slotIndex);
+}
+
+bool WorkstationAudioEngine::moveTrackPlugin(int trackIndex, int fromSlotIndex, int toSlotIndex)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.movePlugin(fromSlotIndex, toSlotIndex);
+
+    return false;
+}
+
 juce::String WorkstationAudioEngine::getTrackPluginName(int trackIndex) const
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
         return tracks[(size_t) trackIndex]->insertChain.getSummaryName();
+
+    return {};
+}
+
+juce::StringArray WorkstationAudioEngine::getTrackPluginNames(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.getPluginNames();
+
+    return {};
+}
+
+juce::Array<bool> WorkstationAudioEngine::getTrackPluginBypassStates(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.getBypassStates();
 
     return {};
 }
@@ -1815,6 +1924,12 @@ void WorkstationAudioEngine::setTrackPluginBypassed(int trackIndex, bool shouldB
         tracks[(size_t) trackIndex]->insertChain.setLastBypassed(shouldBypass);
 }
 
+void WorkstationAudioEngine::setTrackPluginBypassed(int trackIndex, int slotIndex, bool shouldBypass)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->insertChain.setBypassed(slotIndex, shouldBypass);
+}
+
 bool WorkstationAudioEngine::isTrackPluginBypassed(int trackIndex) const noexcept
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
@@ -1823,10 +1938,26 @@ bool WorkstationAudioEngine::isTrackPluginBypassed(int trackIndex) const noexcep
     return false;
 }
 
+bool WorkstationAudioEngine::isTrackPluginBypassed(int trackIndex, int slotIndex) const noexcept
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.isBypassed(slotIndex);
+
+    return false;
+}
+
 juce::AudioProcessorEditor* WorkstationAudioEngine::createTrackPluginEditor(int trackIndex)
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
         return tracks[(size_t) trackIndex]->insertChain.createLastEditor();
+
+    return nullptr;
+}
+
+juce::AudioProcessorEditor* WorkstationAudioEngine::createTrackPluginEditor(int trackIndex, int slotIndex)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.createEditor(slotIndex);
 
     return nullptr;
 }
@@ -1867,10 +1998,7 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
             if (track->insertChain.copyStateTo(slotIndex, pluginState))
                 slotState.setProperty("state", juce::Base64::toBase64(pluginState.getData(), pluginState.getSize()), nullptr);
 
-            if (slotIndex == track->insertChain.getPluginCount() - 1)
-                slotState.setProperty("bypassed", track->insertChain.isLastBypassed(), nullptr);
-            else
-                slotState.setProperty("bypassed", false, nullptr);
+            slotState.setProperty("bypassed", track->insertChain.isBypassed(slotIndex), nullptr);
 
             insertChainState.addChild(slotState, -1, nullptr);
         }
