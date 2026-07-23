@@ -210,13 +210,6 @@ TrackerPanel::TrackerPanel()
     };
     addAndMakeVisible(keySelector);
 
-    addTrackButton.onClick = [this]
-    {
-        if (onAddTrackRequested)
-            onAddTrackRequested();
-    };
-    addAndMakeVisible(addTrackButton);
-
     compactButton.onClick = [this] { canvas.setLaneHeight(72); };
     comfortButton.onClick = [this] { canvas.setLaneHeight(100); };
     tallButton.onClick = [this] { canvas.setLaneHeight(132); };
@@ -304,6 +297,11 @@ TrackerPanel::TrackerPanel()
     {
         if (onRemoveTrackRequested)
             onRemoveTrackRequested(trackIndex);
+    };
+    canvas.onAddTrackRequested = [this]
+    {
+        if (onAddTrackRequested)
+            onAddTrackRequested();
     };
     canvas.onPlayheadPositionChanged = [this](double seconds)
     {
@@ -509,12 +507,11 @@ void TrackerPanel::resized()
     infoRow.removeFromLeft(6);
     keySelector.setBounds(infoRow.removeFromLeft(72));
 
-    // Destructive track removal deliberately isn't a toolbar button - it lives behind a
-    // right-click "Remove Track..." on the track header, matching the clip context-menu
-    // pattern, so it can't sit adjacent to frequently-clicked buttons and get mis-hit.
+    // Track creation/removal deliberately aren't toolbar buttons - Add Track is a right-click
+    // in the blank timeline area, and Remove Track lives behind the per-track "..." menu, both
+    // matching the clip context-menu pattern so no destructive/structural action sits adjacent
+    // to frequently-clicked buttons and gets mis-hit.
     auto trackButtons = controls.removeFromTop(32);
-    addTrackButton.setBounds(trackButtons.removeFromLeft(154));
-    trackButtons.removeFromLeft(24);
     zoomOutButton.setBounds(trackButtons.removeFromLeft(78));
     trackButtons.removeFromLeft(6);
     zoomInButton.setBounds(trackButtons.removeFromLeft(78));
@@ -543,7 +540,7 @@ void TrackerPanel::refreshSelectionLabel()
 
     if (selectedTrack < 0)
     {
-        selectionLabel.setText("No tracks yet. Use + Add Track to start the timeline.", juce::dontSendNotification);
+        selectionLabel.setText("No tracks yet. Right-click the timeline to add a track.", juce::dontSendNotification);
         return;
     }
 
@@ -949,7 +946,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
         g.setFont(juce::Font(18.0f).boldened());
         g.drawText("No tracks yet", bounds.reduced(24), juce::Justification::centred);
         g.setFont(juce::Font(14.0f));
-        g.drawText("Add tracks here; audio, MIDI, automation, and folders come next.", bounds.reduced(24).translated(0, 26), juce::Justification::centred);
+        g.drawText("Right-click here to add a track.", bounds.reduced(24).translated(0, 26), juce::Justification::centred);
         return;
     }
 
@@ -1136,11 +1133,34 @@ void TrackerPanel::TimelineCanvas::resized()
 
 void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
 {
-    if (trackCount <= 0)
-        return;
-
     auto laneStart = 56;
     auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+
+    // Right-click in the empty body area (below the ruler, not on a clip) adds a track. This runs
+    // before the no-tracks early-out below so it also works from the empty "No tracks yet" state.
+    if (event.mods.isPopupMenu() && event.y >= laneStart)
+    {
+        auto clipUnderCursor = (timelineModel != nullptr && event.x >= labelWidth + 12)
+                                   ? hitTestClip(event.position.toInt())
+                                   : -1;
+        if (clipUnderCursor < 0)
+        {
+            juce::PopupMenu menu;
+            menu.addItem(1, "Add Track");
+            auto clickArea = juce::Rectangle<int>(event.x, event.y, 1, 1);
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
+                                                        .withTargetScreenArea(localAreaToGlobal(clickArea)),
+                                [safe = juce::Component::SafePointer<TimelineCanvas>(this)](int result)
+                                {
+                                    if (safe != nullptr && result == 1 && safe->onAddTrackRequested)
+                                        safe->onAddTrackRequested();
+                                });
+            return;
+        }
+    }
+
+    if (trackCount <= 0)
+        return;
 
     if (event.x >= labelWidth + 12 && timelineModel != nullptr && event.y < laneStart)
     {

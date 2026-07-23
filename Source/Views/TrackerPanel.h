@@ -82,6 +82,7 @@ private:
         std::function<void(int, int)> onTrackInputChanged;
         std::function<void(int)> onTrackFxRequested;
         std::function<void(int)> onTrackRemoveRequested;
+        std::function<void()> onAddTrackRequested;
         std::function<void(double)> onPlayheadPositionChanged;
         std::function<void(double, double)> onLoopRegionChanged;
         std::function<void(const juce::String&)> onMarkerClicked;
@@ -220,7 +221,6 @@ private:
     juce::TextEditor bpmEditor;
     juce::TextEditor timeSignatureEditor;
     juce::ComboBox keySelector;
-    juce::TextButton addTrackButton { "+ Add Track" };
     juce::TextButton compactButton { "Compact" };
     juce::TextButton comfortButton { "Comfort" };
     juce::TextButton tallButton { "Tall" };
