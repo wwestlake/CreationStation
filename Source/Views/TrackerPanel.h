@@ -81,6 +81,7 @@ private:
         std::function<void(int, float)> onTrackGainChanged;
         std::function<void(int, int)> onTrackInputChanged;
         std::function<void(int)> onTrackFxRequested;
+        std::function<void(int)> onTrackRemoveRequested;
         std::function<void(double)> onPlayheadPositionChanged;
         std::function<void(double, double)> onLoopRegionChanged;
         std::function<void(const juce::String&)> onMarkerClicked;
@@ -144,6 +145,7 @@ private:
             std::function<void(int, float)> onGainChanged;
             std::function<void(int, int)> onInputChanged;
             std::function<void(int)> onFxRequested;
+            std::function<void(int)> onRemoveRequested;
 
             void setTrackIndex(int newTrackIndex);
             void setTrackName(const juce::String& name);
@@ -177,6 +179,7 @@ private:
             juce::TextButton soloButton { "S" };
             juce::TextButton monitorButton { "Mon" };
             juce::TextButton stereoButton { "Mono" };
+            juce::TextButton menuButton;
             juce::ComboBox inputSelector;
             juce::TextButton fxButton { "FX" };
             juce::Label dbLabel;
@@ -218,7 +221,6 @@ private:
     juce::TextEditor timeSignatureEditor;
     juce::ComboBox keySelector;
     juce::TextButton addTrackButton { "+ Add Track" };
-    juce::TextButton removeTrackButton { "- Remove" };
     juce::TextButton compactButton { "Compact" };
     juce::TextButton comfortButton { "Comfort" };
     juce::TextButton tallButton { "Tall" };

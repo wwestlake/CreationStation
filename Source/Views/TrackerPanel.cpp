@@ -217,13 +217,6 @@ TrackerPanel::TrackerPanel()
     };
     addAndMakeVisible(addTrackButton);
 
-    removeTrackButton.onClick = [this]
-    {
-        if (onRemoveTrackRequested && selectedTrack >= 0)
-            onRemoveTrackRequested(selectedTrack);
-    };
-    addAndMakeVisible(removeTrackButton);
-
     compactButton.onClick = [this] { canvas.setLaneHeight(72); };
     comfortButton.onClick = [this] { canvas.setLaneHeight(100); };
     tallButton.onClick = [this] { canvas.setLaneHeight(132); };
@@ -306,6 +299,11 @@ TrackerPanel::TrackerPanel()
     {
         if (onTrackFxRequested)
             onTrackFxRequested(trackIndex);
+    };
+    canvas.onTrackRemoveRequested = [this](int trackIndex)
+    {
+        if (onRemoveTrackRequested)
+            onRemoveTrackRequested(trackIndex);
     };
     canvas.onPlayheadPositionChanged = [this](double seconds)
     {
@@ -511,11 +509,12 @@ void TrackerPanel::resized()
     infoRow.removeFromLeft(6);
     keySelector.setBounds(infoRow.removeFromLeft(72));
 
+    // Destructive track removal deliberately isn't a toolbar button - it lives behind a
+    // right-click "Remove Track..." on the track header, matching the clip context-menu
+    // pattern, so it can't sit adjacent to frequently-clicked buttons and get mis-hit.
     auto trackButtons = controls.removeFromTop(32);
     addTrackButton.setBounds(trackButtons.removeFromLeft(154));
-    trackButtons.removeFromLeft(8);
-    removeTrackButton.setBounds(trackButtons.removeFromLeft(120));
-    trackButtons.removeFromLeft(12);
+    trackButtons.removeFromLeft(24);
     zoomOutButton.setBounds(trackButtons.removeFromLeft(78));
     trackButtons.removeFromLeft(6);
     zoomInButton.setBounds(trackButtons.removeFromLeft(78));
@@ -541,7 +540,6 @@ void TrackerPanel::refreshSelectionLabel()
 {
     auto trackCount = canvas.getNumChildComponents();
     juce::ignoreUnused(trackCount);
-    removeTrackButton.setEnabled(selectedTrack >= 0);
 
     if (selectedTrack < 0)
     {
@@ -652,6 +650,11 @@ void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
         {
             if (onTrackFxRequested)
                 onTrackFxRequested(index);
+        };
+        header->onRemoveRequested = [this](int index)
+        {
+            if (onTrackRemoveRequested)
+                onTrackRemoveRequested(index);
         };
         addAndMakeVisible(header);
         header->setInputSources(inputSourceNames);
@@ -1494,6 +1497,26 @@ TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)
     };
     addAndMakeVisible(stereoButton);
 
+    menuButton.setButtonText(juce::String::fromUTF8("\xE2\x8B\xAF")); // horizontal ellipsis "more actions"
+    menuButton.setTooltip("Track actions");
+    menuButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff263341));
+    menuButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffd7e4f5));
+    menuButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Remove Track...");
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&menuButton),
+                           [safe = juce::Component::SafePointer<TrackHeader>(this), index = trackIndex](int result)
+                           {
+                               if (safe == nullptr)
+                                   return;
+
+                               if (result == 1 && safe->onRemoveRequested)
+                                   safe->onRemoveRequested(index);
+                           });
+    };
+    addAndMakeVisible(menuButton);
+
     inputSelector.setTooltip("Audio input source for this track");
     inputSelector.onChange = [this]
     {
@@ -1678,9 +1701,11 @@ void TrackerPanel::TimelineCanvas::TrackHeader::resized()
     area.removeFromRight(36);
 
     auto top = area.removeFromTop(26);
-    stereoButton.setBounds(top.removeFromRight(48));
+    menuButton.setBounds(top.removeFromRight(26));
+    top.removeFromRight(4);
+    stereoButton.setBounds(top.removeFromRight(44));
     top.removeFromRight(6);
-    kindButton.setBounds(top.removeFromRight(96));
+    kindButton.setBounds(top.removeFromRight(80));
     top.removeFromRight(6);
     nameEditor.setBounds(top);
 
@@ -1716,6 +1741,9 @@ void TrackerPanel::TimelineCanvas::TrackHeader::resized()
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseDown(const juce::MouseEvent&)
 {
+    // Track-level actions (Remove Track, etc.) live behind the explicit menu button next to
+    // the channel-mode toggle rather than a right-click - right-click is reserved for dynamic,
+    // context-specific things like clips.
     if (onSelected)
         onSelected(trackIndex);
 }

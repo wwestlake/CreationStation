@@ -3365,6 +3365,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
 MainComponent::~MainComponent()
 {
+    if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
+        top->removeKeyListener(this);
+
     saveLayoutToDisk(true);
     stopTimer();
     pluginEditorWindow.reset();
@@ -6107,7 +6110,26 @@ void MainComponent::pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit
 
 void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const juce::String& statusText)
 {
-    timelineModel.restoreState(state);
+    // Most undo entries (clip split/duplicate/delete/move) are a bare "Timeline" tree and only
+    // need timelineModel restored, as before. Track-level operations (add/remove) push a wrapping
+    // "UndoSnapshot" that also carries the engine's full session state (gain/pan/mute/solo/plugin
+    // chains), since removing a track destroys engine-side state that timelineModel never held.
+    if (state.hasType(juce::Identifier("UndoSnapshot")))
+    {
+        if (auto timelineState = state.getChildWithName("Timeline"); timelineState.isValid())
+            timelineModel.restoreState(timelineState);
+
+        if (auto engineState = state.getChildWithName("CreationStationSession"); engineState.isValid())
+        {
+            juce::String engineError;
+            engine.restoreSessionState(engineState, engineError);
+        }
+    }
+    else
+    {
+        timelineModel.restoreState(state);
+    }
+
     selectedClipIndex = -1;
     syncTrackViews();
     trackerPanel.setSelectedClip(-1);
@@ -6246,23 +6268,49 @@ void MainComponent::renameClip(int clipIndex)
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
+    return handleGlobalKeyPress(key);
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component*)
+{
+    return handleGlobalKeyPress(key);
+}
+
+void MainComponent::parentHierarchyChanged()
+{
+    // Register as a key listener on the top-level window so app shortcuts (undo/redo/etc.) fire
+    // regardless of which child currently holds keyboard focus - or when the previously focused
+    // component (e.g. a just-removed track header) has been destroyed and nothing holds focus.
+    if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
+    {
+        top->removeKeyListener(this);
+        top->addKeyListener(this);
+    }
+}
+
+bool MainComponent::handleGlobalKeyPress(const juce::KeyPress& key)
+{
     auto mods = key.getModifiers();
     auto code = key.getKeyCode();
 
-    if (mods.isCommandDown() && ! mods.isShiftDown() && code == 'z')
+    // JUCE returns the *uppercase* letter for alphabetic keys from getKeyCode(); normalise so the
+    // shortcuts fire regardless of case (comparing against lowercase 'z' alone silently never matched).
+    auto letter = (juce::juce_wchar) juce::CharacterFunctions::toUpperCase((juce::juce_wchar) code);
+
+    if (mods.isCommandDown() && ! mods.isShiftDown() && letter == 'Z')
     {
         undoTimelineEdit();
         return true;
     }
 
-    if ((mods.isCommandDown() && ! mods.isShiftDown() && code == 'y')
-        || (mods.isCommandDown() && mods.isShiftDown() && code == 'z'))
+    if ((mods.isCommandDown() && ! mods.isShiftDown() && letter == 'Y')
+        || (mods.isCommandDown() && mods.isShiftDown() && letter == 'Z'))
     {
         redoTimelineEdit();
         return true;
     }
 
-    if (mods.isCommandDown() && ! mods.isShiftDown() && code == 'd' && selectedClipIndex >= 0)
+    if (mods.isCommandDown() && ! mods.isShiftDown() && letter == 'D' && selectedClipIndex >= 0)
     {
         duplicateClip(selectedClipIndex);
         return true;
@@ -6280,7 +6328,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         return true;
     }
 
-    if (mods.isCommandDown() && mods.isShiftDown() && code == 's' && selectedClipIndex >= 0)
+    if (mods.isCommandDown() && mods.isShiftDown() && letter == 'S' && selectedClipIndex >= 0)
     {
         splitClipAt(selectedClipIndex, timelineModel.getTransportSeconds());
         return true;
@@ -6688,9 +6736,15 @@ void MainComponent::setAudioOutputDevice(const juce::String& outputDeviceName)
 
 void MainComponent::addTrack()
 {
+    juce::ValueTree undoSnapshot("UndoSnapshot");
+    undoSnapshot.addChild(timelineModel.createState(), -1, nullptr);
+    undoSnapshot.addChild(engine.createSessionState(), -1, nullptr);
+
     auto trackIndex = engine.addTrack();
     if (trackIndex < 0)
         return;
+
+    pushTimelineUndoState(undoSnapshot);
 
     if ((int) armedTracks.size() <= trackIndex)
         armedTracks.resize((size_t) trackIndex + 1, false);
@@ -6761,8 +6815,44 @@ void MainComponent::addTrack()
 
 void MainComponent::removeTrack(int trackIndex)
 {
+    if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
+        return;
+
+    auto trackName = engine.getTrackName(trackIndex);
+    if (trackName.trim().isEmpty())
+        trackName = "Track " + juce::String(trackIndex + 1);
+
+    auto options = juce::MessageBoxOptions()
+        .withIconType(juce::MessageBoxIconType::WarningIcon)
+        .withTitle("Remove Track")
+        .withMessage("Remove track \"" + trackName + "\"? This can be undone with Ctrl+Z.")
+        .withButton("Remove")
+        .withButton("Cancel");
+
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    juce::AlertWindow::showAsync(options,
+                                 [safeThis, trackIndex](int result)
+                                 {
+                                     if (safeThis == nullptr || result != 1)
+                                         return;
+
+                                     safeThis->performTrackRemoval(trackIndex);
+                                 });
+}
+
+void MainComponent::performTrackRemoval(int trackIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
+        return;
+
+    juce::ValueTree undoSnapshot("UndoSnapshot");
+    undoSnapshot.addChild(timelineModel.createState(), -1, nullptr);
+    undoSnapshot.addChild(engine.createSessionState(), -1, nullptr);
+
     if (! engine.removeTrack(trackIndex))
         return;
+
+    pushTimelineUndoState(undoSnapshot);
 
     timelineModel.removeTrack(trackIndex);
     trackerPanel.refreshTimelineView();

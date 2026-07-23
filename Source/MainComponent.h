@@ -37,7 +37,8 @@
 #include "Views/TourGuideOverlay.h"
 
 class MainComponent final : public juce::Component,
-                            private juce::Timer
+                            private juce::Timer,
+                            private juce::KeyListener
 {
 public:
     enum class WorkspaceMode
@@ -360,6 +361,9 @@ private:
 
     void timerCallback() override;
     bool keyPressed(const juce::KeyPress& key) override;
+    bool keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent) override;
+    void parentHierarchyChanged() override;
+    bool handleGlobalKeyPress(const juce::KeyPress& key);
     juce::File getSessionFile() const;
     juce::ValueTree createProjectStateForSave();
     void remapTemplateStateFilesToCurrentProject(juce::ValueTree& state) const;
@@ -394,6 +398,7 @@ private:
     void setAudioOutputDevice(const juce::String& outputDeviceName);
     void addTrack();
     void removeTrack(int trackIndex);
+    void performTrackRemoval(int trackIndex);
     void setWorkspaceMode(WorkspaceMode mode);
     void refreshModeVisibility();
     juce::Component* getWorkspaceComponent(WorkspaceMode mode);
