@@ -20,8 +20,11 @@ void VstPluginCatalog::rescan()
         if (! directory.isDirectory())
             continue;
 
+        // VST2 (.dll) plugins are intentionally excluded: this build only compiles in VST3
+        // hosting (JUCE_PLUGINHOST_VST3=1, no legacy JUCE_PLUGINHOST_VST support), so a .dll
+        // entry would list a plugin that fails the moment someone tries to load it. Many
+        // plugins ship both formats - point a search path at the VST3 build instead.
         directory.findChildFiles(discoveredFiles, juce::File::findFilesAndDirectories, true, "*.vst3");
-        directory.findChildFiles(discoveredFiles, juce::File::findFiles, true, "*.dll");
     }
 
     juce::StringArray seenPaths;

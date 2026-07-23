@@ -4049,7 +4049,7 @@ void MainComponent::showPluginLoadMenu(const std::function<void(const juce::File
     auto entries = vstPluginCatalog.getEntries();
     if (entries.isEmpty())
     {
-        pluginChooser = std::make_unique<juce::FileChooser>("Load a VST3 plugin", juce::File{}, "*.vst3;*.dll");
+        pluginChooser = std::make_unique<juce::FileChooser>("Load a VST3 plugin", juce::File{}, "*.vst3");
         pluginChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                    [this, onPluginChosen](const juce::FileChooser& chooser)
                                    {
@@ -4090,7 +4090,7 @@ void MainComponent::showPluginLoadMenu(const std::function<void(const juce::File
 
                            if (result == 1000)
                            {
-                               pluginChooser = std::make_unique<juce::FileChooser>("Load a VST3 plugin", juce::File{}, "*.vst3;*.dll");
+                               pluginChooser = std::make_unique<juce::FileChooser>("Load a VST3 plugin", juce::File{}, "*.vst3");
                                pluginChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                                           [this, onPluginChosen](const juce::FileChooser& chooser)
                                                           {
