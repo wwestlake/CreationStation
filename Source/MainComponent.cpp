@@ -1551,6 +1551,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             stopRecordingSession();
         else if (startRecordingSession())
         {
+            refreshTrackerPlaybackClips();
             transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
             transportStartTimelineSeconds = timelineModel.getTransportSeconds();
             engine.setPlaying(true);
@@ -1886,6 +1887,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     trackerPanel.onClipMoveCommitted = [this]
     {
         clipDragUndoCaptured = false;
+        refreshTrackerPlaybackClips();
         saveSessionToDisk();
     };
 
@@ -3268,6 +3270,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                 }
                 else if (startRecordingSession())
                 {
+                    refreshTrackerPlaybackClips();
                     engine.setPlaying(true);
                     midiSurface.setTransportState(true, true);
                     if (safeBar != nullptr)
@@ -6027,31 +6030,34 @@ bool MainComponent::prepareTrackerPlayback()
         return false;
     }
 
-    auto firstClipStart = std::numeric_limits<double>::max();
-
-    for (const auto& target : targets)
-        firstClipStart = juce::jmin(firstClipStart, target.startSeconds);
-
     if (! engine.setTrackerPlaybackClips(targets, errorMessage))
     {
         transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not prepare tracker playback.");
         return false;
     }
 
-    if (targets.isEmpty())
-    {
-        transportBar.setStatusText("No recorded clips are available to play.");
-        return false;
-    }
-
-    if (! targets.isEmpty() && timelineModel.getTransportSeconds() >= lastClipEnd - 0.01)
-    {
-        timelineModel.setTransportSeconds(firstClipStart == std::numeric_limits<double>::max() ? 0.0 : firstClipStart);
-        trackerPanel.refreshTimelineView();
-    }
-
-    transportBar.setStatusText(targets.isEmpty() ? "No clips on the tracker to play." : "Tracker playback ready: " + juce::String(targets.size()) + " clip(s).");
+    // Play always starts from wherever the playhead currently is - no auto-snap to the
+    // first clip. (Previously this reset the transport position whenever it was at or past
+    // the last clip's end, which silently discarded the user's chosen playhead position -
+    // including immediately before recording, since onRecord also flows through here.)
+    transportBar.setStatusText("Tracker playback ready: " + juce::String(targets.size()) + " clip(s).");
     return true;
+}
+
+void MainComponent::refreshTrackerPlaybackClips()
+{
+    // Keeps the engine's cached tracker playback clip list in sync with timelineModel
+    // immediately after any edit (delete/split/duplicate/move/undo/redo), not just when
+    // Play is next pressed. Without this, a deleted clip's audio keeps being cached by the
+    // engine and can still be heard - and captured into a new take - the next time
+    // anything triggers playback, including pressing Record.
+    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
+    double lastClipEnd = 0.0;
+    juce::String errorMessage;
+    buildTrackerPlaybackTargets(targets, lastClipEnd, errorMessage);
+
+    juce::String engineError;
+    engine.setTrackerPlaybackClips(targets, engineError);
 }
 
 bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
@@ -6106,6 +6112,7 @@ void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const
     syncTrackViews();
     trackerPanel.setSelectedClip(-1);
     trackerPanel.refreshTimelineView();
+    refreshTrackerPlaybackClips();
     projectDirty = true;
     saveSessionToDisk();
     transportBar.setStatusText(statusText);
@@ -6152,6 +6159,7 @@ void MainComponent::splitClipAt(int clipIndex, double splitSeconds)
     selectedClipIndex = juce::jmin(clipIndex + 1, static_cast<int>(timelineModel.getClips().size()) - 1);
     trackerPanel.setSelectedClip(selectedClipIndex);
     trackerPanel.refreshTimelineView();
+    refreshTrackerPlaybackClips();
     projectDirty = true;
     saveSessionToDisk();
     transportBar.setStatusText("Clip split.");
@@ -6170,6 +6178,7 @@ void MainComponent::duplicateClip(int clipIndex)
     selectedClipIndex = static_cast<int>(timelineModel.getClips().size()) - 1;
     trackerPanel.setSelectedClip(selectedClipIndex);
     trackerPanel.refreshTimelineView();
+    refreshTrackerPlaybackClips();
     projectDirty = true;
     saveSessionToDisk();
     transportBar.setStatusText("Clip duplicated.");
@@ -6188,6 +6197,7 @@ void MainComponent::deleteClip(int clipIndex)
     selectedClipIndex = -1;
     trackerPanel.setSelectedClip(-1);
     trackerPanel.refreshTimelineView();
+    refreshTrackerPlaybackClips();
     projectDirty = true;
     saveSessionToDisk();
     transportBar.setStatusText("Clip deleted.");

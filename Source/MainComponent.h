@@ -366,6 +366,7 @@ private:
     void saveSessionToDisk(bool userInitiated = false);
     void loadSessionFromDisk();
     bool prepareTrackerPlayback();
+    void refreshTrackerPlaybackClips();
     bool buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                      double& durationSeconds,
                                      juce::String& errorMessage) const;
