@@ -67,6 +67,17 @@ public:
     bool splitClip(int clipIndex, double splitSeconds);
     bool hasActiveRecordingClip() const noexcept { return ! activeRecordingClips.empty(); }
 
+    juce::String addMarker(double seconds, const juce::String& name = {});
+    void removeMarker(const juce::String& id);
+    void renameMarker(const juce::String& id, const juce::String& name);
+    const std::vector<TimelineMarker>& getMarkers() const noexcept { return markers; }
+
+    void setLoopRegion(double startSeconds, double endSeconds);
+    double getLoopStartSeconds() const noexcept { return loopStartSeconds; }
+    double getLoopEndSeconds() const noexcept { return loopEndSeconds; }
+    void setLoopEnabled(bool shouldEnable) noexcept { loopEnabled = shouldEnable; }
+    bool isLoopEnabled() const noexcept { return loopEnabled; }
+
     const std::vector<TimelineClip>& getClips() const noexcept { return clips; }
     const std::vector<TimelineTrack>& getTracks() const noexcept { return tracks; }
     int getTrackCount() const noexcept { return static_cast<int>(tracks.size()); }
@@ -97,6 +108,10 @@ private:
     std::vector<int> activeRecordingClips;
     std::vector<TimelineTrack> tracks;
     std::vector<TimelineClip> clips;
+    std::vector<TimelineMarker> markers;
+    double loopStartSeconds = 0.0;
+    double loopEndSeconds = 0.0;
+    bool loopEnabled = false;
 
     juce::AudioFormatManager formatManager;
 };

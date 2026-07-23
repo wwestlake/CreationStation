@@ -237,11 +237,17 @@ TrackerPanel::TrackerPanel()
         if (onZoomInRequested)
             onZoomInRequested();
     };
+    addMarkerButton.onClick = [this]
+    {
+        if (onMarkerAddRequested)
+            onMarkerAddRequested();
+    };
     addAndMakeVisible(compactButton);
     addAndMakeVisible(comfortButton);
     addAndMakeVisible(tallButton);
     addAndMakeVisible(zoomOutButton);
     addAndMakeVisible(zoomInButton);
+    addAndMakeVisible(addMarkerButton);
     timelineScrollBar.addListener(this);
     addAndMakeVisible(timelineScrollBar);
 
@@ -305,6 +311,16 @@ TrackerPanel::TrackerPanel()
     {
         if (onPlayheadPositionChanged)
             onPlayheadPositionChanged(seconds);
+    };
+    canvas.onLoopRegionChanged = [this](double startSeconds, double endSeconds)
+    {
+        if (onLoopRegionChanged)
+            onLoopRegionChanged(startSeconds, endSeconds);
+    };
+    canvas.onMarkerClicked = [this](const juce::String& markerId)
+    {
+        if (onMarkerClicked)
+            onMarkerClicked(markerId);
     };
     canvas.onClipMoved = [this](int clipIndex, int trackIndex, double startSeconds)
     {
@@ -511,6 +527,8 @@ void TrackerPanel::resized()
     comfortButton.setBounds(heightButtons.removeFromLeft(96));
     heightButtons.removeFromLeft(6);
     tallButton.setBounds(heightButtons.removeFromLeft(80));
+    heightButtons.removeFromLeft(6);
+    addMarkerButton.setBounds(heightButtons.removeFromLeft(90));
 
     area.removeFromTop(12);
     timelineScrollBar.setBounds(area.removeFromBottom(16));
@@ -1044,6 +1062,51 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
 
     if (timelineModel != nullptr)
     {
+        auto loopStart = timelineModel->getLoopStartSeconds();
+        auto loopEnd = timelineModel->getLoopEndSeconds();
+        if (loopEnd > loopStart)
+        {
+            auto startX = xForTimelineSeconds(loopStart);
+            auto endX = xForTimelineSeconds(loopEnd);
+            auto bandLeft = juce::jmax(labelWidth, startX);
+            auto bandRight = juce::jmin(getWidth(), endX);
+            if (bandRight > bandLeft)
+            {
+                g.setColour(juce::Colour(timelineModel->isLoopEnabled() ? 0x4067e8a5 : 0x2067e8a5));
+                g.fillRect(bandLeft, 0, bandRight - bandLeft, getHeight());
+                g.setColour(juce::Colour(0xff67e8a5));
+                g.drawVerticalLine(startX, 0.0f, static_cast<float>(rulerHeight));
+                g.drawVerticalLine(endX, 0.0f, static_cast<float>(rulerHeight));
+            }
+        }
+
+        if (draggingLoopRegion && loopRegionMoved)
+        {
+            auto previewStartX = xForTimelineSeconds(juce::jmin(loopDragStartSeconds, loopDragCurrentSeconds));
+            auto previewEndX = xForTimelineSeconds(juce::jmax(loopDragStartSeconds, loopDragCurrentSeconds));
+            g.setColour(juce::Colour(0x60ffd166));
+            g.fillRect(juce::jmax(labelWidth, previewStartX), 0, juce::jmax(0, previewEndX - previewStartX), getHeight());
+        }
+
+        for (const auto& marker : timelineModel->getMarkers())
+        {
+            auto x = xForTimelineSeconds(marker.seconds);
+            if (x < labelWidth || x > getWidth())
+                continue;
+
+            g.setColour(juce::Colour(0xffff9f6e));
+            juce::Path flag;
+            flag.addTriangle((float) x, 4.0f, (float) x, 20.0f, (float) x + 10.0f, 12.0f);
+            g.fillPath(flag);
+            g.drawVerticalLine(x, 20.0f, static_cast<float>(rulerHeight));
+
+            g.setFont(juce::Font(10.0f));
+            g.drawText(marker.name, x + 12, 4, 90, 16, juce::Justification::centredLeft, true);
+        }
+    }
+
+    if (timelineModel != nullptr)
+    {
         auto timelineOriginX = labelWidth + 12;
         auto playheadX = timelineOriginX + juce::roundToInt((timelineModel->getTransportSeconds() - scrollSeconds)
                                                             * timelineModel->getPixelsPerSecond());
@@ -1075,6 +1138,24 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
 
     auto laneStart = 56;
     auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+
+    if (event.x >= labelWidth + 12 && timelineModel != nullptr && event.y < laneStart)
+    {
+        auto markerId = hitTestMarker(event.x);
+        if (markerId.isNotEmpty())
+        {
+            if (onMarkerClicked)
+                onMarkerClicked(markerId);
+            return;
+        }
+
+        draggingLoopRegion = true;
+        loopRegionMoved = false;
+        loopDragStartSeconds = xToTimelineSeconds(event.x);
+        loopDragCurrentSeconds = loopDragStartSeconds;
+        repaint();
+        return;
+    }
 
     if (event.x >= labelWidth + 12 && timelineModel != nullptr)
     {
@@ -1159,6 +1240,14 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
     if (timelineModel == nullptr)
         return;
 
+    if (draggingLoopRegion)
+    {
+        loopDragCurrentSeconds = xToTimelineSeconds(event.x);
+        loopRegionMoved = true;
+        repaint();
+        return;
+    }
+
     if (draggingClipIndex >= 0)
     {
         const auto pixelsPerSecond = juce::jmax(1.0, timelineModel->getPixelsPerSecond());
@@ -1192,6 +1281,24 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
 
 void TrackerPanel::TimelineCanvas::mouseUp(const juce::MouseEvent&)
 {
+    if (draggingLoopRegion)
+    {
+        if (loopRegionMoved && std::abs(loopDragCurrentSeconds - loopDragStartSeconds) > 0.05)
+        {
+            if (onLoopRegionChanged)
+                onLoopRegionChanged(loopDragStartSeconds, loopDragCurrentSeconds);
+        }
+        else if (onPlayheadPositionChanged)
+        {
+            onPlayheadPositionChanged(loopDragStartSeconds);
+        }
+
+        draggingLoopRegion = false;
+        loopRegionMoved = false;
+        repaint();
+        return;
+    }
+
     if (draggingClipIndex >= 0)
     {
         if (draggingClipMoved && onClipMoveCommitted)
@@ -1211,6 +1318,14 @@ double TrackerPanel::TimelineCanvas::xToTimelineSeconds(int x) const noexcept
     auto timelineOriginX = labelWidth + 12;
     auto pixelsPerSecond = timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0;
     return juce::jmax(0.0, scrollSeconds + static_cast<double>(x - timelineOriginX) / juce::jmax(1.0, pixelsPerSecond));
+}
+
+int TrackerPanel::TimelineCanvas::xForTimelineSeconds(double seconds) const noexcept
+{
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    auto timelineOriginX = labelWidth + 12;
+    auto pixelsPerSecond = timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0;
+    return timelineOriginX + juce::roundToInt((seconds - scrollSeconds) * pixelsPerSecond);
 }
 
 int TrackerPanel::TimelineCanvas::yToTrackIndex(int y) const noexcept
@@ -1250,6 +1365,22 @@ int TrackerPanel::TimelineCanvas::hitTestClip(juce::Point<int> position) const
     }
 
     return -1;
+}
+
+juce::String TrackerPanel::TimelineCanvas::hitTestMarker(int x) const
+{
+    if (timelineModel == nullptr)
+        return {};
+
+    constexpr int hitRadius = 8;
+    for (const auto& marker : timelineModel->getMarkers())
+    {
+        auto markerX = xForTimelineSeconds(marker.seconds);
+        if (std::abs(x - markerX) <= hitRadius)
+            return marker.id;
+    }
+
+    return {};
 }
 
 TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)

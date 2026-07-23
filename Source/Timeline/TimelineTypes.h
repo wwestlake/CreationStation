@@ -41,6 +41,13 @@ struct TimelineTrack
     bool folded = false;
 };
 
+struct TimelineMarker
+{
+    juce::String id;
+    juce::String name;
+    double seconds = 0.0;
+};
+
 inline juce::String toStorageToken(TrackKind kind)
 {
     switch (kind)

@@ -1,4 +1,5 @@
 #include "TimelineModel.h"
+#include <algorithm>
 
 namespace cs
 {
@@ -423,7 +424,57 @@ void TimelineModel::clear()
     tracks.clear();
     clips.clear();
     activeRecordingClips.clear();
+    markers.clear();
+    loopStartSeconds = 0.0;
+    loopEndSeconds = 0.0;
+    loopEnabled = false;
     transportSeconds = 0.0;
+}
+
+juce::String TimelineModel::addMarker(double seconds, const juce::String& name)
+{
+    TimelineMarker marker;
+    marker.id = juce::Uuid().toString();
+    marker.seconds = juce::jmax(0.0, seconds);
+    marker.name = name.isNotEmpty() ? name : ("Marker " + juce::String(static_cast<int>(markers.size()) + 1));
+    markers.push_back(marker);
+
+    std::sort(markers.begin(), markers.end(), [](const TimelineMarker& a, const TimelineMarker& b)
+    {
+        return a.seconds < b.seconds;
+    });
+
+    return marker.id;
+}
+
+void TimelineModel::removeMarker(const juce::String& id)
+{
+    markers.erase(std::remove_if(markers.begin(), markers.end(), [&id](const TimelineMarker& marker)
+    {
+        return marker.id == id;
+    }), markers.end());
+}
+
+void TimelineModel::renameMarker(const juce::String& id, const juce::String& name)
+{
+    auto cleaned = name.trim();
+    if (cleaned.isEmpty())
+        return;
+
+    for (auto& marker : markers)
+    {
+        if (marker.id == id)
+        {
+            marker.name = cleaned;
+            return;
+        }
+    }
+}
+
+void TimelineModel::setLoopRegion(double startSeconds, double endSeconds)
+{
+    loopStartSeconds = juce::jmax(0.0, juce::jmin(startSeconds, endSeconds));
+    loopEndSeconds = juce::jmax(0.0, juce::jmax(startSeconds, endSeconds));
 }
 
 double TimelineModel::getTotalDurationSeconds() const noexcept
@@ -528,6 +579,20 @@ juce::ValueTree TimelineModel::createState() const
     state.setProperty("musicalKey", musicalKey, nullptr);
     state.setProperty("pixelsPerSecond", pixelsPerSecond, nullptr);
     state.setProperty("transportSeconds", transportSeconds, nullptr);
+    state.setProperty("loopStartSeconds", loopStartSeconds, nullptr);
+    state.setProperty("loopEndSeconds", loopEndSeconds, nullptr);
+    state.setProperty("loopEnabled", loopEnabled, nullptr);
+
+    juce::ValueTree markersState("Markers");
+    for (const auto& marker : markers)
+    {
+        juce::ValueTree markerState("Marker");
+        markerState.setProperty("id", marker.id, nullptr);
+        markerState.setProperty("name", marker.name, nullptr);
+        markerState.setProperty("seconds", marker.seconds, nullptr);
+        markersState.addChild(markerState, -1, nullptr);
+    }
+    state.addChild(markersState, -1, nullptr);
 
     juce::ValueTree tracksState("Tracks");
     for (const auto& track : tracks)
@@ -579,6 +644,27 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
     setMusicalKey(state.getProperty("musicalKey", musicalKey).toString());
     setPixelsPerSecond((double) state.getProperty("pixelsPerSecond", pixelsPerSecond));
     setTransportSeconds((double) state.getProperty("transportSeconds", 0.0));
+    loopStartSeconds = (double) state.getProperty("loopStartSeconds", 0.0);
+    loopEndSeconds = (double) state.getProperty("loopEndSeconds", 0.0);
+    loopEnabled = (bool) state.getProperty("loopEnabled", false);
+
+    auto markersState = state.getChildWithName("Markers");
+    if (markersState.isValid())
+    {
+        for (const auto child : markersState)
+        {
+            if (! child.hasType("Marker"))
+                continue;
+
+            TimelineMarker marker;
+            marker.id = child.getProperty("id").toString();
+            if (marker.id.isEmpty())
+                marker.id = juce::Uuid().toString();
+            marker.name = child.getProperty("name").toString();
+            marker.seconds = (double) child.getProperty("seconds", 0.0);
+            markers.push_back(std::move(marker));
+        }
+    }
 
     auto tracksState = state.getChildWithName("Tracks");
     if (tracksState.isValid())

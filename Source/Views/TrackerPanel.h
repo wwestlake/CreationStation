@@ -26,6 +26,9 @@ public:
     std::function<void()> onZoomOutRequested;
     std::function<void()> onZoomInRequested;
     std::function<void(double)> onPlayheadPositionChanged;
+    std::function<void(double, double)> onLoopRegionChanged;
+    std::function<void()> onMarkerAddRequested;
+    std::function<void(const juce::String&)> onMarkerClicked;
     std::function<void(int, int, double)> onClipMoved;
     std::function<void()> onClipMoveCommitted;
     std::function<void(int)> onClipSelected;
@@ -79,6 +82,8 @@ private:
         std::function<void(int, int)> onTrackInputChanged;
         std::function<void(int)> onTrackFxRequested;
         std::function<void(double)> onPlayheadPositionChanged;
+        std::function<void(double, double)> onLoopRegionChanged;
+        std::function<void(const juce::String&)> onMarkerClicked;
         std::function<void(int, int, double)> onClipMoved;
         std::function<void()> onClipMoveCommitted;
         std::function<void(int)> onClipSelected;
@@ -118,8 +123,10 @@ private:
 
     private:
         double xToTimelineSeconds(int x) const noexcept;
+        int xForTimelineSeconds(double seconds) const noexcept;
         int yToTrackIndex(int y) const noexcept;
         int hitTestClip(juce::Point<int> position) const;
+        juce::String hitTestMarker(int x) const;
 
         class TrackHeader final : public juce::Component
         {
@@ -184,6 +191,10 @@ private:
         int draggingOriginalTrack = -1;
         double draggingOriginalStartSeconds = 0.0;
         bool draggingClipMoved = false;
+        bool draggingLoopRegion = false;
+        bool loopRegionMoved = false;
+        double loopDragStartSeconds = 0.0;
+        double loopDragCurrentSeconds = 0.0;
         double scrollSeconds = 0.0;
         const cs::TimelineModel* timelineModel = nullptr;
         juce::StringArray trackNames;
@@ -213,6 +224,7 @@ private:
     juce::TextButton tallButton { "Tall" };
     juce::TextButton zoomOutButton { "Zoom -" };
     juce::TextButton zoomInButton { "Zoom +" };
+    juce::TextButton addMarkerButton { "+ Marker" };
     juce::ScrollBar timelineScrollBar { false };
     TimelineCanvas canvas;
 

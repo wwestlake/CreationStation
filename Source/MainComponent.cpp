@@ -1584,7 +1584,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     };
     transportBar.onLoopChanged = [this](bool loopEnabled)
     {
-        juce::ignoreUnused(loopEnabled);
+        timelineModel.setLoopEnabled(loopEnabled);
         transportBar.setStatusText(loopEnabled ? "Transport: loop on" : "Transport: loop off");
     };
     transportBar.onClickChanged = [this](bool clickEnabled)
@@ -1831,6 +1831,35 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
         trackerPanel.refreshTimelineView();
         saveSessionToDisk();
+    };
+
+    trackerPanel.onLoopRegionChanged = [this](double startSeconds, double endSeconds)
+    {
+        timelineModel.setLoopRegion(startSeconds, endSeconds);
+        trackerPanel.refreshTimelineView();
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onMarkerAddRequested = [this]
+    {
+        timelineModel.addMarker(timelineModel.getTransportSeconds());
+        trackerPanel.refreshTimelineView();
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onMarkerClicked = [this](const juce::String& markerId)
+    {
+        for (const auto& marker : timelineModel.getMarkers())
+        {
+            if (marker.id == markerId)
+            {
+                timelineModel.setTransportSeconds(marker.seconds);
+                transportStartTimelineSeconds = marker.seconds;
+                transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+                trackerPanel.refreshTimelineView();
+                break;
+            }
+        }
     };
 
     trackerPanel.onClipMoved = [this](int clipIndex, int trackIndex, double startSeconds)
@@ -3411,6 +3440,17 @@ void MainComponent::timerCallback()
         auto nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
         auto elapsed = juce::jmax(0.0, nowSeconds - transportStartWallSeconds);
         auto timelineSeconds = transportStartTimelineSeconds + elapsed;
+
+        if (engine.isPlaying() && ! engine.isRecording() && timelineModel.isLoopEnabled()
+            && timelineModel.getLoopEndSeconds() > timelineModel.getLoopStartSeconds()
+            && timelineSeconds >= timelineModel.getLoopEndSeconds())
+        {
+            timelineSeconds = timelineModel.getLoopStartSeconds();
+            transportStartTimelineSeconds = timelineSeconds;
+            transportStartWallSeconds = nowSeconds;
+            engine.setPlaybackPositionSeconds(timelineSeconds);
+        }
+
         timelineModel.setTransportSeconds(timelineSeconds);
 
         if (engine.isRecording())
@@ -6256,6 +6296,8 @@ void MainComponent::loadSessionFromDisk()
 
     if (auto timelineState = state.getChildWithName("Timeline"); timelineState.isValid())
         timelineModel.restoreState(timelineState);
+
+    transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);
 
     timelineUndoStack.clear();
     if (auto undoState = state.getChildWithName("TimelineUndoStack"); undoState.isValid())
