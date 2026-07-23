@@ -198,6 +198,34 @@ target_link_libraries(CreationStationInstrument PRIVATE
     juce::juce_recommended_warning_flags
 )
 
+# --- Creation Station branded effect plugin suite ---------------------------
+
+add_library(CreationStationPluginKit STATIC
+    Source/PluginKit/CreationStationPluginLookAndFeel.cpp
+    Source/PluginKit/CreationStationPluginLookAndFeel.h
+    Source/PluginKit/CreationStationPluginHeader.cpp
+    Source/PluginKit/CreationStationPluginHeader.h
+    Source/PluginKit/LevelMeterComponent.cpp
+    Source/PluginKit/LevelMeterComponent.h
+    Source/PluginKit/CreationStationPluginPalette.h
+    Source/Branding.cpp
+    Source/Branding.h
+)
+target_link_libraries(CreationStationPluginKit PUBLIC
+    juce::juce_gui_extra
+    juce::juce_dsp
+)
+
+include(cmake/CreationStationPlugin.cmake)
+
+add_creation_station_effect_plugin(CreationStationCompressor "Creation Station Compressor" CSCp "Fx")
+target_sources(CreationStationCompressor PRIVATE
+    Source/Plugins/Compressor/CreationStationCompressorProcessor.cpp
+    Source/Plugins/Compressor/CreationStationCompressorProcessor.h
+    Source/Plugins/Compressor/CreationStationCompressorEditor.cpp
+    Source/Plugins/Compressor/CreationStationCompressorEditor.h
+)
+
 install(TARGETS CreativeWorkstation
     RUNTIME DESTINATION . COMPONENT CreativeWorkstation
     RESOURCE DESTINATION . COMPONENT CreativeWorkstation

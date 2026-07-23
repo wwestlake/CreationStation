@@ -15,6 +15,7 @@ wiki/
 *.pdb
 *.ilk
 *.cmake
+!/cmake/*.cmake
 *.ninja
 *.log
 DerivedData/
