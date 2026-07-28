@@ -33,6 +33,7 @@ AuthGateView::AuthGateView()
         if (onSignInRequested != nullptr)
             onSignInRequested();
     };
+    signInButton.setTooltip("Sign in to sync your account");
     addAndMakeVisible(signInButton);
 
     logoutButton.onClick = [this]
@@ -40,6 +41,7 @@ AuthGateView::AuthGateView()
         if (onLogoutRequested != nullptr)
             onLogoutRequested();
     };
+    logoutButton.setTooltip("Clear the current session");
     addAndMakeVisible(logoutButton);
 
     addAndMakeVisible(progress);

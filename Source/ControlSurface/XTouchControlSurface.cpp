@@ -1,4 +1,5 @@
 #include "XTouchControlSurface.h"
+#include "../Audio/WorkstationAudioEngine.h"
 
 #include <cmath>
 
@@ -73,6 +74,7 @@ constexpr int transportDrop = 0x57;
 constexpr int transportReplace = 0x58;
 constexpr int transportClick = 0x59;
 constexpr int transportSolo = 0x5A;
+constexpr int jogWheelController = 0x3C;
 constexpr int scribbleStripWidth = 7;
 constexpr int scribbleStripHeight = 2;
 constexpr juce::uint8 scribbleDeviceId = 0x41;
@@ -186,6 +188,7 @@ void XTouchControlSurface::reportStatus(const juce::String& text) const
 void XTouchControlSurface::attachToDeviceManager(juce::AudioDeviceManager& deviceManager)
 {
     enabledDeviceIds.clear();
+    deviceNameById.clear();
     midiOutput.reset();
 
     for (const auto& device : juce::MidiInput::getAvailableDevices())
@@ -194,6 +197,7 @@ void XTouchControlSurface::attachToDeviceManager(juce::AudioDeviceManager& devic
         {
             deviceManager.setMidiInputDeviceEnabled(device.identifier, true);
             enabledDeviceIds.add(device.identifier);
+            deviceNameById[device.identifier] = device.name;
 
             if (activeDeviceName.isEmpty())
                 activeDeviceName = device.name;
@@ -213,7 +217,11 @@ void XTouchControlSurface::attachToDeviceManager(juce::AudioDeviceManager& devic
         }
     }
 
-    deviceManager.addMidiInputDeviceCallback({}, this);
+    // An empty device identifier here would mean "every enabled MIDI device", not just X-Touch/
+    // BCR2000 - that let a plain keyboard's notes get misread as Mackie Control surface commands
+    // (e.g. a note matching globalAudioInstrument switching the workspace to Plugins mid-take).
+    for (const auto& deviceId : enabledDeviceIds)
+        deviceManager.addMidiInputDeviceCallback(deviceId, this);
 
     if (activeDeviceName.isNotEmpty())
         reportStatus("MIDI: connected to " + activeDeviceName);
@@ -223,12 +231,70 @@ void XTouchControlSurface::attachToDeviceManager(juce::AudioDeviceManager& devic
     refreshVisibleWindow();
 }
 
+void XTouchControlSurface::setControlSurfaceMappings(const ControlSurfaceMappingStore& store)
+{
+    mappingStore = store;
+}
+
+bool XTouchControlSurface::tryDispatchMappedTransport(const ControlSurfaceMappingStore& store,
+                                                       const juce::String& deviceName,
+                                                       const juce::MidiMessage& message,
+                                                       TransportCommand& outCommand)
+{
+    if (! message.isNoteOn(true) && ! message.isController())
+        return false;
+
+    // Deliberately does NOT require velocity/value > 0 here. Many BCR2000 button presets are
+    // configured as toggles (press-on sends one value, the next press sends a different one -
+    // e.g. 127 then 0) rather than a clean momentary press, so gating on "value > 0" would only
+    // fire every other press. Learned bindings match on channel+number alone; whichever edge of
+    // the button's actual behavior arrives, it fires the action.
+    auto number = message.isController() ? message.getControllerNumber() : message.getNoteNumber();
+    auto channel = message.getChannel();
+
+    for (const auto& profile : store.getProfiles())
+    {
+        if (! profile.matchesDevice(deviceName))
+            continue;
+
+        for (const auto& binding : profile.bindings)
+        {
+            if (binding.triggerType != "transport")
+                continue;
+
+            if (binding.channel != -1 && binding.channel != channel)
+                continue;
+
+            if (binding.number != -1 && binding.number != number)
+                continue;
+
+            if (binding.targetId == "transport_play")
+                outCommand = TransportCommand::play;
+            else if (binding.targetId == "transport_stop")
+                outCommand = TransportCommand::stop;
+            else if (binding.targetId == "transport_record")
+                outCommand = TransportCommand::record;
+            else if (binding.targetId == "transport_rewind")
+                outCommand = TransportCommand::rewind;
+            else if (binding.targetId == "transport_fast_forward")
+                outCommand = TransportCommand::fastForward;
+            else
+                continue;
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void XTouchControlSurface::detachFromDeviceManager(juce::AudioDeviceManager& deviceManager)
 {
     stopTimer();
     pendingScribbleTracks.clear();
     pendingScribbleIndex = 0;
-    deviceManager.removeMidiInputDeviceCallback({}, this);
+    for (const auto& deviceId : enabledDeviceIds)
+        deviceManager.removeMidiInputDeviceCallback(deviceId, this);
     midiOutput.reset();
 
     for (const auto& identifier : enabledDeviceIds)
@@ -440,8 +506,30 @@ void XTouchControlSurface::setTransportState(bool playing, bool recording)
     sendTransportValue(transportRecord, recording);
 }
 
-void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& message)
+void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message)
 {
+    if (source != nullptr && learnEngine != nullptr
+        && (message.isNoteOn(true) || (message.isController() && message.getControllerValue() > 0)))
+    {
+        auto number = message.isController() ? message.getControllerNumber() : message.getNoteNumber();
+        if (learnEngine->offerMidiLearnCandidate(source->getIdentifier(), message.getChannel(), number, message.isController()))
+            return;
+    }
+
+    if (source != nullptr && onTransportCommand)
+    {
+        auto it = deviceNameById.find(source->getIdentifier());
+        if (it != deviceNameById.end())
+        {
+            TransportCommand mappedCommand {};
+            if (tryDispatchMappedTransport(mappingStore, it->second, message, mappedCommand))
+            {
+                onTransportCommand(mappedCommand);
+                return;
+            }
+        }
+    }
+
     if (message.isPitchWheel())
     {
         auto channel = message.getChannel();
@@ -462,6 +550,22 @@ void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput*, const juc
 
     if (message.isController())
     {
+        if (message.getControllerNumber() == jogWheelController && onJogWheelMoved)
+        {
+            auto value = message.getControllerValue();
+            int delta = 0;
+
+            if (value > 0x40)
+                delta = -(value - 0x40);
+            else if (value < 0x40)
+                delta = value;
+
+            if (delta != 0)
+                onJogWheelMoved(delta);
+
+            return;
+        }
+
         auto channel = message.getChannel();
         auto trackIndex = bankOffset + channel - 1;
 

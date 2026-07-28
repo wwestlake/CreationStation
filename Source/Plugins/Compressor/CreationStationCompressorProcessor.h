@@ -35,6 +35,7 @@ public:
 
     juce::AudioProcessorValueTreeState& getValueTreeState() noexcept { return parameters; }
     const std::atomic<float>& getGainReductionValue() const noexcept { return currentGainReductionDb; }
+    const std::atomic<float>& getInputLevelValue() const noexcept { return currentInputLevelDb; }
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
@@ -53,6 +54,7 @@ private:
     juce::dsp::Gain<float> makeupGain;
 
     std::atomic<float> currentGainReductionDb { 0.0f };
+    std::atomic<float> currentInputLevelDb { -100.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CreationStationCompressorProcessor)
 };

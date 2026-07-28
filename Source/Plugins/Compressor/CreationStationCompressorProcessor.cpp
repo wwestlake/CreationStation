@@ -40,7 +40,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout CreationStationCompressorPro
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID { makeupId, 1 }, "Makeup",
-        juce::NormalisableRange<float>(-12.0f, 24.0f, 0.1f), 0.0f,
+        juce::NormalisableRange<float>(-12.0f, 24.0f, 0.1f), 3.0f,
         juce::AudioParameterFloatAttributes().withLabel("dB")));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -106,25 +106,36 @@ void CreationStationCompressorProcessor::processBlock(juce::AudioBuffer<float>& 
     makeupGain.setGainDecibels(makeupGainParam->load());
     dryWetMixer.setWetMixProportion(mixParam->load() * 0.01f);
 
+    auto numSamples = buffer.getNumSamples();
+    auto numChannels = buffer.getNumChannels();
+
+    // Input level (peak across channels) in dBFS, for the UI's live meter - measured before any
+    // processing so the threshold line the user drags reads against the true incoming signal.
+    auto inputPeak = 0.0f;
+    for (int channel = 0; channel < numChannels; ++channel)
+        inputPeak = juce::jmax(inputPeak, buffer.getMagnitude(channel, 0, numSamples));
+    currentInputLevelDb.store(inputPeak > 0.0f ? juce::Decibels::gainToDecibels(inputPeak) : -100.0f);
+
     juce::dsp::AudioBlock<float> block(buffer);
     dryWetMixer.pushDrySamples(block);
 
-    auto numSamples = buffer.getNumSamples();
     auto preRms = buffer.getRMSLevel(0, 0, numSamples);
 
     juce::dsp::ProcessContextReplacing<float> context(block);
     compressor.process(context);
 
+    // Approximate gain reduction from the pre/post RMS ratio, with simple meter ballistics
+    // (jump up instantly, decay back toward 0) so the GR meter reads steadily rather than
+    // flickering per block.
+    auto instantReductionDb = 0.0f;
     auto postCompressionRms = buffer.getRMSLevel(0, 0, numSamples);
     if (preRms > 0.0001f && postCompressionRms > 0.0f)
-    {
-        auto reductionDb = juce::Decibels::gainToDecibels((float) (postCompressionRms / preRms));
-        currentGainReductionDb.store(juce::jmax(0.0f, -reductionDb));
-    }
-    else
-    {
-        currentGainReductionDb.store(0.0f);
-    }
+        instantReductionDb = juce::jmax(0.0f, -juce::Decibels::gainToDecibels((float) (postCompressionRms / preRms)));
+
+    auto smoothedReduction = currentGainReductionDb.load();
+    smoothedReduction = instantReductionDb > smoothedReduction ? instantReductionDb
+                                                               : smoothedReduction * 0.85f + instantReductionDb * 0.15f;
+    currentGainReductionDb.store(smoothedReduction);
 
     makeupGain.process(context);
     dryWetMixer.mixWetSamples(block);

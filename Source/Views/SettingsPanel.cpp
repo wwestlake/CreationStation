@@ -36,9 +36,8 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
     };
     content.addAndMakeVisible(searchEditor);
 
-    projectSectionLabel.setText("Project", juce::dontSendNotification);
-    projectSectionLabel.setFont(juce::Font(18.0f).boldened());
-    projectSectionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    projectSectionLabel.setText("Project");
+    projectSectionLabel.onToggled = [this] { layoutContent(); };
     content.addAndMakeVisible(projectSectionLabel);
 
     auto setupProjectField = [this](juce::Label& label, juce::TextEditor& editor, const juce::String& labelText, const juce::String& emptyText)
@@ -62,17 +61,36 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
     projectDescriptionEditor.setMultiLine(true);
     projectRightsEditor.setMultiLine(true);
     projectMetadataSaveButton.onClick = [this] { applyProjectMetadata(); };
+    projectMetadataSaveButton.setTooltip("Save the project name, description, and other metadata");
     content.addAndMakeVisible(projectMetadataSaveButton);
 
-    startupSectionLabel.setText("Startup", juce::dontSendNotification);
-    startupSectionLabel.setFont(juce::Font(18.0f).boldened());
-    startupSectionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    startupSectionLabel.setText("Startup");
+    startupSectionLabel.onToggled = [this] { layoutContent(); };
     content.addAndMakeVisible(startupSectionLabel);
 
-    toolsSectionLabel.setText("Tools", juce::dontSendNotification);
-    toolsSectionLabel.setFont(juce::Font(18.0f).boldened());
-    toolsSectionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    toolsSectionLabel.setText("Tools");
+    toolsSectionLabel.onToggled = [this] { layoutContent(); };
     content.addAndMakeVisible(toolsSectionLabel);
+
+    midiSectionLabel.setText("MIDI");
+    midiSectionLabel.onToggled = [this] { layoutContent(); };
+    content.addAndMakeVisible(midiSectionLabel);
+
+    midiHintLabel.setText("Devices below feed every enabled track by default (Omni). Route a device to one track "
+                          "to keep it from bleeding into others - channel filtering (Omni / Ch 1-16) is still set "
+                          "per track in the Tracker's Input dropdown.",
+                          juce::dontSendNotification);
+    midiHintLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+    midiHintLabel.setJustificationType(juce::Justification::topLeft);
+    content.addAndMakeVisible(midiHintLabel);
+
+    refreshMidiDevicesButton.onClick = [this]
+    {
+        if (owner.onRefreshMidiDevicesRequested != nullptr)
+            owner.onRefreshMidiDevicesRequested();
+    };
+    refreshMidiDevicesButton.setTooltip("Rescan for newly connected MIDI devices");
+    content.addAndMakeVisible(refreshMidiDevicesButton);
 
     studioInputsLabel.setText("Studio Inputs", juce::dontSendNotification);
     studioInputsLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
@@ -124,11 +142,11 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
         if (owner.onOpenDriverControlPanelRequested != nullptr)
             owner.onOpenDriverControlPanelRequested();
     };
+    audioDriverControlPanelButton.setTooltip("Open your audio driver's own control panel");
     content.addAndMakeVisible(audioDriverControlPanelButton);
 
-    aiSectionLabel.setText("AI Provider", juce::dontSendNotification);
-    aiSectionLabel.setFont(juce::Font(18.0f).boldened());
-    aiSectionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    aiSectionLabel.setText("AI Provider");
+    aiSectionLabel.onToggled = [this] { layoutContent(); };
     content.addAndMakeVisible(aiSectionLabel);
 
     aiProviderLabel.setText("Provider", juce::dontSendNotification);
@@ -206,6 +224,7 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
         if (owner.onRefreshAiModelsRequested != nullptr)
             owner.onRefreshAiModelsRequested();
     };
+    aiRefreshModelsButton.setTooltip("Fetch the list of available models from the AI provider");
     content.addAndMakeVisible(aiRefreshModelsButton);
 
     storageLabel.setText("Storage folder", juce::dontSendNotification);
@@ -222,6 +241,7 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
         if (owner.onAutoloadChanged != nullptr)
             owner.onAutoloadChanged(autoloadToggle.getToggleState());
     };
+    autoloadToggle.setTooltip("Automatically reopen your last project on startup");
     content.addAndMakeVisible(autoloadToggle);
 
     auto setupRow = [this](ActionRow& row, const juce::String& description)
@@ -252,6 +272,7 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
             else if (&row == &controlSurfaceRow && owner.onManageControlSurfaceMappingsRequested != nullptr)
                 owner.onManageControlSurfaceMappingsRequested();
         };
+        row.actionButton.setTooltip(description);
         content.addAndMakeVisible(row.actionButton);
     };
 
@@ -321,69 +342,46 @@ void SettingsPanel::ContentView::applyFilter()
     vstRow.visible = matches(vstRow);
     controlSurfaceRow.visible = matches(controlSurfaceRow);
 
-    auto projectVisible = newProjectRow.visible || openProjectRow.visible || saveProjectRow.visible || revealProjectRow.visible;
-    auto startupVisible = storageRow.visible || autoloadToggle.isVisible();
-    auto toolsVisible = studioInputsRow.visible || audioRow.visible || vstRow.visible || controlSurfaceRow.visible;
-    auto aiVisible = query.isEmpty()
-                     || aiSectionLabel.getText().toLowerCase().contains(query)
-                     || aiProviderLabel.getText().toLowerCase().contains(query)
-                     || aiHintLabel.getText().toLowerCase().contains(query)
-                     || aiModelLabel.getText().toLowerCase().contains(query)
-                     || aiEndpointLabel.getText().toLowerCase().contains(query)
-                     || aiKeyLabel.getText().toLowerCase().contains(query)
-                     || aiModelComboBox.getText().toLowerCase().contains(query)
-                     || aiEndpointEditor.getText().toLowerCase().contains(query);
+    projectSectionVisible = newProjectRow.visible || openProjectRow.visible || saveProjectRow.visible || revealProjectRow.visible;
+    startupSectionVisible = storageRow.visible;
+    toolsSectionVisible = studioInputsRow.visible || audioRow.visible || vstRow.visible || controlSurfaceRow.visible;
+    aiSectionVisible = query.isEmpty()
+                       || aiSectionLabel.getText().toLowerCase().contains(query)
+                       || aiProviderLabel.getText().toLowerCase().contains(query)
+                       || aiHintLabel.getText().toLowerCase().contains(query)
+                       || aiModelLabel.getText().toLowerCase().contains(query)
+                       || aiEndpointLabel.getText().toLowerCase().contains(query)
+                       || aiKeyLabel.getText().toLowerCase().contains(query)
+                       || aiModelComboBox.getText().toLowerCase().contains(query)
+                       || aiEndpointEditor.getText().toLowerCase().contains(query);
 
-    projectSectionLabel.setVisible(projectVisible);
-    projectNameLabel.setVisible(projectVisible);
-    projectNameEditor.setVisible(projectVisible);
-    projectDescriptionLabel.setVisible(projectVisible);
-    projectDescriptionEditor.setVisible(projectVisible);
-    projectAuthorLabel.setVisible(projectVisible);
-    projectAuthorEditor.setVisible(projectVisible);
-    projectCopyrightLabel.setVisible(projectVisible);
-    projectCopyrightEditor.setVisible(projectVisible);
-    projectRightsLabel.setVisible(projectVisible);
-    projectRightsEditor.setVisible(projectVisible);
-    projectMetadataSaveButton.setVisible(projectVisible);
-    startupSectionLabel.setVisible(startupVisible);
-    toolsSectionLabel.setVisible(toolsVisible);
-    aiSectionLabel.setVisible(aiVisible);
+    midiSectionVisible = query.isEmpty()
+                         || midiSectionLabel.getText().toLowerCase().contains(query)
+                         || midiHintLabel.getText().toLowerCase().contains(query);
+    if (! midiSectionVisible)
+        for (auto* row : midiDeviceRows)
+            if (row->nameLabel.getText().toLowerCase().contains(query))
+                midiSectionVisible = true;
 
-    storageLabel.setVisible(storageRow.visible);
-    storageValueLabel.setVisible(storageRow.visible);
-    autoloadToggle.setVisible(startupVisible);
-    studioInputsLabel.setVisible(studioInputsRow.visible);
-    studioInputsValueLabel.setVisible(studioInputsRow.visible);
-    for (auto* label : studioInputHardwareLabels)
-        label->setVisible(studioInputsRow.visible);
-    for (auto* editor : studioInputNameEditors)
-        editor->setVisible(studioInputsRow.visible);
-    audioSystemLabel.setVisible(studioInputsRow.visible);
-    audioSystemComboBox.setVisible(studioInputsRow.visible);
-    audioInputLabel.setVisible(studioInputsRow.visible);
-    audioInputComboBox.setVisible(studioInputsRow.visible);
-    audioOutputLabel.setVisible(studioInputsRow.visible);
-    audioOutputComboBox.setVisible(studioInputsRow.visible);
-    audioDiagnosticsLabel.setVisible(studioInputsRow.visible);
-    audioDriverControlPanelButton.setVisible(studioInputsRow.visible && audioDriverControlPanelButton.isEnabled());
-    aiProviderLabel.setVisible(aiVisible);
-    aiProviderComboBox.setVisible(aiVisible);
-    aiHintLabel.setVisible(aiVisible);
-    aiModelLabel.setVisible(aiVisible);
-    aiModelComboBox.setVisible(aiVisible);
-    aiEndpointLabel.setVisible(aiVisible);
-    aiEndpointEditor.setVisible(aiVisible);
-    aiKeyLabel.setVisible(aiVisible);
-    aiKeyEditor.setVisible(aiVisible);
-    aiModelStatusLabel.setVisible(aiVisible);
-    aiRefreshModelsButton.setVisible(aiVisible);
+    // A search match forces its section open, so results are never hidden behind a collapsed
+    // header - manual collapse choices only matter again once the search box is cleared.
+    if (query.isNotEmpty())
+    {
+        if (projectSectionVisible) projectSectionLabel.setExpanded(true);
+        if (startupSectionVisible) startupSectionLabel.setExpanded(true);
+        if (toolsSectionVisible) toolsSectionLabel.setExpanded(true);
+        if (aiSectionVisible) aiSectionLabel.setExpanded(true);
+        if (midiSectionVisible) midiSectionLabel.setExpanded(true);
+    }
+
+    projectSectionLabel.setVisible(projectSectionVisible);
+    startupSectionLabel.setVisible(startupSectionVisible);
+    toolsSectionLabel.setVisible(toolsSectionVisible);
+    aiSectionLabel.setVisible(aiSectionVisible);
+    midiSectionLabel.setVisible(midiSectionVisible);
 
     for (auto* row : { &newProjectRow, &openProjectRow, &saveProjectRow, &revealProjectRow, &storageRow, &studioInputsRow, &audioRow, &vstRow, &controlSurfaceRow })
-    {
         row->description.setVisible(row->visible);
-        row->actionButton.setVisible(row->visible);
-    }
 
     layoutContent();
 }
@@ -404,24 +402,31 @@ void SettingsPanel::ContentView::layoutContent()
     auto sectionHeight = 28;
     auto rowHeight = 44;
 
-    auto laySection = [&](juce::Label& label, const std::initializer_list<ActionRow*> rows)
+    // Lays out one ActionRow-based section; returns whether its body should be laid out (visible
+    // via search AND expanded) so callers can gate any extra hand-written body beneath it.
+    auto laySection = [&](CollapsibleHeader& header, bool sectionVisible, const std::initializer_list<ActionRow*> rows)
     {
-        bool anyVisible = false;
-        for (auto* row : rows)
-            anyVisible |= row->visible;
+        header.setVisible(sectionVisible);
+        if (! sectionVisible)
+        {
+            for (auto* row : rows)
+            {
+                row->description.setVisible(false);
+                row->actionButton.setVisible(false);
+            }
+            return false;
+        }
 
-        label.setVisible(anyVisible);
-        if (! anyVisible)
-            return;
-
-        label.setBounds(x, y, width, sectionHeight);
+        header.setBounds(x, y, width, sectionHeight);
         y += sectionHeight + 6;
 
+        auto expanded = header.isExpanded();
         for (auto* row : rows)
         {
-            row->description.setVisible(row->visible);
-            row->actionButton.setVisible(row->visible);
-            if (! row->visible)
+            auto rowVisible = row->visible && expanded;
+            row->description.setVisible(rowVisible);
+            row->actionButton.setVisible(rowVisible);
+            if (! rowVisible)
                 continue;
 
             row->description.setBounds(x, y, juce::jmax(220, width - 180), rowHeight);
@@ -429,12 +434,28 @@ void SettingsPanel::ContentView::layoutContent()
             y += rowHeight + 6;
         }
 
-        y += 8;
+        if (expanded)
+            y += 8;
+
+        return expanded;
     };
 
-    laySection(projectSectionLabel, { &newProjectRow, &openProjectRow, &saveProjectRow, &revealProjectRow });
+    auto projectExpanded = laySection(projectSectionLabel, projectSectionVisible,
+                                      { &newProjectRow, &openProjectRow, &saveProjectRow, &revealProjectRow });
 
-    if (projectSectionLabel.isVisible())
+    projectNameLabel.setVisible(projectExpanded);
+    projectNameEditor.setVisible(projectExpanded);
+    projectDescriptionLabel.setVisible(projectExpanded);
+    projectDescriptionEditor.setVisible(projectExpanded);
+    projectAuthorLabel.setVisible(projectExpanded);
+    projectAuthorEditor.setVisible(projectExpanded);
+    projectCopyrightLabel.setVisible(projectExpanded);
+    projectCopyrightEditor.setVisible(projectExpanded);
+    projectRightsLabel.setVisible(projectExpanded);
+    projectRightsEditor.setVisible(projectExpanded);
+    projectMetadataSaveButton.setVisible(projectExpanded);
+
+    if (projectExpanded)
     {
         auto fieldLabelWidth = 120;
         auto fieldHeight = 28;
@@ -456,18 +477,37 @@ void SettingsPanel::ContentView::layoutContent()
         y += 44;
     }
 
-    laySection(startupSectionLabel, { &storageRow });
+    auto startupExpanded = laySection(startupSectionLabel, startupSectionVisible, { &storageRow });
+    storageLabel.setVisible(startupExpanded && storageRow.visible);
+    storageValueLabel.setVisible(startupExpanded && storageRow.visible);
+    autoloadToggle.setVisible(startupExpanded);
 
-    if (autoloadToggle.isVisible())
+    if (startupExpanded)
     {
         autoloadToggle.setBounds(x, y, 240, 28);
-        y += 38;
-        y += 10;
+        y += 38 + 10;
     }
 
-    laySection(toolsSectionLabel, { &studioInputsRow, &audioRow, &vstRow, &controlSurfaceRow });
+    auto toolsExpanded = laySection(toolsSectionLabel, toolsSectionVisible,
+                                    { &studioInputsRow, &audioRow, &vstRow, &controlSurfaceRow });
 
-    if (studioInputsRow.visible)
+    auto studioInputsVisible = toolsExpanded && studioInputsRow.visible;
+    audioSystemLabel.setVisible(studioInputsVisible);
+    audioSystemComboBox.setVisible(studioInputsVisible);
+    audioInputLabel.setVisible(studioInputsVisible);
+    audioInputComboBox.setVisible(studioInputsVisible);
+    audioOutputLabel.setVisible(studioInputsVisible);
+    audioOutputComboBox.setVisible(studioInputsVisible);
+    audioDiagnosticsLabel.setVisible(studioInputsVisible);
+    studioInputsLabel.setVisible(studioInputsVisible);
+    studioInputsValueLabel.setVisible(studioInputsVisible);
+    audioDriverControlPanelButton.setVisible(studioInputsVisible && audioDriverControlPanelButton.isEnabled());
+    for (auto* label : studioInputHardwareLabels)
+        label->setVisible(studioInputsVisible);
+    for (auto* editor : studioInputNameEditors)
+        editor->setVisible(studioInputsVisible);
+
+    if (studioInputsVisible)
     {
         audioSystemLabel.setBounds(x, y, 140, 24);
         audioSystemComboBox.setBounds(x + 150, y - 2, juce::jmax(240, width - 150), 28);
@@ -519,11 +559,73 @@ void SettingsPanel::ContentView::layoutContent()
         }
     }
 
-    if (aiSectionLabel.isVisible())
+    midiSectionLabel.setVisible(midiSectionVisible);
+    auto midiExpanded = midiSectionVisible && midiSectionLabel.isExpanded();
+
+    if (midiSectionVisible)
+    {
+        midiSectionLabel.setBounds(x, y, width, sectionHeight);
+        y += sectionHeight + 6;
+    }
+
+    midiHintLabel.setVisible(midiExpanded);
+    refreshMidiDevicesButton.setVisible(midiExpanded);
+    for (auto* row : midiDeviceRows)
+    {
+        row->nameLabel.setVisible(midiExpanded);
+        row->enabledToggle.setVisible(midiExpanded);
+        row->routeCombo.setVisible(midiExpanded);
+    }
+
+    if (midiExpanded)
+    {
+        midiHintLabel.setBounds(x, y, width, 40);
+        y += 46;
+
+        refreshMidiDevicesButton.setBounds(x, y, 160, 30);
+        y += 40;
+
+        if (midiDeviceRows.isEmpty())
+        {
+            y += 4;
+        }
+        else
+        {
+            for (auto* row : midiDeviceRows)
+            {
+                row->nameLabel.setBounds(x, y, juce::jmax(160, width - 340), 28);
+                row->enabledToggle.setBounds(x + width - 320, y, 100, 28);
+                row->routeCombo.setBounds(x + width - 210, y, 210, 28);
+                y += 34;
+            }
+        }
+
+        y += 8;
+    }
+
+    aiSectionLabel.setVisible(aiSectionVisible);
+    auto aiExpanded = aiSectionVisible && aiSectionLabel.isExpanded();
+
+    aiProviderLabel.setVisible(aiExpanded);
+    aiProviderComboBox.setVisible(aiExpanded);
+    aiHintLabel.setVisible(aiExpanded);
+    aiModelLabel.setVisible(aiExpanded);
+    aiModelComboBox.setVisible(aiExpanded);
+    aiEndpointLabel.setVisible(aiExpanded);
+    aiEndpointEditor.setVisible(aiExpanded);
+    aiKeyLabel.setVisible(aiExpanded);
+    aiKeyEditor.setVisible(aiExpanded);
+    aiModelStatusLabel.setVisible(aiExpanded);
+    aiRefreshModelsButton.setVisible(aiExpanded);
+
+    if (aiSectionVisible)
     {
         aiSectionLabel.setBounds(x, y, width, sectionHeight);
         y += sectionHeight + 6;
+    }
 
+    if (aiExpanded)
+    {
         aiProviderLabel.setBounds(x, y, 100, 24);
         aiProviderComboBox.setBounds(x + 110, y, juce::jmax(180, width - 110), 24);
         y += 28;
@@ -658,6 +760,64 @@ void SettingsPanel::ContentView::setStudioInputRows(const juce::StringArray& nam
     resized();
 }
 
+void SettingsPanel::ContentView::setMidiInputDevices(const juce::Array<SettingsPanel::MidiDeviceInfo>& devices,
+                                                      const juce::StringArray& midiTrackNames)
+{
+    midiRouteTrackNames = midiTrackNames;
+
+    while (midiDeviceRows.size() > devices.size())
+        midiDeviceRows.removeLast();
+
+    while (midiDeviceRows.size() < devices.size())
+    {
+        auto* row = new MidiDeviceRow();
+        row->nameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        content.addAndMakeVisible(row->nameLabel);
+
+        row->enabledToggle.setColour(juce::ToggleButton::textColourId, juce::Colour(0xffaebbd0));
+        row->enabledToggle.setTooltip("Enable or disable this MIDI input device");
+        row->routeCombo.setTooltip("Which track this device's MIDI feeds - All Tracks, or one specific track");
+        content.addAndMakeVisible(row->enabledToggle);
+
+        row->routeCombo.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff141a24));
+        row->routeCombo.setColour(juce::ComboBox::outlineColourId, sectionAccent().withAlpha(0.28f));
+        content.addAndMakeVisible(row->routeCombo);
+
+        midiDeviceRows.add(row);
+    }
+
+    for (int index = 0; index < devices.size(); ++index)
+    {
+        auto* row = midiDeviceRows[index];
+        const auto& info = devices.getReference(index);
+        row->deviceId = info.id;
+        row->nameLabel.setText(info.name, juce::dontSendNotification);
+
+        row->enabledToggle.onClick = nullptr;
+        row->enabledToggle.setToggleState(info.enabled, juce::dontSendNotification);
+        auto deviceId = info.id;
+        row->enabledToggle.onClick = [this, &toggle = row->enabledToggle, deviceId]
+        {
+            if (owner.onMidiInputDeviceEnabledChanged != nullptr)
+                owner.onMidiInputDeviceEnabledChanged(deviceId, toggle.getToggleState());
+        };
+
+        row->routeCombo.onChange = nullptr;
+        row->routeCombo.clear(juce::dontSendNotification);
+        row->routeCombo.addItem("All Tracks", 1);
+        for (int trackIndex = 0; trackIndex < midiTrackNames.size(); ++trackIndex)
+            row->routeCombo.addItem(midiTrackNames[trackIndex], trackIndex + 2);
+        row->routeCombo.setSelectedId(info.routedTrackIndex < 0 ? 1 : (info.routedTrackIndex + 2), juce::dontSendNotification);
+        row->routeCombo.onChange = [this, &combo = row->routeCombo, deviceId]
+        {
+            if (owner.onMidiInputDeviceRouteChanged != nullptr)
+                owner.onMidiInputDeviceRouteChanged(deviceId, combo.getSelectedId() - 2);
+        };
+    }
+
+    resized();
+}
+
 SettingsPanel::SettingsPanel()
     : contentView(*this)
 {
@@ -764,6 +924,11 @@ void SettingsPanel::setStudioInputRows(const juce::StringArray& names,
                                        const juce::Array<bool>& availability)
 {
     contentView.setStudioInputRows(names, hardwareNames, availability);
+}
+
+void SettingsPanel::setMidiInputDevices(const juce::Array<MidiDeviceInfo>& devices, const juce::StringArray& midiTrackNames)
+{
+    contentView.setMidiInputDevices(devices, midiTrackNames);
 }
 
 AiProviderSettings SettingsPanel::getAiProviderSettings() const

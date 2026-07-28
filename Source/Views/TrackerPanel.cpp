@@ -228,12 +228,62 @@ TrackerPanel::TrackerPanel()
         if (onMarkerAddRequested)
             onMarkerAddRequested();
     };
+    compactButton.setTooltip("Compact track height");
+    comfortButton.setTooltip("Comfortable track height");
+    tallButton.setTooltip("Tall track height");
+    zoomOutButton.setTooltip("Zoom out on the timeline");
+    zoomInButton.setTooltip("Zoom in on the timeline");
+    addMarkerButton.setTooltip("Add a marker at the playhead");
     addAndMakeVisible(compactButton);
     addAndMakeVisible(comfortButton);
     addAndMakeVisible(tallButton);
     addAndMakeVisible(zoomOutButton);
     addAndMakeVisible(zoomInButton);
     addAndMakeVisible(addMarkerButton);
+
+    snapToggleButton.setClickingTogglesState(true);
+    snapToggleButton.setToggleState(true, juce::dontSendNotification);
+    snapToggleButton.onClick = [this]
+    {
+        if (onTimelineSnapChanged)
+            onTimelineSnapChanged(snapToggleButton.getToggleState());
+    };
+    snapToggleButton.setTooltip("Snap the loop region (and other drags) to the grid");
+    addAndMakeVisible(snapToggleButton);
+
+    gridResolutionCombo.addItem("1 Bar", 1);
+    gridResolutionCombo.addItem("1/2", 2);
+    gridResolutionCombo.addItem("1/4", 3);
+    gridResolutionCombo.addItem("1/8", 4);
+    gridResolutionCombo.addItem("1/16", 5);
+    gridResolutionCombo.addItem("1/32", 6);
+    gridResolutionCombo.setSelectedId(3, juce::dontSendNotification);
+    gridResolutionCombo.onChange = [this]
+    {
+        if (! onTimelineGridChanged)
+            return;
+
+        constexpr double beatsPerId[] = { 4.0, 2.0, 1.0, 0.5, 0.25, 0.125 };
+        auto id = gridResolutionCombo.getSelectedId();
+        if (id >= 1 && id <= 6)
+            onTimelineGridChanged(beatsPerId[id - 1]);
+    };
+    gridResolutionCombo.setTooltip("Grid resolution used for snapping");
+    addAndMakeVisible(gridResolutionCombo);
+
+    canvas.onLoopRegionCleared = [this]
+    {
+        if (onLoopRegionCleared)
+            onLoopRegionCleared();
+    };
+    canvas.onScrollRequested = [this](double newRangeStart)
+    {
+        scrollTimelineTo(newRangeStart);
+    };
+    canvas.onMouseWheelUsed = [this](const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+    {
+        applyWheelNavigation(event.getEventRelativeTo(this), wheel);
+    };
     timelineScrollBar.addListener(this);
     addAndMakeVisible(timelineScrollBar);
 
@@ -354,6 +404,51 @@ TrackerPanel::TrackerPanel()
         if (onClipDeleteRequested)
             onClipDeleteRequested(clipIndex);
     };
+    canvas.onClipEditRequested = [this](int clipIndex)
+    {
+        if (onClipEditRequested)
+            onClipEditRequested(clipIndex);
+    };
+    canvas.onEmptyMidiClipRequested = [this](int trackIndex, double seconds)
+    {
+        if (onEmptyMidiClipRequested)
+            onEmptyMidiClipRequested(trackIndex, seconds);
+    };
+    canvas.onAutomationTargetRequested = [this](int trackIndex)
+    {
+        if (onAutomationTargetRequested)
+            onAutomationTargetRequested(trackIndex);
+    };
+    canvas.onMoveToFolderRequested = [this](int trackIndex)
+    {
+        if (onMoveToFolderRequested)
+            onMoveToFolderRequested(trackIndex);
+    };
+    canvas.onTrackReorderRequested = [this](int trackIndex, int destinationIndex)
+    {
+        if (onTrackReorderRequested)
+            onTrackReorderRequested(trackIndex, destinationIndex);
+    };
+    canvas.onAutomationPointChanged = [this](int trackIndex)
+    {
+        if (onAutomationPointChanged)
+            onAutomationPointChanged(trackIndex);
+    };
+    canvas.onAutomationDataCommitted = [this](int trackIndex)
+    {
+        if (onAutomationDataCommitted)
+            onAutomationDataCommitted(trackIndex);
+    };
+    canvas.onAutomationRecordModeChanged = [this](int trackIndex, cs::AutomationRecordMode mode)
+    {
+        if (onAutomationRecordModeChanged)
+            onAutomationRecordModeChanged(trackIndex, mode);
+    };
+    canvas.onAutomationRecordingRateChanged = [this](int trackIndex, int pointsPerSecond)
+    {
+        if (onAutomationRecordingRateChanged)
+            onAutomationRecordingRateChanged(trackIndex, pointsPerSecond);
+    };
     addAndMakeVisible(canvas);
 
     refreshSelectionLabel();
@@ -422,6 +517,31 @@ void TrackerPanel::setTrackFxSummary(int trackIndex, int pluginCount)
     canvas.setTrackFxSummary(trackIndex, pluginCount);
 }
 
+void TrackerPanel::setAutomationTargetLabel(int trackIndex, const juce::String& label)
+{
+    canvas.setAutomationTargetLabel(trackIndex, label);
+}
+
+void TrackerPanel::setAutomationRecordMode(int trackIndex, cs::AutomationRecordMode mode)
+{
+    canvas.setAutomationRecordMode(trackIndex, mode);
+}
+
+void TrackerPanel::setAutomationRecordingRate(int trackIndex, int pointsPerSecond)
+{
+    canvas.setAutomationRecordingRate(trackIndex, pointsPerSecond);
+}
+
+void TrackerPanel::setTrackIndented(int trackIndex, bool indented)
+{
+    canvas.setTrackIndented(trackIndex, indented);
+}
+
+void TrackerPanel::setTrackAccentColour(int trackIndex, juce::Colour colour)
+{
+    canvas.setTrackAccentColour(trackIndex, colour);
+}
+
 void TrackerPanel::setInputSources(const juce::Array<juce::String>& sourceNames)
 {
     canvas.setInputSources(sourceNames);
@@ -456,10 +576,31 @@ void TrackerPanel::setTimingInfo(double bpm, int numerator, int denominator, con
     keySelector.setSelectedId(keyId > 0 ? keyId : 1, juce::dontSendNotification);
 }
 
-void TrackerPanel::setTimelineModel(const cs::TimelineModel* model)
+void TrackerPanel::setTimelineModel(cs::TimelineModel* model)
 {
+    timelineModel = model;
     canvas.setTimelineModel(model);
     refreshTimelineScrollBar();
+
+    if (timelineModel != nullptr)
+    {
+        snapToggleButton.setToggleState(timelineModel->isTimelineSnapEnabled(), juce::dontSendNotification);
+
+        auto gridBeats = timelineModel->getTimelineGridBeats();
+        auto closestId = 3;
+        auto closestDistance = 1.0e9;
+        constexpr double beatsPerId[] = { 4.0, 2.0, 1.0, 0.5, 0.25, 0.125 };
+        for (int id = 1; id <= 6; ++id)
+        {
+            auto distance = std::abs(beatsPerId[id - 1] - gridBeats);
+            if (distance < closestDistance)
+            {
+                closestDistance = distance;
+                closestId = id;
+            }
+        }
+        gridResolutionCombo.setSelectedId(closestId, juce::dontSendNotification);
+    }
 }
 
 void TrackerPanel::refreshTimelineView()
@@ -489,12 +630,20 @@ void TrackerPanel::paint(juce::Graphics& g)
     g.fillRoundedRectangle(bounds, 12.0f);
     g.setColour(juce::Colour(0xff26364b));
     g.drawRoundedRectangle(bounds, 12.0f, 1.0f);
+
+    if (fileDragActive)
+    {
+        g.setColour(juce::Colour(0xff67e8a5).withAlpha(0.10f));
+        g.fillRoundedRectangle(canvas.getBounds().toFloat(), 10.0f);
+        g.setColour(juce::Colour(0xff67e8a5).withAlpha(0.70f));
+        g.drawRoundedRectangle(canvas.getBounds().toFloat(), 10.0f, 2.0f);
+    }
 }
 
 void TrackerPanel::resized()
 {
     auto area = getLocalBounds().reduced(22, 18);
-    auto header = area.removeFromTop(96);
+    auto header = area.removeFromTop(120);
     auto controls = header.removeFromRight(420);
     titleLabel.setBounds(header.removeFromTop(32));
     hintLabel.setBounds(header.removeFromTop(24));
@@ -526,11 +675,95 @@ void TrackerPanel::resized()
     heightButtons.removeFromLeft(6);
     addMarkerButton.setBounds(heightButtons.removeFromLeft(90));
 
+    controls.removeFromTop(8);
+    auto snapRow = controls.removeFromTop(28);
+    snapToggleButton.setBounds(snapRow.removeFromLeft(70));
+    snapRow.removeFromLeft(6);
+    gridResolutionCombo.setBounds(snapRow.removeFromLeft(90));
+
     area.removeFromTop(12);
     timelineScrollBar.setBounds(area.removeFromBottom(16));
     area.removeFromBottom(6);
     canvas.setBounds(area);
     refreshTimelineScrollBar();
+}
+
+void TrackerPanel::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+{
+    if (event.eventComponent == &canvas)
+        return;
+
+    applyWheelNavigation(event, wheel);
+}
+
+bool TrackerPanel::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    for (const auto& path : files)
+    {
+        auto extension = juce::File(path).getFileExtension().toLowerCase();
+        if (extension == ".wav" || extension == ".aif" || extension == ".aiff"
+            || extension == ".flac" || extension == ".mp3" || extension == ".ogg")
+            return true;
+    }
+
+    return false;
+}
+
+void TrackerPanel::fileDragEnter(const juce::StringArray& files, int x, int y)
+{
+    juce::ignoreUnused(files, x, y);
+    fileDragActive = true;
+    repaint();
+}
+
+void TrackerPanel::fileDragExit(const juce::StringArray& files)
+{
+    juce::ignoreUnused(files);
+    fileDragActive = false;
+    repaint();
+}
+
+void TrackerPanel::filesDropped(const juce::StringArray& files, int x, int y)
+{
+    fileDragActive = false;
+    repaint();
+
+    if (! onAudioFilesDropped || ! isInterestedInFileDrag(files))
+        return;
+
+    onAudioFilesDropped(files, trackIndexForDropY(y), timelineSecondsForDropX(x));
+}
+
+int TrackerPanel::trackIndexForDropY(int y) const noexcept
+{
+    if (canvas.getHeight() <= 0)
+        return selectedTrack;
+
+    constexpr int laneStart = 56;
+    auto localY = y - canvas.getY();
+    if (localY < laneStart)
+        return selectedTrack;
+
+    auto trackCount = canvas.getTrackCount();
+    if (trackCount <= 0)
+        return selectedTrack;
+
+    auto laneHeight = juce::jmax(1, canvas.getLaneHeight());
+    auto trackIndex = (localY - laneStart) / laneHeight;
+    return juce::jlimit(0, trackCount - 1, trackIndex);
+}
+
+double TrackerPanel::timelineSecondsForDropX(int x) const noexcept
+{
+    if (timelineModel == nullptr || canvas.getWidth() <= 0)
+        return 0.0;
+
+    auto localX = x - canvas.getX();
+    auto labelWidth = juce::jmin(340, juce::jmax(290, canvas.getWidth() / 4));
+    auto timelineOriginX = labelWidth + 12;
+    auto pixelsPerSecond = juce::jmax(1.0, timelineModel->getPixelsPerSecond());
+    auto scrollSeconds = timelineScrollBar.getCurrentRangeStart();
+    return juce::jmax(0.0, scrollSeconds + static_cast<double>(localX - timelineOriginX) / pixelsPerSecond);
 }
 
 void TrackerPanel::refreshSelectionLabel()
@@ -560,6 +793,61 @@ void TrackerPanel::scrollBarMoved(juce::ScrollBar* scrollBarThatHasMoved, double
 {
     if (scrollBarThatHasMoved == &timelineScrollBar)
         canvas.setScrollSeconds(newRangeStart);
+}
+
+void TrackerPanel::scrollTimelineTo(double newRangeStart)
+{
+    auto totalSeconds = canvas.getTotalDurationSeconds();
+    auto visibleSeconds = canvas.getVisibleDurationSeconds();
+    auto maxStart = juce::jmax(0.0, totalSeconds - visibleSeconds);
+    auto clampedStart = juce::jlimit(0.0, maxStart, newRangeStart);
+    timelineScrollBar.setCurrentRange(clampedStart, juce::jmax(0.1, visibleSeconds), juce::dontSendNotification);
+    canvas.setScrollSeconds(clampedStart);
+}
+
+void TrackerPanel::applyWheelNavigation(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+{
+    if (timelineModel == nullptr)
+        return;
+
+    auto localPoint = event.getEventRelativeTo(this).position.toInt();
+    if (! canvas.getBounds().contains(localPoint))
+        return;
+
+    auto canvasPoint = event.getEventRelativeTo(&canvas).position.toInt();
+    auto zoomGesture = event.mods.isCtrlDown() || event.mods.isAltDown() || event.mods.isCommandDown();
+
+    if (zoomGesture)
+    {
+        auto labelWidth = juce::jmin(340, juce::jmax(290, canvas.getWidth() / 4));
+        auto timelineOriginX = labelWidth + 12;
+        auto oldPixelsPerSecond = timelineModel->getPixelsPerSecond();
+        auto focusSeconds = juce::jmax(0.0, timelineScrollBar.getCurrentRangeStart()
+                                                + static_cast<double>(canvasPoint.x - timelineOriginX)
+                                                      / juce::jmax(1.0, oldPixelsPerSecond));
+        auto zoomDelta = std::abs(wheel.deltaY) > 0.0001f ? wheel.deltaY : -wheel.deltaX;
+        if (std::abs(zoomDelta) < 0.0001f)
+            return;
+
+        auto zoomFactor = std::pow(1.8, (double) zoomDelta * 2.4);
+        timelineModel->setPixelsPerSecond(oldPixelsPerSecond * zoomFactor);
+        refreshTimelineScrollBar();
+
+        auto newPixelsPerSecond = timelineModel->getPixelsPerSecond();
+        auto newScrollStart = focusSeconds - static_cast<double>(canvasPoint.x - timelineOriginX)
+                                             / juce::jmax(1.0, newPixelsPerSecond);
+        scrollTimelineTo(newScrollStart);
+        repaint();
+        return;
+    }
+
+    auto horizontalIntent = std::abs(wheel.deltaX) > std::abs(wheel.deltaY) ? wheel.deltaX : wheel.deltaY;
+    if (std::abs(horizontalIntent) < 0.0001f)
+        return;
+
+    auto visibleSeconds = canvas.getVisibleDurationSeconds();
+    auto scrollStepSeconds = juce::jmax(0.25, visibleSeconds * 0.16);
+    scrollTimelineTo(timelineScrollBar.getCurrentRangeStart() - (double) horizontalIntent * scrollStepSeconds * 8.0);
 }
 
 void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
@@ -652,6 +940,42 @@ void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
         {
             if (onTrackRemoveRequested)
                 onTrackRemoveRequested(index);
+        };
+        header->onTargetRequested = [this](int index)
+        {
+            if (onAutomationTargetRequested)
+                onAutomationTargetRequested(index);
+        };
+        header->onMoveToFolderRequested = [this](int index)
+        {
+            if (onMoveToFolderRequested)
+                onMoveToFolderRequested(index);
+        };
+        header->onRecordModeChanged = [this](int index, cs::AutomationRecordMode mode)
+        {
+            if (onAutomationRecordModeChanged)
+                onAutomationRecordModeChanged(index, mode);
+        };
+        header->onRecordingRateChanged = [this](int index, int pointsPerSecond)
+        {
+            if (onAutomationRecordingRateChanged)
+                onAutomationRecordingRateChanged(index, pointsPerSecond);
+        };
+        header->onReorderDragged = [this](int index, int canvasY)
+        {
+            reorderDragTrackIndex = index;
+            reorderDragTargetIndex = juce::jlimit(0, juce::jmax(0, trackCount - 1), yToTrackIndex(canvasY));
+            repaint();
+        };
+        header->onReorderCommitted = [this](int index, int canvasY)
+        {
+            auto destinationIndex = juce::jlimit(0, juce::jmax(0, trackCount - 1), yToTrackIndex(canvasY));
+            reorderDragTrackIndex = -1;
+            reorderDragTargetIndex = -1;
+            repaint();
+
+            if (destinationIndex != index && onTrackReorderRequested)
+                onTrackReorderRequested(index, destinationIndex);
         };
         addAndMakeVisible(header);
         header->setInputSources(inputSourceNames);
@@ -823,10 +1147,40 @@ void TrackerPanel::TimelineCanvas::setLaneHeight(int newLaneHeight)
     repaint();
 }
 
-void TrackerPanel::TimelineCanvas::setTimelineModel(const cs::TimelineModel* model)
+void TrackerPanel::TimelineCanvas::setTimelineModel(cs::TimelineModel* model)
 {
     timelineModel = model;
     repaint();
+}
+
+void TrackerPanel::TimelineCanvas::setAutomationTargetLabel(int trackIndex, const juce::String& label)
+{
+    if (auto* header = trackHeaders[trackIndex])
+        header->setAutomationTargetLabel(label);
+}
+
+void TrackerPanel::TimelineCanvas::setAutomationRecordMode(int trackIndex, cs::AutomationRecordMode mode)
+{
+    if (auto* header = trackHeaders[trackIndex])
+        header->setAutomationRecordMode(mode);
+}
+
+void TrackerPanel::TimelineCanvas::setAutomationRecordingRate(int trackIndex, int pointsPerSecond)
+{
+    if (auto* header = trackHeaders[trackIndex])
+        header->setAutomationRecordingRate(pointsPerSecond);
+}
+
+void TrackerPanel::TimelineCanvas::setTrackIndented(int trackIndex, bool indented)
+{
+    if (auto* header = trackHeaders[trackIndex])
+        header->setIndented(indented);
+}
+
+void TrackerPanel::TimelineCanvas::setTrackAccentColour(int trackIndex, juce::Colour colour)
+{
+    if (auto* header = trackHeaders[trackIndex])
+        header->setAccentColour(colour);
 }
 
 void TrackerPanel::TimelineCanvas::setScrollSeconds(double seconds)
@@ -993,6 +1347,12 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                 if (clip.trackIndex != trackIndex)
                     continue;
 
+                if (clip.kind == cs::ClipKind::automation)
+                {
+                    drawAutomationLane(g, clip, timelineLane);
+                    continue;
+                }
+
                 auto pixelsPerSecond = timelineModel->getPixelsPerSecond();
                 auto clipX = timelineOriginX + juce::roundToInt((clip.startSeconds - scrollSeconds) * pixelsPerSecond);
                 auto clipWidth = juce::jmax(8, juce::roundToInt(clip.durationSeconds * pixelsPerSecond));
@@ -1018,10 +1378,6 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
 
                 if (! clip.peaks.empty())
                 {
-                    auto maxPeak = 0.01f;
-                    for (auto peak : clip.peaks)
-                        maxPeak = juce::jmax(maxPeak, peak);
-
                     auto sourceDurationSeconds = clip.sourceDurationSeconds > 0.0
                                                    ? clip.sourceDurationSeconds
                                                    : juce::jmax(clip.sourceStartSeconds + clip.durationSeconds, clip.durationSeconds);
@@ -1032,16 +1388,37 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                     auto sourceEndPeak = juce::roundToInt(sourceEndRatio * static_cast<double>(clip.peaks.size() - 1));
                     auto sourcePeakSpan = juce::jmax(1, sourceEndPeak - sourceStartPeak);
 
-                    for (int x = 0; x < waveformArea.getWidth(); ++x)
+                    auto drawWave = [&](const std::vector<float>& peakData, juce::Rectangle<int> area)
                     {
-                        auto peakIndex = juce::jlimit(0,
-                                                      (int) clip.peaks.size() - 1,
-                                                      sourceStartPeak + x * sourcePeakSpan / juce::jmax(1, waveformArea.getWidth()));
-                        auto peak = juce::jlimit(0.0f, 1.0f, clip.peaks[(size_t) peakIndex] / maxPeak);
-                        auto halfHeight = juce::roundToInt((float) waveformArea.getHeight() * 0.5f * peak);
-                        g.drawVerticalLine(waveformArea.getX() + x,
-                                           (float) waveformArea.getCentreY() - halfHeight,
-                                           (float) waveformArea.getCentreY() + halfHeight);
+                        auto maxPeak = 0.01f;
+                        for (auto peak : peakData)
+                            maxPeak = juce::jmax(maxPeak, peak);
+
+                        for (int x = 0; x < area.getWidth(); ++x)
+                        {
+                            auto peakIndex = juce::jlimit(0,
+                                                          (int) peakData.size() - 1,
+                                                          sourceStartPeak + x * sourcePeakSpan / juce::jmax(1, area.getWidth()));
+                            auto peak = juce::jlimit(0.0f, 1.0f, peakData[(size_t) peakIndex] / maxPeak);
+                            auto halfHeight = juce::roundToInt((float) area.getHeight() * 0.5f * peak);
+                            g.drawVerticalLine(area.getX() + x,
+                                               (float) area.getCentreY() - halfHeight,
+                                               (float) area.getCentreY() + halfHeight);
+                        }
+                    };
+
+                    if (clip.sourceNumChannels >= 2 && clip.rightPeaks.size() == clip.peaks.size() && waveformArea.getHeight() >= 14)
+                    {
+                        auto upperWave = waveformArea.removeFromTop(waveformArea.getHeight() / 2).reduced(0, 1);
+                        auto lowerWave = waveformArea.reduced(0, 1);
+                        drawWave(clip.peaks, upperWave);
+                        drawWave(clip.rightPeaks, lowerWave);
+                        g.setColour(juce::Colour(0x55d7f8ff));
+                        g.drawHorizontalLine(lowerWave.getY() - 1, (float) lowerWave.getX(), (float) lowerWave.getRight());
+                    }
+                    else
+                    {
+                        drawWave(clip.peaks, waveformArea);
                     }
                 }
                 else
@@ -1064,6 +1441,14 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
     {
         auto loopStart = timelineModel->getLoopStartSeconds();
         auto loopEnd = timelineModel->getLoopEndSeconds();
+
+        // While actively dragging one edge, show that edge at its live (pre-commit) position
+        // rather than the model's still-unchanged value, so the preview tracks the mouse.
+        if (resizingLoopEdge == LoopEdge::left)
+            loopStart = juce::jmin(loopEdgeLiveSeconds, loopEdgeOtherSeconds);
+        else if (resizingLoopEdge == LoopEdge::right)
+            loopEnd = juce::jmax(loopEdgeLiveSeconds, loopEdgeOtherSeconds);
+
         if (loopEnd > loopStart)
         {
             auto startX = xForTimelineSeconds(loopStart);
@@ -1077,6 +1462,20 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                 g.setColour(juce::Colour(0xff67e8a5));
                 g.drawVerticalLine(startX, 0.0f, static_cast<float>(rulerHeight));
                 g.drawVerticalLine(endX, 0.0f, static_cast<float>(rulerHeight));
+
+                // Wider grab handles at each edge, drawn only within the ruler strip, hinting
+                // that the edges are draggable without cluttering the track lanes below.
+                g.setColour(juce::Colour(0xffbdf5d6));
+                g.fillRect(startX - 2, 0, 4, rulerHeight);
+                g.fillRect(endX - 2, 0, 4, rulerHeight);
+
+                // Small close glyph at the top-left of the band - click to clear the region.
+                juce::Rectangle<float> closeGlyph((float) bandLeft + 3.0f, 2.0f, 13.0f, 13.0f);
+                g.setColour(juce::Colour(0xcc1a2430));
+                g.fillEllipse(closeGlyph);
+                g.setColour(juce::Colour(0xffe8f0f7));
+                g.drawLine(closeGlyph.getX() + 3.5f, closeGlyph.getY() + 3.5f, closeGlyph.getRight() - 3.5f, closeGlyph.getBottom() - 3.5f, 1.5f);
+                g.drawLine(closeGlyph.getRight() - 3.5f, closeGlyph.getY() + 3.5f, closeGlyph.getX() + 3.5f, closeGlyph.getBottom() - 3.5f, 1.5f);
             }
         }
 
@@ -1117,6 +1516,16 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
             g.fillEllipse(static_cast<float>(playheadX - 5), 4.0f, 10.0f, 10.0f);
         }
     }
+
+    if (reorderDragTrackIndex >= 0)
+    {
+        constexpr int dragRulerHeight = 56;
+        auto dropY = dragRulerHeight + reorderDragTargetIndex * laneHeight
+                   + (reorderDragTargetIndex > reorderDragTrackIndex ? laneHeight : 0);
+        g.setColour(juce::Colour(0xffffd166));
+        g.drawHorizontalLine(dropY, 0.0f, static_cast<float>(getWidth()));
+        g.fillEllipse(2.0f, (float) dropY - 4.0f, 8.0f, 8.0f);
+    }
 }
 
 void TrackerPanel::TimelineCanvas::resized()
@@ -1135,6 +1544,64 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
 {
     auto laneStart = 56;
     auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+
+    // Automation lanes take over all clicks (including right-click) in their own lane body -
+    // checked before the generic "right-click empty area -> Add Track" handler below, which
+    // would otherwise swallow every right-click meant for a point's context menu.
+    if (event.x >= labelWidth + 12 && event.y >= laneStart && timelineModel != nullptr)
+    {
+        auto hoveredTrackIndex = yToTrackIndex(event.y);
+        if (juce::isPositiveAndBelow(hoveredTrackIndex, trackCount)
+            && timelineModel->getTrackKind(hoveredTrackIndex) == cs::TrackKind::automation)
+        {
+            selectedTrack = hoveredTrackIndex;
+            if (onTrackSelected)
+                onTrackSelected(hoveredTrackIndex);
+
+            auto hitPointId = hitTestAutomationPoint(hoveredTrackIndex, event.position.toInt());
+
+            if (event.mods.isPopupMenu())
+            {
+                if (hitPointId.isNotEmpty())
+                    showAutomationSegmentMenu(hoveredTrackIndex, hitPointId, event.position.toInt());
+                return;
+            }
+
+            if (hitPointId.isNotEmpty())
+            {
+                draggingAutomationTrackIndex = hoveredTrackIndex;
+                draggingAutomationPointId = hitPointId;
+                repaint();
+                return;
+            }
+
+            auto tensionPointId = hitTestAutomationTensionHandle(hoveredTrackIndex, event.position.toInt());
+            if (tensionPointId.isNotEmpty())
+            {
+                draggingAutomationTensionTrackIndex = hoveredTrackIndex;
+                draggingAutomationTensionPointId = tensionPointId;
+                repaint();
+                return;
+            }
+
+            auto lane = getAutomationLaneBounds(hoveredTrackIndex);
+            auto seconds = timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x));
+            auto value = juce::jlimit(0.0f, 1.0f,
+                                      (float) (lane.getBottom() - event.y) / (float) juce::jmax(1, lane.getHeight()));
+
+            auto newPointId = timelineModel->addOrUpdateAutomationPoint(hoveredTrackIndex, seconds, value);
+            if (newPointId.isNotEmpty())
+            {
+                draggingAutomationTrackIndex = hoveredTrackIndex;
+                draggingAutomationPointId = newPointId;
+                if (onAutomationPointChanged)
+                    onAutomationPointChanged(hoveredTrackIndex);
+            }
+
+            repaint();
+            return;
+        }
+    }
 
     // Right-click in the empty body area (below the ruler, not on a clip) adds a track. This runs
     // before the no-tracks early-out below so it also works from the empty "No tracks yet" state.
@@ -1164,6 +1631,25 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
 
     if (event.x >= labelWidth + 12 && timelineModel != nullptr && event.y < laneStart)
     {
+        if (hitTestLoopClose(event.position.toInt()))
+        {
+            if (onLoopRegionCleared)
+                onLoopRegionCleared();
+            return;
+        }
+
+        auto edgeHit = hitTestLoopEdge(event.x);
+        if (edgeHit != LoopEdge::none)
+        {
+            resizingLoopEdge = edgeHit;
+            auto loopStart = timelineModel->getLoopStartSeconds();
+            auto loopEnd = timelineModel->getLoopEndSeconds();
+            loopEdgeOtherSeconds = (edgeHit == LoopEdge::left) ? loopEnd : loopStart;
+            loopEdgeLiveSeconds = (edgeHit == LoopEdge::left) ? loopStart : loopEnd;
+            repaint();
+            return;
+        }
+
         auto markerId = hitTestMarker(event.x);
         if (markerId.isNotEmpty())
         {
@@ -1174,7 +1660,7 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
 
         draggingLoopRegion = true;
         loopRegionMoved = false;
-        loopDragStartSeconds = xToTimelineSeconds(event.x);
+        loopDragStartSeconds = timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x));
         loopDragCurrentSeconds = loopDragStartSeconds;
         repaint();
         return;
@@ -1257,15 +1743,84 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
         onTrackSelected(trackIndex);
 }
 
+void TrackerPanel::TimelineCanvas::mouseDoubleClick(const juce::MouseEvent& event)
+{
+    if (timelineModel == nullptr)
+        return;
+
+    auto clipIndex = hitTestClip(event.position.toInt());
+    if (clipIndex >= 0)
+    {
+        const auto& clip = timelineModel->getClips()[(size_t) clipIndex];
+        if (clip.kind == cs::ClipKind::midi && onClipEditRequested)
+            onClipEditRequested(clipIndex);
+        return;
+    }
+
+    auto trackIndex = yToTrackIndex(event.y);
+    if (! juce::isPositiveAndBelow(trackIndex, trackCount))
+        return;
+
+    if (timelineModel->getTrackKind(trackIndex) != cs::TrackKind::midi)
+        return;
+
+    if (onEmptyMidiClipRequested)
+        onEmptyMidiClipRequested(trackIndex, xToTimelineSeconds(event.x));
+}
+
 void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
 {
     auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
     if (timelineModel == nullptr)
         return;
 
+    if (draggingAutomationTrackIndex >= 0 && draggingAutomationPointId.isNotEmpty())
+    {
+        auto lane = getAutomationLaneBounds(draggingAutomationTrackIndex);
+        auto seconds = timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x));
+        auto value = juce::jlimit(0.0f, 1.0f,
+                                  (float) (lane.getBottom() - event.y) / (float) juce::jmax(1, lane.getHeight()));
+
+        if (timelineModel->moveAutomationPoint(draggingAutomationTrackIndex, draggingAutomationPointId, seconds, value)
+            && onAutomationPointChanged)
+            onAutomationPointChanged(draggingAutomationTrackIndex);
+
+        repaint();
+        return;
+    }
+
+    if (draggingAutomationTensionTrackIndex >= 0 && draggingAutomationTensionPointId.isNotEmpty())
+    {
+        auto currentShape = cs::AutomationCurveShape::power;
+        if (auto* points = timelineModel->getAutomationPoints(draggingAutomationTensionTrackIndex))
+            for (const auto& point : *points)
+                if (point.id == draggingAutomationTensionPointId)
+                    currentShape = point.shape;
+
+        auto deltaY = (float) event.getDistanceFromDragStartY();
+        auto tension = juce::jlimit(-1.0f, 1.0f, deltaY / 80.0f);
+
+        if (timelineModel->setAutomationPointShape(draggingAutomationTensionTrackIndex,
+                                                   draggingAutomationTensionPointId,
+                                                   currentShape,
+                                                   tension)
+            && onAutomationPointChanged)
+            onAutomationPointChanged(draggingAutomationTensionTrackIndex);
+
+        repaint();
+        return;
+    }
+
+    if (resizingLoopEdge != LoopEdge::none)
+    {
+        loopEdgeLiveSeconds = juce::jmax(0.0, timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x)));
+        repaint();
+        return;
+    }
+
     if (draggingLoopRegion)
     {
-        loopDragCurrentSeconds = xToTimelineSeconds(event.x);
+        loopDragCurrentSeconds = timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x));
         loopRegionMoved = true;
         repaint();
         return;
@@ -1273,9 +1828,10 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
 
     if (draggingClipIndex >= 0)
     {
+        auto scrolledSeconds = autoScrollWhileDragging(event.x);
         const auto pixelsPerSecond = juce::jmax(1.0, timelineModel->getPixelsPerSecond());
         const auto deltaSeconds = static_cast<double>(event.getDistanceFromDragStartX()) / pixelsPerSecond;
-        const auto newStartSeconds = juce::jmax(0.0, draggingOriginalStartSeconds + deltaSeconds);
+        const auto newStartSeconds = juce::jmax(0.0, draggingOriginalStartSeconds + deltaSeconds + scrolledSeconds);
         const auto newTrackIndex = yToTrackIndex(event.y);
 
         if (juce::isPositiveAndBelow(newTrackIndex, trackCount))
@@ -1302,8 +1858,65 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
     repaint();
 }
 
+void TrackerPanel::TimelineCanvas::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+{
+    if (onMouseWheelUsed)
+        onMouseWheelUsed(event, wheel);
+}
+
+void TrackerPanel::TimelineCanvas::mouseMove(const juce::MouseEvent& event)
+{
+    constexpr int rulerHeight = 56;
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+
+    if (event.x < labelWidth + 12 || event.y >= rulerHeight || timelineModel == nullptr)
+    {
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+        return;
+    }
+
+    if (hitTestLoopClose(event.position.toInt()))
+        setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    else if (hitTestLoopEdge(event.x) != LoopEdge::none)
+        setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+    else
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+}
+
 void TrackerPanel::TimelineCanvas::mouseUp(const juce::MouseEvent&)
 {
+    if (draggingAutomationTrackIndex >= 0)
+    {
+        auto trackIndex = draggingAutomationTrackIndex;
+        draggingAutomationTrackIndex = -1;
+        draggingAutomationPointId.clear();
+        if (onAutomationDataCommitted)
+            onAutomationDataCommitted(trackIndex);
+        repaint();
+        return;
+    }
+
+    if (draggingAutomationTensionTrackIndex >= 0)
+    {
+        auto trackIndex = draggingAutomationTensionTrackIndex;
+        draggingAutomationTensionTrackIndex = -1;
+        draggingAutomationTensionPointId.clear();
+        if (onAutomationDataCommitted)
+            onAutomationDataCommitted(trackIndex);
+        repaint();
+        return;
+    }
+
+    if (resizingLoopEdge != LoopEdge::none)
+    {
+        if (onLoopRegionChanged)
+            onLoopRegionChanged(loopEdgeLiveSeconds, loopEdgeOtherSeconds);
+
+        resizingLoopEdge = LoopEdge::none;
+        repaint();
+        return;
+    }
+
     if (draggingLoopRegion)
     {
         if (loopRegionMoved && std::abs(loopDragCurrentSeconds - loopDragStartSeconds) > 0.05)
@@ -1404,6 +2017,256 @@ juce::String TrackerPanel::TimelineCanvas::hitTestMarker(int x) const
     }
 
     return {};
+}
+
+TrackerPanel::TimelineCanvas::LoopEdge TrackerPanel::TimelineCanvas::hitTestLoopEdge(int x) const noexcept
+{
+    if (timelineModel == nullptr)
+        return LoopEdge::none;
+
+    auto loopStart = timelineModel->getLoopStartSeconds();
+    auto loopEnd = timelineModel->getLoopEndSeconds();
+    if (loopEnd <= loopStart)
+        return LoopEdge::none;
+
+    constexpr int grabPixels = 6;
+    if (std::abs(x - xForTimelineSeconds(loopStart)) <= grabPixels)
+        return LoopEdge::left;
+    if (std::abs(x - xForTimelineSeconds(loopEnd)) <= grabPixels)
+        return LoopEdge::right;
+
+    return LoopEdge::none;
+}
+
+double TrackerPanel::TimelineCanvas::autoScrollWhileDragging(int x)
+{
+    if (onScrollRequested == nullptr || timelineModel == nullptr)
+        return 0.0;
+
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    auto timelineOriginX = labelWidth + 12;
+    auto rightEdge = getWidth() - 12;
+    constexpr int hotZoneWidth = 48;
+
+    auto visibleSeconds = getVisibleDurationSeconds();
+    auto scrollStepSeconds = juce::jmax(0.15, visibleSeconds * 0.045);
+    auto previousScroll = scrollSeconds;
+
+    if (x < timelineOriginX + hotZoneWidth)
+        onScrollRequested(scrollSeconds - scrollStepSeconds);
+    else if (x > rightEdge - hotZoneWidth)
+        onScrollRequested(scrollSeconds + scrollStepSeconds);
+
+    return scrollSeconds - previousScroll;
+}
+
+bool TrackerPanel::TimelineCanvas::hitTestLoopClose(juce::Point<int> position) const noexcept
+{
+    if (timelineModel == nullptr)
+        return false;
+
+    auto loopStart = timelineModel->getLoopStartSeconds();
+    auto loopEnd = timelineModel->getLoopEndSeconds();
+    if (loopEnd <= loopStart)
+        return false;
+
+    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    auto bandLeft = juce::jmax(labelWidth, xForTimelineSeconds(loopStart));
+    juce::Rectangle<int> closeGlyph(bandLeft + 3, 2, 13, 13);
+    return closeGlyph.contains(position);
+}
+
+juce::Rectangle<int> TrackerPanel::TimelineCanvas::getAutomationLaneBounds(int trackIndex) const
+{
+    constexpr int rulerHeight = 56;
+    auto lane = juce::Rectangle<int>(0, rulerHeight + trackIndex * laneHeight, getWidth(), laneHeight);
+    return lane.reduced(12, 14);
+}
+
+void TrackerPanel::TimelineCanvas::drawAutomationLane(juce::Graphics& g, const cs::TimelineClip& clip, juce::Rectangle<int> lane) const
+{
+    const auto automationColour = juce::Colour(0xffffd166);
+    auto valueToY = [&](float value)
+    {
+        return (float) lane.getBottom() - juce::jlimit(0.0f, 1.0f, value) * (float) lane.getHeight();
+    };
+
+    const auto& points = clip.automationPoints;
+
+    if (points.empty())
+    {
+        g.setColour(automationColour.withAlpha(0.35f));
+        auto midY = (float) lane.getCentreY();
+        g.drawHorizontalLine((int) midY, (float) lane.getX(), (float) lane.getRight());
+        g.setFont(juce::Font(11.0f));
+        g.setColour(automationColour.withAlpha(0.6f));
+        g.drawText("Click to add automation points", lane.reduced(6, 0), juce::Justification::centredLeft, true);
+        return;
+    }
+
+    juce::Path path;
+    auto firstY = valueToY(points.front().value);
+    path.startNewSubPath((float) lane.getX(), firstY);
+
+    constexpr int stepPx = 3;
+    auto firstX = xForTimelineSeconds(points.front().seconds);
+    if (firstX > lane.getX())
+        path.lineTo((float) firstX, firstY);
+
+    for (size_t i = 0; i + 1 < points.size(); ++i)
+    {
+        auto startX = xForTimelineSeconds(points[i].seconds);
+        auto endX = xForTimelineSeconds(points[i + 1].seconds);
+        if (endX <= startX)
+            continue;
+
+        for (int x = startX; x <= endX; x += stepPx)
+        {
+            auto seconds = xToTimelineSeconds(x);
+            auto value = cs::evaluateAutomationSegment(points[i], points[i + 1], seconds);
+            path.lineTo((float) x, valueToY(value));
+        }
+        path.lineTo((float) endX, valueToY(points[i + 1].value));
+    }
+
+    auto lastX = xForTimelineSeconds(points.back().seconds);
+    auto lastY = valueToY(points.back().value);
+    if (lastX < lane.getRight())
+        path.lineTo((float) lane.getRight(), lastY);
+
+    g.setColour(automationColour);
+    g.strokePath(path, juce::PathStrokeType(2.0f));
+
+    for (const auto& point : points)
+    {
+        auto x = xForTimelineSeconds(point.seconds);
+        if (x < lane.getX() - 10 || x > lane.getRight() + 10)
+            continue;
+
+        auto y = valueToY(point.value);
+        g.setColour(juce::Colours::black);
+        g.fillEllipse((float) x - 4.5f, y - 4.5f, 9.0f, 9.0f);
+        g.setColour(automationColour);
+        g.fillEllipse((float) x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+    }
+
+    for (size_t i = 0; i + 1 < points.size(); ++i)
+    {
+        if (points[i].shape != cs::AutomationCurveShape::power && points[i].shape != cs::AutomationCurveShape::bezier)
+            continue;
+
+        auto midSeconds = (points[i].seconds + points[i + 1].seconds) * 0.5;
+        auto midX = xForTimelineSeconds(midSeconds);
+        if (midX < lane.getX() - 10 || midX > lane.getRight() + 10)
+            continue;
+
+        auto midY = valueToY(cs::evaluateAutomationSegment(points[i], points[i + 1], midSeconds));
+
+        constexpr float half = 4.5f;
+        juce::Path diamond;
+        diamond.addQuadrilateral((float) midX, midY - half, (float) midX + half, midY, (float) midX, midY + half, (float) midX - half, midY);
+        g.setColour(juce::Colours::black);
+        g.fillPath(diamond);
+        g.setColour(juce::Colour(0xff8fd3ff));
+        g.strokePath(diamond, juce::PathStrokeType(1.2f));
+    }
+}
+
+juce::String TrackerPanel::TimelineCanvas::hitTestAutomationPoint(int trackIndex, juce::Point<int> position) const
+{
+    if (timelineModel == nullptr)
+        return {};
+
+    auto* points = timelineModel->getAutomationPoints(trackIndex);
+    if (points == nullptr)
+        return {};
+
+    auto lane = getAutomationLaneBounds(trackIndex);
+    constexpr float hitRadius = 10.0f;
+
+    for (const auto& point : *points)
+    {
+        auto x = (float) xForTimelineSeconds(point.seconds);
+        auto y = (float) lane.getBottom() - juce::jlimit(0.0f, 1.0f, point.value) * (float) lane.getHeight();
+        if (position.toFloat().getDistanceFrom(juce::Point<float>(x, y)) <= hitRadius)
+            return point.id;
+    }
+
+    return {};
+}
+
+juce::String TrackerPanel::TimelineCanvas::hitTestAutomationTensionHandle(int trackIndex, juce::Point<int> position) const
+{
+    if (timelineModel == nullptr)
+        return {};
+
+    auto* points = timelineModel->getAutomationPoints(trackIndex);
+    if (points == nullptr || points->size() < 2)
+        return {};
+
+    auto lane = getAutomationLaneBounds(trackIndex);
+    constexpr float hitRadius = 10.0f;
+
+    for (size_t i = 0; i + 1 < points->size(); ++i)
+    {
+        const auto& a = (*points)[i];
+        const auto& b = (*points)[i + 1];
+        if (a.shape != cs::AutomationCurveShape::power && a.shape != cs::AutomationCurveShape::bezier)
+            continue;
+
+        auto midSeconds = (a.seconds + b.seconds) * 0.5;
+        auto midValue = cs::evaluateAutomationSegment(a, b, midSeconds);
+        auto x = (float) xForTimelineSeconds(midSeconds);
+        auto y = (float) lane.getBottom() - juce::jlimit(0.0f, 1.0f, midValue) * (float) lane.getHeight();
+
+        if (position.toFloat().getDistanceFrom(juce::Point<float>(x, y)) <= hitRadius)
+            return a.id;
+    }
+
+    return {};
+}
+
+void TrackerPanel::TimelineCanvas::showAutomationSegmentMenu(int trackIndex, const juce::String& pointId, juce::Point<int> screenAnchor)
+{
+    juce::PopupMenu menu;
+    menu.addItem(1, "Linear");
+    menu.addItem(2, "Step");
+    menu.addItem(3, "S-Curve");
+    menu.addItem(4, "Power");
+    menu.addItem(5, "Bezier");
+    menu.addSeparator();
+    menu.addItem(6, "Delete Point");
+
+    auto clickArea = juce::Rectangle<int>(screenAnchor.x, screenAnchor.y, 1, 1);
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
+                                                .withTargetScreenArea(localAreaToGlobal(clickArea)),
+                        [safe = juce::Component::SafePointer<TimelineCanvas>(this), trackIndex, pointId](int result)
+                        {
+                            if (safe == nullptr || result <= 0 || safe->timelineModel == nullptr)
+                                return;
+
+                            if (result == 6)
+                            {
+                                safe->timelineModel->removeAutomationPoint(trackIndex, pointId);
+                            }
+                            else
+                            {
+                                auto shape = cs::AutomationCurveShape::linear;
+                                switch (result)
+                                {
+                                    case 2: shape = cs::AutomationCurveShape::step; break;
+                                    case 3: shape = cs::AutomationCurveShape::sCurve; break;
+                                    case 4: shape = cs::AutomationCurveShape::power; break;
+                                    case 5: shape = cs::AutomationCurveShape::bezier; break;
+                                    default: break;
+                                }
+                                safe->timelineModel->setAutomationPointShape(trackIndex, pointId, shape, 0.0f);
+                            }
+
+                            safe->repaint();
+                            if (safe->onAutomationDataCommitted)
+                                safe->onAutomationDataCommitted(trackIndex);
+                        });
 }
 
 TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)
@@ -1517,6 +2380,53 @@ TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)
     };
     addAndMakeVisible(stereoButton);
 
+    recordModeButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff263341));
+    recordModeButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffffd166));
+    recordModeButton.setTooltip("Automation record mode: Touch (record while moved), Latch (keep recording after release), or Write (record continuously all pass)");
+    recordModeButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Touch", true, recordMode == cs::AutomationRecordMode::touch);
+        menu.addItem(2, "Latch", true, recordMode == cs::AutomationRecordMode::latch);
+        menu.addItem(3, "Write", true, recordMode == cs::AutomationRecordMode::write);
+
+        menu.addSeparator();
+        juce::PopupMenu rateMenu;
+        static constexpr int rateChoices[] = { 5, 10, 20, 30, 60 };
+        static constexpr int rateItemIdBase = 100;
+        for (int i = 0; i < (int) std::size(rateChoices); ++i)
+            rateMenu.addItem(rateItemIdBase + i, juce::String(rateChoices[i]) + " points/sec", true, recordingRate == rateChoices[i]);
+        menu.addSubMenu("Recording Resolution (" + juce::String(recordingRate) + "/sec)", rateMenu);
+
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&recordModeButton),
+                           [this](int result)
+                           {
+                               if (result <= 0)
+                                   return;
+
+                               if (result >= rateItemIdBase)
+                               {
+                                   auto rateIndex = result - rateItemIdBase;
+                                   if (juce::isPositiveAndBelow(rateIndex, (int) std::size(rateChoices)))
+                                   {
+                                       setAutomationRecordingRate(rateChoices[rateIndex]);
+                                       if (onRecordingRateChanged)
+                                           onRecordingRateChanged(trackIndex, rateChoices[rateIndex]);
+                                   }
+                                   return;
+                               }
+
+                               auto mode = cs::AutomationRecordMode::touch;
+                               if (result == 2) mode = cs::AutomationRecordMode::latch;
+                               else if (result == 3) mode = cs::AutomationRecordMode::write;
+
+                               setAutomationRecordMode(mode);
+                               if (onRecordModeChanged)
+                                   onRecordModeChanged(trackIndex, mode);
+                           });
+    };
+    addChildComponent(recordModeButton);
+
     menuButton.setButtonText(juce::String::fromUTF8("\xE2\x8B\xAF")); // horizontal ellipsis "more actions"
     menuButton.setTooltip("Track actions");
     menuButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff263341));
@@ -1525,6 +2435,7 @@ TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)
     {
         juce::PopupMenu menu;
         menu.addItem(1, "Remove Track...");
+        menu.addItem(2, "Move to Folder...");
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&menuButton),
                            [safe = juce::Component::SafePointer<TrackHeader>(this), index = trackIndex](int result)
                            {
@@ -1533,6 +2444,8 @@ TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)
 
                                if (result == 1 && safe->onRemoveRequested)
                                    safe->onRemoveRequested(index);
+                               else if (result == 2 && safe->onMoveToFolderRequested)
+                                   safe->onMoveToFolderRequested(index);
                            });
     };
     addAndMakeVisible(menuButton);
@@ -1569,6 +2482,16 @@ TrackerPanel::TimelineCanvas::TrackHeader::TrackHeader(int newTrackIndex)
             onGainChanged(trackIndex, static_cast<float>(gainSlider.getValue()));
     };
     addAndMakeVisible(gainSlider);
+
+    targetButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff263341));
+    targetButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffffd166));
+    targetButton.setTooltip("Choose what this automation lane controls");
+    targetButton.onClick = [this]
+    {
+        if (onTargetRequested)
+            onTargetRequested(trackIndex);
+    };
+    addChildComponent(targetButton);
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::setTrackIndex(int newTrackIndex)
@@ -1583,8 +2506,12 @@ void TrackerPanel::TimelineCanvas::TrackHeader::setTrackName(const juce::String&
 
 void TrackerPanel::TimelineCanvas::TrackHeader::setTrackKind(cs::TrackKind kind)
 {
+    const auto kindChanged = trackKind != kind;
     trackKind = kind;
     kindButton.setButtonText(cs::toDisplayName(kind));
+
+    if (kindChanged)
+        refreshInputSelectorForKind();
     auto colour = juce::Colour(0xff74caff);
 
     switch (kind)
@@ -1600,6 +2527,31 @@ void TrackerPanel::TimelineCanvas::TrackHeader::setTrackKind(cs::TrackKind kind)
 
     kindButton.setColour(juce::TextButton::buttonColourId, colour.withAlpha(0.85f));
     kindButton.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff11161e));
+
+    // An automation track has no source or output of its own - monitor/stereo/input are audio-
+    // input concepts that don't apply, and its own FX chain doesn't exist since it never renders
+    // audio. The input selector's slot is reused for the target picker instead. Arm stays visible
+    // but is repurposed: arming an automation lane and moving its target's control while playing
+    // ("riding the fader") records those manual changes into the curve.
+    const bool isAutomation = (kind == cs::TrackKind::automation);
+    const bool isFolder = (kind == cs::TrackKind::folder);
+    // A folder track has no audio source of its own - its only possible input is the sum of
+    // whatever tracks are routed into it, so arm/monitor/input/stereo (all input-side concepts)
+    // don't apply. Unlike automation, a folder DOES keep its gain slider (group volume) and FX
+    // button (group FX chain) - those are exactly what a folder bus is for.
+    monitorButton.setVisible(! isAutomation && ! isFolder);
+    stereoButton.setVisible(! isAutomation && ! isFolder);
+    fxButton.setVisible(! isAutomation);
+    inputSelector.setVisible(! isAutomation && ! isFolder);
+    armButton.setVisible(! isFolder);
+    targetButton.setVisible(isAutomation);
+    recordModeButton.setVisible(isAutomation);
+    armButton.setTooltip(isAutomation
+                              ? "Arm this automation lane - move its target's control while playing to record the change into the curve"
+                              : "Arm this track for recording");
+
+    if (kindChanged)
+        resized();
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::setSelected(bool shouldSelect)
@@ -1664,8 +2616,46 @@ void TrackerPanel::TimelineCanvas::TrackHeader::setFxSummary(int pluginCount)
                              : "No plugins loaded - click to open this track's effects chain");
 }
 
+void TrackerPanel::TimelineCanvas::TrackHeader::setAutomationTargetLabel(const juce::String& label)
+{
+    targetButton.setButtonText(label.isNotEmpty() ? label : "No Target");
+    targetButton.setTooltip(label.isNotEmpty() ? ("Automating: " + label + " - click to change")
+                                               : "Choose what this automation lane controls");
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::setAutomationRecordMode(cs::AutomationRecordMode mode)
+{
+    recordMode = mode;
+    recordModeButton.setButtonText(cs::toDisplayName(mode));
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::setAutomationRecordingRate(int pointsPerSecond)
+{
+    recordingRate = juce::jmax(1, pointsPerSecond);
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::setIndented(bool shouldIndent)
+{
+    if (indented == shouldIndent)
+        return;
+
+    indented = shouldIndent;
+    resized();
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::setAccentColour(juce::Colour colour)
+{
+    accentColour = colour;
+    repaint();
+}
+
 void TrackerPanel::TimelineCanvas::TrackHeader::setInputSources(const juce::Array<juce::String>& sourceNames)
 {
+    lastAudioSourceNames = sourceNames;
+
+    if (trackKind == cs::TrackKind::midi)
+        return;
+
     auto selectedId = inputSelector.getSelectedId();
     inputSelector.clear(juce::dontSendNotification);
 
@@ -1687,6 +2677,26 @@ void TrackerPanel::TimelineCanvas::TrackHeader::setInputChannel(int inputChannel
     inputSelector.setSelectedId(inputChannel + 1, juce::dontSendNotification);
 }
 
+void TrackerPanel::TimelineCanvas::TrackHeader::populateMidiChannelOptions()
+{
+    auto selectedId = inputSelector.getSelectedId();
+    inputSelector.clear(juce::dontSendNotification);
+
+    inputSelector.addItem("Omni (All Channels)", 1);
+    for (int channel = 1; channel <= 16; ++channel)
+        inputSelector.addItem("Channel " + juce::String(channel), channel + 1);
+
+    inputSelector.setSelectedId(juce::jlimit(1, 17, selectedId <= 0 ? 1 : selectedId), juce::dontSendNotification);
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::refreshInputSelectorForKind()
+{
+    if (trackKind == cs::TrackKind::midi)
+        populateMidiChannelOptions();
+    else
+        setInputSources(lastAudioSourceNames);
+}
+
 void TrackerPanel::TimelineCanvas::TrackHeader::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
@@ -1696,7 +2706,8 @@ void TrackerPanel::TimelineCanvas::TrackHeader::paint(juce::Graphics& g)
     g.drawRect(getLocalBounds(), selected ? 2 : 1);
 
     auto badge = getLocalBounds().reduced(8, 8).removeFromLeft(6).toFloat();
-    g.setColour(selected ? juce::Colour(0xff74caff) : juce::Colour(0xff33445a));
+    g.setColour(selected ? juce::Colour(0xff74caff)
+                         : (accentColour.isTransparent() ? juce::Colour(0xff33445a) : accentColour));
     g.fillRoundedRectangle(badge, 3.0f);
 
     auto meter = getLocalBounds().removeFromRight(34).reduced(3, 12).toFloat();
@@ -1724,9 +2735,12 @@ void TrackerPanel::TimelineCanvas::TrackHeader::resized()
     menuButton.setBounds(top.removeFromRight(26));
     top.removeFromRight(4);
     stereoButton.setBounds(top.removeFromRight(44));
+    recordModeButton.setBounds(stereoButton.getBounds());
     top.removeFromRight(6);
     kindButton.setBounds(top.removeFromRight(80));
     top.removeFromRight(6);
+    if (indented)
+        top.removeFromLeft(14);
     nameEditor.setBounds(top);
 
     area.removeFromTop(8);
@@ -1742,6 +2756,7 @@ void TrackerPanel::TimelineCanvas::TrackHeader::resized()
     fxButton.setBounds(buttons.removeFromLeft(30));
     buttons.removeFromLeft(8);
     inputSelector.setBounds(buttons);
+    targetButton.setBounds(buttons);
 
     // The gain slider is the lowest-priority row: show it only when there's genuinely
     // legible room left (Comfort/Tall), rather than letting removeFromTop silently hand
@@ -1764,6 +2779,28 @@ void TrackerPanel::TimelineCanvas::TrackHeader::mouseDown(const juce::MouseEvent
     // Track-level actions (Remove Track, etc.) live behind the explicit menu button next to
     // the channel-mode toggle rather than a right-click - right-click is reserved for dynamic,
     // context-specific things like clips.
+    reorderDragActive = false;
     if (onSelected)
         onSelected(trackIndex);
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::mouseDrag(const juce::MouseEvent& event)
+{
+    constexpr int reorderThresholdPixels = 6;
+    if (! reorderDragActive && std::abs(event.getDistanceFromDragStartY()) < reorderThresholdPixels)
+        return;
+
+    reorderDragActive = true;
+    if (onReorderDragged)
+        onReorderDragged(trackIndex, getY() + event.position.roundToInt().y);
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::mouseUp(const juce::MouseEvent& event)
+{
+    if (! reorderDragActive)
+        return;
+
+    reorderDragActive = false;
+    if (onReorderCommitted)
+        onReorderCommitted(trackIndex, getY() + event.position.roundToInt().y);
 }

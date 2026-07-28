@@ -37,6 +37,7 @@ ContentPanel::TutorialCard::TutorialCard()
         if (onLaunchRequested)
             onLaunchRequested(item);
     };
+    launchButton.setTooltip("Run this tutorial");
     addAndMakeVisible(launchButton);
 
     revealButton.onClick = [this]
@@ -44,6 +45,7 @@ ContentPanel::TutorialCard::TutorialCard()
         if (onRevealRequested)
             onRevealRequested(item);
     };
+    revealButton.setTooltip("Reveal this tutorial's file on disk");
     addAndMakeVisible(revealButton);
 }
 
@@ -95,6 +97,7 @@ ContentPanel::ProjectAssetCard::ProjectAssetCard()
         if (onOpenRequested)
             onOpenRequested(asset);
     };
+    openButton.setTooltip("Open this asset");
     addAndMakeVisible(openButton);
 
     placeButton.onClick = [this]
@@ -102,6 +105,7 @@ ContentPanel::ProjectAssetCard::ProjectAssetCard()
         if (onPlaceRequested)
             onPlaceRequested(asset);
     };
+    placeButton.setTooltip("Place this asset on the timeline");
     addAndMakeVisible(placeButton);
 
     exportButton.onClick = [this]
@@ -109,6 +113,7 @@ ContentPanel::ProjectAssetCard::ProjectAssetCard()
         if (onExportRequested)
             onExportRequested(asset);
     };
+    exportButton.setTooltip("Export this asset as a raw file");
     addAndMakeVisible(exportButton);
 }
 
@@ -141,6 +146,34 @@ void ContentPanel::ProjectAssetCard::paint(juce::Graphics& g)
     g.setFont(juce::Font(13.0f));
     g.drawText(asset.category + "  |  " + asset.type, textArea.removeFromTop(18), juce::Justification::centredLeft, true);
     g.drawText(asset.description, textArea.removeFromTop(20), juce::Justification::centredLeft, true);
+
+    if (asset.numChannels > 0 || asset.sampleRate > 0.0 || asset.bitDepth > 0 || asset.durationSeconds > 0.0)
+    {
+        juce::String metadataLine;
+        if (asset.numChannels > 0)
+            metadataLine << juce::String(asset.numChannels) << (asset.numChannels == 1 ? " ch" : " ch");
+        if (asset.sampleRate > 0.0)
+        {
+            if (metadataLine.isNotEmpty())
+                metadataLine << "  |  ";
+            metadataLine << juce::String(juce::roundToInt(asset.sampleRate)) << " Hz";
+        }
+        if (asset.bitDepth > 0)
+        {
+            if (metadataLine.isNotEmpty())
+                metadataLine << "  |  ";
+            metadataLine << juce::String(asset.bitDepth) << "-bit";
+        }
+        if (asset.durationSeconds > 0.0)
+        {
+            if (metadataLine.isNotEmpty())
+                metadataLine << "  |  ";
+            metadataLine << juce::String(asset.durationSeconds, 2) << " s";
+        }
+
+        g.setColour(juce::Colour(0xff7ec6ff));
+        g.drawText(metadataLine, textArea.removeFromTop(18), juce::Justification::centredLeft, true);
+    }
 
     g.setColour(juce::Colour(0xff7dd36f));
     g.drawText(asset.relativePath, textArea.removeFromBottom(20), juce::Justification::centredLeft, true);
@@ -223,6 +256,7 @@ void ContentPanel::ItemCard::updateActionButton()
     actionButton.setVisible(actionText.isNotEmpty());
     actionButton.setButtonText(actionText);
     actionButton.setEnabled(actionText.isNotEmpty() && actionText != "Locked");
+    actionButton.setTooltip(actionText);
 }
 
 ContentPanel::ContentPanel()
@@ -259,6 +293,7 @@ ContentPanel::ContentPanel()
         if (onRefreshRequested)
             onRefreshRequested();
     };
+    refreshButton.setTooltip("Refresh the content library");
     addAndMakeVisible(refreshButton);
 
     openFolderButton.onClick = [this]
@@ -266,6 +301,7 @@ ContentPanel::ContentPanel()
         if (onOpenContentFolderRequested)
             onOpenContentFolderRequested();
     };
+    openFolderButton.setTooltip("Open the content folder on disk");
     addAndMakeVisible(openFolderButton);
 
     adminPublishButton.onClick = [this]
@@ -273,6 +309,7 @@ ContentPanel::ContentPanel()
         if (onAdminPublishRequested)
             onAdminPublishRequested();
     };
+    adminPublishButton.setTooltip("Publish this content (admin only)");
     addAndMakeVisible(adminPublishButton);
     adminPublishButton.setVisible(false);
 

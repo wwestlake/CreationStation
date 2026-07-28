@@ -74,6 +74,7 @@ juce::var ControlSurfaceMappingStore::bindingToVar(const Binding& binding)
     object->setProperty("channel", binding.channel);
     object->setProperty("number", binding.number);
     object->setProperty("value", binding.value);
+    object->setProperty("isController", binding.isController);
     return juce::var(object);
 }
 
@@ -101,6 +102,7 @@ bool ControlSurfaceMappingStore::bindingFromVar(const juce::var& value, Binding&
     binding.channel = static_cast<int>(object->getProperty("channel"));
     binding.number = static_cast<int>(object->getProperty("number"));
     binding.value = static_cast<int>(object->getProperty("value"));
+    binding.isController = static_cast<bool>(object->getProperty("isController"));
     return true;
 }
 
@@ -252,15 +254,20 @@ ControlSurfaceMappingStore ControlSurfaceMappingStore::createDefaultLibrary()
 {
     ControlSurfaceMappingStore store;
 
+    // Real Mackie Control Universal note numbers on channel 1 - matches the constants hardcoded
+    // in XTouchControlSurface, which stays as a fallback in case this file goes missing, but this
+    // is now the path X-Touch's own transport buttons actually take, same as any learned device.
     Profile xTouchMix;
     xTouchMix.id = "xtouch-mix";
     xTouchMix.displayName = "X-Touch Mix";
     xTouchMix.devicePattern = "x-touch,xtouch,x touch,mackie";
     xTouchMix.usage = "mix";
     xTouchMix.description = "Hands-on track mixing and transport control.";
-    xTouchMix.bindings.add({ "transport", "play", "transport_play", "momentary", -1, -1, -1 });
-    xTouchMix.bindings.add({ "transport", "stop", "transport_stop", "momentary", -1, -1, -1 });
-    xTouchMix.bindings.add({ "transport", "record", "transport_record", "momentary", -1, -1, -1 });
+    xTouchMix.bindings.add({ "transport", "play", "transport_play", "momentary", 1, 94, -1 });
+    xTouchMix.bindings.add({ "transport", "stop", "transport_stop", "momentary", 1, 93, -1 });
+    xTouchMix.bindings.add({ "transport", "record", "transport_record", "momentary", 1, 95, -1 });
+    xTouchMix.bindings.add({ "transport", "rewind", "transport_rewind", "momentary", 1, 91, -1 });
+    xTouchMix.bindings.add({ "transport", "fast_forward", "transport_fast_forward", "momentary", 1, 92, -1 });
     xTouchMix.bindings.add({ "bank", "step", "bank_left", "momentary", -1, -8, -1 });
     xTouchMix.bindings.add({ "bank", "step", "bank_right", "momentary", -1, 8, -1 });
     store.addProfile(std::move(xTouchMix));

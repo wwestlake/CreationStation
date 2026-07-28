@@ -61,6 +61,7 @@ public:
                                      safeThis->refreshFromProcessor();
                                  });
         };
+        loadButton.setTooltip("Load a Creation Station patch file");
         addAndMakeVisible(loadButton);
 
         auditionButton.onClick = [this]
@@ -68,6 +69,7 @@ public:
             processor.triggerAudition();
             refreshFromProcessor();
         };
+        auditionButton.setTooltip("Play a test note to audition the patch");
         addAndMakeVisible(auditionButton);
 
         refreshFromProcessor();

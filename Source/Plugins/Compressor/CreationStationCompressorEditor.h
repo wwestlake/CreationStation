@@ -5,10 +5,12 @@
 #include "../../PluginKit/CreationStationPluginLookAndFeel.h"
 #include "../../PluginKit/CreationStationPluginHeader.h"
 #include "../../PluginKit/LevelMeterComponent.h"
+#include "../../PluginKit/ThresholdMeterComponent.h"
 
 namespace cs::plugins
 {
-class CreationStationCompressorEditor final : public juce::AudioProcessorEditor
+class CreationStationCompressorEditor final : public juce::AudioProcessorEditor,
+                                              private juce::Timer
 {
 public:
     explicit CreationStationCompressorEditor(CreationStationCompressorProcessor& processorToEdit);
@@ -26,13 +28,17 @@ private:
     };
 
     void configureKnob(KnobControl& knob, const juce::String& parameterId, const juce::String& labelText);
+    void timerCallback() override;
 
     CreationStationCompressorProcessor& processorRef;
     CreationStationPluginLookAndFeel lookAndFeel;
     CreationStationPluginHeader header { "Compressor" };
-    LevelMeterComponent meter;
 
-    KnobControl thresholdKnob, ratioKnob, attackKnob, releaseKnob, makeupKnob, mixKnob;
+    ThresholdMeterComponent inputMeter;
+    LevelMeterComponent gainReductionMeter;
+    juce::Label inLabel, grLabel;
+
+    KnobControl ratioKnob, attackKnob, releaseKnob, makeupKnob, mixKnob;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(CreationStationCompressorEditor)
 };

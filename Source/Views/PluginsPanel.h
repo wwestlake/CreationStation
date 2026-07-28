@@ -14,10 +14,12 @@ public:
     void setInsertTargetDescription(const juce::String& text);
 
     std::function<void()> onAddPathRequested;
+    std::function<void()> onImportPathListRequested;
     std::function<void(int)> onRemovePathRequested;
     std::function<void()> onRescanRequested;
     std::function<void(const VstPluginCatalog::Entry&)> onLoadIntoInsertRequested;
     std::function<void(const VstPluginCatalog::Entry&)> onAssignNodeRequested;
+    std::function<void()> onBuildSamplePackRequested;
 
     void paint(juce::Graphics& g) override;
     void resized() override;
@@ -38,10 +40,10 @@ private:
         juce::TextButton removeButton { "Remove" };
     };
 
-    class PluginCard final : public juce::Component
+    class PluginItem final : public juce::Component
     {
     public:
-        PluginCard();
+        PluginItem();
         void setEntry(const VstPluginCatalog::Entry& newEntry);
         std::function<void(const VstPluginCatalog::Entry&)> onLoadRequested;
         std::function<void(const VstPluginCatalog::Entry&)> onAssignRequested;
@@ -54,6 +56,30 @@ private:
         juce::TextButton assignButton { "Assign To VST Node" };
     };
 
+    class CategorySection final : public juce::Component
+    {
+    public:
+        CategorySection(const juce::String& categoryName, bool isCreationStation = false);
+        void setPlugins(const juce::Array<VstPluginCatalog::Entry>& pluginList);
+        void setCollapsed(bool shouldCollapse);
+        bool isCollapsed() const { return collapsed; }
+        std::function<void(const VstPluginCatalog::Entry&)> onLoadRequested;
+        std::function<void(const VstPluginCatalog::Entry&)> onAssignRequested;
+        std::function<void()> onToggled;
+        void paint(juce::Graphics& g) override;
+        void resized() override;
+        void mouseUp(const juce::MouseEvent& event) override;
+        int getContentHeight() const;
+
+    private:
+        juce::String categoryName;
+        bool isCreationStation;
+        bool collapsed = false;
+        juce::OwnedArray<PluginItem> pluginItems;
+    };
+
+    void rebuildPluginsList();
+
     juce::Label titleLabel;
     juce::Label subtitleLabel;
     juce::Label targetLabel;
@@ -61,13 +87,17 @@ private:
     juce::Label pathsLabel;
     juce::Label pluginsLabel;
     juce::TextButton addPathButton { "Add Folder" };
+    juce::TextButton importPathListButton { "Import Path List" };
     juce::TextButton rescanButton { "Rescan" };
+    juce::TextButton buildSamplePackButton { "Build Sample Pack..." };
+    juce::TextEditor filterEditor;
+    juce::ComboBox formatFilter;
     juce::Viewport pathsViewport;
     juce::Component pathsHost;
     juce::OwnedArray<PathCard> pathCards;
     juce::Viewport pluginsViewport;
     juce::Component pluginsHost;
-    juce::OwnedArray<PluginCard> pluginCards;
+    juce::OwnedArray<CategorySection> categorySections;
     juce::StringArray searchPaths;
     juce::Array<VstPluginCatalog::Entry> plugins;
 };

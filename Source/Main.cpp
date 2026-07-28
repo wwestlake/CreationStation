@@ -147,13 +147,15 @@ private:
     public:
         StartupSplashWindow()
             : juce::DocumentWindow("Creation Station",
-                                   juce::Colours::transparentBlack,
+                                   juce::Colour(0x00000000),
                                    0)
         {
             setUsingNativeTitleBar(false);
+            setTitleBarHeight(0);
             setDropShadowEnabled(true);
             setResizable(false, false);
             setAlwaysOnTop(true);
+            setBackgroundColour(juce::Colour(0x00000000));
             content = new StartupSplashContent();
             setContentOwned(content, true);
             centreWithSize(720, 420);

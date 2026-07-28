@@ -21,12 +21,244 @@ public:
     void closeButtonPressed() override
     {
         setVisible(false);
-        if (onClose)
-            onClose();
+        auto closeCallback = onClose;
+        juce::MessageManager::callAsync([closeCallback]() mutable
+        {
+            if (closeCallback)
+                closeCallback();
+        });
     }
 
 private:
     std::function<void()> onClose;
+};
+
+// Right-click a transport button -> Learn MIDI Binding. Opens armed by default (Any Device) so
+// the common case is just "wiggle the hardware and it's bound" - manual entry is the fallback.
+class MidiLearnPanel final : public juce::Component,
+                             private juce::Timer
+{
+public:
+    struct ExistingBinding
+    {
+        bool found = false;
+        juce::String deviceLabel;
+        int channel = 0;
+        int number = 0;
+        bool isController = false;
+    };
+
+    MidiLearnPanel(WorkstationAudioEngine& engineRef, juce::String targetIdIn, const juce::String& displayLabel,
+                   const ExistingBinding& existing)
+        : engine(engineRef), targetId(std::move(targetIdIn))
+    {
+        titleLabel.setText("Learn MIDI Binding: " + displayLabel, juce::dontSendNotification);
+        titleLabel.setFont(juce::Font(16.0f).boldened());
+        titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addAndMakeVisible(titleLabel);
+
+        instructionsLabel.setText(
+            "Move a knob or press a button on your controller now - it will be captured "
+            "automatically and saved right away. Or, if you already know the values, type them "
+            "in below and click \"Save Typed Values\" instead.",
+            juce::dontSendNotification);
+        instructionsLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+        instructionsLabel.setJustificationType(juce::Justification::topLeft);
+        addAndMakeVisible(instructionsLabel);
+
+        if (existing.found)
+        {
+            currentBindingLabel.setText("Currently bound to: " + existing.deviceLabel + ", channel "
+                                        + juce::String(existing.channel) + ", "
+                                        + (existing.isController ? "CC " : "Note ") + juce::String(existing.number),
+                                        juce::dontSendNotification);
+            currentBindingLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+            addAndMakeVisible(currentBindingLabel);
+        }
+
+        deviceLabel.setText("Listen to", juce::dontSendNotification);
+        deviceLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+        addAndMakeVisible(deviceLabel);
+
+        deviceCombo.addItem("Any Device", 1);
+        auto itemId = 2;
+        for (const auto& device : juce::MidiInput::getAvailableDevices())
+        {
+            deviceCombo.addItem(device.name, itemId);
+            deviceIdsByItemId[itemId] = device.identifier;
+            ++itemId;
+        }
+        deviceCombo.setSelectedId(1, juce::dontSendNotification);
+        deviceCombo.onChange = [this] { armLearn(); };
+        deviceCombo.setTooltip("Restrict listening to one device, or Any Device to accept from all");
+        addAndMakeVisible(deviceCombo);
+
+        statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff5f93ff));
+        statusLabel.setJustificationType(juce::Justification::centredLeft);
+        addAndMakeVisible(statusLabel);
+
+        manualHintLabel.setText("Manual entry (only needed if auto-capture above doesn't work):",
+                                juce::dontSendNotification);
+        manualHintLabel.setColour(juce::Label::textColourId, juce::Colour(0xff71839b));
+        addAndMakeVisible(manualHintLabel);
+
+        channelLabel.setText("Channel (1-16)", juce::dontSendNotification);
+        channelLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+        addAndMakeVisible(channelLabel);
+        channelEditor.setInputRestrictions(2, "0123456789");
+        addAndMakeVisible(channelEditor);
+
+        numberLabel.setText("Note/CC # (0-127)", juce::dontSendNotification);
+        numberLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+        addAndMakeVisible(numberLabel);
+        numberEditor.setInputRestrictions(3, "0123456789");
+        addAndMakeVisible(numberEditor);
+
+        if (existing.found)
+        {
+            channelEditor.setText(juce::String(existing.channel), juce::dontSendNotification);
+            numberEditor.setText(juce::String(existing.number), juce::dontSendNotification);
+        }
+
+        isCCToggle.setButtonText("The number above is a CC (Control Change), not a Note");
+        isCCToggle.setColour(juce::ToggleButton::textColourId, juce::Colour(0xffaebbd0));
+        isCCToggle.setToggleState(existing.isController, juce::dontSendNotification);
+        isCCToggle.setTooltip("Check this if the number above is a CC (Control Change) number, not a Note number");
+        addAndMakeVisible(isCCToggle);
+
+        applyManualButton.setButtonText("Save Typed Values");
+        applyManualButton.onClick = [this] { applyManualEntry(); };
+        applyManualButton.setTooltip("Save the channel/number typed in above as the binding");
+        addAndMakeVisible(applyManualButton);
+
+        closeButton.setButtonText("Close");
+        closeButton.onClick = [this] { if (onCancelled) onCancelled(); };
+        closeButton.setTooltip("Close this dialog");
+        addAndMakeVisible(closeButton);
+
+        armLearn();
+        startTimer(60);
+    }
+
+    ~MidiLearnPanel() override
+    {
+        engine.cancelMidiLearn();
+    }
+
+    // Fired every time something is captured/saved - the panel stays open afterward so the user
+    // can see what was captured and try again if it's wrong. Only the Close button (or the
+    // window's own close control) actually dismisses the dialog.
+    std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned;
+    std::function<void()> onCancelled;
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(16);
+        titleLabel.setBounds(area.removeFromTop(28));
+        area.removeFromTop(6);
+
+        instructionsLabel.setBounds(area.removeFromTop(56));
+        area.removeFromTop(8);
+
+        if (currentBindingLabel.isVisible())
+        {
+            currentBindingLabel.setBounds(area.removeFromTop(20));
+            area.removeFromTop(8);
+        }
+
+        auto deviceRow = area.removeFromTop(28);
+        deviceLabel.setBounds(deviceRow.removeFromLeft(80));
+        deviceCombo.setBounds(deviceRow);
+        area.removeFromTop(8);
+
+        statusLabel.setBounds(area.removeFromTop(36));
+        area.removeFromTop(12);
+
+        manualHintLabel.setBounds(area.removeFromTop(20));
+        area.removeFromTop(6);
+
+        auto manualRow = area.removeFromTop(28);
+        channelLabel.setBounds(manualRow.removeFromLeft(90));
+        channelEditor.setBounds(manualRow.removeFromLeft(50));
+        manualRow.removeFromLeft(10);
+        numberLabel.setBounds(manualRow.removeFromLeft(110));
+        numberEditor.setBounds(manualRow.removeFromLeft(50));
+        area.removeFromTop(8);
+
+        isCCToggle.setBounds(area.removeFromTop(24));
+        area.removeFromTop(10);
+
+        auto buttonRow = area.removeFromTop(32);
+        applyManualButton.setBounds(buttonRow.removeFromLeft(160));
+        buttonRow.removeFromLeft(10);
+        closeButton.setBounds(buttonRow.removeFromLeft(100));
+    }
+
+private:
+    void armLearn()
+    {
+        auto selectedId = deviceCombo.getSelectedId();
+        juce::String deviceIdFilter;
+        if (selectedId > 1)
+        {
+            auto it = deviceIdsByItemId.find(selectedId);
+            if (it != deviceIdsByItemId.end())
+                deviceIdFilter = it->second;
+        }
+        engine.armMidiLearn(deviceIdFilter);
+        statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff5f93ff));
+        statusLabel.setText("Listening - move or press the control now...", juce::dontSendNotification);
+    }
+
+    void applyManualEntry()
+    {
+        auto channel = channelEditor.getText().getIntValue();
+        auto number = numberEditor.getText().getIntValue();
+        if (channel < 1 || channel > 16 || number < 0 || number > 127)
+        {
+            statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xffffb0a8));
+            statusLabel.setText("Enter a channel 1-16 and a number 0-127.", juce::dontSendNotification);
+            return;
+        }
+
+        statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff7fe8a0));
+        statusLabel.setText("Saved: channel " + juce::String(channel) + ", "
+                            + (isCCToggle.getToggleState() ? "CC " : "Note ") + juce::String(number),
+                            juce::dontSendNotification);
+
+        if (onLearned)
+            onLearned({}, channel, number, isCCToggle.getToggleState());
+    }
+
+    void timerCallback() override
+    {
+        WorkstationAudioEngine::MidiLearnResult result;
+        if (engine.takeMidiLearnResult(result))
+        {
+            channelEditor.setText(juce::String(result.channel), juce::dontSendNotification);
+            numberEditor.setText(juce::String(result.number), juce::dontSendNotification);
+            isCCToggle.setToggleState(result.isController, juce::dontSendNotification);
+
+            statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff7fe8a0));
+            statusLabel.setText("Captured & saved: channel " + juce::String(result.channel) + ", "
+                                + (result.isController ? "CC " : "Note ") + juce::String(result.number),
+                                juce::dontSendNotification);
+
+            if (onLearned)
+                onLearned(result.deviceId, result.channel, result.number, result.isController);
+        }
+    }
+
+    WorkstationAudioEngine& engine;
+    juce::String targetId;
+    std::map<int, juce::String> deviceIdsByItemId;
+
+    juce::Label titleLabel, instructionsLabel, currentBindingLabel, deviceLabel, statusLabel,
+               manualHintLabel, channelLabel, numberLabel;
+    juce::ComboBox deviceCombo;
+    juce::TextEditor channelEditor, numberEditor;
+    juce::ToggleButton isCCToggle;
+    juce::TextButton applyManualButton, closeButton;
 };
 
 class TransportButtonLookAndFeel final : public juce::LookAndFeel_V4
@@ -291,12 +523,13 @@ juce::String workspaceModeName(MainComponent::WorkspaceMode mode)
         case MainComponent::WorkspaceMode::record: return "Capture";
         case MainComponent::WorkspaceMode::score: return "Score";
         case MainComponent::WorkspaceMode::settings: return "Settings";
+        case MainComponent::WorkspaceMode::sampler: return "Sampler";
     }
 
     return "Tracker";
 }
 
-constexpr int workspaceModeCount = 11;
+constexpr int workspaceModeCount = 12;
 
 int workspaceModeIndex(MainComponent::WorkspaceMode mode)
 {
@@ -420,12 +653,10 @@ MainComponent::TransportBar::TransportBar()
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
-    midiStatusLabel.setText("MIDI: waiting for controller", juce::dontSendNotification);
-    midiStatusLabel.setJustificationType(juce::Justification::centredLeft);
-    midiStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
-    addAndMakeVisible(midiStatusLabel);
+    midiStatusLabel.setVisible(false);
 
     projectButton.setButtonText("Project: No project open");
+    projectButton.setTooltip("Open the project menu - new, open, save, and recent projects");
     addAndMakeVisible(projectButton);
 
     playButton.setLookAndFeel(&getTransportButtonLookAndFeel());
@@ -464,24 +695,49 @@ MainComponent::TransportBar::TransportBar()
     rewindButton.setMouseClickGrabsKeyboardFocus(false);
     fastForwardButton.setMouseClickGrabsKeyboardFocus(false);
 
+    // Right-click any transport button to bind it to a hardware controller - TransportBar::
+    // mouseDown() checks event.eventComponent against these to know which one was clicked.
+    playButton.addMouseListener(this, false);
+    stopButton.addMouseListener(this, false);
+    recordButton.addMouseListener(this, false);
+    rewindButton.addMouseListener(this, false);
+    fastForwardButton.addMouseListener(this, false);
+
     audioButton.onClick = [this]
     {
         if (onAudioRequested)
             onAudioRequested();
     };
+    audioButton.setTooltip("Open the audio device settings window");
     addAndMakeVisible(audioButton);
+
+    suiteButton.onClick = [this]
+    {
+        if (onSuiteRequested)
+            onSuiteRequested();
+    };
+    suiteButton.setTooltip("Open the Creation Suite control panel");
+    addAndMakeVisible(suiteButton);
 
     tourButton.onClick = [this]
     {
         if (onTourRequested)
             onTourRequested();
     };
+    tourButton.setTooltip("Start the guided tour");
     addAndMakeVisible(tourButton);
 
     statusLabel.setText("Ready for audio work.", juce::dontSendNotification);
     statusLabel.setJustificationType(juce::Justification::centredRight);
     statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff99a6b8));
     addAndMakeVisible(statusLabel);
+
+    scrubModeLabel.setText("SCRUB", juce::dontSendNotification);
+    scrubModeLabel.setJustificationType(juce::Justification::centred);
+    scrubModeLabel.setColour(juce::Label::textColourId, juce::Colour(0xff11151c));
+    scrubModeLabel.setColour(juce::Label::backgroundColourId, juce::Colour(0xfff5c96a));
+    scrubModeLabel.setVisible(false);
+    addAndMakeVisible(scrubModeLabel);
 
     playButton.onClick = [this]
     {
@@ -550,6 +806,7 @@ MainComponent::TransportBar::TransportBar()
         if (onSignInRequested)
             onSignInRequested();
     };
+    signInButton.setTooltip("Sign in to sync your account");
     addAndMakeVisible(signInButton);
 
     projectButton.onClick = [this]
@@ -570,6 +827,7 @@ MainComponent::TransportBar::TransportBar()
     addAndMakeVisible(profileDetailLabel);
 
     clearProfile();
+    setScrubModeEnabled(false);
 }
 
 MainComponent::ViewModeBar::ViewModeBar()
@@ -592,6 +850,7 @@ MainComponent::ViewModeBar::ViewModeBar()
     };
 
     setupButton(trackerButton, WorkspaceMode::tracker);
+    setupButton(samplerButton, WorkspaceMode::sampler);
     setupButton(arrangeButton, WorkspaceMode::arrange);
     setupButton(signalButton, WorkspaceMode::signal);
     setupButton(libraryButton, WorkspaceMode::library);
@@ -602,6 +861,20 @@ MainComponent::ViewModeBar::ViewModeBar()
     setupButton(recordButton, WorkspaceMode::record);
     setupButton(scoreButton, WorkspaceMode::score);
     setupButton(settingsButton, WorkspaceMode::settings);
+
+    trackerButton.setTooltip("Tracker - arrange and edit tracks");
+    samplerButton.setTooltip("Sampler - build and manage pitch-mapped sample packs");
+    arrangeButton.setTooltip("Foley - arrange sound effects and foley clips");
+    signalButton.setTooltip("Signal Lab - sound design and synthesis");
+    libraryButton.setTooltip("Content library - browse and manage assets");
+    mixButton.setTooltip("Mixer - adjust levels, pan, and sends");
+    pluginsButton.setTooltip("Plugin browser - find and load VST plugins");
+    nodeButton.setTooltip("Node graph - patch signal routing visually");
+    codeButton.setTooltip("Patina script editor - write DSL patches");
+    recordButton.setTooltip("Recording workspace - capture new takes");
+    scoreButton.setTooltip("Score view - notation and piano roll editing");
+    settingsButton.setTooltip("App settings - project, audio, MIDI, and AI configuration");
+    popOutButton.setTooltip("Pop the current workspace out into its own window");
 
     popOutButton.onClick = [this]
     {
@@ -617,6 +890,7 @@ void MainComponent::ViewModeBar::setActiveMode(WorkspaceMode newMode)
 {
     activeMode = newMode;
     trackerButton.setToggleState(activeMode == WorkspaceMode::tracker, juce::dontSendNotification);
+    samplerButton.setToggleState(activeMode == WorkspaceMode::sampler, juce::dontSendNotification);
     arrangeButton.setToggleState(activeMode == WorkspaceMode::arrange, juce::dontSendNotification);
     signalButton.setToggleState(activeMode == WorkspaceMode::signal, juce::dontSendNotification);
     libraryButton.setToggleState(activeMode == WorkspaceMode::library, juce::dontSendNotification);
@@ -654,6 +928,7 @@ void MainComponent::ViewModeBar::resized()
     area.removeFromRight(8);
     auto buttonWidth = 78;
     trackerButton.setBounds(area.removeFromLeft(buttonWidth));
+    samplerButton.setBounds(area.removeFromLeft(buttonWidth));
     arrangeButton.setBounds(area.removeFromLeft(buttonWidth));
     signalButton.setBounds(area.removeFromLeft(buttonWidth));
     libraryButton.setBounds(area.removeFromLeft(buttonWidth));
@@ -673,15 +948,26 @@ void MainComponent::TransportBar::setStatusText(const juce::String& text)
 
 void MainComponent::TransportBar::setMidiStatusText(const juce::String& text)
 {
-    midiStatusLabel.setText(text, juce::dontSendNotification);
+    juce::ignoreUnused(text);
 }
 
 void MainComponent::TransportBar::setPlaybackVisualState(bool playing, bool recording)
 {
+    // Play and Pause occupy the same slot - only the one matching current state is shown, so
+    // one button (and one hardware press) drives both directions instead of needing two.
+    playButton.setVisible(! playing);
+    pauseButton.setVisible(playing);
     playButton.setToggleState(playing && ! recording, juce::dontSendNotification);
     pauseButton.setToggleState(false, juce::dontSendNotification);
     stopButton.setToggleState(! playing && ! recording, juce::dontSendNotification);
     recordButton.setToggleState(recording, juce::dontSendNotification);
+    repaint();
+}
+
+void MainComponent::TransportBar::setScrubModeEnabled(bool enabled)
+{
+    scrubModeEnabled = enabled;
+    scrubModeLabel.setVisible(false);
     repaint();
 }
 
@@ -746,15 +1032,25 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
     if (! transportControlBounds.isEmpty())
     {
         auto panel = transportControlBounds.toFloat().expanded(12.0f, 9.0f);
-        juce::ColourGradient glow(juce::Colour(0x4426d9ff), panel.getCentreX(), panel.getY(),
-                                  juce::Colour(0x00101820), panel.getCentreX(), panel.getBottom(), false);
+        auto accentGlowTop = scrubModeEnabled ? juce::Colour(0x55ff5b6e) : juce::Colour(0x4426d9ff);
+        auto accentGlowBottom = scrubModeEnabled ? juce::Colour(0x001f0f14) : juce::Colour(0x00101820);
+        juce::ColourGradient glow(accentGlowTop, panel.getCentreX(), panel.getY(),
+                                  accentGlowBottom, panel.getCentreX(), panel.getBottom(), false);
         g.setGradientFill(glow);
         g.fillRoundedRectangle(panel.expanded(4.0f), 18.0f);
 
         g.setColour(juce::Colour(0xff151b23));
         g.fillRoundedRectangle(panel, 16.0f);
-        g.setColour(juce::Colour(0xff36506b));
-        g.drawRoundedRectangle(panel, 16.0f, 1.4f);
+        if (scrubModeEnabled)
+        {
+            g.setColour(juce::Colour(0xffff5b6e));
+            g.drawRoundedRectangle(panel, 16.0f, 2.6f);
+        }
+        else
+        {
+            g.setColour(juce::Colour(0xff36506b));
+            g.drawRoundedRectangle(panel, 16.0f, 1.4f);
+        }
     }
 
     if (profileVisible)
@@ -787,6 +1083,30 @@ void MainComponent::TransportBar::paint(juce::Graphics& g)
 
 void MainComponent::TransportBar::mouseDown(const juce::MouseEvent& event)
 {
+    if (event.mods.isPopupMenu())
+    {
+        juce::String targetId;
+        juce::String label;
+
+        if (event.eventComponent == &rewindButton) { targetId = "transport_rewind"; label = "Rewind"; }
+        else if (event.eventComponent == &fastForwardButton) { targetId = "transport_fast_forward"; label = "Fast Forward"; }
+        else if (event.eventComponent == &playButton) { targetId = "transport_play"; label = "Play"; }
+        else if (event.eventComponent == &stopButton) { targetId = "transport_stop"; label = "Stop"; }
+        else if (event.eventComponent == &recordButton) { targetId = "transport_record"; label = "Record"; }
+
+        if (targetId.isNotEmpty())
+        {
+            juce::PopupMenu menu;
+            menu.addItem(1, "Learn MIDI Binding...");
+            menu.showMenuAsync(juce::PopupMenu::Options(), [this, targetId, label](int result)
+            {
+                if (result == 1 && onLearnMidiRequested)
+                    onLearnMidiRequested(targetId, label);
+            });
+            return;
+        }
+    }
+
     if (profileVisible && profileChipBounds.contains(event.getPosition()))
     {
         juce::PopupMenu menu;
@@ -826,12 +1146,12 @@ void MainComponent::TransportBar::resized()
     auto topRow = area.removeFromTop(30);
     auto bottomRow = area;
 
-    titleLabel.setBounds(topRow.removeFromLeft(290));
-    midiStatusLabel.setBounds(topRow.removeFromLeft(230));
+    titleLabel.setBounds(topRow.removeFromLeft(520));
 
     auto transportRow = bottomRow.removeFromLeft(662);
     projectButton.setBounds(bottomRow.removeFromLeft(260));
     audioButton.setBounds(bottomRow.removeFromLeft(82));
+    suiteButton.setBounds(bottomRow.removeFromLeft(54));
     tourButton.setBounds(bottomRow.removeFromLeft(78));
 
     auto placeTransportButton = [&transportRow](juce::Button& button, int width)
@@ -843,11 +1163,12 @@ void MainComponent::TransportBar::resized()
     placeTransportButton(rewindButton, 62);
     placeTransportButton(fastForwardButton, 62);
     placeTransportButton(stopButton, 66);
-    placeTransportButton(pauseButton, 66);
     placeTransportButton(playButton, 82);
+    pauseButton.setBounds(playButton.getBounds()); // same slot - only one of the two is ever visible
     placeTransportButton(loopButton, 64);
     placeTransportButton(clickButton, 64);
     placeTransportButton(recordButton, 82);
+    scrubModeLabel.setBounds(0, 0, 0, 0);
     statusLabel.setBounds(bottomRow.removeFromRight(220));
 
     auto combineBounds = [](juce::Rectangle<int> left, juce::Rectangle<int> right)
@@ -897,18 +1218,17 @@ MainComponent::PluginRackBar::PluginRackBar()
     pluginNameLabel.setText("No plugin loaded", juce::dontSendNotification);
     pluginNameLabel.setJustificationType(juce::Justification::centredLeft);
     pluginNameLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
-    addAndMakeVisible(pluginNameLabel);
 
     catalogLabel.setText("No VST folders configured.", juce::dontSendNotification);
     catalogLabel.setJustificationType(juce::Justification::centredLeft);
     catalogLabel.setColour(juce::Label::textColourId, juce::Colour(0xff71839b));
-    addAndMakeVisible(catalogLabel);
 
     bypassButton.onClick = [this]
     {
         if (onBypassChanged)
             onBypassChanged(bypassButton.getToggleState());
     };
+    bypassButton.setTooltip("Bypass this plugin");
     addAndMakeVisible(bypassButton);
 
     pathsButton.onClick = [this]
@@ -916,6 +1236,7 @@ MainComponent::PluginRackBar::PluginRackBar()
         if (onManagePluginPaths)
             onManagePluginPaths();
     };
+    pathsButton.setTooltip("Manage VST plugin search folders");
     addAndMakeVisible(pathsButton);
 
     openEditorButton.onClick = [this]
@@ -923,6 +1244,7 @@ MainComponent::PluginRackBar::PluginRackBar()
         if (onOpenPluginEditor)
             onOpenPluginEditor();
     };
+    openEditorButton.setTooltip("Open this plugin's own UI window");
     addAndMakeVisible(openEditorButton);
 
     fxStackButton.onClick = [this]
@@ -930,6 +1252,7 @@ MainComponent::PluginRackBar::PluginRackBar()
         if (onOpenFxStack)
             onOpenFxStack();
     };
+    fxStackButton.setTooltip("Open the full FX stack for this track");
     addAndMakeVisible(fxStackButton);
 
     loadButton.onClick = [this]
@@ -937,6 +1260,7 @@ MainComponent::PluginRackBar::PluginRackBar()
         if (onLoadPlugin)
             onLoadPlugin();
     };
+    loadButton.setTooltip("Load a VST3 plugin into this slot");
     addAndMakeVisible(loadButton);
 
     unloadButton.onClick = [this]
@@ -944,6 +1268,7 @@ MainComponent::PluginRackBar::PluginRackBar()
         if (onUnloadPlugin)
             onUnloadPlugin();
     };
+    unloadButton.setTooltip("Remove the loaded plugin from this slot");
     addAndMakeVisible(unloadButton);
 
     pathsButton.setVisible(false);
@@ -1014,9 +1339,7 @@ void MainComponent::PluginRackBar::resized()
     auto area = getLocalBounds().reduced(14, 8);
     titleLabel.setBounds(area.removeFromLeft(150));
     contextLabel.setBounds(area.removeFromLeft(220));
-    auto centerArea = area.removeFromLeft(360);
-    pluginNameLabel.setBounds(centerArea.removeFromTop(20));
-    catalogLabel.setBounds(centerArea.removeFromTop(18));
+    area.removeFromLeft(360); // reserved - no longer shows the plugin name/catalog status text
     unloadButton.setBounds(area.removeFromRight(90));
     openEditorButton.setBounds(area.removeFromRight(110));
     fxStackButton.setBounds(area.removeFromRight(100).reduced(4, 0));
@@ -1064,6 +1387,12 @@ MainComponent::FxStackPanel::FxStackPanel()
             onOpenPluginEditor(slot);
     };
 
+    removeButton.setTooltip("Remove the selected plugin from the stack");
+    upButton.setTooltip("Move the selected plugin up in the chain");
+    downButton.setTooltip("Move the selected plugin down in the chain");
+    bypassButton.setTooltip("Bypass the selected plugin");
+    openButton.setTooltip("Open the selected plugin's own UI window");
+
     for (auto* button : { &removeButton, &upButton, &downButton, &bypassButton, &openButton })
         addAndMakeVisible(button);
 
@@ -1074,24 +1403,24 @@ MainComponent::FxStackPanel::FxStackPanel()
     searchBox.setTextToShowWhenEmpty("Search plugins...", juce::Colour(0xff6d7d91));
     searchBox.onTextChange = [this]
     {
-        catalogModel.setFilterText(searchBox.getText());
-        catalogList.updateContent();
+        catalogBrowser.setFilterText(searchBox.getText());
     };
     addAndMakeVisible(searchBox);
 
-    catalogModel.onRowDoubleClicked = [this](int row)
+    catalogBrowser.onEntryChosen = [this](const VstPluginCatalog::Entry& entry)
     {
-        if (auto* entry = catalogModel.getEntry(row))
-            if (onAddPlugin)
-                onAddPlugin(*entry);
+        if (onAddPlugin)
+            onAddPlugin(entry);
     };
-    catalogList.setRowHeight(38);
-    catalogList.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff0d141d));
-    addAndMakeVisible(catalogList);
+    addAndMakeVisible(catalogBrowser);
 
     addButton.onClick = [this] { addSelectedCatalogEntry(); };
     insertButton.onClick = [this] { insertSelectedCatalogEntry(); };
     rescanButton.onClick = [this] { if (onRescanRequested) onRescanRequested(); };
+
+    addButton.setTooltip("Add the selected plugin to the end of the stack");
+    insertButton.setTooltip("Insert the selected plugin at the current position");
+    rescanButton.setTooltip("Rescan VST folders for plugins");
 
     for (auto* button : { &addButton, &insertButton, &rescanButton })
         addAndMakeVisible(button);
@@ -1120,13 +1449,12 @@ void MainComponent::FxStackPanel::setPlugins(const juce::StringArray& names, con
 
 void MainComponent::FxStackPanel::setCatalog(const juce::Array<VstPluginCatalog::Entry>& entries)
 {
-    catalogModel.setEntries(entries);
-    catalogList.updateContent();
+    catalogBrowser.setPlugins(entries);
 }
 
 void MainComponent::FxStackPanel::addSelectedCatalogEntry()
 {
-    if (auto* entry = catalogModel.getEntry(catalogList.getSelectedRow()))
+    if (auto* entry = catalogBrowser.getSelectedEntry())
         if (onAddPlugin)
             onAddPlugin(*entry);
 }
@@ -1134,76 +1462,9 @@ void MainComponent::FxStackPanel::addSelectedCatalogEntry()
 void MainComponent::FxStackPanel::insertSelectedCatalogEntry()
 {
     const auto slot = getSelectedSlot();
-    if (auto* entry = catalogModel.getEntry(catalogList.getSelectedRow()))
+    if (auto* entry = catalogBrowser.getSelectedEntry())
         if (onInsertPlugin && slot >= 0)
             onInsertPlugin(slot, *entry);
-}
-
-void MainComponent::FxStackPanel::CatalogListBoxModel::setEntries(const juce::Array<VstPluginCatalog::Entry>& newEntries)
-{
-    allEntries = newEntries;
-    applyFilter();
-}
-
-void MainComponent::FxStackPanel::CatalogListBoxModel::setFilterText(const juce::String& filterText)
-{
-    filter = filterText.trim().toLowerCase();
-    applyFilter();
-}
-
-void MainComponent::FxStackPanel::CatalogListBoxModel::applyFilter()
-{
-    if (filter.isEmpty())
-    {
-        filteredEntries = allEntries;
-        return;
-    }
-
-    filteredEntries.clearQuick();
-    for (const auto& entry : allEntries)
-        if (entry.name.toLowerCase().contains(filter))
-            filteredEntries.add(entry);
-}
-
-const VstPluginCatalog::Entry* MainComponent::FxStackPanel::CatalogListBoxModel::getEntry(int row) const noexcept
-{
-    return juce::isPositiveAndBelow(row, filteredEntries.size()) ? &filteredEntries.getReference(row) : nullptr;
-}
-
-int MainComponent::FxStackPanel::CatalogListBoxModel::getNumRows()
-{
-    return filteredEntries.size();
-}
-
-void MainComponent::FxStackPanel::CatalogListBoxModel::paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected)
-{
-    if (! juce::isPositiveAndBelow(rowNumber, filteredEntries.size()))
-        return;
-
-    auto row = juce::Rectangle<int>(0, 0, width, height).reduced(5, 3);
-    g.setColour(rowIsSelected ? juce::Colour(0xff1f5f86) : juce::Colour(0xff172332));
-    g.fillRoundedRectangle(row.toFloat(), 6.0f);
-
-    const auto& entry = filteredEntries.getReference(rowNumber);
-    auto textArea = row.reduced(10, 2);
-
-    g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(14.0f).boldened());
-    g.drawText(entry.name, textArea.removeFromTop(height > 30 ? (height - 6) / 2 + 3 : height),
-               juce::Justification::centredLeft, true);
-
-    if (height > 30)
-    {
-        g.setColour(juce::Colour(0xff7f90a8));
-        g.setFont(juce::Font(11.0f));
-        g.drawText(entry.file.getFullPathName(), textArea, juce::Justification::centredLeft, true);
-    }
-}
-
-void MainComponent::FxStackPanel::CatalogListBoxModel::listBoxItemDoubleClicked(int row, const juce::MouseEvent&)
-{
-    if (onRowDoubleClicked)
-        onRowDoubleClicked(row);
 }
 
 int MainComponent::FxStackPanel::getSelectedSlot() const noexcept
@@ -1246,7 +1507,7 @@ void MainComponent::FxStackPanel::resized()
     rightColumn.removeFromTop(2);
     searchBox.setBounds(rightColumn.removeFromTop(28));
     rightColumn.removeFromTop(6);
-    catalogList.setBounds(rightColumn);
+    catalogBrowser.setBounds(rightColumn);
 }
 
 int MainComponent::FxStackPanel::getNumRows()
@@ -1389,9 +1650,17 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         showAudioSettings();
     };
+    transportBar.onSuiteRequested = [this]
+    {
+        showSuiteSettingsWindow();
+    };
     transportBar.onTourRequested = [this]
     {
         showTour();
+    };
+    transportBar.onLearnMidiRequested = [this](const juce::String& targetId, const juce::String& displayLabel)
+    {
+        showMidiLearnDialog(targetId, displayLabel);
     };
     if (authSession.hasValidSession())
     {
@@ -1410,6 +1679,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         ensureStorageRootConfigured();
 
     loadAppSettings();
+    {
+        juce::String suiteSettingsError;
+        suiteSettings = suiteSettingsStore.load(suiteSettingsError);
+        if (suiteSettingsError.isNotEmpty())
+            transportBar.setStatusText(suiteSettingsError);
+    }
     reportStartup("Applying audio device settings...", 0.50f);
     applySelectedAudioDeviceSettings();
 
@@ -1449,7 +1724,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     }
 
     reportStartup("Loading control-surface maps...", 0.86f);
-    ControlSurfaceMappingStore controlSurfaceMappings;
     juce::String controlSurfaceError;
     if (! projectManager.loadControlSurfaceMappings(controlSurfaceMappings, controlSurfaceError)
         || controlSurfaceMappings.getProfiles().isEmpty())
@@ -1460,6 +1734,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     auto* activePreset = controlSurfaceMappings.findProfileById(controlSurfaceMappings.getActivePresetId());
     transportBar.setMidiStatusText("Control preset: " + (activePreset != nullptr ? activePreset->displayName
                                                                                  : controlSurfaceMappings.getActivePresetId()));
+    midiSurface.setControlSurfaceMappings(controlSurfaceMappings);
+    midiSurface.setEngineForMidiLearn(engine);
 
     viewModeBar.onModeSelected = [this](WorkspaceMode mode)
     {
@@ -1475,6 +1751,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     addAndMakeVisible(viewModeBar);
     addAndMakeVisible(pluginRackBar);
     addAndMakeVisible(trackerPanel);
+    addAndMakeVisible(samplePackBuilderPanel);
     addAndMakeVisible(arrangeView);
     addAndMakeVisible(signalLabPanel);
     addAndMakeVisible(contentPanel);
@@ -1547,7 +1824,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     transportBar.onRecord = [this]
     {
         engine.stopAssetPreview();
-        if (engine.isRecording())
+        if (engine.isRecording() || engine.isMidiRecording())
             stopRecordingSession();
         else if (startRecordingSession())
         {
@@ -1731,6 +2008,58 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         timelineModel.setTrackKind(trackIndex, kind);
         trackerPanel.setTrackKind(trackIndex, kind);
         arrangeView.setTrackKind(trackIndex, kind);
+        engine.setTrackIsMidiKind(trackIndex, kind == cs::TrackKind::midi);
+        engine.setTrackIsAutomationKind(trackIndex, kind == cs::TrackKind::automation);
+
+        if (kind == cs::TrackKind::automation)
+        {
+            timelineModel.ensureAutomationClip(trackIndex);
+            pushAutomationDataToEngine(trackIndex);
+            trackerPanel.repaint();
+        }
+
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onAutomationTargetRequested = [this](int trackIndex)
+    {
+        showAutomationTargetPicker(trackIndex);
+    };
+
+    trackerPanel.onMoveToFolderRequested = [this](int trackIndex)
+    {
+        showMoveToFolderPicker(trackIndex);
+    };
+
+    trackerPanel.onTrackReorderRequested = [this](int trackIndex, int destinationIndex)
+    {
+        if (performTrackMove(trackIndex, destinationIndex))
+        {
+            syncTrackViews();
+            saveSessionToDisk();
+        }
+    };
+
+    trackerPanel.onAutomationPointChanged = [this](int trackIndex)
+    {
+        pushAutomationDataToEngine(trackIndex);
+    };
+
+    trackerPanel.onAutomationDataCommitted = [this](int trackIndex)
+    {
+        pushAutomationDataToEngine(trackIndex);
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onAutomationRecordModeChanged = [this](int trackIndex, cs::AutomationRecordMode mode)
+    {
+        timelineModel.setAutomationRecordMode(trackIndex, mode);
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onAutomationRecordingRateChanged = [this](int trackIndex, int pointsPerSecond)
+    {
+        timelineModel.setAutomationRecordingRate(trackIndex, pointsPerSecond);
         saveSessionToDisk();
     };
 
@@ -1740,7 +2069,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
 
         armedTracks[(size_t) trackIndex] = shouldArm;
-        engine.setTrackRecordingArmed(trackIndex, shouldArm);
+
+        // An automation track has no audio input of its own - arming it means "record manual
+        // control changes into this lane while playing," not "record audio," so it shouldn't
+        // also flip the engine's audio-input recording-armed state.
+        if (timelineModel.getTrackKind(trackIndex) != cs::TrackKind::automation)
+            engine.setTrackRecordingArmed(trackIndex, shouldArm);
+
         recordView.setTrackCount(engine.getTrackCount());
         syncTrackViews();
         saveSessionToDisk();
@@ -1797,6 +2132,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
 
         engine.setTrackGain(trackIndex, gain);
+        recordAutomationWriteIfArmed(trackIndex, cs::AutomationTargetKind::trackVolume, gain);
         mixerPanel.setChannelGain(trackIndex, gain);
         midiSurface.setChannelGain(trackIndex, gain);
         saveSessionToDisk();
@@ -1806,6 +2142,16 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
             return;
+
+        if (timelineModel.getTrackKind(trackIndex) == cs::TrackKind::midi)
+        {
+            // inputChannel here is 0 = Omni (all channels), 1-16 = a specific MIDI channel -
+            // a separate axis from audio input routing, which doesn't apply to a MIDI track.
+            engine.setTrackMidiInputChannel(trackIndex, inputChannel);
+            trackerPanel.setTrackInput(trackIndex, inputChannel);
+            saveSessionToDisk();
+            return;
+        }
 
         auto resolvedChannel = studioIOModel.getChannelForInputIndex(inputChannel);
         engine.setTrackInputChannel(trackIndex, resolvedChannel);
@@ -1828,6 +2174,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     trackerPanel.onPlayheadPositionChanged = [this](double seconds)
     {
         timelineModel.setTransportSeconds(seconds);
+        engine.setPlaybackPositionSeconds(seconds);
         transportStartTimelineSeconds = seconds;
         transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
         trackerPanel.refreshTimelineView();
@@ -1838,6 +2185,25 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         timelineModel.setLoopRegion(startSeconds, endSeconds);
         trackerPanel.refreshTimelineView();
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onLoopRegionCleared = [this]
+    {
+        timelineModel.clearLoopRegion();
+        trackerPanel.refreshTimelineView();
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onTimelineSnapChanged = [this](bool enabled)
+    {
+        timelineModel.setTimelineSnapEnabled(enabled);
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onTimelineGridChanged = [this](double gridBeats)
+    {
+        timelineModel.setTimelineGridBeats(gridBeats);
         saveSessionToDisk();
     };
 
@@ -1855,6 +2221,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             if (marker.id == markerId)
             {
                 timelineModel.setTransportSeconds(marker.seconds);
+                engine.setPlaybackPositionSeconds(marker.seconds);
                 transportStartTimelineSeconds = marker.seconds;
                 transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
                 trackerPanel.refreshTimelineView();
@@ -1915,6 +2282,41 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     trackerPanel.onClipDeleteRequested = [this](int clipIndex)
     {
         deleteClip(clipIndex);
+    };
+
+    trackerPanel.onClipEditRequested = [this](int clipIndex)
+    {
+        showMidiEditorWindow(clipIndex);
+    };
+
+    trackerPanel.onEmptyMidiClipRequested = [this](int trackIndex, double seconds)
+    {
+        auto defaultBeats = 4.0;
+        auto durationSeconds = timelineModel.beatToSeconds(defaultBeats);
+
+        juce::String errorMessage;
+        auto clipIndex = timelineModel.addClip(cs::ClipKind::midi,
+                                               trackIndex,
+                                               "MIDI",
+                                               "",
+                                               "midi-editor",
+                                               juce::File(),
+                                               seconds,
+                                               durationSeconds,
+                                               errorMessage);
+        if (clipIndex < 0)
+        {
+            transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not create MIDI clip.");
+            return;
+        }
+
+        projectDirty = true;
+        trackerPanel.refreshTimelineView();
+        showMidiEditorWindow(clipIndex);
+    };
+    trackerPanel.onAudioFilesDropped = [this](const juce::StringArray& files, int trackIndex, double startSeconds)
+    {
+        importAudioFilesToTracker(files, trackIndex, startSeconds);
     };
 
     trackerPanel.onTempoChanged = [this](double bpm)
@@ -2032,20 +2434,19 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
                 targetTrack = 0;
 
+            auto renderedAsset = projectManager.findProjectAssetById(projectManager.createProjectAssetId(renderedFile));
             juce::String clipError;
-            auto clipIndex = timelineModel.addClip(cs::ClipKind::audio,
-                                                   targetTrack,
-                                                   suggestedName,
-                                                   renderedFile.getFileName(),
-                                                   "signal",
-                                                   renderedFile,
-                                                   timelineModel.getTransportSeconds(),
-                                                   0.05,
-                                                   clipError);
+            auto clipIndex = renderedAsset.has_value()
+                                 ? placeAudioAssetOnTracker(*renderedAsset,
+                                                            targetTrack,
+                                                            timelineModel.getTransportSeconds(),
+                                                            "signal",
+                                                            clipError)
+                                 : -1;
             if (clipIndex < 0)
             {
                 transportBar.setStatusText(clipError.isNotEmpty() ? clipError
-                                                                   : "Rendered sound, but could not place it on the Tracker.");
+                                                                  : "Rendered sound, but could not place it on the Tracker.");
                 refreshProjectAssets();
                 refreshContentLibrary();
                 saveSessionToDisk();
@@ -2416,6 +2817,37 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         editControlSurfaceMappings();
     };
+    settingsPanel.onRefreshMidiDevicesRequested = [this]
+    {
+        refreshMidiDeviceSettings();
+    };
+    settingsPanel.onMidiInputDeviceEnabledChanged = [this](const juce::String& deviceId, bool enabled)
+    {
+        deviceManager.setMidiInputDeviceEnabled(deviceId, enabled);
+
+        if (enabled)
+            disabledMidiInputDeviceIds.removeString(deviceId);
+        else
+            disabledMidiInputDeviceIds.addIfNotAlreadyThere(deviceId);
+
+        saveAppSettings();
+        refreshMidiDeviceSettings();
+    };
+    settingsPanel.onMidiInputDeviceRouteChanged = [this](const juce::String& deviceId, int trackIndexOrMinusOne)
+    {
+        // Only one track can own a given device at a time - clear it from whichever track had
+        // it before applying the new choice.
+        for (int trackIndex = 0; trackIndex < engine.getTrackCount(); ++trackIndex)
+            if (engine.getTrackMidiInputDeviceId(trackIndex) == deviceId)
+                engine.setTrackMidiInputDeviceId(trackIndex, {});
+
+        if (juce::isPositiveAndBelow(trackIndexOrMinusOne, engine.getTrackCount()))
+            engine.setTrackMidiInputDeviceId(trackIndexOrMinusOne, deviceId);
+
+        projectDirty = true;
+        saveSessionToDisk();
+        refreshMidiDeviceSettings();
+    };
     settingsPanel.onAutoloadChanged = [this](bool enabled)
     {
         autoloadLastProject = enabled;
@@ -2621,13 +3053,16 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     pluginRackBar.onUnloadPlugin = [this, refreshVisibleBank]
     {
-        if (pluginEditorWindow != nullptr)
-            pluginEditorWindow.reset();
-
         if (pluginRackBar.isTrackContext())
+        {
+            closePluginEditorWindowsForTrack(pluginRackBar.getTrackIndex());
             engine.unloadTrackPlugin(pluginRackBar.getTrackIndex());
+        }
         else
+        {
+            closePluginEditorWindow("master-plugin");
             engine.unloadMasterPlugin();
+        }
 
         refreshVisibleBank();
     };
@@ -2651,32 +3086,60 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         if (! hasPlugin)
             return;
 
-        if (pluginEditorWindow != nullptr)
+        if (isTrackContext)
         {
-            pluginEditorWindow->toFront(true);
-            return;
+            auto trackIndex = pluginRackBar.getTrackIndex();
+            auto windowKey = "track-rack-" + juce::String(trackIndex);
+            if (auto* existingWindow = findPluginEditorWindow(windowKey))
+            {
+                existingWindow->toFront(true);
+                return;
+            }
+
+            if (auto* editor = engine.createTrackPluginEditor(trackIndex))
+            {
+                auto windowTitle = "Track " + juce::String(trackIndex + 1) + " Editor";
+                auto window = std::make_unique<ManagedDocumentWindow>(windowTitle,
+                                                                      juce::Colour(0xff11151c),
+                                                                      juce::DocumentWindow::allButtons,
+                                                                      [this, windowKey]
+                                                                      {
+                                                                          closePluginEditorWindow(windowKey);
+                                                                      });
+                window->setUsingNativeTitleBar(true);
+                window->setResizable(true, true);
+                window->setContentOwned(editor, true);
+                window->centreWithSize(900, 650);
+                window->setVisible(true);
+                pluginEditorWindows.push_back({ windowKey, trackIndex, std::move(window) });
+                pollPluginEditorReady(windowKey, trackIndex, juce::Component::SafePointer<juce::Component>(editor), 30);
+            }
         }
-
-        auto* editor = isTrackContext ? engine.createTrackPluginEditor(pluginRackBar.getTrackIndex())
-                                      : engine.createMasterPluginEditor();
-
-        if (editor != nullptr)
+        else
         {
-            auto windowTitle = isTrackContext ? ("Track " + juce::String(pluginRackBar.getTrackIndex() + 1) + " Editor")
-                                              : "Master Editor";
-            auto window = std::make_unique<ManagedDocumentWindow>(windowTitle,
-                                                                  juce::Colour(0xff11151c),
-                                                                  juce::DocumentWindow::closeButton,
-                                                                  [this]
-                                                                  {
-                                                                      pluginEditorWindow.reset();
-                                                                  });
-            window->setUsingNativeTitleBar(true);
-            window->setResizable(true, true);
-            window->setContentOwned(editor, true);
-            window->centreWithSize(900, 650);
-            window->setVisible(true);
-            pluginEditorWindow = std::move(window);
+            constexpr auto* windowKey = "master-plugin";
+            if (auto* existingWindow = findPluginEditorWindow(windowKey))
+            {
+                existingWindow->toFront(true);
+                return;
+            }
+
+            if (auto* editor = engine.createMasterPluginEditor())
+            {
+                auto window = std::make_unique<ManagedDocumentWindow>("Master Editor",
+                                                                      juce::Colour(0xff11151c),
+                                                                      juce::DocumentWindow::allButtons,
+                                                                      [this, windowKey]
+                                                                      {
+                                                                          closePluginEditorWindow(windowKey);
+                                                                      });
+                window->setUsingNativeTitleBar(true);
+                window->setResizable(true, true);
+                window->setContentOwned(editor, true);
+                window->centreWithSize(900, 650);
+                window->setVisible(true);
+                pluginEditorWindows.push_back({ windowKey, -1, std::move(window) });
+            }
         }
     };
 
@@ -2759,9 +3222,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         if (! engine.hasGraphVstPlugin())
             return;
 
-        if (pluginEditorWindow != nullptr)
+        constexpr auto* windowKey = "graph-vst";
+        if (auto* existingWindow = findPluginEditorWindow(windowKey))
         {
-            pluginEditorWindow->toFront(true);
+            existingWindow->toFront(true);
             return;
         }
 
@@ -2769,23 +3233,28 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         {
             auto window = std::make_unique<ManagedDocumentWindow>("Patch VST Editor",
                                                                   juce::Colour(0xff11151c),
-                                                                  juce::DocumentWindow::closeButton,
-                                                                  [this]
+                                                                  juce::DocumentWindow::allButtons,
+                                                                  [this, windowKey]
                                                                   {
-                                                                      pluginEditorWindow.reset();
+                                                                      closePluginEditorWindow(windowKey);
                                                                   });
             window->setUsingNativeTitleBar(true);
             window->setResizable(true, true);
             window->setContentOwned(editor, true);
             window->centreWithSize(900, 650);
             window->setVisible(true);
-            pluginEditorWindow = std::move(window);
+            pluginEditorWindows.push_back({ windowKey, -1, std::move(window) });
         }
     };
 
     pluginsPanel.onAddPathRequested = [this]
     {
         configureVstSearchPaths();
+    };
+
+    pluginsPanel.onImportPathListRequested = [this]
+    {
+        importVstPathList();
     };
 
     pluginsPanel.onRemovePathRequested = [this](int pathIndex)
@@ -2808,6 +3277,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         transportBar.setStatusText(vstPluginCatalog.describeSummary());
     };
 
+    pluginsPanel.onBuildSamplePackRequested = [this]
+    {
+        setWorkspaceMode(WorkspaceMode::sampler);
+    };
+
     pluginsPanel.onLoadIntoInsertRequested = [this](const VstPluginCatalog::Entry& entry)
     {
         loadPluginIntoCurrentInsert(entry.file);
@@ -2823,7 +3297,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         if (index == 8)
             engine.setMasterGain(value);
         else
+        {
             engine.setTrackGain(index, value);
+            recordAutomationWriteIfArmed(index, cs::AutomationTargetKind::trackVolume, value);
+        }
 
         if (index == 8)
             midiSurface.setMasterFaderValue(value);
@@ -2839,15 +3316,16 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     mixerPanel.onInsertButtonClicked = [this, refreshVisibleBank](int trackIndex)
     {
         pluginRackBar.setContextTrack(trackIndex, engine.getTrackName(trackIndex));
-        if (pluginEditorWindow != nullptr)
-            pluginEditorWindow.reset();
         refreshVisibleBank();
     };
 
     mixerPanel.onPanChanged = [this](int index, float value)
     {
         if (index < engine.getTrackCount())
+        {
             engine.setTrackPan(index, value);
+            recordAutomationWriteIfArmed(index, cs::AutomationTargetKind::trackPan, juce::jmap(value, -1.0f, 1.0f, 0.0f, 1.0f));
+        }
 
         midiSurface.setChannelPan(index, value);
     };
@@ -2890,7 +3368,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         auto advanceMode = [this](int step)
         {
             auto modeIndex = static_cast<int>(activeMode);
-            constexpr int modeCount = static_cast<int>(WorkspaceMode::settings) + 1;
+            constexpr int modeCount = static_cast<int>(WorkspaceMode::sampler) + 1;
             modeIndex = (modeIndex + step + modeCount) % modeCount;
             setWorkspaceMode(static_cast<WorkspaceMode>(modeIndex));
         };
@@ -3098,25 +3576,28 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         {
             if (pluginRackBar.isTrackContext() && engine.hasTrackPlugin(pluginRackBar.getTrackIndex()))
             {
-                if (pluginEditorWindow != nullptr)
-                    pluginEditorWindow.reset();
-
-                auto* editor = engine.createTrackPluginEditor(pluginRackBar.getTrackIndex());
-                if (editor != nullptr)
+                auto trackIndex = pluginRackBar.getTrackIndex();
+                auto windowKey = "track-rack-" + juce::String(trackIndex);
+                if (auto* existingWindow = findPluginEditorWindow(windowKey))
+                {
+                    existingWindow->toFront(true);
+                }
+                else if (auto* editor = engine.createTrackPluginEditor(trackIndex))
                 {
                     auto window = std::make_unique<ManagedDocumentWindow>("Track Editor",
                                                                           juce::Colour(0xff11151c),
-                                                                          juce::DocumentWindow::closeButton,
-                                                                          [this]
+                                                                          juce::DocumentWindow::allButtons,
+                                                                          [this, windowKey]
                                                                           {
-                                                                              pluginEditorWindow.reset();
+                                                                              closePluginEditorWindow(windowKey);
                                                                           });
                     window->setUsingNativeTitleBar(true);
                     window->setResizable(true, true);
                     window->setContentOwned(editor, true);
                     window->centreWithSize(900, 650);
                     window->setVisible(true);
-                    pluginEditorWindow = std::move(window);
+                    pluginEditorWindows.push_back({ windowKey, trackIndex, std::move(window) });
+                    pollPluginEditorReady(windowKey, trackIndex, juce::Component::SafePointer<juce::Component>(editor), 30);
                 }
             }
             else
@@ -3126,9 +3607,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
         else if (button == "scrub")
         {
-            engine.setGraphEnabled(! engine.isGraphEnabled());
-            graphPanel.setEnabled(engine.isGraphEnabled());
-            setWorkspaceMode(WorkspaceMode::node);
+            midiScrubModeEnabled = ! midiScrubModeEnabled;
+            transportBar.setScrubModeEnabled(midiScrubModeEnabled);
+            transportBar.setStatusText(midiScrubModeEnabled
+                ? "X-Touch scrub mode armed. Jog wheel hookup is next."
+                : "X-Touch scrub mode off.");
         }
         else if (button == "user_a")
         {
@@ -3146,6 +3629,14 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     midiSurface.onFaderMoved = [this](int index, float value)
     {
         engine.setTrackGain(index, value);
+
+        // Runs on the MIDI input thread, not the message thread - TimelineModel/TrackerPanel
+        // mutation must be deferred, same as the mixerPanel update just below.
+        juce::MessageManager::callAsync([safeThis = juce::Component::SafePointer<MainComponent>(this), index, value]
+        {
+            if (safeThis != nullptr)
+                safeThis->recordAutomationWriteIfArmed(index, cs::AutomationTargetKind::trackVolume, value);
+        });
 
         midiSurface.setChannelGain(index, value);
 
@@ -3179,7 +3670,16 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     midiSurface.onPanMoved = [this](int index, float value)
     {
         if (index < engine.getTrackCount())
+        {
             engine.setTrackPan(index, value);
+
+            juce::MessageManager::callAsync([safeThis = juce::Component::SafePointer<MainComponent>(this), index, value]
+            {
+                if (safeThis != nullptr)
+                    safeThis->recordAutomationWriteIfArmed(index, cs::AutomationTargetKind::trackPan,
+                                                           juce::jmap(value, -1.0f, 1.0f, 0.0f, 1.0f));
+            });
+        }
 
         auto safePanel = mixerPanelSafe;
         if (safePanel != nullptr)
@@ -3224,6 +3724,23 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
     };
 
+    midiSurface.onJogWheelMoved = [this](int delta)
+    {
+        if (! midiScrubModeEnabled || delta == 0 || engine.isPlaying())
+            return;
+
+        auto stepSeconds = 0.05 * (double) std::abs(delta);
+        auto signedStep = delta > 0 ? stepSeconds : -stepSeconds;
+        auto newSeconds = juce::jmax(0.0, timelineModel.getTransportSeconds() + signedStep);
+
+        timelineModel.setTransportSeconds(newSeconds);
+        engine.setPlaybackPositionSeconds(newSeconds);
+        transportStartTimelineSeconds = newSeconds;
+        transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        trackerPanel.refreshTimelineView();
+        previewScrubAudioAt(newSeconds);
+    };
+
     midiSurface.onTransportCommand = [this](XTouchControlSurface::TransportCommand command)
     {
         auto safeBar = transportBarSafe;
@@ -3231,6 +3748,25 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         switch (command)
         {
             case XTouchControlSurface::TransportCommand::play:
+                // One hardware button drives both directions: if already playing, this same
+                // trigger pauses instead of restarting playback from the top.
+                if (engine.isPlaying())
+                {
+                    engine.stopAssetPreview();
+                    engine.setPlaying(false);
+                    midiSurface.setTransportState(false, false);
+                    if (safeBar != nullptr)
+                        juce::MessageManager::callAsync([safeBar]
+                        {
+                            if (safeBar != nullptr)
+                            {
+                                safeBar->setStatusText("Transport: pause");
+                                safeBar->setPlaybackVisualState(false, false);
+                            }
+                        });
+                    break;
+                }
+
                 if (! prepareTrackerPlayback())
                     break;
 
@@ -3264,7 +3800,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                     });
                 break;
             case XTouchControlSurface::TransportCommand::record:
-                if (engine.isRecording())
+                if (engine.isRecording() || engine.isMidiRecording())
                 {
                     stopRecordingSession();
                 }
@@ -3370,7 +3906,7 @@ MainComponent::~MainComponent()
 
     saveLayoutToDisk(true);
     stopTimer();
-    pluginEditorWindow.reset();
+    pluginEditorWindows.clear();
     for (auto& window : workspacePopoutWindows)
         window.reset();
     midiSurface.detachFromDeviceManager(deviceManager);
@@ -3438,8 +3974,16 @@ void MainComponent::timerCallback()
 {
     refreshTrackInputSources();
 
+    pollHostedPluginStateAutosave();
+
     if (layoutDirty && juce::Time::getMillisecondCounterHiRes() * 0.001 - layoutLastChangeWallSeconds > 0.75)
         saveLayoutToDisk();
+
+    if (midiPlaybackRefreshPending && juce::Time::getMillisecondCounterHiRes() * 0.001 - midiPlaybackRefreshLastChangeWallSeconds > 0.35)
+    {
+        midiPlaybackRefreshPending = false;
+        refreshTrackerPlaybackClips();
+    }
 
     if (engine.isPlaying() || engine.isRecording())
     {
@@ -3471,8 +4015,95 @@ void MainComponent::timerCallback()
         trackerPanel.refreshTimelineView();
     }
 
+    if (midiEditorPanel != nullptr)
+    {
+        if (engine.isPlaying() || engine.isRecording())
+        {
+            auto clipIndex = midiEditorPanel->getEditingClipIndex();
+            if (juce::isPositiveAndBelow(clipIndex, (int) timelineModel.getClips().size()))
+            {
+                const auto& clip = timelineModel.getClips()[(size_t) clipIndex];
+                auto clipRelativeSeconds = juce::jmax(0.0, timelineModel.getTransportSeconds() - clip.startSeconds);
+                midiEditorPanel->setDisplayedTransportSeconds(clipRelativeSeconds, true);
+            }
+            midiEditorPanel->setPlaybackState(true, engine.isRecording() || engine.isMidiRecording());
+        }
+        else if (midiEditorPreviewPlaying)
+        {
+            auto nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            auto localSeconds = midiEditorPreviewStartLocalSeconds + juce::jmax(0.0, nowSeconds - midiEditorPreviewStartWallSeconds);
+            if (localSeconds >= midiEditorPreviewEndLocalSeconds)
+            {
+                if (midiEditorPreviewLoopEnabled && midiEditorPreviewLoopEndSeconds > midiEditorPreviewLoopStartSeconds)
+                {
+                    midiEditorPreviewStartLocalSeconds = midiEditorPreviewLoopStartSeconds;
+                    midiEditorPreviewStartWallSeconds = nowSeconds;
+                    updateMidiEditorPreviewNotes(midiEditorPreviewLoopStartSeconds, true);
+                    localSeconds = midiEditorPreviewLoopStartSeconds;
+                }
+                else
+                {
+                    stopMidiEditorPreview();
+                }
+            }
+
+            if (midiEditorPreviewPlaying)
+            {
+                updateMidiEditorPreviewNotes(localSeconds, false);
+                midiEditorPanel->setDisplayedTransportSeconds(localSeconds, false);
+                midiEditorPanel->setPlaybackState(true, false);
+            }
+        }
+        else
+        {
+            midiEditorPanel->setPlaybackState(false, false);
+        }
+    }
+
     for (int index = 0; index < engine.getTrackCount(); ++index)
+    {
         trackerPanel.setTrackLevel(index, engine.getTrackLevel(index));
+
+        // Keeps the header gain readout honest while an automation lane is driving this track's
+        // volume - otherwise the slider only ever shows the last value the user dragged it to,
+        // even while the engine is actually applying a different, automation-driven gain.
+        trackerPanel.setTrackGain(index, engine.getTrackGain(index));
+    }
+
+    updateAutomationRecordModes();
+}
+
+void MainComponent::pollHostedPluginStateAutosave()
+{
+    auto nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+
+    if (nowSeconds - pluginStateLastPollWallSeconds >= 0.5)
+    {
+        pluginStateLastPollWallSeconds = nowSeconds;
+        auto currentSignature = engine.createHostedPluginStateSignature();
+
+        if (lastObservedPluginStateSignature.isEmpty())
+        {
+            lastObservedPluginStateSignature = currentSignature;
+        }
+        else if (currentSignature != lastObservedPluginStateSignature)
+        {
+            lastObservedPluginStateSignature = currentSignature;
+            pluginStateAutosavePending = true;
+            pluginStateLastChangeWallSeconds = nowSeconds;
+            projectDirty = true;
+        }
+    }
+
+    if (! pluginStateAutosavePending || nowSeconds - pluginStateLastChangeWallSeconds <= 0.9)
+        return;
+
+    pluginStateAutosavePending = false;
+
+    if (! projectManager.hasProject() || ! projectManager.hasStorageRoot())
+        return;
+
+    projectManager.saveProjectState(createProjectStateForSave());
 }
 
 void MainComponent::paint(juce::Graphics& g)
@@ -3502,6 +4133,7 @@ void MainComponent::resized()
     auto aiArea = area.removeFromRight(aiWidth);
     auto contentArea = area;
     if (! isWorkspacePoppedOut(WorkspaceMode::tracker)) trackerPanel.setBounds(contentArea);
+    if (! isWorkspacePoppedOut(WorkspaceMode::sampler)) samplePackBuilderPanel.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::arrange)) arrangeView.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::signal)) signalLabPanel.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::library)) contentPanel.setBounds(contentArea);
@@ -3524,6 +4156,9 @@ void MainComponent::setWorkspaceMode(WorkspaceMode mode)
     if (activeMode == WorkspaceMode::settings && mode != WorkspaceMode::settings)
         saveAppSettings();
 
+    if (mode == WorkspaceMode::settings)
+        refreshMidiDeviceSettings();
+
     activeMode = mode;
     viewModeBar.setActiveMode(mode);
     refreshModeVisibility();
@@ -3536,6 +4171,7 @@ void MainComponent::refreshModeVisibility()
     viewModeBar.setVisible(true);
     pluginRackBar.setVisible(true);
     trackerPanel.setVisible(activeMode == WorkspaceMode::tracker || isWorkspacePoppedOut(WorkspaceMode::tracker));
+    samplePackBuilderPanel.setVisible(activeMode == WorkspaceMode::sampler || isWorkspacePoppedOut(WorkspaceMode::sampler));
     arrangeView.setVisible(activeMode == WorkspaceMode::arrange || isWorkspacePoppedOut(WorkspaceMode::arrange));
     signalLabPanel.setVisible(activeMode == WorkspaceMode::signal || isWorkspacePoppedOut(WorkspaceMode::signal));
     contentPanel.setVisible(activeMode == WorkspaceMode::library || isWorkspacePoppedOut(WorkspaceMode::library));
@@ -3595,7 +4231,7 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
         return;
 
     auto savedActiveMode = static_cast<WorkspaceMode>(juce::jlimit(0,
-                                                                    static_cast<int>(WorkspaceMode::settings),
+                                                                    static_cast<int>(WorkspaceMode::sampler),
                                                                     (int) state.getProperty("activeMode", static_cast<int>(WorkspaceMode::tracker))));
     activeMode = savedActiveMode;
     viewModeBar.setActiveMode(savedActiveMode);
@@ -3717,6 +4353,7 @@ juce::Component* MainComponent::getWorkspaceComponent(WorkspaceMode mode)
     switch (mode)
     {
         case WorkspaceMode::tracker: return &trackerPanel;
+        case WorkspaceMode::sampler: return &samplePackBuilderPanel;
         case WorkspaceMode::arrange: return &arrangeView;
         case WorkspaceMode::signal: return &signalLabPanel;
         case WorkspaceMode::library: return &contentPanel;
@@ -3859,7 +4496,7 @@ void MainComponent::showAudioSettings()
 
     auto window = std::make_unique<ManagedDocumentWindow>("Audio Devices",
                                                           juce::Colour(0xff11151c),
-                                                          juce::DocumentWindow::closeButton,
+                                                          juce::DocumentWindow::allButtons,
                                                           [this]
                                                           {
                                                               audioDeviceWindow.reset();
@@ -3916,7 +4553,13 @@ void MainComponent::showFxStackWindow()
 
     panel->onRemovePlugin = [this](int slotIndex)
     {
-        engine.unloadTrackPlugin(pluginRackBar.getTrackIndex(), slotIndex);
+        const auto trackIndex = pluginRackBar.getTrackIndex();
+
+        // Close any open editors for this track before unloading - otherwise their editor
+        // components would outlive the processors they belong to.
+        closePluginEditorWindowsForTrack(trackIndex);
+
+        engine.unloadTrackPlugin(trackIndex, slotIndex);
         refreshInsertRack();
         syncTrackViews();
         projectDirty = true;
@@ -3954,7 +4597,7 @@ void MainComponent::showFxStackWindow()
 
     auto window = std::make_unique<ManagedDocumentWindow>("Creation Station - Track FX Stack",
                                                           juce::Colour(0xff11151c),
-                                                          juce::DocumentWindow::closeButton,
+                                                          juce::DocumentWindow::allButtons,
                                                           [this]
                                                           {
                                                               fxStackPanel = nullptr;
@@ -3970,6 +4613,243 @@ void MainComponent::showFxStackWindow()
     refreshFxStackWindow();
 }
 
+void MainComponent::showMidiEditorWindow(int clipIndex)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) timelineModel.getClips().size()))
+        return;
+
+    if (midiEditorWindow != nullptr)
+    {
+        if (midiEditorPanel != nullptr)
+            midiEditorPanel->setClip(&timelineModel, clipIndex);
+        midiEditorWindow->toFront(true);
+        return;
+    }
+
+    auto panel = std::make_unique<MidiEditorPanel>();
+    midiEditorPanel = panel.get();
+
+    panel->onNotesChanged = [this]
+    {
+        projectDirty = true;
+        saveSessionToDisk();
+
+        // Re-rendering a MIDI clip through its instrument plugin is too slow to do on every
+        // single drag step (each call loads a fresh plugin instance) - coalesce rapid edits
+        // and refresh once the user pauses, via the existing 30Hz UI timer below.
+        midiPlaybackRefreshPending = true;
+        midiPlaybackRefreshLastChangeWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    };
+
+    panel->onCloseRequested = [this]
+    {
+        midiEditorPanel = nullptr;
+        midiEditorWindow.reset();
+    };
+
+    panel->onPlayRequested = [this]
+    {
+        startMidiEditorPreview();
+    };
+
+    panel->onStopRequested = [this]
+    {
+        stopMidiEditorPreview();
+    };
+
+    panel->onLoopEnabledChanged = [this](bool enabled)
+    {
+        midiEditorPreviewLoopEnabled = enabled;
+    };
+
+    panel->onTransportChanged = [this](double seconds)
+    {
+        midiEditorPreviewStartLocalSeconds = juce::jmax(0.0, seconds);
+        if (midiEditorPanel != nullptr)
+            midiEditorPanel->setDisplayedTransportSeconds(midiEditorPreviewStartLocalSeconds, false);
+    };
+
+    panel->onLoopRegionChanged = [this](double startSeconds, double endSeconds)
+    {
+        midiEditorPreviewLoopStartSeconds = juce::jmax(0.0, startSeconds);
+        midiEditorPreviewLoopEndSeconds = juce::jmax(midiEditorPreviewLoopStartSeconds, endSeconds);
+        midiEditorPreviewLoopEnabled = midiEditorPreviewLoopEndSeconds > midiEditorPreviewLoopStartSeconds;
+    };
+
+    panel->onLoopRegionCleared = [this]
+    {
+        midiEditorPreviewLoopEnabled = false;
+        midiEditorPreviewLoopStartSeconds = 0.0;
+        midiEditorPreviewLoopEndSeconds = 0.0;
+    };
+
+    panel->onAuditionNote = [this](int pitch, int velocity, bool isOn)
+    {
+        if (midiEditorPanel == nullptr)
+            return;
+
+        auto editingClipIndex = midiEditorPanel->getEditingClipIndex();
+        if (! juce::isPositiveAndBelow(editingClipIndex, (int) timelineModel.getClips().size()))
+            return;
+
+        auto trackIndex = timelineModel.getClips()[(size_t) editingClipIndex].trackIndex;
+        if (isOn)
+            engine.auditionNoteOn(trackIndex, pitch, velocity);
+        else
+            engine.auditionNoteOff(trackIndex, pitch);
+    };
+
+    panel->setClip(&timelineModel, clipIndex);
+    panel->setPlaybackState(engine.isPlaying(), engine.isRecording() || engine.isMidiRecording());
+    panel->setDisplayedTransportSeconds(0.0, false);
+
+    auto window = std::make_unique<ManagedDocumentWindow>("Creation Station - MIDI Editor",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              midiEditorPanel = nullptr;
+                                                              midiEditorWindow.reset();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setResizeLimits(820, 470, 1800, 1100);
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(1100, 660);
+    window->setVisible(true);
+    midiEditorWindow = std::move(window);
+}
+
+bool MainComponent::startMidiEditorPreview()
+{
+    if (midiEditorPanel == nullptr)
+        return false;
+
+    const auto clipIndex = midiEditorPanel->getEditingClipIndex();
+    if (! juce::isPositiveAndBelow(clipIndex, (int) timelineModel.getClips().size()))
+        return false;
+
+    const auto& clip = timelineModel.getClips()[(size_t) clipIndex];
+    if (clip.kind != cs::ClipKind::midi || clip.midiNotes.empty())
+    {
+        transportBar.setStatusText("This MIDI clip has no notes to preview.");
+        return false;
+    }
+
+    if (! juce::isPositiveAndBelow(clip.trackIndex, engine.getTrackCount()))
+    {
+        transportBar.setStatusText("That MIDI clip is not assigned to a valid track.");
+        return false;
+    }
+
+    auto instrumentPluginFile = engine.getTrackInstrumentPluginFile(clip.trackIndex);
+    if (! instrumentPluginFile.existsAsFile())
+    {
+        transportBar.setStatusText("Load an instrument on this track to preview the MIDI clip.");
+        return false;
+    }
+
+    auto localStart = juce::jlimit(0.0, clip.durationSeconds, midiEditorPanel->getLocalTransportSeconds());
+    auto previewEnd = clip.durationSeconds;
+    if (midiEditorPreviewLoopEnabled && midiEditorPreviewLoopEndSeconds > midiEditorPreviewLoopStartSeconds)
+    {
+        localStart = juce::jlimit(midiEditorPreviewLoopStartSeconds, midiEditorPreviewLoopEndSeconds, localStart);
+        previewEnd = midiEditorPreviewLoopEndSeconds;
+    }
+
+    releaseMidiEditorPreviewNotes();
+    midiEditorPreviewPlaying = true;
+    midiEditorPreviewStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    midiEditorPreviewStartLocalSeconds = localStart;
+    midiEditorPreviewLastLocalSeconds = localStart;
+    midiEditorPreviewEndLocalSeconds = previewEnd;
+    if (midiEditorPanel != nullptr)
+    {
+        midiEditorPanel->setDisplayedTransportSeconds(localStart, false);
+        midiEditorPanel->setPlaybackState(true, false);
+    }
+    updateMidiEditorPreviewNotes(localStart, true);
+    transportBar.setStatusText("Previewing MIDI clip inside the editor.");
+    return true;
+}
+
+void MainComponent::stopMidiEditorPreview(bool resetPlayheadToLoopStart)
+{
+    releaseMidiEditorPreviewNotes();
+
+    midiEditorPreviewPlaying = false;
+    auto nextLocalSeconds = midiEditorPreviewStartLocalSeconds;
+    if (resetPlayheadToLoopStart && midiEditorPreviewLoopEnabled)
+        nextLocalSeconds = midiEditorPreviewLoopStartSeconds;
+
+    if (midiEditorPanel != nullptr)
+    {
+        midiEditorPanel->setDisplayedTransportSeconds(nextLocalSeconds, false);
+        midiEditorPanel->setPlaybackState(engine.isPlaying(), engine.isRecording() || engine.isMidiRecording());
+    }
+}
+
+void MainComponent::updateMidiEditorPreviewNotes(double currentLocalSeconds, bool restartCycle)
+{
+    if (midiEditorPanel == nullptr)
+        return;
+
+    const auto clipIndex = midiEditorPanel->getEditingClipIndex();
+    if (! juce::isPositiveAndBelow(clipIndex, (int) timelineModel.getClips().size()))
+        return;
+
+    const auto& clip = timelineModel.getClips()[(size_t) clipIndex];
+    if (! juce::isPositiveAndBelow(clip.trackIndex, engine.getTrackCount()))
+        return;
+
+    if (restartCycle)
+        releaseMidiEditorPreviewNotes();
+
+    for (const auto& note : clip.midiNotes)
+    {
+        const auto noteStartSeconds = timelineModel.beatToSeconds(note.startBeats);
+        const auto noteEndSeconds = timelineModel.beatToSeconds(note.startBeats + note.lengthBeats);
+        const bool shouldBeActive = currentLocalSeconds >= noteStartSeconds && currentLocalSeconds < noteEndSeconds;
+        const bool isActive = midiEditorPreviewActiveNoteIds.contains(note.id);
+
+        if (shouldBeActive && ! isActive)
+        {
+            engine.auditionNoteOn(clip.trackIndex, note.pitch, note.velocity);
+            midiEditorPreviewActiveNoteIds.addIfNotAlreadyThere(note.id);
+        }
+        else if (! shouldBeActive && isActive)
+        {
+            engine.auditionNoteOff(clip.trackIndex, note.pitch);
+            midiEditorPreviewActiveNoteIds.removeString(note.id);
+        }
+    }
+
+    midiEditorPreviewLastLocalSeconds = currentLocalSeconds;
+}
+
+void MainComponent::releaseMidiEditorPreviewNotes()
+{
+    if (midiEditorPanel != nullptr)
+    {
+        const auto clipIndex = midiEditorPanel->getEditingClipIndex();
+        if (juce::isPositiveAndBelow(clipIndex, (int) timelineModel.getClips().size()))
+        {
+            const auto& clip = timelineModel.getClips()[(size_t) clipIndex];
+            if (juce::isPositiveAndBelow(clip.trackIndex, engine.getTrackCount()))
+            {
+                for (const auto& note : clip.midiNotes)
+                {
+                    if (midiEditorPreviewActiveNoteIds.contains(note.id))
+                        engine.auditionNoteOff(clip.trackIndex, note.pitch);
+                }
+            }
+        }
+    }
+
+    midiEditorPreviewActiveNoteIds.clear();
+    engine.requestAllNotesOff();
+}
+
 void MainComponent::refreshFxStackWindow()
 {
     if (fxStackPanel == nullptr || ! pluginRackBar.isTrackContext())
@@ -3981,13 +4861,76 @@ void MainComponent::refreshFxStackWindow()
                              engine.getTrackPluginBypassStates(trackIndex));
 }
 
+juce::DocumentWindow* MainComponent::findPluginEditorWindow(const juce::String& key) const
+{
+    auto it = std::find_if(pluginEditorWindows.begin(), pluginEditorWindows.end(),
+                           [&key](const PluginEditorWindowEntry& entry)
+                           {
+                               return entry.key == key && entry.window != nullptr;
+                           });
+    return it != pluginEditorWindows.end() ? it->window.get() : nullptr;
+}
+
+void MainComponent::refreshTrackPluginEditorState(int trackIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
+        return;
+
+    auto hasOpenEditor = std::any_of(pluginEditorWindows.begin(), pluginEditorWindows.end(),
+                                     [trackIndex](const PluginEditorWindowEntry& entry)
+                                     {
+                                         return entry.trackIndex == trackIndex && entry.window != nullptr;
+                                     });
+    engine.setTrackHasOpenEditor(trackIndex, hasOpenEditor);
+}
+
+void MainComponent::closePluginEditorWindow(const juce::String& key)
+{
+    auto it = std::find_if(pluginEditorWindows.begin(), pluginEditorWindows.end(),
+                           [&key](const PluginEditorWindowEntry& entry)
+                           {
+                               return entry.key == key;
+                           });
+    if (it == pluginEditorWindows.end())
+        return;
+
+    auto trackIndex = it->trackIndex;
+    it->window.reset();
+    pluginEditorWindows.erase(it);
+    if (trackIndex >= 0)
+        refreshTrackPluginEditorState(trackIndex);
+}
+
+void MainComponent::closePluginEditorWindowsForTrack(int trackIndex)
+{
+    for (auto it = pluginEditorWindows.begin(); it != pluginEditorWindows.end();)
+    {
+        if (it->trackIndex == trackIndex)
+        {
+            it->window.reset();
+            it = pluginEditorWindows.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    if (trackIndex >= 0)
+        refreshTrackPluginEditorState(trackIndex);
+}
+
 void MainComponent::openTrackPluginEditor(int trackIndex, int slotIndex)
 {
     if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
         return;
 
-    if (pluginEditorWindow != nullptr)
-        pluginEditorWindow.reset();
+    auto windowKey = "track-plugin-" + juce::String(trackIndex) + "-" + juce::String(slotIndex);
+    if (auto* existingWindow = findPluginEditorWindow(windowKey))
+    {
+        existingWindow->toFront(true);
+        return;
+    }
 
     auto* editor = engine.createTrackPluginEditor(trackIndex, slotIndex);
     if (editor == nullptr)
@@ -3998,17 +4941,78 @@ void MainComponent::openTrackPluginEditor(int trackIndex, int slotIndex)
                                                                               : "Plugin";
     auto window = std::make_unique<ManagedDocumentWindow>("Track " + juce::String(trackIndex + 1) + " - " + pluginName,
                                                           juce::Colour(0xff11151c),
-                                                          juce::DocumentWindow::closeButton,
-                                                          [this]
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this, windowKey]
                                                           {
-                                                              pluginEditorWindow.reset();
+                                                              closePluginEditorWindow(windowKey);
                                                           });
     window->setUsingNativeTitleBar(true);
     window->setResizable(true, true);
     window->setContentOwned(editor, true);
     window->centreWithSize(900, 650);
     window->setVisible(true);
-    pluginEditorWindow = std::move(window);
+    pluginEditorWindows.push_back({ windowKey, trackIndex, std::move(window) });
+
+    engine.reapplyTrackPluginState(trackIndex, slotIndex);
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    juce::Timer::callAfterDelay(450, [safeThis, trackIndex, slotIndex]
+    {
+        if (safeThis != nullptr)
+            safeThis->engine.reapplyTrackPluginState(trackIndex, slotIndex);
+    });
+
+    // Don't engage the live audio path (and start calling processBlock from the audio thread)
+    // until the editor is actually showing with a real size, not just after a guessed delay - a
+    // fixed delay that's fine for a light editor (e.g. TAL-NoiseMaker) can still be too short for
+    // a heavier one (e.g. a sampler loading kit graphics), and the resulting race is intermittent
+    // rather than a hard crash every time, which matches what was observed.
+    pollPluginEditorReady(windowKey, trackIndex, juce::Component::SafePointer<juce::Component>(editor), 30);
+}
+
+void MainComponent::pollPluginEditorReady(const juce::String& windowKey,
+                                          int trackIndex,
+                                          juce::Component::SafePointer<juce::Component> editorPointer,
+                                          int attemptsRemaining)
+{
+    if (findPluginEditorWindow(windowKey) == nullptr)
+        return; // Editor was closed or replaced before it became ready - nothing to engage.
+
+    auto isReady = editorPointer != nullptr && editorPointer->isShowing()
+                  && editorPointer->getWidth() > 0 && editorPointer->getHeight() > 0;
+
+    if (isReady || attemptsRemaining <= 0)
+    {
+        engine.setTrackHasOpenEditor(trackIndex, true);
+
+        auto slotText = windowKey.fromLastOccurrenceOf("-", false, false);
+        auto slotIndex = slotText.getIntValue();
+        if (slotIndex >= 0)
+        {
+            engine.reapplyTrackPluginState(trackIndex, slotIndex);
+
+            auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+            juce::Timer::callAfterDelay(900, [safeThis, trackIndex, slotIndex]
+            {
+                if (safeThis != nullptr)
+                    safeThis->engine.reapplyTrackPluginState(trackIndex, slotIndex);
+            });
+
+            juce::Timer::callAfterDelay(2200, [safeThis, trackIndex, slotIndex]
+            {
+                if (safeThis != nullptr)
+                    safeThis->engine.reapplyTrackPluginState(trackIndex, slotIndex);
+            });
+        }
+
+        return;
+    }
+
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    juce::Timer::callAfterDelay(150, [safeThis, windowKey, trackIndex, editorPointer, attemptsRemaining]
+    {
+        if (safeThis != nullptr)
+            safeThis->pollPluginEditorReady(windowKey, trackIndex, editorPointer, attemptsRemaining - 1);
+    });
 }
 
 void MainComponent::configureVstSearchPaths()
@@ -4048,6 +5052,85 @@ void MainComponent::configureVstSearchPaths()
                                });
 }
 
+juce::StringArray MainComponent::parseVstPathList(const juce::String& rawList)
+{
+    juce::StringArray result;
+    auto tokens = juce::StringArray::fromTokens(rawList, ";", "");
+
+    for (auto token : tokens)
+    {
+        token = token.trim();
+        if (token.isEmpty())
+            continue;
+
+        // Expand %ENV_VAR% style references (e.g. %LOCALAPPDATA%, %PROGRAMFILES%).
+        for (int guard = 0; guard < 8 && token.contains("%"); ++guard)
+        {
+            auto start = token.indexOfChar('%');
+            auto end = token.indexOfChar(start + 1, '%');
+            if (end < 0)
+                break;
+
+            auto varName = token.substring(start + 1, end);
+            auto varValue = juce::SystemStats::getEnvironmentVariable(varName, {});
+            if (varValue.isEmpty())
+                break;
+
+            token = token.substring(0, start) + varValue + token.substring(end + 1);
+        }
+
+        // Don't require the folder to exist yet - a dev project's VST3 output folder (e.g.
+        // "...\Builds\VisualStudio2022\x64\Debug\VST3") may not exist until it's been built once,
+        // and the scanner already skips missing search paths gracefully every rescan, so
+        // registering it now means it starts working the moment it does exist.
+        result.add(juce::File(token).getFullPathName());
+    }
+
+    return result;
+}
+
+void MainComponent::importVstPathList()
+{
+    if (! ensureStorageRootConfigured())
+        return;
+
+    auto* alertWindow = new juce::AlertWindow("Import VST Path List",
+                                              "Paste a semicolon-separated list of VST folders (e.g. copied from Reaper's VST path setting). "
+                                              "Windows %ENV_VAR% references are expanded automatically.",
+                                              juce::MessageBoxIconType::NoIcon);
+    alertWindow->addTextEditor("pathList", "", "Path list");
+    alertWindow->addButton("Import", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    alertWindow->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    alertWindow->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, alertWindow](int result)
+    {
+        if (safeThis == nullptr || result != 1)
+            return;
+
+        auto rawList = alertWindow->getTextEditorContents("pathList");
+        auto parsedPaths = parseVstPathList(rawList);
+
+        if (parsedPaths.isEmpty())
+        {
+            safeThis->transportBar.setStatusText("No valid folders found in the pasted list.");
+            return;
+        }
+
+        auto updatedPaths = safeThis->vstPluginCatalog.getSearchPaths();
+        for (const auto& path : parsedPaths)
+            updatedPaths.addIfNotAlreadyThere(path);
+        updatedPaths.trim();
+        updatedPaths.removeEmptyStrings();
+        updatedPaths.removeDuplicates(false);
+
+        safeThis->vstPluginCatalog.setSearchPaths(updatedPaths);
+        safeThis->saveAppSettings();
+        safeThis->rescanVstCatalog();
+        safeThis->transportBar.setStatusText("Imported " + juce::String(parsedPaths.size()) + " VST folder(s).");
+    }), true);
+}
+
 void MainComponent::editControlSurfaceMappings()
 {
     if (! ensureStorageRootConfigured())
@@ -4078,6 +5161,139 @@ void MainComponent::editControlSurfaceMappings()
         mappingsFile.revealToUser();
 
     transportBar.setStatusText("Opened control surface mappings.");
+}
+
+void MainComponent::showMidiLearnDialog(const juce::String& targetId, const juce::String& displayLabel)
+{
+    if (midiLearnWindow != nullptr)
+    {
+        midiLearnWindow->toFront(true);
+        return;
+    }
+
+    MidiLearnPanel::ExistingBinding existing;
+    for (const auto& profile : controlSurfaceMappings.getProfiles())
+    {
+        auto found = false;
+        for (const auto& binding : profile.bindings)
+        {
+            if (binding.targetId != targetId)
+                continue;
+
+            existing.found = true;
+            existing.deviceLabel = profile.devicePattern.isNotEmpty() ? profile.devicePattern : "any device";
+            existing.channel = binding.channel;
+            existing.number = binding.number;
+            existing.isController = binding.isController;
+            found = true;
+            break;
+        }
+        if (found)
+            break;
+    }
+
+    auto panel = std::make_unique<MidiLearnPanel>(engine, targetId, displayLabel, existing);
+    auto* panelPtr = panel.get();
+
+    auto window = std::make_unique<ManagedDocumentWindow>("Learn MIDI Binding",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              midiLearnWindow.reset();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(false, false);
+
+    // The panel stays open after a capture so the user can see what was saved - only Close (or
+    // the window's own close control) dismisses it. Deferred via callAsync since onCancelled
+    // fires from inside a MidiLearnPanel button click, and resetting midiLearnWindow
+    // synchronously would destroy the panel - and this lambda - while still on the call stack.
+    panelPtr->onLearned = [this, targetId](juce::String deviceId, int channel, int number, bool isCC)
+    {
+        applyLearnedMidiBinding(targetId, deviceId, channel, number, isCC);
+    };
+    panelPtr->onCancelled = [this]
+    {
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->midiLearnWindow.reset();
+        });
+    };
+
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(460, 400);
+    window->setVisible(true);
+    midiLearnWindow = std::move(window);
+}
+
+void MainComponent::applyLearnedMidiBinding(const juce::String& targetId, const juce::String& deviceId, int channel, int number, bool isCC)
+{
+    juce::String deviceName = "*";
+    if (deviceId.isNotEmpty())
+    {
+        for (const auto& device : juce::MidiInput::getAvailableDevices())
+        {
+            if (device.identifier == deviceId)
+            {
+                deviceName = device.name;
+                break;
+            }
+        }
+    }
+
+    auto* profile = controlSurfaceMappings.findProfileById("custom-bindings");
+    if (profile == nullptr)
+    {
+        ControlSurfaceMappingStore::Profile newProfile;
+        newProfile.id = "custom-bindings";
+        newProfile.displayName = "Custom Bindings";
+        newProfile.devicePattern = deviceName;
+        newProfile.usage = "*";
+        newProfile.description = "Bindings created via right-click -> Learn MIDI Binding.";
+        controlSurfaceMappings.addProfile(std::move(newProfile));
+        profile = controlSurfaceMappings.findProfileById("custom-bindings");
+    }
+    else if (deviceName != "*" && ! profile->matchesDevice(deviceName))
+    {
+        profile->devicePattern += "," + deviceName;
+    }
+
+    if (profile == nullptr)
+        return;
+
+    // Only replace an exact duplicate (same target + same channel/number, i.e. re-learning the
+    // identical control) - a DIFFERENT device or control bound to the same targetId is meant to
+    // coexist, so more than one piece of hardware can trigger the same action.
+    for (int i = profile->bindings.size(); --i >= 0;)
+    {
+        const auto& existing = profile->bindings.getReference(i);
+        if (existing.targetId == targetId && existing.channel == channel && existing.number == number)
+            profile->bindings.remove(i);
+    }
+
+    ControlSurfaceMappingStore::Binding binding;
+    binding.triggerType = "transport";
+    binding.actionId = targetId.fromFirstOccurrenceOf("transport_", false, false);
+    binding.targetId = targetId;
+    binding.behavior = "momentary";
+    binding.channel = channel;
+    binding.number = number;
+    binding.isController = isCC;
+    profile->bindings.add(binding);
+
+    juce::String saveError;
+    if (! projectManager.saveControlSurfaceMappings(controlSurfaceMappings, saveError))
+    {
+        transportBar.setStatusText("Could not save MIDI binding: " + saveError);
+        return;
+    }
+
+    midiSurface.setControlSurfaceMappings(controlSurfaceMappings);
+    transportBar.setStatusText("Learned MIDI binding for " + targetId
+                               + (deviceName != "*" ? (" on " + deviceName) : "") + ".");
 }
 
 void MainComponent::rescanVstCatalog()
@@ -4171,8 +5387,10 @@ void MainComponent::loadPluginIntoCurrentInsert(const juce::File& file)
     if (! file.existsAsFile() && ! file.isDirectory())
         return;
 
-    if (pluginEditorWindow != nullptr)
-        pluginEditorWindow.reset();
+    if (pluginRackBar.isTrackContext())
+        closePluginEditorWindowsForTrack(pluginRackBar.getTrackIndex());
+    else
+        closePluginEditorWindow("master-plugin");
 
     juce::String errorMessage;
     auto loaded = pluginRackBar.isTrackContext()
@@ -4471,6 +5689,8 @@ MainComponent::WorkspaceMode MainComponent::workspaceModeFromString(const juce::
 
     if (normalized == "tracker")
         return WorkspaceMode::tracker;
+    if (normalized == "sampler")
+        return WorkspaceMode::sampler;
     if (normalized == "arrange" || normalized == "foley")
         return WorkspaceMode::arrange;
     if (normalized == "signal")
@@ -5025,16 +6245,12 @@ void MainComponent::placeProjectAssetOnTracker(const ProjectManager::ProjectAsse
         targetTrack = 0;
 
     juce::String errorMessage;
-    auto sourceTool = asset.type == "render" ? "signal" : "project-audio";
-    auto clipIndex = timelineModel.addClip(cs::ClipKind::audio,
-                                           targetTrack,
-                                           asset.name,
-                                           asset.file.getFileName(),
-                                           sourceTool,
-                                           asset.file,
-                                           timelineModel.getTransportSeconds(),
-                                           0.05,
-                                           errorMessage);
+    auto sourceTool = asset.type == "render" ? "render" : "project-audio";
+    auto clipIndex = placeAudioAssetOnTracker(asset,
+                                              targetTrack,
+                                              timelineModel.getTransportSeconds(),
+                                              sourceTool,
+                                              errorMessage);
 
     if (clipIndex < 0)
     {
@@ -5047,6 +6263,152 @@ void MainComponent::placeProjectAssetOnTracker(const ProjectManager::ProjectAsse
     setWorkspaceMode(WorkspaceMode::tracker);
     saveSessionToDisk();
     transportBar.setStatusText("Placed project asset on Tracker: " + asset.name);
+}
+
+int MainComponent::placeAudioAssetOnTracker(const ProjectManager::ProjectAsset& asset,
+                                            int targetTrack,
+                                            double startSeconds,
+                                            const juce::String& sourceTool,
+                                            juce::String& errorMessage)
+{
+    auto clipIndex = timelineModel.addClip(cs::ClipKind::audio,
+                                           targetTrack,
+                                           asset.name,
+                                           asset.id,
+                                           sourceTool,
+                                           asset.file,
+                                           startSeconds,
+                                           0.0,
+                                           errorMessage);
+
+    if (clipIndex >= 0)
+        timelineModel.setClipAssetReference(clipIndex, asset.ref);
+
+    if (clipIndex >= 0 && asset.numChannels >= 2 && juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
+    {
+        engine.setTrackStereoEnabled(targetTrack, true);
+        timelineModel.setTrackChannelMode(targetTrack, cs::TrackChannelMode::stereo);
+        trackerPanel.setTrackStereo(targetTrack, true);
+    }
+
+    return clipIndex;
+}
+
+bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds)
+{
+    if (filePaths.isEmpty())
+        return false;
+
+    if (! ensureStorageRootConfigured())
+        return false;
+
+    if (! projectManager.hasProject())
+    {
+        juce::String projectError;
+        if (! projectManager.createProject("Untitled Project", projectError))
+        {
+            transportBar.setStatusText("Could not create a project for imported tracker audio.");
+            return false;
+        }
+
+        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+    }
+
+    if (engine.getTrackCount() == 0)
+        addTrack();
+
+    auto targetTrack = preferredTrack;
+    if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
+        targetTrack = trackerPanel.getSelectedTrack();
+    if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
+        targetTrack = 0;
+
+    auto placedCount = 0;
+    auto nextStartSeconds = juce::jmax(0.0, startSeconds);
+    juce::String lastError;
+
+    for (const auto& filePath : filePaths)
+    {
+        auto sourceFile = juce::File(filePath);
+        if (! sourceFile.existsAsFile())
+            continue;
+
+        juce::String importError;
+        auto importedFile = projectManager.importAssetFile(sourceFile, importError);
+        if (! importedFile.existsAsFile())
+        {
+            lastError = importError;
+            continue;
+        }
+
+        auto importedAsset = projectManager.findProjectAssetById(projectManager.createProjectAssetId(importedFile));
+        if (! importedAsset.has_value())
+        {
+            lastError = "Imported the sound, but could not register it as a project asset.";
+            continue;
+        }
+
+        juce::String clipError;
+        auto clipIndex = placeAudioAssetOnTracker(*importedAsset, targetTrack, nextStartSeconds, "import", clipError);
+        if (clipIndex < 0)
+        {
+            lastError = clipError;
+            continue;
+        }
+
+        const auto& clip = timelineModel.getClips()[(size_t) clipIndex];
+        nextStartSeconds = clip.startSeconds + clip.durationSeconds;
+        ++placedCount;
+    }
+
+    if (placedCount <= 0)
+    {
+        if (lastError.isNotEmpty())
+            transportBar.setStatusText(lastError);
+        return false;
+    }
+
+    refreshProjectAssets();
+    trackerPanel.setSelectedTrack(targetTrack);
+    trackerPanel.refreshTimelineView();
+    setWorkspaceMode(WorkspaceMode::tracker);
+    saveSessionToDisk(true);
+    transportBar.setStatusText("Imported " + juce::String(placedCount) + " audio file(s) onto the Tracker.");
+    return true;
+}
+
+std::optional<ProjectManager::ProjectAsset> MainComponent::resolveTimelineClipAsset(const cs::TimelineClip& clip) const
+{
+    cs::AssetRef assetRef;
+    assetRef.id = clip.assetId;
+    assetRef.versionId = clip.assetVersionId;
+    assetRef.mode = clip.assetReferenceMode;
+    assetRef.displayName = clip.displayName;
+
+    if (auto asset = projectManager.findProjectAsset(assetRef); asset.has_value())
+        return asset;
+
+    if (clip.assetId.isNotEmpty())
+        return projectManager.findProjectAssetById(clip.assetId);
+
+    return std::nullopt;
+}
+
+void MainComponent::resolveTrackerClipAssetFiles()
+{
+    const auto& clips = timelineModel.getClips();
+    for (int clipIndex = 0; clipIndex < (int) clips.size(); ++clipIndex)
+    {
+        const auto& clip = clips[(size_t) clipIndex];
+        if (clip.assetId.isEmpty() || clip.file.existsAsFile())
+            continue;
+
+        auto asset = resolveTimelineClipAsset(clip);
+        if (! asset.has_value())
+            continue;
+
+        timelineModel.setClipFile(clipIndex, asset->file);
+    }
 }
 
 void MainComponent::exportProjectAssetRaw(const ProjectManager::ProjectAsset& asset)
@@ -5271,6 +6633,116 @@ void MainComponent::showProjectMenu()
                                default: break;
                            }
                        });
+}
+
+void MainComponent::showSuiteSettingsWindow()
+{
+    if (suiteSettingsWindow != nullptr)
+    {
+        suiteSettingsWindow->toFront(true);
+        return;
+    }
+
+    auto panel = std::make_unique<SuiteSettingsPanel>();
+    panel->setSettings(suiteSettings);
+    panel->onBrowseRequested = [this](const juce::String& fieldId)
+    {
+        chooseSuiteDirectory(fieldId);
+    };
+    panel->onApplyRequested = [this](const SuiteSettings& settings)
+    {
+        applySuiteSettings(settings);
+    };
+
+    auto* panelRaw = panel.get();
+    auto window = std::make_unique<ManagedDocumentWindow>("Creation Suite Control",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              closeSuiteSettingsWindow();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(940, 560);
+    window->setVisible(true);
+
+    suiteSettingsPanel = panelRaw;
+    suiteSettingsWindow = std::move(window);
+}
+
+void MainComponent::closeSuiteSettingsWindow()
+{
+    suiteSettingsPanel = nullptr;
+    suiteSettingsWindow.reset();
+}
+
+void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
+{
+    juce::String currentPath = suiteSettings.suiteVfsRoot;
+    if (fieldId == "shared_resources_root")
+        currentPath = suiteSettings.sharedResourcesRoot;
+    else if (fieldId == "creation_station_projects_root")
+        currentPath = suiteSettings.creationStationProjectsRoot;
+    else if (fieldId == "creation_engine_projects_root")
+        currentPath = suiteSettings.creationEngineProjectsRoot;
+    else if (fieldId == "creation_movie_projects_root")
+        currentPath = suiteSettings.creationMovieProjectsRoot;
+    else if (fieldId == "creation_live_projects_root")
+        currentPath = suiteSettings.creationLiveProjectsRoot;
+
+    suiteDirectoryChooser = std::make_unique<juce::FileChooser>("Choose a folder for the Creation Suite",
+                                                                currentPath.isNotEmpty()
+                                                                    ? juce::File(currentPath)
+                                                                    : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+                                                                "*",
+                                                                true);
+    auto chooser = suiteDirectoryChooser.get();
+    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                         [this, chooser, fieldId](const juce::FileChooser& result)
+                         {
+                             auto selected = result.getResult();
+                             if (chooser == suiteDirectoryChooser.get())
+                                 suiteDirectoryChooser.reset();
+
+                             if (selected == juce::File())
+                                 return;
+
+                             auto selectedPath = selected.getFullPathName();
+                             if (fieldId == "suite_vfs_root")
+                                 suiteSettings.suiteVfsRoot = selectedPath;
+                             else if (fieldId == "shared_resources_root")
+                                 suiteSettings.sharedResourcesRoot = selectedPath;
+                             else if (fieldId == "creation_station_projects_root")
+                                 suiteSettings.creationStationProjectsRoot = selectedPath;
+                             else if (fieldId == "creation_engine_projects_root")
+                                 suiteSettings.creationEngineProjectsRoot = selectedPath;
+                             else if (fieldId == "creation_movie_projects_root")
+                                 suiteSettings.creationMovieProjectsRoot = selectedPath;
+                             else if (fieldId == "creation_live_projects_root")
+                                 suiteSettings.creationLiveProjectsRoot = selectedPath;
+
+                             if (suiteSettingsPanel != nullptr)
+                                 suiteSettingsPanel->setSettings(suiteSettings);
+                         });
+}
+
+void MainComponent::applySuiteSettings(const SuiteSettings& settings)
+{
+    juce::String errorMessage;
+    if (! suiteSettingsStore.save(settings, errorMessage))
+    {
+        transportBar.setStatusText(errorMessage);
+        if (suiteSettingsPanel != nullptr)
+            suiteSettingsPanel->setStatusText(errorMessage);
+        return;
+    }
+
+    suiteSettings = settings;
+    transportBar.setStatusText("Saved Creation Suite settings.");
+    if (suiteSettingsPanel != nullptr)
+        suiteSettingsPanel->setStatusText("Saved suite-wide settings for all Creation apps.");
 }
 
 void MainComponent::createNewProject()
@@ -5637,12 +7109,19 @@ bool MainComponent::startRecordingSession()
     }
 
     juce::Array<WorkstationAudioEngine::RecordingTarget> recordingTargets;
+    juce::Array<int> midiRecordingTracks;
     const auto timestamp = makeRecordingTimestamp();
 
     for (int trackIndex = 0; trackIndex < engine.getTrackCount(); ++trackIndex)
     {
         if (! juce::isPositiveAndBelow(trackIndex, (int) armedTracks.size()) || ! armedTracks[(size_t) trackIndex])
             continue;
+
+        if (timelineModel.getTrackKind(trackIndex) == cs::TrackKind::midi)
+        {
+            midiRecordingTracks.add(trackIndex);
+            continue;
+        }
 
         auto trackName = engine.getTrackName(trackIndex).retainCharacters("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ ");
         trackName = trackName.trim().replace(" ", "-");
@@ -5659,38 +7138,129 @@ bool MainComponent::startRecordingSession()
         recordingTargets.add(target);
     }
 
-    juce::String errorMessage;
-    if (! engine.startRecordingToFiles(recordingTargets, errorMessage))
+    if (! recordingTargets.isEmpty())
     {
-        transportBar.setStatusText("Record failed: " + errorMessage);
+        juce::String errorMessage;
+        if (! engine.startRecordingToFiles(recordingTargets, errorMessage))
+        {
+            transportBar.setStatusText("Record failed: " + errorMessage);
+            return false;
+        }
+
+        for (const auto& target : recordingTargets)
+            timelineModel.beginRecordingClip(target.trackIndex, target.file);
+    }
+
+    if (! midiRecordingTracks.isEmpty())
+    {
+        engine.startMidiRecording();
+        for (auto trackIndex : midiRecordingTracks)
+            timelineModel.beginRecordingMidiClip(trackIndex);
+    }
+
+    const auto totalArmedCount = recordingTargets.size() + midiRecordingTracks.size();
+    if (totalArmedCount == 0)
+    {
+        transportBar.setStatusText("Record failed: no armed tracks were available for recording.");
         return false;
     }
 
-    for (const auto& target : recordingTargets)
-        timelineModel.beginRecordingClip(target.trackIndex, target.file);
-
     trackerPanel.refreshTimelineView();
-    transportBar.setStatusText("Recording " + juce::String(recordingTargets.size()) + " track(s).");
-    recordView.setRecordingState(true, recordingTargets.size() == 1 ? recordingTargets[0].file.getFileName()
-                                                                    : juce::String(recordingTargets.size()) + " tracks");
+    transportBar.setStatusText("Recording " + juce::String(totalArmedCount) + " track(s).");
+    recordView.setRecordingState(true, totalArmedCount == 1
+                                            ? (recordingTargets.size() == 1 ? recordingTargets[0].file.getFileName()
+                                                                             : juce::String("MIDI"))
+                                            : juce::String(totalArmedCount) + " tracks");
     refreshRecentTakes();
     return true;
 }
 
 void MainComponent::stopRecordingSession()
 {
-    if (! engine.isRecording())
+    const auto wasMidiRecording = engine.isMidiRecording();
+    if (! engine.isRecording() && ! wasMidiRecording)
         return;
 
     auto takeFiles = engine.getRecordingFiles();
     engine.stopRecording();
+
+    auto midiTrackCount = 0;
+
+    if (wasMidiRecording)
+    {
+        engine.stopMidiRecording();
+        auto recordedEvents = engine.takeRecordedMidiEvents();
+        const auto engineSampleRate = engine.getSampleRate();
+
+        juce::Array<int> recordedTrackIndices;
+        for (const auto& event : recordedEvents)
+            recordedTrackIndices.addIfNotAlreadyThere(event.trackIndex);
+
+        for (auto trackIndex : recordedTrackIndices)
+        {
+            std::vector<WorkstationAudioEngine::RecordedMidiEvent> trackEvents;
+            for (const auto& event : recordedEvents)
+                if (event.trackIndex == trackIndex)
+                    trackEvents.push_back(event);
+
+            std::sort(trackEvents.begin(), trackEvents.end(),
+                      [](const auto& a, const auto& b) { return a.samplePosition < b.samplePosition; });
+
+            // Pair each note-on with the next note-off on the same channel/pitch, converting the
+            // engine's absolute recording-clock sample position into clip-relative beats.
+            std::vector<cs::MidiNoteEvent> notes;
+            struct OpenNote { int channel; int pitch; size_t noteIndex; };
+            std::vector<OpenNote> openNotes;
+
+            for (const auto& event : trackEvents)
+            {
+                const auto& message = event.message;
+                const auto eventSeconds = engineSampleRate > 0.0 ? (double) event.samplePosition / engineSampleRate : 0.0;
+                const auto elapsedBeats = timelineModel.secondsToBeat(eventSeconds - transportStartTimelineSeconds);
+
+                if (message.isNoteOn())
+                {
+                    cs::MidiNoteEvent note;
+                    note.id = juce::Uuid().toString();
+                    note.pitch = message.getNoteNumber();
+                    note.velocity = message.getVelocity();
+                    note.channel = message.getChannel();
+                    note.startBeats = juce::jmax(0.0, elapsedBeats);
+                    note.lengthBeats = 0.25;
+                    notes.push_back(note);
+                    openNotes.push_back({ note.channel, note.pitch, notes.size() - 1 });
+                }
+                else if (message.isNoteOff())
+                {
+                    for (auto it = openNotes.begin(); it != openNotes.end(); ++it)
+                    {
+                        if (it->channel == message.getChannel() && it->pitch == message.getNoteNumber())
+                        {
+                            auto& note = notes[it->noteIndex];
+                            note.lengthBeats = juce::jmax(0.05, elapsedBeats - note.startBeats);
+                            openNotes.erase(it);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            timelineModel.setRecordingClipMidiNotes(trackIndex, std::move(notes));
+        }
+
+        midiTrackCount = recordedTrackIndices.size();
+    }
+
     timelineModel.finishRecordingClip(timelineModel.getTransportSeconds());
     activeRecordingTrack = -1;
     trackerPanel.refreshTimelineView();
     midiSurface.setTransportState(false, false);
-    transportBar.setStatusText("Recording stopped: " + juce::String(takeFiles.size()) + " track(s).");
-    recordView.setRecordingState(false, takeFiles.size() == 1 ? takeFiles[0].getFileName()
-                                                              : juce::String(takeFiles.size()) + " tracks");
+
+    const auto totalTrackCount = takeFiles.size() + midiTrackCount;
+    transportBar.setStatusText("Recording stopped: " + juce::String(totalTrackCount) + " track(s).");
+    recordView.setRecordingState(false, totalTrackCount == 1
+                                             ? (takeFiles.size() == 1 ? takeFiles[0].getFileName() : juce::String("MIDI"))
+                                             : juce::String(totalTrackCount) + " tracks");
     refreshRecentTakes();
     saveSessionToDisk();
 }
@@ -5784,14 +7354,6 @@ bool MainComponent::ensureStorageRootConfigured()
 
 
 
-juce::File MainComponent::getSessionFile() const
-{
-    if (! projectManager.hasStorageRoot())
-        return {};
-
-    return projectManager.getConfigDirectory().getChildFile("session.xml");
-}
-
 juce::File MainComponent::getAppSettingsFile() const
 {
     if (! projectManager.hasStorageRoot())
@@ -5827,6 +7389,15 @@ void MainComponent::saveAppSettings()
         vstPathsState.addChild(pathState, -1, nullptr);
     }
     state.addChild(vstPathsState, -1, nullptr);
+
+    juce::ValueTree disabledMidiState("DisabledMidiInputDevices");
+    for (const auto& deviceId : disabledMidiInputDeviceIds)
+    {
+        juce::ValueTree deviceState("Device");
+        deviceState.setProperty("id", deviceId, nullptr);
+        disabledMidiState.addChild(deviceState, -1, nullptr);
+    }
+    state.addChild(disabledMidiState, -1, nullptr);
 
     settingsFile.getParentDirectory().createDirectory();
     if (auto xml = state.createXml())
@@ -5880,6 +7451,11 @@ void MainComponent::loadAppSettings()
         vstPluginCatalog.setSearchPaths(paths);
     }
 
+    disabledMidiInputDeviceIds.clear();
+    if (auto disabledMidiState = state.getChildWithName("DisabledMidiInputDevices"); disabledMidiState.isValid())
+        for (const auto child : disabledMidiState)
+            disabledMidiInputDeviceIds.add(child.getProperty("id").toString());
+
     settingsPanel.setAiProviderSettings(aiProviderSettings);
     transportBar.clickButton.setToggleState(metronomeEnabled, juce::dontSendNotification);
     engine.setMetronomeEnabled(metronomeEnabled);
@@ -5890,6 +7466,14 @@ void MainComponent::applySelectedAudioDeviceSettings()
 {
     if (selectedStudioAudioSystem.isNotEmpty())
         deviceManager.setCurrentAudioDeviceType(selectedStudioAudioSystem, true);
+
+    // engine.attachToDevice() auto-enables every non-control-surface MIDI input device as a
+    // friendly default (so a freshly plugged-in keyboard just works) - apply the user's saved
+    // exceptions on top of that default rather than replacing it, so newly connected devices
+    // keep working out of the box while explicit opt-outs still stick across restarts.
+    for (const auto& deviceId : disabledMidiInputDeviceIds)
+        deviceManager.setMidiInputDeviceEnabled(deviceId, false);
+    refreshMidiDeviceSettings();
 
     if (selectedStudioInputDevice.isEmpty() && selectedStudioOutputDevice.isEmpty())
         return;
@@ -5915,6 +7499,36 @@ void MainComponent::applySelectedAudioDeviceSettings()
     auto error = deviceManager.setAudioDeviceSetup(setup, true);
     if (error.isNotEmpty())
         transportBar.setStatusText("Audio restore: " + error);
+}
+
+void MainComponent::refreshMidiDeviceSettings()
+{
+    juce::Array<SettingsPanel::MidiDeviceInfo> devices;
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+    {
+        SettingsPanel::MidiDeviceInfo info;
+        info.id = device.identifier;
+        info.name = device.name;
+        info.enabled = deviceManager.isMidiInputDeviceEnabled(device.identifier);
+        info.routedTrackIndex = -1;
+
+        for (int trackIndex = 0; trackIndex < engine.getTrackCount(); ++trackIndex)
+        {
+            if (engine.getTrackMidiInputDeviceId(trackIndex) == device.identifier)
+            {
+                info.routedTrackIndex = trackIndex;
+                break;
+            }
+        }
+
+        devices.add(info);
+    }
+
+    juce::StringArray trackNames;
+    for (int trackIndex = 0; trackIndex < engine.getTrackCount(); ++trackIndex)
+        trackNames.add(engine.getTrackName(trackIndex));
+
+    settingsPanel.setMidiInputDevices(devices, trackNames);
 }
 
 juce::ValueTree MainComponent::createProjectStateForSave()
@@ -6004,11 +7618,14 @@ void MainComponent::saveSessionToDisk(bool userInitiated)
     auto state = createProjectStateForSave();
 
     projectManager.saveProjectState(state);
+    lastObservedPluginStateSignature = engine.createHostedPluginStateSignature();
+    pluginStateAutosavePending = false;
 
-    auto sessionFile = getSessionFile();
-    sessionFile.getParentDirectory().createDirectory();
-    if (auto xml = state.createXml())
-        xml->writeTo(sessionFile);
+    // Startup restore now uses the active project's state.xml. Remove the old
+    // config snapshot so stale absolute file paths do not linger there.
+    auto legacySessionFile = projectManager.getConfigDirectory().getChildFile("session.xml");
+    if (legacySessionFile.existsAsFile())
+        legacySessionFile.deleteFile();
 
     juce::String packageError;
     if (! projectManager.saveProjectPackage(state, packageError))
@@ -6039,6 +7656,8 @@ bool MainComponent::prepareTrackerPlayback()
         return false;
     }
 
+    refreshMidiPlaybackClips();
+
     // Play always starts from wherever the playhead currently is - no auto-snap to the
     // first clip. (Previously this reset the transport position whenever it was at or past
     // the last clip's end, which silently discarded the user's chosen playhead position -
@@ -6061,6 +7680,28 @@ void MainComponent::refreshTrackerPlaybackClips()
 
     juce::String engineError;
     engine.setTrackerPlaybackClips(targets, engineError);
+
+    refreshMidiPlaybackClips();
+}
+
+void MainComponent::refreshMidiPlaybackClips()
+{
+    juce::Array<WorkstationAudioEngine::MidiPlaybackClip> midiClips;
+
+    for (const auto& clip : timelineModel.getClips())
+    {
+        if (clip.kind != cs::ClipKind::midi || clip.midiNotes.empty())
+            continue;
+
+        WorkstationAudioEngine::MidiPlaybackClip midiClip;
+        midiClip.trackIndex = clip.trackIndex;
+        midiClip.startSeconds = clip.startSeconds;
+        midiClip.durationSeconds = clip.durationSeconds;
+        midiClip.notes = clip.midiNotes;
+        midiClips.add(std::move(midiClip));
+    }
+
+    engine.setTrackerMidiClips(midiClips);
 }
 
 bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
@@ -6072,12 +7713,33 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
 
     for (const auto& clip : timelineModel.getClips())
     {
-        if (clip.recording || ! clip.file.existsAsFile())
+        if (clip.recording)
+            continue;
+
+        if (clip.kind == cs::ClipKind::midi)
+        {
+            // Offline-rendering a MIDI clip means driving the instrument plugin through
+            // hundreds of processBlock calls back-to-back with no real-time pacing. At least
+            // one real-world plugin (a sample-streaming drum sampler) crashes reliably under
+            // that load - confirmed by an identical crash signature to the earlier idle-audio
+            // instability. Disabled until a safer rendering approach exists; see task #7.
+            continue;
+        }
+
+        auto clipFile = clip.file;
+        if (! clipFile.existsAsFile() && clip.assetId.isNotEmpty())
+        {
+            auto asset = resolveTimelineClipAsset(clip);
+            if (asset.has_value())
+                clipFile = asset->file;
+        }
+
+        if (! clipFile.existsAsFile())
             continue;
 
         WorkstationAudioEngine::PlaybackClipTarget target;
         target.trackIndex = clip.trackIndex;
-        target.file = clip.file;
+        target.file = clipFile;
         target.startSeconds = clip.startSeconds;
         target.sourceStartSeconds = clip.sourceStartSeconds;
         target.durationSeconds = clip.durationSeconds;
@@ -6092,6 +7754,56 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
     }
 
     return true;
+}
+
+void MainComponent::previewScrubAudioAt(double timelineSeconds)
+{
+    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> fullTargets;
+    double fullDurationSeconds = 0.0;
+    juce::String errorMessage;
+    if (! buildTrackerPlaybackTargets(fullTargets, fullDurationSeconds, errorMessage))
+        return;
+
+    constexpr double scrubPreviewLeadSeconds = 0.03;
+    constexpr double scrubPreviewLengthSeconds = 0.16;
+
+    auto windowStart = juce::jmax(0.0, timelineSeconds - scrubPreviewLeadSeconds);
+    auto windowEnd = windowStart + scrubPreviewLengthSeconds;
+
+    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> scrubTargets;
+    for (const auto& target : fullTargets)
+    {
+        auto clipStart = target.startSeconds;
+        auto clipEnd = target.startSeconds + target.durationSeconds;
+        auto overlapStart = juce::jmax(clipStart, windowStart);
+        auto overlapEnd = juce::jmin(clipEnd, windowEnd);
+
+        if (overlapEnd <= overlapStart)
+            continue;
+
+        WorkstationAudioEngine::PlaybackClipTarget scrubTarget = target;
+        scrubTarget.startSeconds = overlapStart - windowStart;
+        scrubTarget.sourceStartSeconds = target.sourceStartSeconds + (overlapStart - clipStart);
+        scrubTarget.durationSeconds = overlapEnd - overlapStart;
+        scrubTargets.add(std::move(scrubTarget));
+    }
+
+    if (scrubTargets.isEmpty())
+    {
+        engine.stopAssetPreview();
+        return;
+    }
+
+    WorkstationAudioEngine::RenderSettings settings;
+    settings.sampleRate = engine.getSampleRate() > 0.0 ? engine.getSampleRate() : 48000.0;
+    settings.blockSize = 256;
+    settings.normalizePeak = false;
+
+    juce::AudioBuffer<float> previewBuffer;
+    if (! engine.renderTrackerMixToBuffer(scrubTargets, scrubPreviewLengthSeconds, settings, previewBuffer, errorMessage))
+        return;
+
+    engine.previewGeneratedBuffer(previewBuffer, settings.sampleRate, errorMessage);
 }
 
 void MainComponent::pushTimelineUndoState()
@@ -6355,6 +8067,8 @@ void MainComponent::loadSessionFromDisk()
     if (auto timelineState = state.getChildWithName("Timeline"); timelineState.isValid())
         timelineModel.restoreState(timelineState);
 
+    resolveTrackerClipAssetFiles();
+
     transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);
 
     timelineUndoStack.clear();
@@ -6470,15 +8184,29 @@ void MainComponent::loadSessionFromDisk()
     }
 
     auto savedMode = (int) state.getProperty("workspaceMode", static_cast<int>(WorkspaceMode::tracker));
-    if (savedMode > static_cast<int>(WorkspaceMode::settings))
+    if (savedMode > static_cast<int>(WorkspaceMode::sampler))
         savedMode = static_cast<int>(WorkspaceMode::tracker);
 
-    setWorkspaceMode(static_cast<WorkspaceMode>(juce::jlimit(0, static_cast<int>(WorkspaceMode::settings), savedMode)));
+    setWorkspaceMode(static_cast<WorkspaceMode>(juce::jlimit(0, static_cast<int>(WorkspaceMode::sampler), savedMode)));
 
     refreshInsertRack();
     transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
     refreshRecentTakes();
     refreshFoleyArrangement();
+
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    juce::Timer::callAfterDelay(300, [safeThis]
+    {
+        if (safeThis == nullptr)
+            return;
+
+        safeThis->engine.reapplyHostedPluginStates();
+        safeThis->lastObservedPluginStateSignature = safeThis->engine.createHostedPluginStateSignature();
+    });
+
+    lastObservedPluginStateSignature = engine.createHostedPluginStateSignature();
+    pluginStateAutosavePending = false;
+    pluginStateLastPollWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
     projectDirty = false;
 
 }
@@ -6503,6 +8231,10 @@ void MainComponent::syncTrackViews()
         armedTracks.resize((size_t) trackCount, false);
     else if ((int) armedTracks.size() > trackCount)
         armedTracks.resize((size_t) trackCount);
+    if ((int) automationLastManualWriteWallSeconds.size() < trackCount)
+        automationLastManualWriteWallSeconds.resize((size_t) trackCount, 0.0);
+    else if ((int) automationLastManualWriteWallSeconds.size() > trackCount)
+        automationLastManualWriteWallSeconds.resize((size_t) trackCount);
     if ((int) monitoredTracks.size() < trackCount)
         monitoredTracks.resize((size_t) trackCount, false);
     else if ((int) monitoredTracks.size() > trackCount)
@@ -6516,6 +8248,13 @@ void MainComponent::syncTrackViews()
                                                                                     : cs::TrackChannelMode::mono);
         trackerPanel.setTrackName(index, trackName);
         trackerPanel.setTrackKind(index, timelineModel.getTrackKind(index));
+        engine.setTrackIsMidiKind(index, timelineModel.getTrackKind(index) == cs::TrackKind::midi);
+        engine.setTrackIsAutomationKind(index, timelineModel.getTrackKind(index) == cs::TrackKind::automation);
+        if (timelineModel.getTrackKind(index) == cs::TrackKind::automation)
+            pushAutomationDataToEngine(index);
+        engine.setTrackParentIndex(index, timelineModel.getTrackParent(index));
+        trackerPanel.setTrackIndented(index, timelineModel.getTrackParent(index) >= 0);
+        trackerPanel.setTrackAccentColour(index, computeTrackAccentColour(index));
         trackerPanel.setTrackStereo(index, engine.isTrackStereoEnabled(index));
         arrangeView.setTrackName(index, trackName);
         arrangeView.setTrackKind(index, timelineModel.getTrackKind(index));
@@ -6527,12 +8266,323 @@ void MainComponent::syncTrackViews()
         trackerPanel.setTrackSoloed(index, engine.isTrackSoloed(index));
         trackerPanel.setTrackArmed(index, juce::isPositiveAndBelow(index, (int) armedTracks.size()) && armedTracks[(size_t) index]);
         trackerPanel.setTrackMonitored(index, juce::isPositiveAndBelow(index, (int) monitoredTracks.size()) && monitoredTracks[(size_t) index]);
-        trackerPanel.setTrackInput(index, studioIOModel.getInputIndexForChannel(engine.getTrackInputChannel(index)));
+        trackerPanel.setTrackInput(index, timelineModel.getTrackKind(index) == cs::TrackKind::midi
+                                              ? engine.getTrackMidiInputChannel(index)
+                                              : studioIOModel.getInputIndexForChannel(engine.getTrackInputChannel(index)));
         trackerPanel.setTrackFxSummary(index, engine.getTrackPluginCount(index));
         engine.setTrackRecordingArmed(index, juce::isPositiveAndBelow(index, (int) armedTracks.size()) && armedTracks[(size_t) index]);
         engine.setTrackMonitoringEnabled(index, juce::isPositiveAndBelow(index, (int) monitoredTracks.size()) && monitoredTracks[(size_t) index]);
         trackerPanel.setTrackLevel(index, engine.getTrackLevel(index));
+
+        if (timelineModel.getTrackKind(index) == cs::TrackKind::automation)
+        {
+            auto target = timelineModel.getAutomationTarget(index);
+            trackerPanel.setAutomationTargetLabel(index, target.displayName);
+            trackerPanel.setAutomationRecordMode(index, timelineModel.getAutomationRecordMode(index));
+            trackerPanel.setAutomationRecordingRate(index, timelineModel.getAutomationRecordingRate(index));
+        }
     }
+}
+
+void MainComponent::pushAutomationDataToEngine(int trackIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, engine.getTrackCount()))
+        return;
+
+    auto target = timelineModel.getAutomationTarget(trackIndex);
+
+    std::vector<cs::AutomationPoint> points;
+    if (auto* stored = timelineModel.getAutomationPoints(trackIndex))
+        points = *stored;
+
+    engine.setTrackAutomationData(trackIndex, target, points);
+}
+
+void MainComponent::recordAutomationWriteIfArmed(int targetTrackIndex, cs::AutomationTargetKind kind, float normalizedValue)
+{
+    if (! engine.isPlaying())
+        return;
+
+    auto nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+
+    for (int automationTrackIndex = 0; automationTrackIndex < timelineModel.getTrackCount(); ++automationTrackIndex)
+    {
+        if (timelineModel.getTrackKind(automationTrackIndex) != cs::TrackKind::automation)
+            continue;
+
+        if (! juce::isPositiveAndBelow(automationTrackIndex, (int) armedTracks.size()) || ! armedTracks[(size_t) automationTrackIndex])
+            continue;
+
+        auto target = timelineModel.getAutomationTarget(automationTrackIndex);
+        if (target.kind != kind || target.targetTrackIndex != targetTrackIndex)
+            continue;
+
+        // Suspend this lane's own playback of its (about-to-be-overwritten) curve for as long as
+        // it's being actively written - otherwise the audio-thread automation pass and this
+        // manual write fight over the same value every block.
+        engine.setTrackAutomationWriteActive(automationTrackIndex, true);
+        if (juce::isPositiveAndBelow(automationTrackIndex, (int) automationLastManualWriteWallSeconds.size()))
+            automationLastManualWriteWallSeconds[(size_t) automationTrackIndex] = nowSeconds;
+
+        auto mergeToleranceSeconds = 1.0 / juce::jmax(1, timelineModel.getAutomationRecordingRate(automationTrackIndex));
+        timelineModel.addOrUpdateAutomationPoint(automationTrackIndex, timelineModel.getTransportSeconds(),
+                                                 juce::jlimit(0.0f, 1.0f, normalizedValue), mergeToleranceSeconds);
+        pushAutomationDataToEngine(automationTrackIndex);
+        trackerPanel.refreshTimelineView();
+    }
+}
+
+void MainComponent::updateAutomationRecordModes()
+{
+    if (! engine.isPlaying())
+    {
+        // Passes don't carry a write-active lane over into the next Play - Latch/Write both
+        // reset naturally on stop, matching how a real DAW ends a recording pass.
+        for (int trackIndex = 0; trackIndex < timelineModel.getTrackCount(); ++trackIndex)
+            if (timelineModel.getTrackKind(trackIndex) == cs::TrackKind::automation)
+                engine.setTrackAutomationWriteActive(trackIndex, false);
+        return;
+    }
+
+    constexpr double touchReleaseTimeoutSeconds = 0.2;
+    auto nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+
+    for (int trackIndex = 0; trackIndex < timelineModel.getTrackCount(); ++trackIndex)
+    {
+        if (timelineModel.getTrackKind(trackIndex) != cs::TrackKind::automation)
+            continue;
+
+        if (! juce::isPositiveAndBelow(trackIndex, (int) armedTracks.size()) || ! armedTracks[(size_t) trackIndex])
+            continue;
+
+        auto target = timelineModel.getAutomationTarget(trackIndex);
+        if (target.kind == cs::AutomationTargetKind::none)
+            continue;
+
+        auto mode = timelineModel.getAutomationRecordMode(trackIndex);
+
+        if (mode == cs::AutomationRecordMode::write)
+        {
+            // Write mode records continuously for the whole pass, touched or not - sample
+            // whatever the target's live value currently is (manual writes above may have just
+            // set it; otherwise it's whatever it already was) and bake it into the curve.
+            engine.setTrackAutomationWriteActive(trackIndex, true);
+
+            float currentValue = 0.5f;
+            if (target.kind == cs::AutomationTargetKind::trackVolume)
+                currentValue = engine.getTrackGain(target.targetTrackIndex);
+            else if (target.kind == cs::AutomationTargetKind::trackPan)
+                currentValue = juce::jmap(engine.getTrackPan(target.targetTrackIndex), -1.0f, 1.0f, 0.0f, 1.0f);
+            else if (target.kind == cs::AutomationTargetKind::pluginParameter)
+                currentValue = engine.getTrackPluginParameterValue(target.targetTrackIndex, target.pluginSlotIndex, target.pluginParameterIndex);
+
+            auto mergeToleranceSeconds = 1.0 / juce::jmax(1, timelineModel.getAutomationRecordingRate(trackIndex));
+            timelineModel.addOrUpdateAutomationPoint(trackIndex, timelineModel.getTransportSeconds(),
+                                                     juce::jlimit(0.0f, 1.0f, currentValue), mergeToleranceSeconds);
+            pushAutomationDataToEngine(trackIndex);
+            trackerPanel.refreshTimelineView();
+        }
+        else if (mode == cs::AutomationRecordMode::touch)
+        {
+            // Touch releases (resumes normal curve playback) once nothing has manually moved the
+            // target for a short idle period - Latch deliberately has no such release here.
+            if (juce::isPositiveAndBelow(trackIndex, (int) automationLastManualWriteWallSeconds.size())
+                && nowSeconds - automationLastManualWriteWallSeconds[(size_t) trackIndex] > touchReleaseTimeoutSeconds)
+                engine.setTrackAutomationWriteActive(trackIndex, false);
+        }
+    }
+}
+
+bool MainComponent::performTrackMove(int trackIndex, int destinationIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, timelineModel.getTrackCount()))
+        return false;
+
+    // Computed BEFORE the move and reused for the engine call below, so both arrays agree on
+    // exactly which range moved - TimelineModel::moveTrackGroup decides this the same way
+    // internally, but doesn't hand the value back.
+    auto blockLength = timelineModel.getTrackKind(trackIndex) == cs::TrackKind::folder
+                          ? timelineModel.getFolderBlockLength(trackIndex)
+                          : 1;
+
+    if (! timelineModel.moveTrackGroup(trackIndex, destinationIndex))
+        return false;
+
+    engine.moveTrackRange(trackIndex, blockLength, destinationIndex);
+    return true;
+}
+
+juce::Colour MainComponent::computeTrackAccentColour(int trackIndex) const
+{
+    static const juce::Colour palette[] = {
+        juce::Colour(0xff67e8a5), juce::Colour(0xff74caff), juce::Colour(0xffffd166),
+        juce::Colour(0xffff9f6e), juce::Colour(0xffb185ff), juce::Colour(0xffff6b6b),
+        juce::Colour(0xff5da5ff), juce::Colour(0xffffc857)
+    };
+    constexpr auto paletteSize = (int) (sizeof(palette) / sizeof(palette[0]));
+
+    auto colourForFolder = [&](int folderIndex)
+    {
+        auto id = timelineModel.getTrackId(folderIndex);
+        auto index = (int) ((juce::uint32) id.hashCode() % (juce::uint32) paletteSize);
+        return palette[index];
+    };
+
+    if (timelineModel.getTrackKind(trackIndex) == cs::TrackKind::folder)
+        return colourForFolder(trackIndex);
+
+    auto parent = timelineModel.getTrackParent(trackIndex);
+    if (parent >= 0)
+        return colourForFolder(parent);
+
+    return juce::Colour();
+}
+
+void MainComponent::showMoveToFolderPicker(int trackIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, timelineModel.getTrackCount()))
+        return;
+
+    juce::PopupMenu menu;
+    menu.addItem(1, "None (top-level)", true, timelineModel.getTrackParent(trackIndex) < 0);
+
+    juce::Array<int> folderTrackIndices;
+    int nextItemId = 2;
+    for (int otherIndex = 0; otherIndex < timelineModel.getTrackCount(); ++otherIndex)
+    {
+        if (otherIndex == trackIndex || timelineModel.getTrackKind(otherIndex) != cs::TrackKind::folder)
+            continue;
+
+        auto folderName = timelineModel.getTrackName(otherIndex);
+        if (folderName.isEmpty())
+            folderName = "Track " + juce::String(otherIndex + 1);
+
+        menu.addItem(nextItemId, folderName, true, timelineModel.getTrackParent(trackIndex) == otherIndex);
+        folderTrackIndices.add(otherIndex);
+        ++nextItemId;
+    }
+
+    menu.showMenuAsync(juce::PopupMenu::Options(), [this, trackIndex, folderTrackIndices](int result)
+    {
+        if (result <= 0)
+            return;
+
+        auto newParent = result == 1 ? -1 : folderTrackIndices[result - 2];
+
+        if (! timelineModel.setTrackParent(trackIndex, newParent))
+        {
+            transportBar.setStatusText("Couldn't move that track there - it would create a folder loop.");
+            return;
+        }
+
+        // Assigning into a folder also physically groups it there - directly under the folder
+        // and any of its existing members - so the track list and the routing always agree.
+        // Detaching back to top-level (newParent < 0) leaves its position alone.
+        if (newParent >= 0)
+            performTrackMove(trackIndex, newParent + timelineModel.getFolderBlockLength(newParent));
+
+        syncTrackViews();
+        saveSessionToDisk();
+    });
+}
+
+void MainComponent::showAutomationTargetPicker(int trackIndex)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, timelineModel.getTrackCount()))
+        return;
+
+    struct MenuAction
+    {
+        cs::AutomationTarget target;
+    };
+
+    auto actions = std::make_shared<std::vector<MenuAction>>();
+    juce::PopupMenu menu;
+    int nextItemId = 1;
+
+    for (int otherIndex = 0; otherIndex < timelineModel.getTrackCount(); ++otherIndex)
+    {
+        if (otherIndex == trackIndex)
+            continue;
+
+        if (timelineModel.getTrackKind(otherIndex) == cs::TrackKind::automation)
+            continue;
+
+        auto trackName = timelineModel.getTrackName(otherIndex);
+        if (trackName.isEmpty())
+            trackName = "Track " + juce::String(otherIndex + 1);
+
+        juce::PopupMenu trackMenu;
+
+        {
+            cs::AutomationTarget target;
+            target.kind = cs::AutomationTargetKind::trackVolume;
+            target.targetTrackIndex = otherIndex;
+            target.displayName = trackName + " \xe2\x86\x92 Volume";
+            trackMenu.addItem(nextItemId, "Volume");
+            actions->push_back({ target });
+            ++nextItemId;
+        }
+
+        {
+            cs::AutomationTarget target;
+            target.kind = cs::AutomationTargetKind::trackPan;
+            target.targetTrackIndex = otherIndex;
+            target.displayName = trackName + " \xe2\x86\x92 Pan";
+            trackMenu.addItem(nextItemId, "Pan");
+            actions->push_back({ target });
+            ++nextItemId;
+        }
+
+        auto pluginNames = engine.getTrackPluginNames(otherIndex);
+        for (int slotIndex = 0; slotIndex < pluginNames.size(); ++slotIndex)
+        {
+            auto paramCount = engine.getTrackPluginParameterCount(otherIndex, slotIndex);
+            if (paramCount <= 0)
+                continue;
+
+            juce::PopupMenu pluginMenu;
+            for (int paramIndex = 0; paramIndex < paramCount; ++paramIndex)
+            {
+                auto paramName = engine.getTrackPluginParameterName(otherIndex, slotIndex, paramIndex);
+                if (paramName.isEmpty())
+                    paramName = "Param " + juce::String(paramIndex + 1);
+
+                cs::AutomationTarget target;
+                target.kind = cs::AutomationTargetKind::pluginParameter;
+                target.targetTrackIndex = otherIndex;
+                target.pluginSlotIndex = slotIndex;
+                target.pluginParameterIndex = paramIndex;
+                target.parameterId = juce::String(paramIndex);
+                target.displayName = trackName + " \xe2\x86\x92 " + pluginNames[slotIndex] + " \xe2\x86\x92 " + paramName;
+
+                pluginMenu.addItem(nextItemId, paramName);
+                actions->push_back({ target });
+                ++nextItemId;
+            }
+
+            trackMenu.addSubMenu(pluginNames[slotIndex], pluginMenu);
+        }
+
+        menu.addSubMenu(trackName, trackMenu);
+    }
+
+    if (nextItemId == 1)
+    {
+        menu.addItem(-1, "No other tracks available", false);
+    }
+
+    menu.showMenuAsync(juce::PopupMenu::Options(), [this, trackIndex, actions](int result)
+    {
+        if (result <= 0 || (size_t) result > actions->size())
+            return;
+
+        const auto& action = (*actions)[(size_t) result - 1];
+        timelineModel.setAutomationTarget(trackIndex, action.target);
+        pushAutomationDataToEngine(trackIndex);
+        trackerPanel.setAutomationTargetLabel(trackIndex, action.target.displayName);
+        saveSessionToDisk();
+    });
 }
 
 void MainComponent::refreshTrackInputSources()

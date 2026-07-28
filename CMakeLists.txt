@@ -7,14 +7,37 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(cmake/CreationSharedLLVM.cmake)
+configure_creation_shared_llvm(CS "Creation Station")
+
+# Keep full optimizations in Release but still emit PDBs, so a crash dump collected from a
+# Release build can actually be resolved to real function names/line numbers instead of raw
+# offsets into the executable.
+if(MSVC)
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Zi")
+    string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
+    string(APPEND CMAKE_MODULE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
+endif()
+
 if(NOT DEFINED JUCE_DIR)
     message(FATAL_ERROR "Set JUCE_DIR to your JUCE root directory before configuring.")
 endif()
 
 option(CREATION_STATION_ENABLE_ASIO "Enable Steinberg ASIO support in Creation Station" OFF)
 set(CREATION_STATION_ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK folder containing iasiodrv.h")
+set(CREATION_SUITE_SHARED_DIR "D:/000 Creation Suite/shared" CACHE PATH "Path to the Creation Suite shared code root")
 
 add_subdirectory("${JUCE_DIR}" juce)
+
+set(CS_ASSET_SYSTEM_TARGET creation_asset_system)
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/AssetSystem/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AssetSystem"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedAssetSystem")
+    set(CS_ASSET_SYSTEM_TARGET creation_suite_asset_system)
+else()
+    add_subdirectory(AssetSystem)
+endif()
 
 juce_add_gui_app(CreativeWorkstation
     PRODUCT_NAME "Creative Workstation"
@@ -41,6 +64,20 @@ juce_add_plugin(CreationStationInstrument
 juce_generate_juce_header(CreativeWorkstation)
 juce_generate_juce_header(CreationStationInstrument)
 
+add_library(creation_station_language_host STATIC
+    Source/Language/AppLanguagePolicy.cpp
+    Source/Language/AppLanguagePolicy.h
+)
+
+target_include_directories(creation_station_language_host PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/Source/Language")
+
+if(CS_ENABLE_SCRIPTING)
+    target_include_directories(creation_station_language_host PRIVATE "${CS_LLVM_ROOT}/include")
+    target_compile_definitions(creation_station_language_host PUBLIC CS_ENABLE_SCRIPTING=1)
+else()
+    target_compile_definitions(creation_station_language_host PUBLIC CS_ENABLE_SCRIPTING=0)
+endif()
+
 target_sources(CreativeWorkstation PRIVATE
     Source/AI/CreationStationContextEngine.cpp
     Source/AI/CreationStationContextEngine.h
@@ -66,6 +103,12 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Audio/SignalGraphRuntime.h
     Source/Audio/VstPluginCatalog.cpp
     Source/Audio/VstPluginCatalog.h
+    Source/Audio/SamplePackBuilder/PitchDetector.cpp
+    Source/Audio/SamplePackBuilder/PitchDetector.h
+    Source/Audio/SamplePackBuilder/SamplePackBuilderEngine.cpp
+    Source/Audio/SamplePackBuilder/SamplePackBuilderEngine.h
+    Source/Audio/SamplePackCatalog.cpp
+    Source/Audio/SamplePackCatalog.h
     Source/Auth/DesktopAuthSession.cpp
     Source/Auth/DesktopAuthSession.h
     Source/Branding.cpp
@@ -80,6 +123,9 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Content/ContentApiClient.h
     Source/Project/ProjectManager.cpp
     Source/Project/ProjectManager.h
+    Source/Project/ProjectStorage.cpp
+    Source/Project/ProjectStorage.h
+    Source/Suite/SuiteSettings.h
     Source/Tutorial/GuidedTutorial.cpp
     Source/Tutorial/GuidedTutorial.h
     Source/Tutorial/TutorialScriptCompiler.cpp
@@ -128,8 +174,12 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/GraphPanel.h
     Source/Views/TourGuideOverlay.cpp
     Source/Views/TourGuideOverlay.h
+    Source/Views/MidiEditorPanel.cpp
+    Source/Views/MidiEditorPanel.h
     Source/Views/MixerPanel.cpp
     Source/Views/MixerPanel.h
+    Source/Views/PluginBrowserList.cpp
+    Source/Views/PluginBrowserList.h
     Source/Views/PluginsPanel.cpp
     Source/Views/PluginsPanel.h
     Source/Views/RecordView.cpp
@@ -140,8 +190,12 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/ScorePanel.h
     Source/Views/SignalLabPanel.cpp
     Source/Views/SignalLabPanel.h
+    Source/Views/SuiteSettingsPanel.cpp
+    Source/Views/SuiteSettingsPanel.h
     Source/Views/TrackerPanel.cpp
     Source/Views/TrackerPanel.h
+    Source/Views/SamplePackBuilderPanel.cpp
+    Source/Views/SamplePackBuilderPanel.h
 )
 
 target_sources(CreationStationInstrument PRIVATE
@@ -177,6 +231,8 @@ target_compile_definitions(CreationStationInstrument PRIVATE
 )
 
 target_link_libraries(CreativeWorkstation PRIVATE
+    ${CS_ASSET_SYSTEM_TARGET}
+    creation_station_language_host
     juce::juce_audio_devices
     juce::juce_audio_processors
     juce::juce_audio_formats
@@ -189,6 +245,8 @@ target_link_libraries(CreativeWorkstation PRIVATE
 )
 
 target_link_libraries(CreationStationInstrument PRIVATE
+    ${CS_ASSET_SYSTEM_TARGET}
+    creation_station_language_host
     juce::juce_audio_utils
     juce::juce_audio_processors
     juce::juce_dsp
@@ -207,6 +265,10 @@ add_library(CreationStationPluginKit STATIC
     Source/PluginKit/CreationStationPluginHeader.h
     Source/PluginKit/LevelMeterComponent.cpp
     Source/PluginKit/LevelMeterComponent.h
+    Source/PluginKit/ThresholdMeterComponent.cpp
+    Source/PluginKit/ThresholdMeterComponent.h
+    Source/PluginKit/EqCurveComponent.cpp
+    Source/PluginKit/EqCurveComponent.h
     Source/PluginKit/CreationStationPluginPalette.h
     Source/Branding.cpp
     Source/Branding.h
@@ -224,6 +286,132 @@ target_sources(CreationStationCompressor PRIVATE
     Source/Plugins/Compressor/CreationStationCompressorProcessor.h
     Source/Plugins/Compressor/CreationStationCompressorEditor.cpp
     Source/Plugins/Compressor/CreationStationCompressorEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationLimiter "Creation Station Limiter" CSLm "Fx")
+target_sources(CreationStationLimiter PRIVATE
+    Source/Plugins/Limiter/CreationStationLimiterProcessor.cpp
+    Source/Plugins/Limiter/CreationStationLimiterProcessor.h
+    Source/Plugins/Limiter/CreationStationLimiterEditor.cpp
+    Source/Plugins/Limiter/CreationStationLimiterEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationDeEsser "Creation Station De-Esser" CSDe "Fx")
+target_sources(CreationStationDeEsser PRIVATE
+    Source/Plugins/DeEsser/CreationStationDeEsserProcessor.cpp
+    Source/Plugins/DeEsser/CreationStationDeEsserProcessor.h
+    Source/Plugins/DeEsser/CreationStationDeEsserEditor.cpp
+    Source/Plugins/DeEsser/CreationStationDeEsserEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationPhaser "Creation Station Phaser" CSPh "Fx")
+target_sources(CreationStationPhaser PRIVATE
+    Source/Plugins/Phaser/CreationStationPhaserProcessor.cpp
+    Source/Plugins/Phaser/CreationStationPhaserProcessor.h
+    Source/Plugins/Phaser/CreationStationPhaserEditor.cpp
+    Source/Plugins/Phaser/CreationStationPhaserEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationChorus "Creation Station Chorus" CSCh "Fx")
+target_sources(CreationStationChorus PRIVATE
+    Source/Plugins/Chorus/CreationStationChorusProcessor.cpp
+    Source/Plugins/Chorus/CreationStationChorusProcessor.h
+    Source/Plugins/Chorus/CreationStationChorusEditor.cpp
+    Source/Plugins/Chorus/CreationStationChorusEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationDelay "Creation Station Delay" CSDl "Fx")
+target_sources(CreationStationDelay PRIVATE
+    Source/Plugins/Delay/CreationStationDelayProcessor.cpp
+    Source/Plugins/Delay/CreationStationDelayProcessor.h
+    Source/Plugins/Delay/CreationStationDelayEditor.cpp
+    Source/Plugins/Delay/CreationStationDelayEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationReverb "Creation Station Reverb" CSRv "Fx")
+target_sources(CreationStationReverb PRIVATE
+    Source/Plugins/Reverb/CreationStationReverbProcessor.cpp
+    Source/Plugins/Reverb/CreationStationReverbProcessor.h
+    Source/Plugins/Reverb/CreationStationReverbEditor.cpp
+    Source/Plugins/Reverb/CreationStationReverbEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationOverdrive "Creation Station Overdrive" CSOd "Fx")
+target_sources(CreationStationOverdrive PRIVATE
+    Source/Plugins/Overdrive/CreationStationOverdriveProcessor.cpp
+    Source/Plugins/Overdrive/CreationStationOverdriveProcessor.h
+    Source/Plugins/Overdrive/CreationStationOverdriveEditor.cpp
+    Source/Plugins/Overdrive/CreationStationOverdriveEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationClipper "Creation Station Clipper" CSCp "Fx|Distortion")
+target_sources(CreationStationClipper PRIVATE
+    Source/Plugins/Clipper/CreationStationClipperProcessor.cpp
+    Source/Plugins/Clipper/CreationStationClipperProcessor.h
+    Source/Plugins/Clipper/CreationStationClipperEditor.cpp
+    Source/Plugins/Clipper/CreationStationClipperEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationGate "Creation Station Gate" CSGt "Fx")
+target_sources(CreationStationGate PRIVATE
+    Source/Plugins/Gate/CreationStationGateProcessor.cpp
+    Source/Plugins/Gate/CreationStationGateProcessor.h
+    Source/Plugins/Gate/CreationStationGateEditor.cpp
+    Source/Plugins/Gate/CreationStationGateEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationParametricEQ "Creation Station Parametric EQ" CSEq "EQ")
+target_sources(CreationStationParametricEQ PRIVATE
+    Source/Plugins/ParametricEQ/CreationStationParametricEQProcessor.cpp
+    Source/Plugins/ParametricEQ/CreationStationParametricEQProcessor.h
+    Source/Plugins/ParametricEQ/CreationStationParametricEQEditor.cpp
+    Source/Plugins/ParametricEQ/CreationStationParametricEQEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationVocalFocus "Creation Station Vocal Focus" CSVf "Fx")
+target_sources(CreationStationVocalFocus PRIVATE
+    Source/Plugins/VocalFocus/CreationStationVocalFocusProcessor.cpp
+    Source/Plugins/VocalFocus/CreationStationVocalFocusProcessor.h
+    Source/Plugins/VocalFocus/CreationStationVocalFocusEditor.cpp
+    Source/Plugins/VocalFocus/CreationStationVocalFocusEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationTune "Creation Station Tune" CSTn "Fx|Pitch Shift")
+target_sources(CreationStationTune PRIVATE
+    Source/Plugins/Tune/CreationStationTuneProcessor.cpp
+    Source/Plugins/Tune/CreationStationTuneProcessor.h
+    Source/Plugins/Tune/CreationStationTuneEditor.cpp
+    Source/Plugins/Tune/CreationStationTuneEditor.h
+    Source/Audio/SamplePackBuilder/PitchDetector.cpp
+    Source/Audio/SamplePackBuilder/PitchDetector.h
+)
+
+add_creation_station_effect_plugin(CreationStationDynamicEQ "Creation Station Dynamic EQ" CSDq "Fx|EQ")
+target_sources(CreationStationDynamicEQ PRIVATE
+    Source/Plugins/DynamicEQ/CreationStationDynamicEQProcessor.cpp
+    Source/Plugins/DynamicEQ/CreationStationDynamicEQProcessor.h
+    Source/Plugins/DynamicEQ/CreationStationDynamicEQEditor.cpp
+    Source/Plugins/DynamicEQ/CreationStationDynamicEQEditor.h
+)
+
+add_creation_station_effect_plugin(CreationStationResonanceSuppressor "Creation Station Resonance Suppressor" CSRs "Fx|EQ")
+target_sources(CreationStationResonanceSuppressor PRIVATE
+    Source/Plugins/ResonanceSuppressor/CreationStationResonanceSuppressorProcessor.cpp
+    Source/Plugins/ResonanceSuppressor/CreationStationResonanceSuppressorProcessor.h
+    Source/Plugins/ResonanceSuppressor/CreationStationResonanceSuppressorEditor.cpp
+    Source/Plugins/ResonanceSuppressor/CreationStationResonanceSuppressorEditor.h
+)
+
+add_creation_station_instrument_plugin(CreationStationSamplePlayer "Creation Station Sample Player" CSSp "Instrument|Sampler")
+target_sources(CreationStationSamplePlayer PRIVATE
+    Source/Plugins/SamplePlayer/CreationStationSamplePlayerProcessor.cpp
+    Source/Plugins/SamplePlayer/CreationStationSamplePlayerProcessor.h
+    Source/Plugins/SamplePlayer/CreationStationSamplePlayerEditor.cpp
+    Source/Plugins/SamplePlayer/CreationStationSamplePlayerEditor.h
+    Source/Plugins/SamplePlayer/SamplePlayerLibrarySettings.cpp
+    Source/Plugins/SamplePlayer/SamplePlayerLibrarySettings.h
+    Source/Audio/SamplePackCatalog.cpp
+    Source/Audio/SamplePackCatalog.h
 )
 
 install(TARGETS CreativeWorkstation

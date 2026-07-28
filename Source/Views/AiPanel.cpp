@@ -343,6 +343,10 @@ AiPanel::AiPanel()
     configureModeButton(learnModeButton, GuidanceMode::learn);
     configureModeButton(researchModeButton, GuidanceMode::research);
 
+    normalModeButton.setTooltip("Normal mode - direct answers");
+    learnModeButton.setTooltip("Learn mode - guided, teaching-style answers");
+    researchModeButton.setTooltip("Research mode - deeper, more thorough answers");
+
     providerLabel.setText("Provider", juce::dontSendNotification);
     providerLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
     addAndMakeVisible(providerLabel);
@@ -409,8 +413,10 @@ AiPanel::AiPanel()
         if (onPromptSubmitted)
             onPromptSubmitted(submittedPrompt);
     };
+    sendButton.setTooltip("Send your message to the assistant");
     addAndMakeVisible(sendButton);
 
+    collapseButton.setTooltip("Collapse or expand the assistant sidebar");
     collapseButton.onClick = [this]
     {
         setCollapsed(! collapsed);

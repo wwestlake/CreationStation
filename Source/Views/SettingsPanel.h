@@ -7,6 +7,14 @@
 class SettingsPanel final : public juce::Component
 {
 public:
+    struct MidiDeviceInfo
+    {
+        juce::String id;
+        juce::String name;
+        bool enabled = false;
+        int routedTrackIndex = -1; // -1 = feeds every track (Omni-device), the original behaviour
+    };
+
     SettingsPanel();
 
     std::function<void()> onNewProjectRequested;
@@ -27,6 +35,11 @@ public:
     std::function<void()> onRefreshAiModelsRequested;
     std::function<void(const AiProviderSettings&)> onAiProviderSettingsChanged;
     std::function<void(const ProjectManager::ProjectInfo&)> onProjectMetadataChanged;
+    std::function<void()> onRefreshMidiDevicesRequested;
+    std::function<void(const juce::String& deviceId, bool enabled)> onMidiInputDeviceEnabledChanged;
+    std::function<void(const juce::String& deviceId, int trackIndexOrMinusOne)> onMidiInputDeviceRouteChanged;
+
+    void setMidiInputDevices(const juce::Array<MidiDeviceInfo>& devices, const juce::StringArray& midiTrackNames);
 
     void setProjectMetadata(const ProjectManager::ProjectInfo& metadata);
     void setStoragePath(const juce::String& path);
@@ -66,6 +79,55 @@ private:
         }
     };
 
+    // A clickable section title with an expand/collapse chevron - click anywhere on it to toggle.
+    // Search still overrides this: a section with a matching result forces itself open so results
+    // are never hidden behind a collapsed header.
+    class CollapsibleHeader final : public juce::Component
+    {
+    public:
+        std::function<void()> onToggled;
+
+        void setText(const juce::String& text) { title = text; repaint(); }
+        juce::String getText() const { return title; }
+        void setExpanded(bool shouldExpand)
+        {
+            if (expanded == shouldExpand)
+                return;
+            expanded = shouldExpand;
+            repaint();
+        }
+        bool isExpanded() const noexcept { return expanded; }
+
+        void paint(juce::Graphics& g) override
+        {
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(18.0f).boldened());
+            auto arrow = expanded ? juce::String(juce::CharPointer_UTF8("\xe2\x96\xbe"))
+                                  : juce::String(juce::CharPointer_UTF8("\xe2\x96\xb8"));
+            g.drawText(arrow + "  " + title, getLocalBounds(), juce::Justification::centredLeft);
+        }
+
+        void mouseUp(const juce::MouseEvent&) override
+        {
+            expanded = ! expanded;
+            repaint();
+            if (onToggled != nullptr)
+                onToggled();
+        }
+
+    private:
+        juce::String title;
+        bool expanded = true;
+    };
+
+    struct MidiDeviceRow
+    {
+        juce::String deviceId;
+        juce::Label nameLabel;
+        juce::ToggleButton enabledToggle { "Enabled" };
+        juce::ComboBox routeCombo;
+    };
+
     class ContentView final : public juce::Component
     {
     public:
@@ -76,7 +138,14 @@ private:
         void setStudioInputRows(const juce::StringArray& names,
                                 const juce::StringArray& hardwareNames,
                                 const juce::Array<bool>& availability);
+        void setMidiInputDevices(const juce::Array<SettingsPanel::MidiDeviceInfo>& devices, const juce::StringArray& midiTrackNames);
         void resized() override;
+
+        bool projectSectionVisible = true;
+        bool startupSectionVisible = true;
+        bool toolsSectionVisible = true;
+        bool aiSectionVisible = true;
+        bool midiSectionVisible = true;
 
         juce::Label headerLabel;
         juce::Label subHeaderLabel;
@@ -85,7 +154,7 @@ private:
         juce::Label storageLabel;
         juce::Label storageValueLabel;
         juce::ToggleButton autoloadToggle { "Autoload last project" };
-        juce::Label projectSectionLabel;
+        CollapsibleHeader projectSectionLabel;
         juce::Label projectNameLabel;
         juce::Label projectDescriptionLabel;
         juce::Label projectAuthorLabel;
@@ -97,9 +166,14 @@ private:
         juce::TextEditor projectCopyrightEditor;
         juce::TextEditor projectRightsEditor;
         juce::TextButton projectMetadataSaveButton { "Apply Metadata" };
-        juce::Label startupSectionLabel;
-        juce::Label toolsSectionLabel;
-        juce::Label aiSectionLabel;
+        CollapsibleHeader startupSectionLabel;
+        CollapsibleHeader toolsSectionLabel;
+        CollapsibleHeader aiSectionLabel;
+        CollapsibleHeader midiSectionLabel;
+        juce::Label midiHintLabel;
+        juce::TextButton refreshMidiDevicesButton { "Refresh Devices" };
+        juce::OwnedArray<MidiDeviceRow> midiDeviceRows;
+        juce::StringArray midiRouteTrackNames;
         juce::Label studioInputsLabel;
         juce::Label studioInputsValueLabel;
         juce::OwnedArray<juce::Label> studioInputHardwareLabels;

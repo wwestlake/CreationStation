@@ -45,6 +45,7 @@ GraphPanel::PaletteCard::PaletteCard(const cw::NodeTemplate& templateData)
         if (onAddRequested)
             onAddRequested(nodeTemplate);
     };
+    addButton.setTooltip("Add this node to the canvas");
     addAndMakeVisible(addButton);
 }
 
@@ -110,6 +111,7 @@ GraphPanel::NodeCard::NodeCard(const cw::NodeTemplate& templateData)
     setAmount(templateData.defaultValue);
 
     enableToggle.setToggleState(true, juce::dontSendNotification);
+    enableToggle.setTooltip("Enable or bypass this node");
     addAndMakeVisible(enableToggle);
 
     deleteButton.onClick = [this]
@@ -130,6 +132,7 @@ GraphPanel::NodeCard::NodeCard(const cw::NodeTemplate& templateData)
         if (onAssignVstRequested)
             onAssignVstRequested();
     };
+    assignButton.setTooltip("Assign a VST plugin to this node");
     assignButton.setVisible(isVstHost());
     addAndMakeVisible(assignButton);
 
@@ -138,6 +141,7 @@ GraphPanel::NodeCard::NodeCard(const cw::NodeTemplate& templateData)
         if (onOpenVstRequested)
             onOpenVstRequested();
     };
+    openButton.setTooltip("Open the assigned plugin's own UI window");
     openButton.setVisible(isVstHost());
     openButton.setEnabled(false);
     addAndMakeVisible(openButton);
@@ -459,6 +463,7 @@ GraphPanel::GraphPanel()
         if (onEnabledChanged)
             onEnabledChanged(graphEnabledToggle.getToggleState());
     };
+    graphEnabledToggle.setTooltip("Enable or disable the signal graph");
     addAndMakeVisible(graphEnabledToggle);
 
     autoConnectToggle.setToggleState(true, juce::dontSendNotification);
@@ -471,12 +476,14 @@ GraphPanel::GraphPanel()
         refreshSelectionSummary();
         layoutPlacedNodes();
     };
+    autoConnectToggle.setTooltip("Automatically connect nodes in the order they're placed");
     addAndMakeVisible(autoConnectToggle);
 
     clearCanvasButton.onClick = [this]
     {
         clearPlacedNodes();
     };
+    clearCanvasButton.setTooltip("Remove all nodes from the canvas");
     addAndMakeVisible(clearCanvasButton);
 
     vstStatusLabel.setText("VST node: none assigned", juce::dontSendNotification);

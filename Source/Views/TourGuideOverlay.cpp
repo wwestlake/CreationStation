@@ -26,24 +26,28 @@ TourGuideOverlay::TourGuideOverlay()
     {
         goToStep(currentStepIndex - 1);
     };
+    backButton.setTooltip("Previous tour step");
     addAndMakeVisible(backButton);
 
     nextButton.onClick = [this]
     {
         goToStep(currentStepIndex + 1);
     };
+    nextButton.setTooltip("Next tour step");
     addAndMakeVisible(nextButton);
 
     doneButton.onClick = [this]
     {
         stop();
     };
+    doneButton.setTooltip("Finish the tour");
     addAndMakeVisible(doneButton);
 
     skipButton.onClick = [this]
     {
         stop();
     };
+    skipButton.setTooltip("Skip the rest of the tour");
     addAndMakeVisible(skipButton);
 
     setVisible(false);

@@ -54,6 +54,7 @@ MixerPanel::ChannelStrip::ChannelStrip(int channelIndex, const juce::String& cha
                 if (parent->onMuteChanged)
                     parent->onMuteChanged(index, muteButton.getToggleState());
         };
+        muteButton.setTooltip("Mute this channel");
         addAndMakeVisible(muteButton);
 
         soloButton.onClick = [this]
@@ -62,6 +63,7 @@ MixerPanel::ChannelStrip::ChannelStrip(int channelIndex, const juce::String& cha
                 if (parent->onSoloChanged)
                     parent->onSoloChanged(index, soloButton.getToggleState());
         };
+        soloButton.setTooltip("Solo this channel");
         addAndMakeVisible(soloButton);
 
         fxButton.onClick = [this]
@@ -70,6 +72,7 @@ MixerPanel::ChannelStrip::ChannelStrip(int channelIndex, const juce::String& cha
                 if (parent->onInsertButtonClicked)
                     parent->onInsertButtonClicked(index);
         };
+        fxButton.setTooltip("Open this channel's effects chain");
         addAndMakeVisible(fxButton);
     }
 
@@ -191,6 +194,7 @@ MixerPanel::MixerPanel()
         if (onBankOffsetChanged)
             onBankOffsetChanged(bankOffset);
     };
+    bankLeftButton.setTooltip("Show the previous bank of channels");
     addAndMakeVisible(bankLeftButton);
 
     bankRightButton.onClick = [this]
@@ -199,6 +203,7 @@ MixerPanel::MixerPanel()
         if (onBankOffsetChanged)
             onBankOffsetChanged(bankOffset);
     };
+    bankRightButton.setTooltip("Show the next bank of channels");
     addAndMakeVisible(bankRightButton);
 
     for (int slot = 0; slot < visibleChannelCount; ++slot)

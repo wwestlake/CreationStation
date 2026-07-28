@@ -14,6 +14,7 @@ public:
         int channel = -1;
         int number = -1;
         int value = -1;
+        bool isController = false; // true = "number" is a CC number, false = a Note number
     };
 
     struct Profile

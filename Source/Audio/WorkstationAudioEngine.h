@@ -2,9 +2,13 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <memory>
+#include <vector>
 #include "SignalGraphRuntime.h"
+#include "../Timeline/TimelineModel.h"
 
-class WorkstationAudioEngine final : public juce::AudioIODeviceCallback
+class WorkstationAudioEngine final : public juce::AudioIODeviceCallback,
+                                     private juce::MidiInputCallback
 {
 public:
     struct InputSourceDescriptor
@@ -40,6 +44,18 @@ public:
         double durationSeconds = 0.0;
     };
 
+    // A MIDI clip scheduled for real-time playback: notes are delivered live, sample-accurately,
+    // through the same injection path as a live MIDI keyboard - not offline-rendered. This is the
+    // safe alternative to bouncing through the instrument plugin ahead of time (which crashed at
+    // least one real-world plugin under sustained non-real-time processBlock load).
+    struct MidiPlaybackClip
+    {
+        int trackIndex = -1;
+        double startSeconds = 0.0;
+        double durationSeconds = 0.0;
+        std::vector<cs::MidiNoteEvent> notes;
+    };
+
     struct RenderSettings
     {
         double sampleRate = 48000.0;
@@ -60,6 +76,7 @@ public:
     bool isMetronomeEnabled() const noexcept { return metronomeEnabled.load(); }
     void setMetronomeTempo(double bpm, int numerator) noexcept;
     bool isRecording() const noexcept { return recording; }
+    double getSampleRate() const noexcept { return arrangementSource.getSampleRate(); }
     bool startRecordingToFile(const juce::File& file, juce::String& errorMessage);
     bool startRecordingToFiles(const juce::Array<RecordingTarget>& targets, juce::String& errorMessage);
     void stopRecording();
@@ -70,11 +87,66 @@ public:
     bool previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer, double sampleRate, juce::String& errorMessage);
     bool setFoleyArrangement(const juce::ValueTree& arrangementState, const juce::File& assetsDirectory, juce::String& errorMessage);
     bool setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets, juce::String& errorMessage);
+    void setTrackerMidiClips(const juce::Array<MidiPlaybackClip>& clips);
+
+    // Message-thread-safe: queues an immediate note on/off for one specific track's instrument,
+    // for UI-driven audition (e.g. clicking a note in the piano roll) - bypasses MIDI channel
+    // filtering entirely, since this always targets the exact track the user is editing.
+    void auditionNoteOn(int trackIndex, int pitch, int velocity);
+    void auditionNoteOff(int trackIndex, int pitch);
+
+    // Message-thread-safe: sends an All Notes Off / All Sound Off to every track's instrument.
+    // Stopping the transport mid-note otherwise abandons that note's real-time-scheduled note-off
+    // (it was scheduled for a future audio block that will now never arrive), leaving a stuck
+    // voice sounding indefinitely in the plugin - this is the actual host-side fix for that.
+    void requestAllNotesOff();
+
+    struct MidiLearnResult
+    {
+        juce::String deviceId;
+        int channel = 1;
+        int number = 0;
+        bool isController = false;
+    };
+
+    // Message-thread-safe: arms a one-shot capture of the next note-on or active CC message,
+    // optionally restricted to one device (empty = accept from any enabled device) - this is the
+    // backend for "right-click a control, choose Learn, wiggle the hardware" binding setup.
+    void armMidiLearn(const juce::String& deviceIdFilter = {});
+    void cancelMidiLearn();
+    bool isMidiLearnArmed() const noexcept;
+    // Message-thread-safe: returns true and fills result if a capture has landed since arming.
+    bool takeMidiLearnResult(MidiLearnResult& result);
+    // Message-thread-safe (called from any MIDI callback thread): if learn is armed and this
+    // candidate passes the current device filter, captures it and disarms. Shared with
+    // XTouchControlSurface, which receives control-surface devices (BCR2000/X-Touch) that this
+    // engine deliberately does NOT register its own MIDI callback for - those still need to be
+    // learnable even though they're excluded from live instrument routing.
+    bool offerMidiLearnCandidate(const juce::String& deviceId, int channel, int number, bool isController);
+
+    // A single captured MIDI event during live recording, timestamped as an absolute sample
+    // position on the engine's running audio clock (not clip-relative) - paired up into notes and
+    // converted to clip-relative beats once recording stops, on the message thread.
+    struct RecordedMidiEvent
+    {
+        int trackIndex = -1;
+        juce::MidiMessage message;
+        int64 samplePosition = 0;
+    };
+
+    // Message-thread-safe: arms/disarms live MIDI capture. While active, incoming live keyboard
+    // input on any track that is both record-armed and a MIDI track gets timestamped and queued.
+    void startMidiRecording();
+    void stopMidiRecording();
+    bool isMidiRecording() const noexcept { return midiRecordingActive.load(); }
+    // Message-thread-safe: drains and returns everything captured since the last call.
+    std::vector<RecordedMidiEvent> takeRecordedMidiEvents();
     bool renderTrackerMixToBuffer(const juce::Array<PlaybackClipTarget>& targets,
                                   double durationSeconds,
                                   const RenderSettings& settings,
                                   juce::AudioBuffer<float>& outputBuffer,
                                   juce::String& errorMessage);
+    void reapplyHostedPluginStates();
     void stopAssetPreview();
     bool isPreviewingAsset() const noexcept;
 
@@ -91,6 +163,53 @@ public:
     bool isTrackMonitoringEnabled(int trackIndex) const;
     void setTrackStereoEnabled(int trackIndex, bool enabled);
     bool isTrackStereoEnabled(int trackIndex) const;
+
+    // 0 = Omni (all channels), 1-16 = a specific MIDI channel. Governs which channel of live
+    // MIDI keyboard/controller input (not the X-Touch control surface, which is handled
+    // separately) gets routed into this track's instrument plugin.
+    void setTrackMidiInputChannel(int trackIndex, int channel);
+    int getTrackMidiInputChannel(int trackIndex) const;
+
+    // Empty = any enabled MIDI input device feeds this track (the original behaviour). A
+    // non-empty juce::MidiDeviceInfo::identifier restricts this track to that one physical
+    // device, independent of the channel filter above - this is what lets "Yamaha -> Track 3"
+    // and "nanoKONTROL -> Track 5" coexist without one bleeding into the other.
+    void setTrackMidiInputDeviceId(int trackIndex, const juce::String& deviceId);
+    juce::String getTrackMidiInputDeviceId(int trackIndex) const;
+
+    // Tells the engine this track is a MIDI track, so it stops metering/monitoring/recording
+    // raw audio input on it (a MIDI track has no analog input signal of its own).
+    void setTrackIsMidiKind(int trackIndex, bool isMidi);
+
+    // Automation tracks never render audio/MIDI of their own - they only push values into
+    // another track's controls once per audio block. This excludes the track from the normal
+    // audio-producing render path entirely (no DemoTrackSource playback, no insert-chain audio).
+    void setTrackIsAutomationKind(int trackIndex, bool isAutomation);
+    // Publishes an immutable snapshot of an automation lane's target + curve for the audio
+    // thread to read lock-free, once per block. Called from the message thread whenever the
+    // lane's points or target change (point edits, target reassignment, project load).
+    void setTrackAutomationData(int trackIndex, const cs::AutomationTarget& target, const std::vector<cs::AutomationPoint>& points);
+    // Suspends (true) or resumes (false) this automation lane's per-block application to its
+    // target while a manual recording gesture (fader ride) owns that target's value right now.
+    void setTrackAutomationWriteActive(int trackIndex, bool active);
+
+    // Folder-track bus routing: -1 (default) routes trackIndex's audio straight to master, same
+    // as always; >= 0 routes it into that track's own buffer instead (which must in turn be a
+    // TrackKind::folder track - enforced at the TimelineModel level, not here). Triggers a
+    // message-thread-only recompute of the cached render order the audio thread reads each block.
+    void setTrackParentIndex(int trackIndex, int parentTrackIndex);
+    // Reorders the engine's own track array to match a TimelineModel::moveTrackRange call - same
+    // startIndex/length/destinationIndex, so the two stay index-parity with each other (everything
+    // else - gain, pan, insert chain, automation data - travels with the moved TrackChannelSource
+    // object itself; only parentTrackIndex needs a subsequent syncTrackViews() refresh, since it's
+    // an index that the reorder itself invalidates).
+    void moveTrackRange(int startIndex, int length, int destinationIndex);
+
+    // Keeps a track's live audio path running for as long as its plugin editor window is open -
+    // otherwise clicking a plugin's own on-screen keyboard/pads triggers a note inside the plugin
+    // that never gets flushed to audio, since nothing about a pure UI click signals the host that
+    // MIDI activity happened (unlike live keyboard input or scheduled clip notes, which do).
+    void setTrackHasOpenEditor(int trackIndex, bool hasOpenEditor);
 
     juce::String getTrackName(int trackIndex) const;
     void setTrackName(int trackIndex, const juce::String& name);
@@ -158,6 +277,29 @@ public:
     bool isTrackPluginBypassed(int trackIndex, int slotIndex) const noexcept;
     juce::AudioProcessorEditor* createTrackPluginEditor(int trackIndex);
     juce::AudioProcessorEditor* createTrackPluginEditor(int trackIndex, int slotIndex);
+    juce::File getTrackInstrumentPluginFile(int trackIndex) const;
+    bool reapplyTrackPluginState(int trackIndex, int slotIndex);
+
+    // Plugin parameter enumeration/control, used so an Automation Track can target a parameter
+    // inside any hosted plugin - Creation Station's own or any third-party VST3 - not just the
+    // built-in track volume/pan controls. Count/Name/Value are message-thread queries (used to
+    // populate the automation target picker); the realtime setter is the one meant to be driven
+    // from the per-block automation pass and is safe to call from the audio thread.
+    int getTrackPluginParameterCount(int trackIndex, int slotIndex) const;
+    juce::String getTrackPluginParameterName(int trackIndex, int slotIndex, int paramIndex) const;
+    float getTrackPluginParameterValue(int trackIndex, int slotIndex, int paramIndex) const;
+    void setTrackPluginParameterValueRealtime(int trackIndex, int slotIndex, int paramIndex, float normalizedValue);
+
+    // Offline-renders a MIDI clip's notes/CC through the given instrument plugin into a
+    // temporary WAV file, so it can be scheduled for playback the same way as a recorded
+    // audio clip. Uses a fresh plugin instance - never touches the live, real-time track chain.
+    bool renderMidiClipToFile(const juce::File& instrumentPluginFile,
+                              const std::vector<cs::MidiNoteEvent>& notes,
+                              const std::vector<cs::MidiCCEvent>& ccEvents,
+                              double tempoBpm,
+                              double durationSeconds,
+                              juce::File& outputFile,
+                              juce::String& errorMessage) const;
 
     void audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
                                           int totalNumInputChannels,
@@ -169,6 +311,7 @@ public:
     void audioDeviceStopped() override;
 
     juce::ValueTree createSessionState() const;
+    juce::String createHostedPluginStateSignature() const;
     bool restoreSessionState(const juce::ValueTree& sessionState, juce::String& errorMessage);
 
 private:
@@ -227,16 +370,38 @@ private:
         juce::AudioProcessorEditor* createEditor();
         bool copyStateTo(juce::MemoryBlock& destination) const;
         bool restoreStateFrom(const juce::MemoryBlock& source);
+        bool reapplyCachedState();
+        void addExternalMidi(const juce::MidiBuffer& midi) { pendingExternalMidi.addEvents(midi, 0, -1, 0); }
+
+        // Generic JUCE parameter interface - works identically for Creation Station's own APVTS
+        // plugins and any hosted third-party VST3. Count/Name/Value are message-thread queries;
+        // setParameterValueRealtime is real-time-safe (try-lock, no allocation) and is the one
+        // call site meant to be driven from the engine's per-block automation pass.
+        int getParameterCount() const;
+        juce::String getParameterName(int paramIndex) const;
+        float getParameterValue(int paramIndex) const;
+        bool setParameterValueRealtime(int paramIndex, float normalizedValue);
 
     private:
         juce::AudioPluginFormatManager formatManager;
         std::unique_ptr<juce::AudioPluginInstance> pluginInstance;
         juce::AudioBuffer<float> pluginBuffer;
         juce::MidiBuffer pluginMidiBuffer;
+        juce::MidiBuffer pendingExternalMidi;
         juce::File pluginFile;
         std::atomic<bool> bypassed { false };
         double sampleRate = 44100.0;
         int blockSize = 512;
+        int pluginInputChannels = 2;
+        int pluginOutputChannels = 2;
+        juce::MemoryBlock cachedState;
+
+        // Guards pluginInstance's lifetime (not its internal processing) against the audio thread.
+        // loadPlugin()/unloadPlugin() run on the message thread and can swap or destroy the
+        // instance at any moment; without this, getNextAudioBlock() (audio thread) can pass its
+        // null check and then dereference a pointer that gets reset out from under it a moment
+        // later - an unsynchronized use-after-free that crashed on plugin removal.
+        juce::CriticalSection pluginInstanceLock;
     };
 
     struct PluginInsertChain final : public juce::AudioSource
@@ -273,11 +438,42 @@ private:
         juce::AudioProcessorEditor* createLastEditor();
         juce::AudioProcessorEditor* createEditor(int slotIndex);
         bool copyStateTo(int slotIndex, juce::MemoryBlock& destination) const;
+        void reapplyCachedStates();
+        bool reapplyCachedState(int slotIndex);
+        void pushLiveMidiToFirstSlot(const juce::MidiBuffer& midi);
+        int getParameterCount(int slotIndex) const;
+        juce::String getParameterName(int slotIndex, int paramIndex) const;
+        float getParameterValue(int slotIndex, int paramIndex) const;
+        bool setParameterValueRealtime(int slotIndex, int paramIndex, float normalizedValue);
 
     private:
         juce::OwnedArray<PluginInsertSource> inserts;
         double sampleRate = 44100.0;
         int blockSize = 512;
+    };
+
+    // Immutable snapshot of one automation track's target + curve, published by the message
+    // thread and read lock-free by the audio thread once per block. A fresh snapshot is
+    // published (not mutated in place) on every edit, so the audio thread never observes a
+    // half-updated curve.
+    struct AutomationTrackData
+    {
+        cs::AutomationTarget target;
+        std::vector<cs::AutomationPoint> points;
+    };
+
+    // Immutable snapshot of the track hierarchy's audio-routing shape, published by the message
+    // thread (rebuildTrackRoutingCache()) whenever a track's parent changes or the track count
+    // changes, and read lock-free by the audio thread once per block - the render order itself is
+    // never computed on the audio thread. renderOrder lists every track index children-before-
+    // parents, so a folder's buffer already contains its children's contributions by the time the
+    // folder's own turn comes up. isBusDestination[i] is true if some other track's parent is i -
+    // such a track must fully process every block (insert chain/gain/pan/routing) even with no
+    // clips of its own, since its buffer may already hold audio summed in from its children.
+    struct TrackRoutingInfo
+    {
+        std::vector<int> renderOrder;
+        std::vector<bool> isBusDestination;
     };
 
     struct TrackChannelSource final : public juce::AudioSource
@@ -302,6 +498,42 @@ private:
         bool isSoloed() const noexcept { return source.isSoloed(); }
         void setInputChannel(int channel) noexcept { inputChannel.store(channel); }
         int getInputChannel() const noexcept { return inputChannel.load(); }
+        void setMidiInputChannel(int channel) noexcept { midiInputChannel.store(channel); }
+        int getMidiInputChannel() const noexcept { return midiInputChannel.load(); }
+
+        // Which physical MIDI input device this track listens to - empty means "any enabled
+        // device" (the original behaviour, before per-device routing existed). Set rarely from
+        // the message thread (Settings), read once per audio block, so a short lock is fine.
+        void setMidiInputDeviceId(const juce::String& deviceId)
+        {
+            const juce::ScopedLock lock(midiInputDeviceIdLock);
+            midiInputDeviceId = deviceId;
+        }
+
+        juce::String getMidiInputDeviceId() const
+        {
+            const juce::ScopedLock lock(midiInputDeviceIdLock);
+            return midiInputDeviceId;
+        }
+        void setIsMidiKind(bool shouldBeMidi) noexcept { isMidiKind.store(shouldBeMidi); }
+        bool getIsMidiKind() const noexcept { return isMidiKind.load(); }
+        void setIsAutomationKind(bool shouldBeAutomation) noexcept { isAutomationKind.store(shouldBeAutomation); }
+        bool getIsAutomationKind() const noexcept { return isAutomationKind.load(); }
+        // -1 = routes straight to master (today's only behaviour). >= 0 = this track's fully
+        // processed output feeds that track's buffer instead - see ArrangementSource. Mirrors
+        // cs::TimelineTrack::parentTrackIndex, pushed down whenever it changes.
+        void setParentTrackIndex(int newParentTrackIndex) noexcept { parentTrackIndex.store(newParentTrackIndex); }
+        int getParentTrackIndex() const noexcept { return parentTrackIndex.load(); }
+        void setAutomationData(std::shared_ptr<const AutomationTrackData> data) { automationData.store(std::move(data)); }
+        std::shared_ptr<const AutomationTrackData> getAutomationData() const { return automationData.load(); }
+        // While true, applyAutomationForBlock skips this lane entirely, ceding its target's
+        // control fully to whatever is manually setting it right now (a fader being ridden) -
+        // otherwise the audio-thread automation pass and a live manual drag fight over the same
+        // value every block. Set by MainComponent based on the lane's Touch/Latch/Write mode.
+        void setAutomationWriteActive(bool active) noexcept { automationWriteActive.store(active); }
+        bool getAutomationWriteActive() const noexcept { return automationWriteActive.load(); }
+        void setHasOpenEditor(bool hasEditor) noexcept { hasOpenEditor.store(hasEditor); }
+        bool getHasOpenEditor() const noexcept { return hasOpenEditor.load(); }
         void setRecordingArmed(bool shouldArm) noexcept { recordingArmed.store(shouldArm); }
         bool isRecordingArmed() const noexcept { return recordingArmed.load(); }
         void setMonitoringEnabled(bool shouldMonitor) noexcept { monitoringEnabled.store(shouldMonitor); }
@@ -316,6 +548,15 @@ private:
         DemoTrackSource source;
         PluginInsertChain insertChain;
         std::atomic<int> inputChannel { -1 };
+        std::atomic<int> midiInputChannel { 0 };
+        juce::String midiInputDeviceId;
+        mutable juce::CriticalSection midiInputDeviceIdLock;
+        std::atomic<bool> isMidiKind { false };
+        std::atomic<bool> isAutomationKind { false };
+        std::atomic<int> parentTrackIndex { -1 };
+        std::atomic<std::shared_ptr<const AutomationTrackData>> automationData;
+        std::atomic<bool> automationWriteActive { false };
+        std::atomic<bool> hasOpenEditor { false };
         std::atomic<bool> recordingArmed { false };
         std::atomic<bool> monitoringEnabled { false };
         std::atomic<bool> stereoEnabled { false };
@@ -378,12 +619,15 @@ private:
         void resetPlayback() noexcept;
         void setPlaybackPositionSeconds(double seconds) noexcept;
         void setClips(juce::Array<Clip> newClips);
+        int64 getPlaybackSamplePosition() const noexcept { return playbackSamplePosition; }
+        double getSampleRate() const noexcept { return sampleRate; }
 
     private:
         WorkstationAudioEngine& owner;
         juce::CriticalSection lock;
         juce::Array<Clip> clips;
-        juce::AudioBuffer<float> trackRenderBuffer;
+        juce::AudioBuffer<float> trackRenderBuffer; // scratch for the -1 (Foley/master-level) pseudo-track only
+        std::vector<juce::AudioBuffer<float>> perTrackBuffers; // one per real track, persists for the whole block so children can sum into a parent's buffer before it's finalized
         int64 playbackSamplePosition = 0;
         double sampleRate = 44100.0;
         int blockSize = 512;
@@ -394,7 +638,24 @@ private:
 
     void prepareGraph(double sampleRate, int blockSize);
     void processGraph(juce::AudioBuffer<float>& buffer);
+    void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message) override;
     bool shouldRenderTrack(int trackIndex) const noexcept;
+    // True if trackIndex itself is soloed, or any track anywhere in its descendant chain
+    // (child, grandchild, ...) is soloed - without this, soloing a track nested inside a
+    // non-soloed folder would get silenced by its own parent's solo gate before ever reaching
+    // master, muting the very track you just soloed.
+    bool isTrackOrDescendantSoloed(int trackIndex) const noexcept;
+    // Message-thread only: recomputes the children-before-parents render order (post-order walk
+    // from each root) plus which tracks are bus destinations, and publishes it for the audio
+    // thread. Called whenever a track's parent changes or the track count changes.
+    void rebuildTrackRoutingCache();
+    std::shared_ptr<const TrackRoutingInfo> getCachedTrackRouting() const { return cachedTrackRouting.load(); }
+    // Evaluates every automation-kind track's curve at the given block-start transport position
+    // and applies the result directly to its target track's gain/pan atomics or plugin parameter.
+    // Must run before any track's own rendering in the same audio callback so the value takes
+    // effect for that block (block-accurate, not one block delayed).
+    void applyAutomationForBlock(double blockStartSeconds);
+    bool anyTrackNeedsLiveMonitoring() const noexcept;
     void writeRecording(int trackIndex, const float* leftSource, const float* rightSource, int numSamples);
     void clearTracks();
     void rebuildInputSources(int totalNumInputChannels);
@@ -418,6 +679,47 @@ private:
     PluginInsertSource graphVstInsertSource;
     MasterOutputSource masterOutputSource;
     juce::OwnedArray<TrackChannelSource> tracks;
+    std::atomic<std::shared_ptr<const TrackRoutingInfo>> cachedTrackRouting;
+    std::vector<MidiPlaybackClip> scheduledMidiClips;
+    juce::CriticalSection scheduledMidiClipsLock;
+    struct AuditionRequest { int trackIndex = -1; int pitch = 60; int velocity = 100; bool noteOn = true; };
+    std::vector<AuditionRequest> pendingAuditionRequests;
+    juce::CriticalSection auditionRequestsLock;
+    std::atomic<bool> allNotesOffRequested { false };
+    std::atomic<bool> midiRecordingActive { false };
+    std::vector<RecordedMidiEvent> recordedMidiEvents;
+    juce::CriticalSection recordedMidiEventsLock;
+
+    struct MidiLearnState
+    {
+        bool armed = false;
+        juce::String deviceIdFilter;
+        bool hasResult = false;
+        MidiLearnResult result;
+    };
+    mutable juce::CriticalSection midiLearnLock;
+    MidiLearnState midiLearnState;
+    // Kept open for a few seconds after the last delivered note, not just the exact block a
+    // note-on/off fell in - otherwise a drum hit would be truncated to one audio block (~10-20ms)
+    // instead of being allowed to ring out. Only touched from the audio thread.
+    int64 liveAudioTailSamplesRemaining = 0;
+
+    // One collector per physical MIDI input device, keyed by juce::MidiDeviceInfo::identifier -
+    // replaces a single shared collector so incoming messages keep their device identity, which
+    // per-track device routing (setTrackMidiInputDeviceId) needs to filter by. Devices are added
+    // in attachToDevice()/on first message from an unrecognised device; only ever mutated from
+    // the message thread, so the audio thread only ever needs a ScopedTryLock to iterate safely.
+    struct MidiDeviceCollector
+    {
+        juce::String deviceId;
+        std::unique_ptr<juce::MidiMessageCollector> collector;
+    };
+    std::vector<MidiDeviceCollector> midiDeviceCollectors;
+    juce::CriticalSection midiDeviceCollectorsLock;
+    juce::MidiMessageCollector& getOrCreateMidiDeviceCollector(const juce::String& deviceId);
+
+    juce::AudioDeviceManager* attachedDeviceManager = nullptr;
+    static bool isControlSurfaceMidiDevice(const juce::String& deviceName);
     std::array<float, 2> lowPassState {};
     std::array<float, echoBufferSize> echoHistoryLeft {};
     std::array<float, echoBufferSize> echoHistoryRight {};

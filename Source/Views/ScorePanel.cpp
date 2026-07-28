@@ -663,6 +663,7 @@ ScorePanel::ScorePanel()
         activeSurface = EditorSurface::staff;
         refreshEditorSurface();
     };
+    scoreViewButton.setTooltip("Show standard staff notation");
     addAndMakeVisible(scoreViewButton);
 
     pianoRollViewButton.setClickingTogglesState(true);
@@ -671,6 +672,7 @@ ScorePanel::ScorePanel()
         activeSurface = EditorSurface::pianoRoll;
         refreshEditorSurface();
     };
+    pianoRollViewButton.setTooltip("Show piano roll notation");
     addAndMakeVisible(pianoRollViewButton);
 
     playScoreButton.onClick = [this]
@@ -678,6 +680,7 @@ ScorePanel::ScorePanel()
         if (onPlayRequested)
             onPlayRequested(createPlaybackRequest());
     };
+    playScoreButton.setTooltip("Play the score");
     addAndMakeVisible(playScoreButton);
 
     addNoteButton.onClick = [this] { addNote(); };
@@ -687,6 +690,13 @@ ScorePanel::ScorePanel()
     noteDownButton.onClick = [this] { nudgeSelectedNotePitch(-1); };
     beatLeftButton.onClick = [this] { nudgeSelectedNoteBeat(-1.0f); };
     beatRightButton.onClick = [this] { nudgeSelectedNoteBeat(1.0f); };
+    addNoteButton.setTooltip("Add a new note");
+    removeNoteButton.setTooltip("Remove the selected note");
+    restToggleButton.setTooltip("Toggle the selected note as a rest");
+    noteUpButton.setTooltip("Move the selected note up a semitone");
+    noteDownButton.setTooltip("Move the selected note down a semitone");
+    beatLeftButton.setTooltip("Move the selected note earlier");
+    beatRightButton.setTooltip("Move the selected note later");
     addAndMakeVisible(addNoteButton);
     addAndMakeVisible(removeNoteButton);
     addAndMakeVisible(restToggleButton);

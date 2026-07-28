@@ -13,6 +13,13 @@ juce::String normaliseArchivePath(juce::String path)
     return path.replaceCharacter('\\', '/').trimCharactersAtStart("/");
 }
 
+juce::String makeAssetVersionSuffix(const juce::File& file)
+{
+    auto modified = file.getLastModificationTime().toMilliseconds();
+    auto size = file.getSize();
+    return juce::String::toHexString(modified).toLowerCase() + "-" + juce::String::toHexString(size).toLowerCase();
+}
+
 void addTextEntry(juce::ZipFile::Builder& builder, const juce::String& path, const juce::String& text)
 {
     builder.addEntry(new juce::MemoryInputStream(text.toRawUTF8(), text.getNumBytesAsUTF8(), true),
@@ -44,6 +51,95 @@ void addDirectoryToPackage(juce::ZipFile::Builder& builder,
         auto archivePath = normaliseArchivePath(archiveRoot + "/" + relativePath);
         builder.addFile(file, 6, archivePath);
         packagedFiles.add(file);
+    }
+}
+
+void populateAudioAssetMetadata(ProjectManager::ProjectAsset& asset)
+{
+    auto extension = asset.file.getFileExtension().toLowerCase();
+    if (extension != ".wav" && extension != ".aif" && extension != ".aiff"
+        && extension != ".flac" && extension != ".mp3" && extension != ".ogg")
+        return;
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(asset.file));
+    if (reader == nullptr)
+        return;
+
+    asset.numChannels = (int) reader->numChannels;
+    asset.sampleRate = reader->sampleRate;
+    asset.bitDepth = reader->bitsPerSample;
+    if (reader->sampleRate > 0.0)
+        asset.durationSeconds = (double) reader->lengthInSamples / reader->sampleRate;
+}
+
+juce::File getAudioAssetDirectory(const ProjectManager::ProjectInfo& project, cs::AssetKind assetKind)
+{
+    switch (assetKind)
+    {
+        case cs::AssetKind::render: return project.rendersDirectory;
+        case cs::AssetKind::audio:
+        case cs::AssetKind::samplePack:
+        case cs::AssetKind::unknown:
+        case cs::AssetKind::patch:
+        case cs::AssetKind::script:
+        case cs::AssetKind::metadata:
+        case cs::AssetKind::preset:
+        case cs::AssetKind::midi:
+        case cs::AssetKind::binary:
+        default: return project.assetsDirectory;
+    }
+}
+
+juce::String getDefaultAudioAssetBaseName(cs::AssetKind assetKind)
+{
+    switch (assetKind)
+    {
+        case cs::AssetKind::render: return "full-mix-render";
+        case cs::AssetKind::audio: return "signal-lab-render";
+        default: return "audio-asset";
+    }
+}
+
+juce::String getMissingAudioAssetMessage(cs::AssetKind assetKind)
+{
+    switch (assetKind)
+    {
+        case cs::AssetKind::render: return "There is no rendered audio to save.";
+        case cs::AssetKind::audio: return "There is no generated sound to render yet.";
+        default: return "There is no audio asset to save.";
+    }
+}
+
+juce::String getCreateAudioDirectoryMessage(cs::AssetKind assetKind)
+{
+    switch (assetKind)
+    {
+        case cs::AssetKind::render: return "Could not create the Renders folder.";
+        case cs::AssetKind::audio: return "Could not create the Assets folder.";
+        default: return "Could not create the project audio asset folder.";
+    }
+}
+
+juce::String getOpenAudioFileMessage(cs::AssetKind assetKind)
+{
+    switch (assetKind)
+    {
+        case cs::AssetKind::render: return "Could not open the render file for writing.";
+        case cs::AssetKind::audio: return "Could not open the asset file for writing.";
+        default: return "Could not open the project audio asset file for writing.";
+    }
+}
+
+juce::String getWriteAudioFileMessage(cs::AssetKind assetKind)
+{
+    switch (assetKind)
+    {
+        case cs::AssetKind::render: return "The rendered mix could not be written to disk.";
+        case cs::AssetKind::audio: return "The generated sound could not be written to disk.";
+        default: return "The audio asset could not be written to disk.";
     }
 }
 }
@@ -297,6 +393,16 @@ juce::File ProjectManager::getLayoutPackageFile(const juce::String& layoutName) 
     return getLayoutsRoot().getChildFile(normalizedName + ".cslayout");
 }
 
+std::unique_ptr<cs::IProjectStorage> ProjectManager::createStorageAdapter()
+{
+    return cs::createFolderProjectStorage(*this);
+}
+
+std::unique_ptr<cs::IExternalFileBridge> ProjectManager::createExternalFileBridge()
+{
+    return cs::createFolderExternalFileBridge(*this);
+}
+
 bool ProjectManager::loadStorageConfiguration(juce::String& errorMessage)
 {
     auto pointerFile = getStoragePointerFile();
@@ -422,63 +528,7 @@ juce::File ProjectManager::saveGeneratedAssetFile(const juce::AudioBuffer<float>
                                                   const juce::String& suggestedName,
                                                   juce::String& errorMessage) const
 {
-    if (! hasProject())
-    {
-        errorMessage = "Open or create a project before rendering sounds.";
-        return {};
-    }
-
-    if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
-    {
-        errorMessage = "There is no generated sound to render yet.";
-        return {};
-    }
-
-    if (! currentProject.assetsDirectory.exists() && ! currentProject.assetsDirectory.createDirectory())
-    {
-        errorMessage = "Could not create the Assets folder.";
-        return {};
-    }
-
-    auto baseName = makeSlug(suggestedName.isNotEmpty() ? suggestedName : "signal-lab-render");
-    auto destination = currentProject.assetsDirectory.getChildFile(baseName + ".wav");
-    auto suffix = 2;
-
-    while (destination.existsAsFile())
-    {
-        destination = currentProject.assetsDirectory.getChildFile(baseName + "-" + juce::String(suffix) + ".wav");
-        ++suffix;
-    }
-
-    juce::WavAudioFormat wavFormat;
-    auto outputStream = std::unique_ptr<juce::FileOutputStream>(destination.createOutputStream());
-    if (outputStream == nullptr)
-    {
-        errorMessage = "Could not open the render file for writing.";
-        return {};
-    }
-
-    auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(outputStream.get(),
-                                                                                      sampleRate,
-                                                                                      (unsigned int) buffer.getNumChannels(),
-                                                                                      24,
-                                                                                      {},
-                                                                                      0));
-    if (writer == nullptr)
-    {
-        errorMessage = "Could not create a WAV writer for this render.";
-        return {};
-    }
-
-    outputStream.release();
-
-    if (! writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples()))
-    {
-        errorMessage = "The generated sound could not be written to disk.";
-        return {};
-    }
-
-    return destination;
+    return saveAudioAssetFile(buffer, sampleRate, suggestedName, cs::AssetKind::audio, errorMessage);
 }
 
 juce::File ProjectManager::saveRenderFile(const juce::AudioBuffer<float>& buffer,
@@ -486,31 +536,41 @@ juce::File ProjectManager::saveRenderFile(const juce::AudioBuffer<float>& buffer
                                           const juce::String& suggestedName,
                                           juce::String& errorMessage) const
 {
+    return saveAudioAssetFile(buffer, sampleRate, suggestedName, cs::AssetKind::render, errorMessage);
+}
+
+juce::File ProjectManager::saveAudioAssetFile(const juce::AudioBuffer<float>& buffer,
+                                              double sampleRate,
+                                              const juce::String& suggestedName,
+                                              cs::AssetKind assetKind,
+                                              juce::String& errorMessage) const
+{
     if (! hasProject())
     {
-        errorMessage = "Open or create a project before rendering a mix.";
+        errorMessage = "Open or create a project before rendering audio.";
         return {};
     }
 
     if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
     {
-        errorMessage = "There is no rendered audio to save.";
+        errorMessage = getMissingAudioAssetMessage(assetKind);
         return {};
     }
 
-    if (! currentProject.rendersDirectory.exists() && ! currentProject.rendersDirectory.createDirectory())
+    auto destinationDirectory = getAudioAssetDirectory(currentProject, assetKind);
+    if (! destinationDirectory.exists() && ! destinationDirectory.createDirectory())
     {
-        errorMessage = "Could not create the Renders folder.";
+        errorMessage = getCreateAudioDirectoryMessage(assetKind);
         return {};
     }
 
-    auto baseName = makeSlug(suggestedName.isNotEmpty() ? suggestedName : "full-mix-render");
-    auto destination = currentProject.rendersDirectory.getChildFile(baseName + ".wav");
+    auto baseName = makeSlug(suggestedName.isNotEmpty() ? suggestedName : getDefaultAudioAssetBaseName(assetKind));
+    auto destination = destinationDirectory.getChildFile(baseName + ".wav");
     auto suffix = 2;
 
     while (destination.existsAsFile())
     {
-        destination = currentProject.rendersDirectory.getChildFile(baseName + "-" + juce::String(suffix) + ".wav");
+        destination = destinationDirectory.getChildFile(baseName + "-" + juce::String(suffix) + ".wav");
         ++suffix;
     }
 
@@ -518,7 +578,7 @@ juce::File ProjectManager::saveRenderFile(const juce::AudioBuffer<float>& buffer
     auto outputStream = std::unique_ptr<juce::FileOutputStream>(destination.createOutputStream());
     if (outputStream == nullptr)
     {
-        errorMessage = "Could not open the render file for writing.";
+        errorMessage = getOpenAudioFileMessage(assetKind);
         return {};
     }
 
@@ -538,7 +598,7 @@ juce::File ProjectManager::saveRenderFile(const juce::AudioBuffer<float>& buffer
 
     if (! writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples()))
     {
-        errorMessage = "The rendered mix could not be written to disk.";
+        errorMessage = getWriteAudioFileMessage(assetKind);
         return {};
     }
 
@@ -585,7 +645,14 @@ juce::Array<ProjectManager::ProjectAsset> ProjectManager::listProjectAssets() co
             asset.description = description;
             asset.relativePath = file.getRelativePathFrom(currentProject.rootDirectory).replaceCharacter('\\', '/');
             asset.id = currentProject.slug + ":" + asset.relativePath;
+            asset.versionId = asset.id + "@" + makeAssetVersionSuffix(file);
+            asset.ref.id = asset.id;
+            asset.ref.versionId = asset.versionId;
+            asset.ref.mode = cs::AssetReferenceMode::exact;
+            asset.ref.logicalPath = asset.relativePath;
+            asset.ref.displayName = asset.name;
             asset.fileSizeBytes = file.getSize();
+            populateAudioAssetMetadata(asset);
             assets.add(asset);
         }
     };
@@ -596,6 +663,115 @@ juce::Array<ProjectManager::ProjectAsset> ProjectManager::listProjectAssets() co
     appendFiles(currentProject.rendersDirectory, "render", "Renders", "Rendered mix, stem, loop, or sound-design artifact.", "*");
 
     return assets;
+}
+
+juce::String ProjectManager::createProjectAssetId(const juce::File& file) const
+{
+    if (! hasProject() || ! file.exists())
+        return {};
+
+    auto relativePath = file.getRelativePathFrom(currentProject.rootDirectory).replaceCharacter('\\', '/');
+    if (relativePath.isEmpty())
+        return {};
+
+    return currentProject.slug + ":" + relativePath;
+}
+
+juce::String ProjectManager::createProjectAssetVersionId(const juce::File& file) const
+{
+    auto assetId = createProjectAssetId(file);
+    if (assetId.isEmpty() || ! file.existsAsFile())
+        return {};
+
+    return assetId + "@" + makeAssetVersionSuffix(file);
+}
+
+std::optional<ProjectManager::ProjectAsset> ProjectManager::findProjectAssetById(const juce::String& assetId) const
+{
+    if (! hasProject())
+        return std::nullopt;
+
+    auto normalizedId = assetId.trim();
+    if (normalizedId.isEmpty())
+        return std::nullopt;
+
+    for (const auto& asset : listProjectAssets())
+    {
+        if (asset.id == normalizedId)
+            return asset;
+    }
+
+    auto prefix = currentProject.slug + ":";
+    if (normalizedId.startsWith(prefix))
+    {
+        auto relativePath = normalizedId.fromFirstOccurrenceOf(prefix, false, false).replaceCharacter('/', '\\');
+        auto file = currentProject.rootDirectory.getChildFile(relativePath);
+        if (file.existsAsFile())
+        {
+            ProjectAsset asset;
+            asset.file = file;
+            asset.name = file.getFileNameWithoutExtension().replace("-", " ");
+            asset.relativePath = file.getRelativePathFrom(currentProject.rootDirectory).replaceCharacter('\\', '/');
+            asset.id = currentProject.slug + ":" + asset.relativePath;
+            asset.versionId = asset.id + "@" + makeAssetVersionSuffix(file);
+            asset.ref.id = asset.id;
+            asset.ref.versionId = asset.versionId;
+            asset.ref.mode = cs::AssetReferenceMode::exact;
+            asset.ref.logicalPath = asset.relativePath;
+            asset.ref.displayName = asset.name;
+            asset.fileSizeBytes = file.getSize();
+
+            if (file.isAChildOf(currentProject.rendersDirectory) || file == currentProject.rendersDirectory)
+            {
+                asset.type = "render";
+                asset.category = "Renders";
+                asset.description = "Rendered mix, stem, loop, or sound-design artifact.";
+            }
+            else
+            {
+                asset.type = "audioFile";
+                asset.category = "Audio / Takes";
+                asset.description = "Recorded, imported, or generated audio usable on the Tracker.";
+            }
+
+            populateAudioAssetMetadata(asset);
+
+            return asset;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ProjectManager::ProjectAsset> ProjectManager::findProjectAsset(const cs::AssetRef& assetRef) const
+{
+    if (! assetRef.isValid())
+        return std::nullopt;
+
+    auto asset = findProjectAssetById(assetRef.id);
+    if (! asset.has_value())
+        return std::nullopt;
+
+    switch (assetRef.mode)
+    {
+        case cs::AssetReferenceMode::latest:
+            return asset;
+
+        case cs::AssetReferenceMode::compatibleLatest:
+            // The folder-backed project store only exposes the current file, not immutable
+            // version snapshots yet, so "compatible latest" currently resolves the same way as
+            // "latest". The future VFS-backed resolver will supply real compatibility rules.
+            return asset;
+
+        case cs::AssetReferenceMode::exact:
+            break;
+    }
+
+    auto requestedVersionId = assetRef.versionId.trim();
+    if (requestedVersionId.isEmpty() || asset->versionId == requestedVersionId)
+        return asset;
+
+    return std::nullopt;
 }
 
 juce::File ProjectManager::savePatchFile(const juce::String& patchJson,

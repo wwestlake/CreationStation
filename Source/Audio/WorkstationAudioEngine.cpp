@@ -6,6 +6,84 @@
 
 namespace
 {
+bool readAndResampleSection(juce::AudioFormatReader& reader,
+                            int64 sourceStartSample,
+                            int64 sourceSamplesToRead,
+                            double targetSampleRate,
+                            juce::AudioBuffer<float>& destination)
+{
+    const auto clampedSamplesToRead = juce::jmax<int64>(1, sourceSamplesToRead);
+    const auto sourceRate = juce::jmax(1.0, reader.sampleRate);
+    const auto outputRate = juce::jmax(1.0, targetSampleRate);
+    const auto channelCount = juce::jmax(1, (int) reader.numChannels);
+
+    juce::AudioBuffer<float> sourceBuffer(channelCount, (int) clampedSamplesToRead);
+    sourceBuffer.clear();
+    reader.read(&sourceBuffer, 0, (int) clampedSamplesToRead, sourceStartSample, true, true);
+
+    if (std::abs(sourceRate - outputRate) < 0.5)
+    {
+        destination.setSize(juce::jmax(2, channelCount), (int) clampedSamplesToRead, false, false, true);
+        destination.clear();
+        for (int channel = 0; channel < channelCount; ++channel)
+            destination.copyFrom(channel, 0, sourceBuffer, channel, 0, (int) clampedSamplesToRead);
+        return true;
+    }
+
+    const auto durationSeconds = (double) clampedSamplesToRead / sourceRate;
+    const auto targetSamples = juce::jmax(1, (int) std::llround(durationSeconds * outputRate));
+    destination.setSize(juce::jmax(2, channelCount), targetSamples, false, false, true);
+    destination.clear();
+
+    const auto speedRatio = sourceRate / outputRate;
+    for (int channel = 0; channel < channelCount; ++channel)
+    {
+        juce::LagrangeInterpolator interpolator;
+        interpolator.reset();
+        interpolator.process(speedRatio,
+                             sourceBuffer.getReadPointer(channel),
+                             destination.getWritePointer(channel),
+                             targetSamples);
+    }
+
+    return true;
+}
+
+// Provides hosted plugins with transport/tempo/PPQ info. No plugin instance was ever given an
+// AudioPlayHead in this codebase - some plugins (e.g. a sampler with a tempo-synced Grooves
+// feature, which SSD5 has) may dereference a null/absent playhead as soon as they actually need
+// to render a note against host tempo, not before - which matches the observed crash exactly:
+// identical fault signature whether triggered by idle processing, an offline render loop, or a
+// single live note, always only once real note processing actually happens.
+class EngineTransportPlayHead final : public juce::AudioPlayHead
+{
+public:
+    void update(bool isPlayingNow, double bpm, int64 samplePosition, double sampleRate) noexcept
+    {
+        playing.store(isPlayingNow);
+        tempoBpm.store(juce::jmax(1.0, bpm));
+        auto seconds = sampleRate > 0.0 ? (double) samplePosition / sampleRate : 0.0;
+        ppqPosition.store(seconds * tempoBpm.load() / 60.0);
+    }
+
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo info;
+        info.setIsPlaying(playing.load());
+        info.setBpm(tempoBpm.load());
+        info.setPpqPosition(ppqPosition.load());
+        info.setTimeSignature(TimeSignature { 4, 4 });
+        return info;
+    }
+
+private:
+    std::atomic<bool> playing { false };
+    std::atomic<double> tempoBpm { 120.0 };
+    std::atomic<double> ppqPosition { 0.0 };
+};
+
+EngineTransportPlayHead enginePlayHead;
+
 float panToLeftGain(float pan) noexcept
 {
     return juce::jlimit(0.0f, 1.0f, 0.5f * (1.0f - pan));
@@ -22,6 +100,56 @@ juce::String createDefaultTrackName(int trackIndex)
 }
 
 constexpr double foleySecondsPerBeat = 0.5;
+
+// Enables only the main input/output bus, explicitly disabling any others - e.g. the per-piece
+// multi-out buses a drum sampler like SSD5 exposes (confirmed: 48 output channels). Reaper only
+// activates the main stereo pair by default; enabling every bus can cause a multi-out instrument
+// to spread its audio across its individual outs instead of the consolidated main bus we read
+// from, producing silence on the main bus even though the plugin is processing correctly.
+void configureMainBusOnly(juce::AudioPluginInstance& instance)
+{
+    if (instance.getBusCount(true) > 0)
+    {
+        if (auto* mainIn = instance.getBus(true, 0))
+            mainIn->enable(true);
+
+        for (int i = 1; i < instance.getBusCount(true); ++i)
+            if (auto* bus = instance.getBus(true, i))
+                bus->enable(false);
+    }
+
+    if (instance.getBusCount(false) > 0)
+    {
+        if (auto* mainOut = instance.getBus(false, 0))
+            mainOut->enable(true);
+
+        for (int i = 1; i < instance.getBusCount(false); ++i)
+            if (auto* bus = instance.getBus(false, i))
+                bus->enable(false);
+    }
+}
+
+juce::File getPluginStateDiagnosticsFile()
+{
+    auto logDirectory = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                            .getChildFile("Creation Station");
+    logDirectory.createDirectory();
+    return logDirectory.getChildFile("plugin-state-diagnostics.log");
+}
+
+void appendPluginStateDiagnostic(const juce::String& eventName,
+                                 const juce::String& pluginName,
+                                 const juce::File& pluginFile,
+                                 size_t stateBytes)
+{
+    auto line = juce::Time::getCurrentTime().formatted("%Y-%m-%d %H:%M:%S")
+                + " | " + eventName
+                + " | plugin=" + (pluginName.isNotEmpty() ? pluginName : "<unnamed>")
+                + " | file=" + pluginFile.getFullPathName()
+                + " | bytes=" + juce::String((int64) stateBytes)
+                + "\n";
+    getPluginStateDiagnosticsFile().appendText(line, false, false, "\n");
+}
 }
 
 WorkstationAudioEngine::DemoTrackSource::DemoTrackSource(juce::String trackName, double frequencyHz)
@@ -94,7 +222,11 @@ void WorkstationAudioEngine::PluginInsertSource::prepareToPlay(int samplesPerBlo
 
     if (pluginInstance != nullptr)
     {
-        pluginInstance->setPlayConfigDetails(2, 2, sampleRate, blockSize);
+        configureMainBusOnly(*pluginInstance);
+        pluginInstance->setPlayHead(&enginePlayHead);
+        pluginInputChannels = juce::jmax(0, pluginInstance->getTotalNumInputChannels());
+        pluginOutputChannels = juce::jmax(1, pluginInstance->getTotalNumOutputChannels());
+        pluginInstance->setPlayConfigDetails(pluginInputChannels, pluginOutputChannels, sampleRate, blockSize);
         pluginInstance->prepareToPlay(sampleRate, blockSize);
     }
 }
@@ -115,6 +247,7 @@ bool WorkstationAudioEngine::PluginInsertSource::loadPlugin(const juce::File& fi
                                                             juce::String& errorMessage)
 {
     unloadPlugin();
+    cachedState.reset();
 
     juce::OwnedArray<juce::PluginDescription> pluginDescriptions;
 
@@ -143,15 +276,34 @@ bool WorkstationAudioEngine::PluginInsertSource::loadPlugin(const juce::File& fi
 
         if (instance != nullptr)
         {
-            instance->setPlayConfigDetails(2, 2, sampleRate, blockSize);
-            instance->prepareToPlay(sampleRate, blockSize);
+            configureMainBusOnly(*instance);
+            instance->setPlayHead(&enginePlayHead);
+            pluginInputChannels = juce::jmax(0, instance->getTotalNumInputChannels());
+            pluginOutputChannels = juce::jmax(1, instance->getTotalNumOutputChannels());
+            instance->setPlayConfigDetails(pluginInputChannels, pluginOutputChannels, sampleRate, blockSize);
 
             if (savedState != nullptr && savedState->getSize() > 0)
+            {
                 instance->setStateInformation(savedState->getData(), (int) savedState->getSize());
+                cachedState = *savedState;
+                appendPluginStateDiagnostic("loadPlugin.prepared-state-before-activate",
+                                            pluginDescription->name,
+                                            file,
+                                            savedState->getSize());
+            }
 
-            pluginInstance = std::move(instance);
+            instance->prepareToPlay(sampleRate, blockSize);
+
+            {
+                const juce::ScopedLock lock(pluginInstanceLock);
+                pluginInstance = std::move(instance);
+            }
             pluginFile = file;
             bypassed.store(false);
+            appendPluginStateDiagnostic("loadPlugin.success",
+                                        pluginDescription->name,
+                                        file,
+                                        cachedState.getSize());
             return true;
         }
 
@@ -167,6 +319,8 @@ bool WorkstationAudioEngine::PluginInsertSource::loadPlugin(const juce::File& fi
 
 void WorkstationAudioEngine::PluginInsertSource::unloadPlugin()
 {
+    const juce::ScopedLock lock(pluginInstanceLock);
+
     if (pluginInstance != nullptr)
     {
         pluginInstance->releaseResources();
@@ -175,6 +329,9 @@ void WorkstationAudioEngine::PluginInsertSource::unloadPlugin()
 
     pluginFile = {};
     bypassed.store(false);
+    pluginInputChannels = 2;
+    pluginOutputChannels = 2;
+    cachedState.reset();
 }
 
 juce::String WorkstationAudioEngine::PluginInsertSource::getPluginName() const
@@ -200,6 +357,10 @@ bool WorkstationAudioEngine::PluginInsertSource::copyStateTo(juce::MemoryBlock& 
         return false;
 
     pluginInstance->getStateInformation(destination);
+    appendPluginStateDiagnostic("copyStateTo",
+                                pluginInstance->getName(),
+                                pluginFile,
+                                destination.getSize());
     return destination.getSize() > 0;
 }
 
@@ -209,7 +370,24 @@ bool WorkstationAudioEngine::PluginInsertSource::restoreStateFrom(const juce::Me
         return false;
 
     pluginInstance->setStateInformation(source.getData(), (int) source.getSize());
+    cachedState = source;
+    appendPluginStateDiagnostic("restoreStateFrom",
+                                pluginInstance->getName(),
+                                pluginFile,
+                                source.getSize());
     return true;
+}
+
+bool WorkstationAudioEngine::PluginInsertSource::reapplyCachedState()
+{
+    if (cachedState.getSize() == 0)
+        return false;
+
+    appendPluginStateDiagnostic("reapplyCachedState",
+                                getPluginName(),
+                                pluginFile,
+                                cachedState.getSize());
+    return restoreStateFrom(cachedState);
 }
 
 void WorkstationAudioEngine::PluginInsertSource::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
@@ -217,29 +395,84 @@ void WorkstationAudioEngine::PluginInsertSource::getNextAudioBlock(const juce::A
     if (bufferToFill.buffer == nullptr)
         return;
 
-    if (pluginInstance == nullptr)
+    // Real-time-safe: loadPlugin()/unloadPlugin() only hold this lock for a pointer swap/reset,
+    // never while constructing or destroying the plugin itself, so contention here is brief -
+    // unlike letting the audio thread dereference a pointer that's mid-reset on another thread.
+    const juce::ScopedTryLock scopedLock(pluginInstanceLock);
+    if (! scopedLock.isLocked() || pluginInstance == nullptr)
         return;
 
-    pluginBuffer.setSize(juce::jmax(2, bufferToFill.buffer->getNumChannels()),
-                         bufferToFill.numSamples,
-                         false,
-                         false,
-                         true);
+    auto pluginChannelCount = juce::jmax(1, juce::jmax(pluginInputChannels, pluginOutputChannels));
+    const auto deviceChannels = bufferToFill.buffer->getNumChannels();
 
-    for (int channel = 0; channel < bufferToFill.buffer->getNumChannels(); ++channel)
-        pluginBuffer.copyFrom(channel, 0, *bufferToFill.buffer, channel, bufferToFill.startSample, bufferToFill.numSamples);
+    pluginBuffer.setSize(pluginChannelCount, bufferToFill.numSamples, false, false, true);
 
-    for (int channel = bufferToFill.buffer->getNumChannels(); channel < pluginBuffer.getNumChannels(); ++channel)
-        pluginBuffer.clear(channel, 0, bufferToFill.numSamples);
+    for (int channel = 0; channel < pluginChannelCount; ++channel)
+    {
+        if (channel < pluginInputChannels && channel < deviceChannels)
+            pluginBuffer.copyFrom(channel, 0, *bufferToFill.buffer, channel, bufferToFill.startSample, bufferToFill.numSamples);
+        else
+            pluginBuffer.clear(channel, 0, bufferToFill.numSamples);
+    }
 
     pluginMidiBuffer.clear();
+    pluginMidiBuffer.addEvents(pendingExternalMidi, 0, bufferToFill.numSamples, 0);
+    pendingExternalMidi.clear();
+
     if (bypassed.load())
         pluginInstance->processBlockBypassed(pluginBuffer, pluginMidiBuffer);
     else
         pluginInstance->processBlock(pluginBuffer, pluginMidiBuffer);
 
-    for (int channel = 0; channel < bufferToFill.buffer->getNumChannels(); ++channel)
+    for (int channel = 0; channel < juce::jmin(pluginOutputChannels, deviceChannels); ++channel)
         bufferToFill.buffer->copyFrom(channel, bufferToFill.startSample, pluginBuffer, channel, 0, bufferToFill.numSamples);
+}
+
+int WorkstationAudioEngine::PluginInsertSource::getParameterCount() const
+{
+    return pluginInstance != nullptr ? pluginInstance->getParameters().size() : 0;
+}
+
+juce::String WorkstationAudioEngine::PluginInsertSource::getParameterName(int paramIndex) const
+{
+    if (pluginInstance == nullptr)
+        return {};
+
+    const auto& params = pluginInstance->getParameters();
+    if (! juce::isPositiveAndBelow(paramIndex, params.size()))
+        return {};
+
+    return params[paramIndex]->getName(64);
+}
+
+float WorkstationAudioEngine::PluginInsertSource::getParameterValue(int paramIndex) const
+{
+    if (pluginInstance == nullptr)
+        return 0.0f;
+
+    const auto& params = pluginInstance->getParameters();
+    if (! juce::isPositiveAndBelow(paramIndex, params.size()))
+        return 0.0f;
+
+    return params[paramIndex]->getValue();
+}
+
+bool WorkstationAudioEngine::PluginInsertSource::setParameterValueRealtime(int paramIndex, float normalizedValue)
+{
+    // Same try-lock-or-skip pattern as getNextAudioBlock above, guarding against a concurrent
+    // message-thread loadPlugin()/unloadPlugin() swapping the instance out from under this call.
+    const juce::ScopedTryLock scopedLock(pluginInstanceLock);
+    if (! scopedLock.isLocked() || pluginInstance == nullptr)
+        return false;
+
+    const auto& params = pluginInstance->getParameters();
+    if (! juce::isPositiveAndBelow(paramIndex, params.size()))
+        return false;
+
+    // setValue() (not setValueNotifyingHost()) - this is a per-block automation write, not a
+    // user-gesture-driven UI change, so it must not trigger the listener/notification path.
+    params[paramIndex]->setValue(juce::jlimit(0.0f, 1.0f, normalizedValue));
+    return true;
 }
 
 void WorkstationAudioEngine::PluginInsertChain::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
@@ -264,6 +497,48 @@ void WorkstationAudioEngine::PluginInsertChain::getNextAudioBlock(const juce::Au
     for (auto* insert : inserts)
         if (insert != nullptr && insert->hasPlugin())
             insert->getNextAudioBlock(bufferToFill);
+}
+
+void WorkstationAudioEngine::PluginInsertChain::pushLiveMidiToFirstSlot(const juce::MidiBuffer& midi)
+{
+    if (! inserts.isEmpty() && inserts.getFirst() != nullptr)
+        inserts.getFirst()->addExternalMidi(midi);
+}
+
+int WorkstationAudioEngine::PluginInsertChain::getParameterCount(int slotIndex) const
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->getParameterCount();
+
+    return 0;
+}
+
+juce::String WorkstationAudioEngine::PluginInsertChain::getParameterName(int slotIndex, int paramIndex) const
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->getParameterName(paramIndex);
+
+    return {};
+}
+
+float WorkstationAudioEngine::PluginInsertChain::getParameterValue(int slotIndex, int paramIndex) const
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->getParameterValue(paramIndex);
+
+    return 0.0f;
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::setParameterValueRealtime(int slotIndex, int paramIndex, float normalizedValue)
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->setParameterValueRealtime(paramIndex, normalizedValue);
+
+    return false;
 }
 
 bool WorkstationAudioEngine::PluginInsertChain::addPlugin(const juce::File& file, juce::String& errorMessage)
@@ -458,6 +733,12 @@ void WorkstationAudioEngine::TrackChannelSource::getNextAudioBlock(const juce::A
         return;
 
     bufferToFill.clearActiveBufferRegion();
+
+    // An automation track has no source or output of its own - it only pushes values into other
+    // tracks' controls once per block (see WorkstationAudioEngine::applyAutomationForBlock).
+    if (isAutomationKind.load())
+        return;
+
     source.getNextAudioBlock(bufferToFill);
     insertChain.getNextAudioBlock(bufferToFill);
 }
@@ -489,14 +770,20 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
     if (bufferToFill.buffer == nullptr)
         return;
 
-    if (! owner.playing.load() && ! owner.assetPreviewSource.isPreviewing())
-    {
-        bufferToFill.clearActiveBufferRegion();
-        return;
-    }
-
     bufferToFill.clearActiveBufferRegion();
-    source.getNextAudioBlock(bufferToFill);
+
+    // `source` (the live per-track mixer/insert-chain path) is for live monitoring/audition
+    // only - clip playback FX is already applied independently inside ArrangementSource, per
+    // track, only for tracks with an actual clip sounding in this block. So `source` must NOT
+    // run just because the transport is playing: continuously running every loaded plugin's
+    // processBlock destabilized at least one real-world instrument plugin (confirmed crash,
+    // same signature, both at idle and during playback) when driven with no real need to. It
+    // only runs for tracks the user explicitly asked to hear live - armed or monitor-enabled -
+    // or while previewing an asset.
+    const auto liveMonitoring = owner.anyTrackNeedsLiveMonitoring();
+    const auto hasRecentMidiActivity = owner.liveAudioTailSamplesRemaining > 0;
+    if (liveMonitoring || owner.assetPreviewSource.isPreviewing() || hasRecentMidiActivity)
+        source.getNextAudioBlock(bufferToFill);
 
     if (owner.playing.load())
         owner.arrangementSource.getNextAudioBlock(bufferToFill);
@@ -553,16 +840,17 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
     auto startSample = juce::jlimit(0, totalSamples - 1, juce::roundToInt((double) totalSamples * safeStart));
     auto endSample = juce::jlimit(startSample + 1, totalSamples, juce::roundToInt((double) totalSamples * safeEnd));
     auto sliceSamples = juce::jmax(1, endSample - startSample);
-    auto numChannels = juce::jmax(1, (int) reader->numChannels);
-
-    previewBuffer.setSize(juce::jmax(2, numChannels), sliceSamples, false, false, true);
-    previewBuffer.clear();
-    reader->read(&previewBuffer, 0, sliceSamples, startSample, true, true);
+    if (! readAndResampleSection(*reader, startSample, sliceSamples, sampleRate, previewBuffer))
+    {
+        errorMessage = "That file could not be resampled for preview.";
+        delete reader;
+        return false;
+    }
     delete reader;
 
     if (settings.normalize)
     {
-        auto peak = previewBuffer.getMagnitude(0, sliceSamples);
+        auto peak = previewBuffer.getMagnitude(0, previewBuffer.getNumSamples());
         if (peak > 0.0f)
             previewBuffer.applyGain(0.95f / peak);
     }
@@ -570,8 +858,9 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
     auto gain = juce::Decibels::decibelsToGain(settings.gainDecibels);
     previewBuffer.applyGain(gain);
 
-    auto fadeInSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeInNormalized));
-    auto fadeOutSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeOutNormalized));
+    auto previewSamples = previewBuffer.getNumSamples();
+    auto fadeInSamples = juce::jlimit(0, previewSamples, juce::roundToInt((float) previewSamples * settings.fadeInNormalized));
+    auto fadeOutSamples = juce::jlimit(0, previewSamples, juce::roundToInt((float) previewSamples * settings.fadeOutNormalized));
 
     for (int channel = 0; channel < previewBuffer.getNumChannels(); ++channel)
     {
@@ -579,7 +868,7 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
             previewBuffer.applyGainRamp(channel, 0, fadeInSamples, 0.0f, 1.0f);
 
         if (fadeOutSamples > 0)
-            previewBuffer.applyGainRamp(channel, sliceSamples - fadeOutSamples, fadeOutSamples, 1.0f, 0.0f);
+            previewBuffer.applyGainRamp(channel, previewSamples - fadeOutSamples, fadeOutSamples, 1.0f, 0.0f);
     }
 
     if (settings.reverse)
@@ -587,7 +876,7 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
         for (int channel = 0; channel < previewBuffer.getNumChannels(); ++channel)
         {
             auto* data = previewBuffer.getWritePointer(channel);
-            std::reverse(data, data + sliceSamples);
+            std::reverse(data, data + previewSamples);
         }
     }
 
@@ -700,15 +989,18 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
     const auto blockStart = playbackSamplePosition;
     const auto blockEnd = playbackSamplePosition + bufferToFill.numSamples;
     const auto outputChannels = bufferToFill.buffer->getNumChannels();
+    const auto trackCount = owner.getTrackCount();
 
-    for (int trackIndex = -1; trackIndex < owner.getTrackCount(); ++trackIndex)
+    // Automation tracks must be evaluated and applied before any track's own rendering below,
+    // in this same callback, so a curve drawn in the tracker plays back block-accurately (not
+    // one block delayed) - see WorkstationAudioEngine::applyAutomationForBlock.
+    if (sampleRate > 0.0)
+        owner.applyAutomationForBlock((double) blockStart / sampleRate);
+
+    // Mixes every clip on `trackIndex` overlapping this block into `destination`. Shared between
+    // the -1 (Foley/master-level) pseudo-track and every real track below.
+    auto mixClipsInto = [&](int trackIndex, juce::AudioBuffer<float>& destination)
     {
-        if (trackIndex >= 0 && ! owner.shouldRenderTrack(trackIndex))
-            continue;
-
-        trackRenderBuffer.setSize(juce::jmax(2, outputChannels), bufferToFill.numSamples, false, false, true);
-        trackRenderBuffer.clear();
-
         auto renderedAnyClip = false;
 
         for (const auto& clip : clips)
@@ -731,36 +1023,88 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
 
             if (clipChannels == 1)
             {
-                for (int channel = 0; channel < trackRenderBuffer.getNumChannels(); ++channel)
-                    trackRenderBuffer.addFrom(channel, destOffset, clip.buffer, 0, clipOffset, numSamples);
+                for (int channel = 0; channel < destination.getNumChannels(); ++channel)
+                    destination.addFrom(channel, destOffset, clip.buffer, 0, clipOffset, numSamples);
             }
             else
             {
-                for (int channel = 0; channel < trackRenderBuffer.getNumChannels(); ++channel)
+                for (int channel = 0; channel < destination.getNumChannels(); ++channel)
                 {
                     auto sourceChannel = juce::jmin(channel, clipChannels - 1);
-                    trackRenderBuffer.addFrom(channel, destOffset, clip.buffer, sourceChannel, clipOffset, numSamples);
+                    destination.addFrom(channel, destOffset, clip.buffer, sourceChannel, clipOffset, numSamples);
                 }
             }
 
             renderedAnyClip = true;
         }
 
-        if (! renderedAnyClip)
-            continue;
+        return renderedAnyClip;
+    };
 
-        if (trackIndex >= 0 && juce::isPositiveAndBelow(trackIndex, owner.tracks.size()))
+    // The -1 pseudo-track (Foley/master-level clips not tied to a real track) has no
+    // TrackChannelSource and can't be a folder-routing participant - always straight to master,
+    // exactly as before.
+    {
+        trackRenderBuffer.setSize(juce::jmax(2, outputChannels), bufferToFill.numSamples, false, false, true);
+        trackRenderBuffer.clear();
+
+        if (mixClipsInto(-1, trackRenderBuffer))
         {
-            auto* track = owner.tracks[(size_t) trackIndex];
-            if (track != nullptr && track->insertChain.hasPlugin())
+            for (int channel = 0; channel < outputChannels; ++channel)
             {
-                juce::AudioSourceChannelInfo trackInfo(&trackRenderBuffer, 0, bufferToFill.numSamples);
-                track->insertChain.getNextAudioBlock(trackInfo);
+                auto sourceChannel = juce::jmin(channel, trackRenderBuffer.getNumChannels() - 1);
+                bufferToFill.buffer->addFrom(channel, bufferToFill.startSample, trackRenderBuffer, sourceChannel, 0, bufferToFill.numSamples, 1.0f);
             }
         }
+    }
 
-        const auto trackGain = trackIndex >= 0 ? juce::jlimit(0.0f, 2.0f, owner.getTrackGain(trackIndex)) : 1.0f;
-        const auto trackPan = trackIndex >= 0 ? juce::jlimit(-1.0f, 1.0f, owner.getTrackPan(trackIndex)) : 0.0f;
+    if (trackCount <= 0)
+    {
+        playbackSamplePosition += bufferToFill.numSamples;
+        return;
+    }
+
+    if ((int) perTrackBuffers.size() != trackCount)
+        perTrackBuffers.resize((size_t) trackCount);
+
+    for (auto& buffer : perTrackBuffers)
+    {
+        buffer.setSize(juce::jmax(2, outputChannels), bufferToFill.numSamples, false, false, true);
+        buffer.clear();
+    }
+
+    auto routing = owner.getCachedTrackRouting();
+
+    // Processes one real track: mixes its clips, runs its insert chain, applies its own
+    // gain/pan, then routes the result into its parent's buffer (if it has one and that parent
+    // is itself a bus destination) or straight to master otherwise. Bus-destination tracks
+    // (folders) always fully process even with no clips of their own, since children processed
+    // earlier in `order` may already have summed audio into their buffer.
+    auto processTrack = [&](int trackIndex)
+    {
+        if (! juce::isPositiveAndBelow(trackIndex, trackCount) || ! owner.shouldRenderTrack(trackIndex))
+            return;
+
+        auto& trackBuffer = perTrackBuffers[(size_t) trackIndex];
+        auto renderedAnyClip = mixClipsInto(trackIndex, trackBuffer);
+
+        auto isBusDestination = routing != nullptr && juce::isPositiveAndBelow(trackIndex, (int) routing->isBusDestination.size())
+                                   && routing->isBusDestination[(size_t) trackIndex];
+
+        if (! renderedAnyClip && ! isBusDestination)
+            return;
+
+        auto* track = owner.tracks[(size_t) trackIndex];
+        if (track != nullptr && track->insertChain.hasPlugin())
+        {
+            juce::AudioSourceChannelInfo trackInfo(&trackBuffer, 0, bufferToFill.numSamples);
+            track->insertChain.getNextAudioBlock(trackInfo);
+        }
+
+        const auto trackGain = juce::jlimit(0.0f, 2.0f, owner.getTrackGain(trackIndex));
+        const auto trackPan = juce::jlimit(-1.0f, 1.0f, owner.getTrackPan(trackIndex));
+        const auto parentTrackIndex = track != nullptr ? track->getParentTrackIndex() : -1;
+        const auto hasValidParent = juce::isPositiveAndBelow(parentTrackIndex, trackCount);
 
         for (int channel = 0; channel < outputChannels; ++channel)
         {
@@ -773,9 +1117,26 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
                     channelGain *= trackPan >= 0.0f ? 1.0f : 1.0f + trackPan;
             }
 
-            auto sourceChannel = juce::jmin(channel, trackRenderBuffer.getNumChannels() - 1);
-            bufferToFill.buffer->addFrom(channel, bufferToFill.startSample, trackRenderBuffer, sourceChannel, 0, bufferToFill.numSamples, channelGain);
+            auto sourceChannel = juce::jmin(channel, trackBuffer.getNumChannels() - 1);
+
+            if (hasValidParent)
+                perTrackBuffers[(size_t) parentTrackIndex].addFrom(channel, 0, trackBuffer, sourceChannel, 0, bufferToFill.numSamples, channelGain);
+            else
+                bufferToFill.buffer->addFrom(channel, bufferToFill.startSample, trackBuffer, sourceChannel, 0, bufferToFill.numSamples, channelGain);
         }
+    };
+
+    if (routing != nullptr && (int) routing->renderOrder.size() == trackCount)
+    {
+        for (auto trackIndex : routing->renderOrder)
+            processTrack(trackIndex);
+    }
+    else
+    {
+        // No cached routing yet (e.g. before the very first hierarchy publish) - plain index
+        // order is correct as long as nothing has a parent yet, matching today's behaviour.
+        for (int trackIndex = 0; trackIndex < trackCount; ++trackIndex)
+            processTrack(trackIndex);
     }
 
     playbackSamplePosition += bufferToFill.numSamples;
@@ -813,6 +1174,7 @@ int WorkstationAudioEngine::addTrack(const juce::String& trackName)
     if (graphSampleRate > 0.0 && graphBlockSize > 0)
         track->prepareToPlay(graphBlockSize, graphSampleRate);
 
+    rebuildTrackRoutingCache();
     return trackIndex;
 }
 
@@ -824,6 +1186,7 @@ bool WorkstationAudioEngine::removeTrack(int trackIndex)
     auto* track = tracks[(size_t) trackIndex];
     mixerSource.removeInputSource(track);
     tracks.remove(trackIndex);
+    rebuildTrackRoutingCache();
     return true;
 }
 
@@ -848,6 +1211,130 @@ int WorkstationAudioEngine::getTrackInputChannel(int trackIndex) const
         return tracks[(size_t) trackIndex]->getInputChannel();
 
     return -1;
+}
+
+void WorkstationAudioEngine::setTrackMidiInputChannel(int trackIndex, int channel)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setMidiInputChannel(juce::jlimit(0, 16, channel));
+}
+
+int WorkstationAudioEngine::getTrackMidiInputChannel(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->getMidiInputChannel();
+
+    return 0;
+}
+
+void WorkstationAudioEngine::setTrackMidiInputDeviceId(int trackIndex, const juce::String& deviceId)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setMidiInputDeviceId(deviceId);
+}
+
+juce::String WorkstationAudioEngine::getTrackMidiInputDeviceId(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->getMidiInputDeviceId();
+
+    return {};
+}
+
+void WorkstationAudioEngine::setTrackIsMidiKind(int trackIndex, bool isMidi)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setIsMidiKind(isMidi);
+}
+
+void WorkstationAudioEngine::setTrackIsAutomationKind(int trackIndex, bool isAutomation)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setIsAutomationKind(isAutomation);
+}
+
+void WorkstationAudioEngine::setTrackAutomationData(int trackIndex, const cs::AutomationTarget& target, const std::vector<cs::AutomationPoint>& points)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return;
+
+    auto data = std::make_shared<AutomationTrackData>();
+    data->target = target;
+    data->points = points;
+    tracks[(size_t) trackIndex]->setAutomationData(std::move(data));
+}
+
+void WorkstationAudioEngine::setTrackAutomationWriteActive(int trackIndex, bool active)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setAutomationWriteActive(active);
+}
+
+void WorkstationAudioEngine::applyAutomationForBlock(double blockStartSeconds)
+{
+    for (int trackIndex = 0; trackIndex < tracks.size(); ++trackIndex)
+    {
+        auto* track = tracks[(size_t) trackIndex];
+        if (track == nullptr || ! track->getIsAutomationKind() || track->getAutomationWriteActive())
+            continue;
+
+        auto data = track->getAutomationData();
+        if (data == nullptr || data->points.empty() || data->target.kind == cs::AutomationTargetKind::none)
+            continue;
+
+        const auto& points = data->points;
+        float value;
+
+        if (blockStartSeconds <= points.front().seconds)
+            value = points.front().value;
+        else if (blockStartSeconds >= points.back().seconds)
+            value = points.back().value;
+        else
+        {
+            value = points.back().value;
+            for (size_t i = 0; i + 1 < points.size(); ++i)
+            {
+                if (blockStartSeconds >= points[i].seconds && blockStartSeconds <= points[i + 1].seconds)
+                {
+                    value = cs::evaluateAutomationSegment(points[i], points[i + 1], blockStartSeconds);
+                    break;
+                }
+            }
+        }
+
+        const auto& target = data->target;
+        if (! juce::isPositiveAndBelow(target.targetTrackIndex, tracks.size()))
+            continue;
+
+        switch (target.kind)
+        {
+            case cs::AutomationTargetKind::trackVolume:
+                // Gain is already 0..1 everywhere it's set manually (header slider, mixer fader,
+                // X-Touch fader all use a 0..1 range) - automation's 0..1 curve value maps to it
+                // directly, with no remapping, so a manually-ridden fader position and a drawn
+                // automation point mean the same thing.
+                tracks[(size_t) target.targetTrackIndex]->setGain(value);
+                break;
+
+            case cs::AutomationTargetKind::trackPan:
+                tracks[(size_t) target.targetTrackIndex]->setPan(juce::jmap(value, 0.0f, 1.0f, -1.0f, 1.0f));
+                break;
+
+            case cs::AutomationTargetKind::pluginParameter:
+                tracks[(size_t) target.targetTrackIndex]->insertChain.setParameterValueRealtime(target.pluginSlotIndex, target.pluginParameterIndex, value);
+                break;
+
+            case cs::AutomationTargetKind::none:
+            default:
+                break;
+        }
+    }
+}
+
+void WorkstationAudioEngine::setTrackHasOpenEditor(int trackIndex, bool hasOpenEditor)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setHasOpenEditor(hasOpenEditor);
 }
 
 void WorkstationAudioEngine::setTrackInputChannel(int trackIndex, int inputChannel)
@@ -983,6 +1470,13 @@ void WorkstationAudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device
     else
         rebuildInputSources(0);
 
+    {
+        const juce::ScopedLock lock(midiDeviceCollectorsLock);
+        for (auto& entry : midiDeviceCollectors)
+            if (entry.collector != nullptr)
+                entry.collector->reset(sampleRate);
+    }
+
     masterOutputSource.prepareToPlay(blockSize, sampleRate);
 }
 
@@ -1003,6 +1497,203 @@ void WorkstationAudioEngine::audioDeviceIOCallbackWithContext(const float* const
 {
     if (inputSources.size() != totalNumInputChannels)
         rebuildInputSources(totalNumInputChannels);
+
+    // Tail window: kept open for a few seconds after the last delivered note rather than just the
+    // exact block a note-on/off fell in, so a triggered sound (e.g. a drum hit) has time to
+    // actually render instead of being truncated to a single ~10-20ms audio block.
+    constexpr double liveAudioTailSeconds = 4.0;
+    const auto engineSampleRate = arrangementSource.getSampleRate();
+    bool blockHadNewMidiActivity = false;
+
+    enginePlayHead.update(playing.load(), metronomeBpm.load(), arrangementSource.getPlaybackSamplePosition(), engineSampleRate);
+
+    // Drain each physical MIDI input device's own collector separately, keeping messages tagged
+    // with which device they came from - needed so a track can be routed to one specific device
+    // (setTrackMidiInputDeviceId) rather than every enabled device being merged into one stream.
+    std::vector<std::pair<juce::String, juce::MidiBuffer>> deviceBlocks;
+    {
+        const juce::ScopedTryLock devicesLock(midiDeviceCollectorsLock);
+        if (devicesLock.isLocked())
+        {
+            for (auto& entry : midiDeviceCollectors)
+            {
+                if (entry.collector == nullptr)
+                    continue;
+
+                juce::MidiBuffer buffer;
+                entry.collector->removeNextBlockOfMessages(buffer, numSamples);
+                if (! buffer.isEmpty())
+                    deviceBlocks.emplace_back(entry.deviceId, std::move(buffer));
+            }
+        }
+    }
+
+    if (! deviceBlocks.empty())
+    {
+        blockHadNewMidiActivity = true;
+
+        const auto midiRecording = midiRecordingActive.load();
+        const auto recordBlockStartSample = arrangementSource.getPlaybackSamplePosition();
+
+        for (int trackIndex = 0; trackIndex < tracks.size(); ++trackIndex)
+        {
+            auto* track = tracks[trackIndex];
+            if (track == nullptr)
+                continue;
+
+            auto routedDeviceId = track->getMidiInputDeviceId();
+            auto channelFilter = track->getMidiInputChannel();
+
+            juce::MidiBuffer combined;
+            for (const auto& deviceBlock : deviceBlocks)
+            {
+                if (routedDeviceId.isNotEmpty() && deviceBlock.first != routedDeviceId)
+                    continue;
+
+                if (channelFilter == 0)
+                {
+                    combined.addEvents(deviceBlock.second, 0, numSamples, 0);
+                }
+                else
+                {
+                    for (const auto metadata : deviceBlock.second)
+                        if (metadata.getMessage().getChannel() == channelFilter)
+                            combined.addEvent(metadata.getMessage(), metadata.samplePosition);
+                }
+            }
+
+            if (combined.isEmpty())
+                continue;
+
+            track->insertChain.pushLiveMidiToFirstSlot(combined);
+
+            // Capture note on/off events for later pairing into clip notes, for any armed track
+            // while a MIDI recording session is active. Deliberately does NOT also require
+            // getIsMidiKind() here - that flag is only refreshed at specific UI sync points and
+            // can go stale independently of the track's real kind, silently blocking capture
+            // even though live audio (which doesn't check it) works fine. An audio track with no
+            // in-progress MIDI clip simply has nothing for these captured events to attach to.
+            if (midiRecording && track->isRecordingArmed())
+            {
+                const juce::ScopedTryLock recordLock(recordedMidiEventsLock);
+                if (recordLock.isLocked())
+                {
+                    for (const auto metadata : combined)
+                    {
+                        const auto& message = metadata.getMessage();
+                        if (message.isNoteOnOrOff())
+                            recordedMidiEvents.push_back({ trackIndex, message, recordBlockStartSample + metadata.samplePosition });
+                    }
+                }
+            }
+        }
+    }
+
+    // Deliver scheduled MIDI clip notes live, sample-accurately, through the same injection path
+    // as a live keyboard - not offline-rendered. Naturally paced by the real audio callback rate,
+    // just like live input, so it doesn't reproduce the instability an offline batch-render loop
+    // caused in at least one real-world plugin.
+    if (playing.load())
+    {
+        const juce::ScopedTryLock midiClipsLock(scheduledMidiClipsLock);
+        if (midiClipsLock.isLocked() && ! scheduledMidiClips.empty())
+        {
+            const auto blockStart = arrangementSource.getPlaybackSamplePosition();
+            const auto blockEnd = blockStart + numSamples;
+            const auto tempoBpm = juce::jmax(1.0, metronomeBpm.load());
+
+            const auto beatsToSamples = [tempoBpm, engineSampleRate](double beats)
+            {
+                return (int64) std::llround((beats * 60.0 / tempoBpm) * engineSampleRate);
+            };
+
+            for (const auto& clip : scheduledMidiClips)
+            {
+                if (! juce::isPositiveAndBelow(clip.trackIndex, tracks.size()))
+                    continue;
+
+                const auto clipStartSample = (int64) std::llround(clip.startSeconds * engineSampleRate);
+
+                juce::MidiBuffer clipMidi;
+                for (const auto& note : clip.notes)
+                {
+                    auto onSample = clipStartSample + beatsToSamples(note.startBeats);
+                    auto offSample = clipStartSample + beatsToSamples(note.startBeats + note.lengthBeats);
+
+                    if (onSample >= blockStart && onSample < blockEnd)
+                        clipMidi.addEvent(juce::MidiMessage::noteOn((int) note.channel, note.pitch, (juce::uint8) note.velocity),
+                                          (int) (onSample - blockStart));
+
+                    if (offSample >= blockStart && offSample < blockEnd)
+                        clipMidi.addEvent(juce::MidiMessage::noteOff((int) note.channel, note.pitch),
+                                          (int) (offSample - blockStart));
+                }
+
+                if (! clipMidi.isEmpty())
+                {
+                    blockHadNewMidiActivity = true;
+                    tracks[(size_t) clip.trackIndex]->insertChain.pushLiveMidiToFirstSlot(clipMidi);
+                }
+            }
+        }
+    }
+
+    // Deliver any UI-driven audition requests (e.g. clicking a note in the piano roll) - queued
+    // from the message thread, drained here on the audio thread, targeting one specific track
+    // directly regardless of its MIDI channel filter.
+    {
+        std::vector<AuditionRequest> requestsToDeliver;
+        {
+            const juce::ScopedTryLock auditionLock(auditionRequestsLock);
+            if (auditionLock.isLocked() && ! pendingAuditionRequests.empty())
+            {
+                requestsToDeliver = std::move(pendingAuditionRequests);
+                pendingAuditionRequests.clear();
+            }
+        }
+
+        for (const auto& request : requestsToDeliver)
+        {
+            if (! juce::isPositiveAndBelow(request.trackIndex, tracks.size()))
+                continue;
+
+            juce::MidiBuffer auditionMidi;
+            if (request.noteOn)
+                auditionMidi.addEvent(juce::MidiMessage::noteOn(1, request.pitch, (juce::uint8) request.velocity), 0);
+            else
+                auditionMidi.addEvent(juce::MidiMessage::noteOff(1, request.pitch), 0);
+
+            blockHadNewMidiActivity = true;
+            tracks[(size_t) request.trackIndex]->insertChain.pushLiveMidiToFirstSlot(auditionMidi);
+        }
+    }
+
+    // Stopping the transport mid-note otherwise leaves a stuck voice sounding indefinitely - a
+    // real host-side bug (the note's real-time-scheduled note-off was scheduled for a future
+    // block that will now never arrive), not a plugin quirk.
+    if (allNotesOffRequested.exchange(false))
+    {
+        for (auto* track : tracks)
+        {
+            if (track == nullptr)
+                continue;
+
+            juce::MidiBuffer panicMidi;
+            for (int channel = 1; channel <= 16; ++channel)
+            {
+                panicMidi.addEvent(juce::MidiMessage::controllerEvent(channel, 123, 0), 0); // All Notes Off
+                panicMidi.addEvent(juce::MidiMessage::controllerEvent(channel, 120, 0), 0); // All Sound Off
+            }
+
+            blockHadNewMidiActivity = true;
+            track->insertChain.pushLiveMidiToFirstSlot(panicMidi);
+        }
+    }
+
+    if (blockHadNewMidiActivity)
+        liveAudioTailSamplesRemaining = (int64) std::llround(liveAudioTailSeconds * engineSampleRate);
+    else if (liveAudioTailSamplesRemaining > 0)
+        liveAudioTailSamplesRemaining = juce::jmax<int64>(0, liveAudioTailSamplesRemaining - numSamples);
 
     callbackRenderBuffer.setSize(juce::jmax(2, totalNumOutputChannels),
                                  numSamples,
@@ -1047,6 +1738,14 @@ void WorkstationAudioEngine::processInputRouting(const float* const* inputChanne
         auto* track = tracks[(size_t) trackIndex];
         if (track == nullptr)
             continue;
+
+        if (track->getIsMidiKind())
+        {
+            // A MIDI track has no analog input signal of its own - don't meter, monitor, or
+            // record whatever the leftover audio input channel selection happens to be.
+            track->setInputLevel(0.0f);
+            continue;
+        }
 
         auto inputChannel = track->getInputChannel();
         if (! juce::isPositiveAndBelow(inputChannel, totalNumInputChannels)
@@ -1177,6 +1876,18 @@ void WorkstationAudioEngine::processGraph(juce::AudioBuffer<float>& buffer)
 
 }
 
+bool WorkstationAudioEngine::anyTrackNeedsLiveMonitoring() const noexcept
+{
+    for (auto* track : tracks)
+        if (track != nullptr
+            && (track->isMonitoringEnabled()
+                || track->isRecordingArmed()
+                || (track->getHasOpenEditor() && track->getIsMidiKind())))
+            return true;
+
+    return false;
+}
+
 bool WorkstationAudioEngine::shouldRenderTrack(int trackIndex) const noexcept
 {
     if (! juce::isPositiveAndBelow(trackIndex, tracks.size()))
@@ -1196,7 +1907,120 @@ bool WorkstationAudioEngine::shouldRenderTrack(int trackIndex) const noexcept
     if (track == nullptr || track->isMuted())
         return false;
 
-    return ! anySoloed || track->isSoloed();
+    return ! anySoloed || isTrackOrDescendantSoloed(trackIndex);
+}
+
+bool WorkstationAudioEngine::isTrackOrDescendantSoloed(int trackIndex) const noexcept
+{
+    if (! juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return false;
+
+    for (int candidateIndex = 0; candidateIndex < tracks.size(); ++candidateIndex)
+    {
+        auto* candidate = tracks[(size_t) candidateIndex];
+        if (candidate == nullptr || ! candidate->isSoloed())
+            continue;
+
+        // Walk candidate's ancestor chain (including itself); if it passes through trackIndex,
+        // trackIndex is candidate's ancestor (or candidate itself) - i.e. trackIndex "contains"
+        // a soloed track and must stay audible. Guard bounds the walk against any cycle.
+        auto current = candidateIndex;
+        for (int guard = 0; guard < tracks.size() && current >= 0; ++guard)
+        {
+            if (current == trackIndex)
+                return true;
+
+            current = juce::isPositiveAndBelow(current, tracks.size()) ? tracks[(size_t) current]->getParentTrackIndex() : -1;
+        }
+    }
+
+    return false;
+}
+
+void WorkstationAudioEngine::setTrackParentIndex(int trackIndex, int parentTrackIndex)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->setParentTrackIndex(parentTrackIndex);
+
+    rebuildTrackRoutingCache();
+}
+
+void WorkstationAudioEngine::moveTrackRange(int startIndex, int length, int destinationIndex)
+{
+    auto trackCount = tracks.size();
+    if (length <= 0 || ! juce::isPositiveAndBelow(startIndex, trackCount) || startIndex + length > trackCount)
+        return;
+
+    destinationIndex = juce::jlimit(0, trackCount - length, destinationIndex);
+
+    // Same erase-then-insert-adjusted-for-shift math as TimelineModel::moveTrackRange - the two
+    // must agree exactly or the model and engine track arrays fall out of index-parity.
+    juce::Array<TrackChannelSource*> moving;
+    for (int i = 0; i < length; ++i)
+        moving.add(tracks.removeAndReturn(startIndex));
+
+    auto insertAt = destinationIndex > startIndex ? destinationIndex - length : destinationIndex;
+    insertAt = juce::jlimit(0, tracks.size(), insertAt);
+
+    for (int i = 0; i < moving.size(); ++i)
+        tracks.insert(insertAt + i, moving[i]);
+
+    rebuildTrackRoutingCache();
+}
+
+void WorkstationAudioEngine::rebuildTrackRoutingCache()
+{
+    auto trackCount = tracks.size();
+    auto info = std::make_shared<TrackRoutingInfo>();
+    info->isBusDestination.assign((size_t) trackCount, false);
+
+    for (int i = 0; i < trackCount; ++i)
+    {
+        auto* track = tracks[(size_t) i];
+        auto parent = track != nullptr ? track->getParentTrackIndex() : -1;
+        if (juce::isPositiveAndBelow(parent, trackCount))
+            info->isBusDestination[(size_t) parent] = true;
+    }
+
+    // Children-before-parents order: repeatedly place any not-yet-placed track whose parent (if
+    // any) is already placed or absent. O(n^2) worst case, trivial at DAW track counts, and
+    // simpler to get right than a recursive post-order walk.
+    std::vector<bool> visited((size_t) trackCount, false);
+    info->renderOrder.reserve((size_t) trackCount);
+    auto remaining = trackCount;
+    while (remaining > 0)
+    {
+        auto placedAny = false;
+        for (int i = 0; i < trackCount; ++i)
+        {
+            if (visited[(size_t) i])
+                continue;
+
+            auto* track = tracks[(size_t) i];
+            auto parent = track != nullptr ? track->getParentTrackIndex() : -1;
+            auto parentReady = ! juce::isPositiveAndBelow(parent, trackCount) || visited[(size_t) parent];
+
+            if (parentReady)
+            {
+                visited[(size_t) i] = true;
+                info->renderOrder.push_back(i);
+                --remaining;
+                placedAny = true;
+            }
+        }
+
+        // A cycle (shouldn't happen - TimelineModel::setTrackParent rejects them) would otherwise
+        // spin forever; break it by force-placing whatever's left in index order.
+        if (! placedAny)
+        {
+            for (int i = 0; i < trackCount; ++i)
+                if (! visited[(size_t) i])
+                    info->renderOrder.push_back(i);
+            break;
+        }
+    }
+
+    cachedTrackRouting.store(std::move(info));
 }
 
 void WorkstationAudioEngine::writeRecording(int trackIndex, const float* leftSource, const float* rightSource, int numSamples)
@@ -1219,14 +2043,71 @@ void WorkstationAudioEngine::writeRecording(int trackIndex, const float* leftSou
     }
 }
 
+bool WorkstationAudioEngine::isControlSurfaceMidiDevice(const juce::String& deviceName)
+{
+    auto lowered = deviceName.toLowerCase();
+    return lowered.contains("x-touch")
+        || lowered.contains("xtouch")
+        || lowered.contains("x touch")
+        || lowered.contains("mackie")
+        || lowered.contains("bcr2000")
+        || lowered.contains("b-control rotary")
+        || lowered.contains("b-control");
+}
+
 void WorkstationAudioEngine::attachToDevice(juce::AudioDeviceManager& deviceManager)
 {
     deviceManager.addAudioCallback(this);
+
+    attachedDeviceManager = &deviceManager;
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+    {
+        if (isControlSurfaceMidiDevice(device.name))
+            continue;
+
+        deviceManager.setMidiInputDeviceEnabled(device.identifier, true);
+        deviceManager.addMidiInputDeviceCallback(device.identifier, this);
+        getOrCreateMidiDeviceCollector(device.identifier);
+    }
+}
+
+juce::MidiMessageCollector& WorkstationAudioEngine::getOrCreateMidiDeviceCollector(const juce::String& deviceId)
+{
+    const juce::ScopedLock lock(midiDeviceCollectorsLock);
+
+    for (auto& entry : midiDeviceCollectors)
+        if (entry.deviceId == deviceId)
+            return *entry.collector;
+
+    auto collector = std::make_unique<juce::MidiMessageCollector>();
+    collector->reset(arrangementSource.getSampleRate());
+    midiDeviceCollectors.push_back({ deviceId, std::move(collector) });
+    return *midiDeviceCollectors.back().collector;
 }
 
 void WorkstationAudioEngine::detachFromDevice(juce::AudioDeviceManager& deviceManager)
 {
     deviceManager.removeAudioCallback(this);
+
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        if (! isControlSurfaceMidiDevice(device.name))
+            deviceManager.removeMidiInputDeviceCallback(device.identifier, this);
+
+    attachedDeviceManager = nullptr;
+}
+
+void WorkstationAudioEngine::handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message)
+{
+    if (source == nullptr)
+        return;
+
+    if (message.isNoteOn(true) || (message.isController() && message.getControllerValue() > 0))
+    {
+        auto number = message.isController() ? message.getControllerNumber() : message.getNoteNumber();
+        offerMidiLearnCandidate(source->getIdentifier(), message.getChannel(), number, message.isController());
+    }
+
+    getOrCreateMidiDeviceCollector(source->getIdentifier()).addMessageToQueue(message);
 }
 
 void WorkstationAudioEngine::setPlaying(bool shouldPlay)
@@ -1238,6 +2119,8 @@ void WorkstationAudioEngine::setPlaying(bool shouldPlay)
 
     if (shouldPlay)
         metronomeSampleCounter = 0;
+    else
+        requestAllNotesOff();
 }
 
 void WorkstationAudioEngine::setPlaybackPositionSeconds(double seconds)
@@ -1401,8 +2284,11 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
         const auto samplesToRead = juce::jlimit<int64>(1, totalSamples - sourceStartSample, requestedSamples);
 
         clip.buffer.setSize(juce::jmax(2, (int) reader->numChannels), (int) samplesToRead, false, false, true);
-        clip.buffer.clear();
-        reader->read(&clip.buffer, 0, (int) samplesToRead, sourceStartSample, true, true);
+        if (! readAndResampleSection(*reader, sourceStartSample, samplesToRead, graphSampleRate, clip.buffer))
+        {
+            errorMessage = "Could not resample recorded clip: " + target.file.getFileName();
+            continue;
+        }
         clip.startSample = (int64) std::llround(target.startSeconds * graphSampleRate);
         clip.trackIndex = target.trackIndex;
         clips.add(std::move(clip));
@@ -1416,6 +2302,107 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
 
     arrangementSource.setClips(std::move(clips));
     return true;
+}
+
+void WorkstationAudioEngine::setTrackerMidiClips(const juce::Array<MidiPlaybackClip>& clips)
+{
+    std::vector<MidiPlaybackClip> newClips;
+    newClips.reserve((size_t) clips.size());
+    for (const auto& clip : clips)
+        newClips.push_back(clip);
+
+    const juce::ScopedLock scopedLock(scheduledMidiClipsLock);
+    scheduledMidiClips = std::move(newClips);
+}
+
+void WorkstationAudioEngine::auditionNoteOn(int trackIndex, int pitch, int velocity)
+{
+    const juce::ScopedLock scopedLock(auditionRequestsLock);
+    pendingAuditionRequests.push_back({ trackIndex, pitch, velocity, true });
+}
+
+void WorkstationAudioEngine::auditionNoteOff(int trackIndex, int pitch)
+{
+    const juce::ScopedLock scopedLock(auditionRequestsLock);
+    pendingAuditionRequests.push_back({ trackIndex, pitch, 0, false });
+}
+
+void WorkstationAudioEngine::requestAllNotesOff()
+{
+    allNotesOffRequested.store(true);
+}
+
+void WorkstationAudioEngine::armMidiLearn(const juce::String& deviceIdFilter)
+{
+    const juce::ScopedLock lock(midiLearnLock);
+    midiLearnState.armed = true;
+    midiLearnState.deviceIdFilter = deviceIdFilter;
+    midiLearnState.hasResult = false;
+}
+
+void WorkstationAudioEngine::cancelMidiLearn()
+{
+    const juce::ScopedLock lock(midiLearnLock);
+    midiLearnState.armed = false;
+}
+
+bool WorkstationAudioEngine::isMidiLearnArmed() const noexcept
+{
+    const juce::ScopedLock lock(midiLearnLock);
+    return midiLearnState.armed;
+}
+
+bool WorkstationAudioEngine::takeMidiLearnResult(MidiLearnResult& result)
+{
+    const juce::ScopedLock lock(midiLearnLock);
+    if (! midiLearnState.hasResult)
+        return false;
+
+    result = midiLearnState.result;
+    midiLearnState.hasResult = false;
+    return true;
+}
+
+bool WorkstationAudioEngine::offerMidiLearnCandidate(const juce::String& deviceId, int channel, int number, bool isController)
+{
+    const juce::ScopedLock lock(midiLearnLock);
+
+    if (! midiLearnState.armed)
+        return false;
+
+    if (midiLearnState.deviceIdFilter.isNotEmpty() && midiLearnState.deviceIdFilter != deviceId)
+        return false;
+
+    midiLearnState.result.deviceId = deviceId;
+    midiLearnState.result.channel = channel;
+    midiLearnState.result.number = number;
+    midiLearnState.result.isController = isController;
+    midiLearnState.hasResult = true;
+    midiLearnState.armed = false;
+    return true;
+}
+
+void WorkstationAudioEngine::startMidiRecording()
+{
+    {
+        const juce::ScopedLock lock(recordedMidiEventsLock);
+        recordedMidiEvents.clear();
+    }
+
+    midiRecordingActive.store(true);
+}
+
+void WorkstationAudioEngine::stopMidiRecording()
+{
+    midiRecordingActive.store(false);
+}
+
+std::vector<WorkstationAudioEngine::RecordedMidiEvent> WorkstationAudioEngine::takeRecordedMidiEvents()
+{
+    const juce::ScopedLock lock(recordedMidiEventsLock);
+    auto events = std::move(recordedMidiEvents);
+    recordedMidiEvents.clear();
+    return events;
 }
 
 bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<PlaybackClipTarget>& targets,
@@ -1513,6 +2500,16 @@ void WorkstationAudioEngine::stopAssetPreview()
 bool WorkstationAudioEngine::isPreviewingAsset() const noexcept
 {
     return assetPreviewSource.isPreviewing();
+}
+
+void WorkstationAudioEngine::reapplyHostedPluginStates()
+{
+    for (auto* track : tracks)
+        if (track != nullptr)
+            track->insertChain.reapplyCachedStates();
+
+    masterInsertSource.reapplyCachedState();
+    graphVstInsertSource.reapplyCachedState();
 }
 
 bool WorkstationAudioEngine::startRecordingToFile(const juce::File& file, juce::String& errorMessage)
@@ -1902,6 +2899,186 @@ juce::File WorkstationAudioEngine::getTrackPluginFile(int trackIndex) const
     return {};
 }
 
+juce::File WorkstationAudioEngine::getTrackInstrumentPluginFile(int trackIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+    {
+        const auto count = tracks[(size_t) trackIndex]->insertChain.getPluginCount();
+        return count > 0 ? tracks[(size_t) trackIndex]->insertChain.getPluginFile(0)
+                         : juce::File();
+    }
+
+    return {};
+}
+
+int WorkstationAudioEngine::getTrackPluginParameterCount(int trackIndex, int slotIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.getParameterCount(slotIndex);
+
+    return 0;
+}
+
+juce::String WorkstationAudioEngine::getTrackPluginParameterName(int trackIndex, int slotIndex, int paramIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.getParameterName(slotIndex, paramIndex);
+
+    return {};
+}
+
+float WorkstationAudioEngine::getTrackPluginParameterValue(int trackIndex, int slotIndex, int paramIndex) const
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.getParameterValue(slotIndex, paramIndex);
+
+    return 0.0f;
+}
+
+void WorkstationAudioEngine::setTrackPluginParameterValueRealtime(int trackIndex, int slotIndex, int paramIndex, float normalizedValue)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->insertChain.setParameterValueRealtime(slotIndex, paramIndex, normalizedValue);
+}
+
+bool WorkstationAudioEngine::renderMidiClipToFile(const juce::File& instrumentPluginFile,
+                                                  const std::vector<cs::MidiNoteEvent>& notes,
+                                                  const std::vector<cs::MidiCCEvent>& ccEvents,
+                                                  double tempoBpm,
+                                                  double durationSeconds,
+                                                  juce::File& outputFile,
+                                                  juce::String& errorMessage) const
+{
+    if (! instrumentPluginFile.existsAsFile())
+    {
+        errorMessage = "No instrument plugin is loaded on this track.";
+        return false;
+    }
+
+    if (notes.empty())
+    {
+        errorMessage = "The MIDI clip has no notes to render.";
+        return false;
+    }
+
+    juce::AudioPluginFormatManager formatManager;
+    formatManager.addDefaultFormats();
+
+    juce::OwnedArray<juce::PluginDescription> pluginDescriptions;
+    for (auto* format : formatManager.getFormats())
+    {
+        if (format != nullptr && format->fileMightContainThisPluginType(instrumentPluginFile.getFullPathName()))
+            format->findAllTypesForFile(pluginDescriptions, instrumentPluginFile.getFullPathName());
+    }
+
+    if (pluginDescriptions.isEmpty())
+    {
+        errorMessage = "Could not identify the instrument plugin format.";
+        return false;
+    }
+
+    const auto sampleRate = juce::jmax(8000.0, graphSampleRate);
+    const auto blockSize = juce::jmax(64, graphBlockSize);
+
+    std::unique_ptr<juce::AudioPluginInstance> instance;
+    for (auto* pluginDescription : pluginDescriptions)
+    {
+        if (pluginDescription == nullptr)
+            continue;
+
+        juce::String creationError;
+        instance = formatManager.createPluginInstance(*pluginDescription, sampleRate, blockSize, creationError);
+        if (instance != nullptr)
+            break;
+    }
+
+    if (instance == nullptr)
+    {
+        errorMessage = "Could not create an instance of the instrument plugin for rendering.";
+        return false;
+    }
+
+    configureMainBusOnly(*instance);
+    instance->setPlayHead(&enginePlayHead);
+    instance->setPlayConfigDetails(2, 2, sampleRate, blockSize);
+    instance->prepareToPlay(sampleRate, blockSize);
+
+    // Sample-accurate note/CC scheduling, converted from clip-relative beats to samples.
+    const auto beatsToSamples = [tempoBpm, sampleRate](double beats)
+    {
+        return (int64) std::llround((beats * 60.0 / juce::jmax(1.0, tempoBpm)) * sampleRate);
+    };
+
+    juce::MidiBuffer fullMidi;
+    for (const auto& note : notes)
+    {
+        auto onSample = beatsToSamples(note.startBeats);
+        auto offSample = beatsToSamples(note.startBeats + note.lengthBeats);
+        fullMidi.addEvent(juce::MidiMessage::noteOn((int) note.channel, note.pitch, (juce::uint8) note.velocity), (int) onSample);
+        fullMidi.addEvent(juce::MidiMessage::noteOff((int) note.channel, note.pitch), (int) juce::jmax(onSample + 1, offSample));
+    }
+
+    for (const auto& point : ccEvents)
+        fullMidi.addEvent(juce::MidiMessage::controllerEvent(1, point.controller, point.value), (int) beatsToSamples(point.beats));
+
+    // Add a release tail so one-shot samples and reverb/decay aren't cut off.
+    auto tailSeconds = juce::jlimit(0.0, 4.0, instance->getTailLengthSeconds());
+    const auto totalSamples = (int64) std::ceil((durationSeconds + juce::jmax(0.5, tailSeconds)) * sampleRate);
+
+    juce::AudioBuffer<float> outputBuffer(2, (int) totalSamples);
+    outputBuffer.clear();
+
+    juce::AudioBuffer<float> blockBuffer(2, blockSize);
+
+    for (int64 blockStart = 0; blockStart < totalSamples; blockStart += blockSize)
+    {
+        const auto samplesThisBlock = (int) juce::jmin<int64>(blockSize, totalSamples - blockStart);
+
+        blockBuffer.clear();
+
+        juce::MidiBuffer blockMidi;
+        for (const auto metadata : fullMidi)
+        {
+            auto samplePos = (int64) metadata.samplePosition;
+            if (samplePos >= blockStart && samplePos < blockStart + samplesThisBlock)
+                blockMidi.addEvent(metadata.getMessage(), (int) (samplePos - blockStart));
+        }
+
+        instance->processBlock(blockBuffer, blockMidi);
+        outputBuffer.copyFrom(0, (int) blockStart, blockBuffer, 0, 0, samplesThisBlock);
+        outputBuffer.copyFrom(1, (int) blockStart, blockBuffer, 1, 0, samplesThisBlock);
+    }
+
+    instance->releaseResources();
+    instance.reset();
+
+    auto cacheDir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("CreationStationMidiRender");
+    cacheDir.createDirectory();
+    auto renderFile = cacheDir.getChildFile("clip_" + juce::Uuid().toString() + ".wav");
+
+    juce::WavAudioFormat wavFormat;
+    std::unique_ptr<juce::FileOutputStream> outputStream(renderFile.createOutputStream());
+    if (outputStream == nullptr)
+    {
+        errorMessage = "Could not create a temporary render file.";
+        return false;
+    }
+
+    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(outputStream.get(), sampleRate, 2, 24, {}, 0));
+    if (writer == nullptr)
+    {
+        errorMessage = "Could not create a WAV writer for the rendered clip.";
+        return false;
+    }
+
+    outputStream.release(); // writer now owns the stream
+    writer->writeFromAudioSampleBuffer(outputBuffer, 0, outputBuffer.getNumSamples());
+    writer.reset();
+
+    outputFile = renderFile;
+    return true;
+}
+
 bool WorkstationAudioEngine::hasTrackPlugin(int trackIndex) const noexcept
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
@@ -1981,6 +3158,8 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
         trackState.setProperty("muted", track->isMuted(), nullptr);
         trackState.setProperty("soloed", track->isSoloed(), nullptr);
         trackState.setProperty("inputChannel", track->getInputChannel(), nullptr);
+        trackState.setProperty("midiInputChannel", track->getMidiInputChannel(), nullptr);
+        trackState.setProperty("midiInputDeviceId", track->getMidiInputDeviceId(), nullptr);
         trackState.setProperty("recordingArmed", track->isRecordingArmed(), nullptr);
         trackState.setProperty("monitoringEnabled", track->isMonitoringEnabled(), nullptr);
         trackState.setProperty("stereoEnabled", track->isStereoEnabled(), nullptr);
@@ -2034,6 +3213,86 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
     return state;
 }
 
+juce::String WorkstationAudioEngine::createHostedPluginStateSignature() const
+{
+    juce::ValueTree state("HostedPluginState");
+
+    juce::ValueTree tracksState("Tracks");
+    for (int trackIndex = 0; trackIndex < tracks.size(); ++trackIndex)
+    {
+        auto* track = tracks[(size_t) trackIndex];
+        juce::ValueTree trackState("Track");
+        trackState.setProperty("index", trackIndex, nullptr);
+
+        juce::ValueTree insertChainState("InsertChain");
+        insertChainState.setProperty("count", track->insertChain.getPluginCount(), nullptr);
+        for (int slotIndex = 0; slotIndex < track->insertChain.getPluginCount(); ++slotIndex)
+        {
+            juce::ValueTree slotState("Insert");
+            slotState.setProperty("slot", slotIndex, nullptr);
+            slotState.setProperty("file", track->insertChain.getPluginFile(slotIndex).getFullPathName(), nullptr);
+            slotState.setProperty("bypassed", track->insertChain.isBypassed(slotIndex), nullptr);
+
+            juce::MemoryBlock pluginState;
+            if (track->insertChain.copyStateTo(slotIndex, pluginState))
+                slotState.setProperty("state", juce::Base64::toBase64(pluginState.getData(), pluginState.getSize()), nullptr);
+
+            insertChainState.addChild(slotState, -1, nullptr);
+        }
+
+        trackState.addChild(insertChainState, -1, nullptr);
+        tracksState.addChild(trackState, -1, nullptr);
+    }
+
+    state.addChild(tracksState, -1, nullptr);
+
+    juce::ValueTree masterInsert("MasterInsert");
+    masterInsert.setProperty("bypassed", masterInsertSource.isBypassed(), nullptr);
+    masterInsert.setProperty("file", masterInsertSource.getPluginFile().getFullPathName(), nullptr);
+    juce::MemoryBlock masterState;
+    if (masterInsertSource.copyStateTo(masterState))
+        masterInsert.setProperty("state", juce::Base64::toBase64(masterState.getData(), masterState.getSize()), nullptr);
+    state.addChild(masterInsert, -1, nullptr);
+
+    juce::ValueTree graphInsert("GraphInsert");
+    graphInsert.setProperty("enabled", graphVstEnabled.load(), nullptr);
+    graphInsert.setProperty("mix", graphVstMix.load(), nullptr);
+    graphInsert.setProperty("file", graphVstInsertSource.getPluginFile().getFullPathName(), nullptr);
+    juce::MemoryBlock graphState;
+    if (graphVstInsertSource.copyStateTo(graphState))
+        graphInsert.setProperty("state", juce::Base64::toBase64(graphState.getData(), graphState.getSize()), nullptr);
+    state.addChild(graphInsert, -1, nullptr);
+
+    if (auto xml = state.createXml())
+        return xml->toString();
+
+    return {};
+}
+
+bool WorkstationAudioEngine::reapplyTrackPluginState(int trackIndex, int slotIndex)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        return tracks[(size_t) trackIndex]->insertChain.reapplyCachedState(slotIndex);
+
+    return false;
+}
+
+void WorkstationAudioEngine::PluginInsertChain::reapplyCachedStates()
+{
+    for (auto* insert : inserts)
+        if (insert != nullptr && insert->hasPlugin())
+            insert->reapplyCachedState();
+}
+
+bool WorkstationAudioEngine::PluginInsertChain::reapplyCachedState(int slotIndex)
+{
+    if (juce::isPositiveAndBelow(slotIndex, inserts.size()))
+        if (auto* insert = inserts[slotIndex])
+            return insert->hasPlugin() && insert->reapplyCachedState();
+
+    return false;
+}
+
 bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionState, juce::String& errorMessage)
 {
     if (! sessionState.isValid() || sessionState.getType() != juce::Identifier("CreationStationSession"))
@@ -2064,6 +3323,8 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
             track->setMuted((bool) child.getProperty("muted", track->isMuted()));
             track->setSoloed((bool) child.getProperty("soloed", track->isSoloed()));
             track->setInputChannel((int) child.getProperty("inputChannel", track->getInputChannel()));
+            track->setMidiInputChannel((int) child.getProperty("midiInputChannel", track->getMidiInputChannel()));
+            track->setMidiInputDeviceId(child.getProperty("midiInputDeviceId", track->getMidiInputDeviceId()).toString());
             track->setRecordingArmed((bool) child.getProperty("recordingArmed", false));
             track->setMonitoringEnabled((bool) child.getProperty("monitoringEnabled", false));
             track->setStereoEnabled((bool) child.getProperty("stereoEnabled", false));

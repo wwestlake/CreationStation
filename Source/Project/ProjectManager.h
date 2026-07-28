@@ -1,8 +1,10 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <optional>
 #include "../AI/AiProviderSettings.h"
 #include "../ControlSurface/ControlSurfaceMappingStore.h"
+#include "ProjectStorage.h"
 
 class ProjectManager final
 {
@@ -25,13 +27,19 @@ public:
     struct ProjectAsset
     {
         juce::String id;
+        juce::String versionId;
         juce::String name;
         juce::String type;
         juce::String category;
         juce::String description;
         juce::String relativePath;
+        cs::AssetRef ref;
         juce::File file;
         int64 fileSizeBytes = 0;
+        int numChannels = 0;
+        double sampleRate = 0.0;
+        int bitDepth = 0;
+        double durationSeconds = 0.0;
     };
 
     bool hasProject() const noexcept { return currentProject.rootDirectory.exists(); }
@@ -83,6 +91,10 @@ public:
                                           juce::String& errorMessage) const;
     juce::Array<juce::File> listAssetFiles() const;
     juce::Array<ProjectAsset> listProjectAssets() const;
+    juce::String createProjectAssetId(const juce::File& file) const;
+    juce::String createProjectAssetVersionId(const juce::File& file) const;
+    std::optional<ProjectAsset> findProjectAssetById(const juce::String& assetId) const;
+    std::optional<ProjectAsset> findProjectAsset(const cs::AssetRef& assetRef) const;
 
     juce::String getDisplayLabel() const;
     juce::File getStorageRoot() const;
@@ -112,11 +124,18 @@ public:
     juce::File getProjectPackageFile() const;
     juce::File getTemplatePackageFile(const juce::String& templateName) const;
     juce::File getLayoutPackageFile(const juce::String& layoutName) const;
+    std::unique_ptr<cs::IProjectStorage> createStorageAdapter();
+    std::unique_ptr<cs::IExternalFileBridge> createExternalFileBridge();
 
 private:
     static juce::String makeSlug(const juce::String& name);
     static juce::File getStoragePointerFile();
     juce::File getAutoloadLastProjectFile() const;
+    juce::File saveAudioAssetFile(const juce::AudioBuffer<float>& buffer,
+                                  double sampleRate,
+                                  const juce::String& suggestedName,
+                                  cs::AssetKind assetKind,
+                                  juce::String& errorMessage) const;
 
     bool ensureDirectories(juce::String& errorMessage);
     bool ensureStorageDirectories(juce::String& errorMessage) const;

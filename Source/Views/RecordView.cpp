@@ -15,6 +15,8 @@ RecordView::TrackRow::TrackRow(int newTrackIndex, const juce::String& name)
         if (onArmChanged)
             onArmChanged(trackIndex, armed);
     };
+    armButton.setTooltip("Arm this track for recording");
+    inputMonitorButton.setTooltip("Monitor this track's input while recording");
     addAndMakeVisible(armButton);
     addAndMakeVisible(inputMonitorButton);
 }

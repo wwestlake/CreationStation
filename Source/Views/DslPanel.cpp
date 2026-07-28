@@ -42,6 +42,7 @@ export instrument main
     addAndMakeVisible(outputEditor);
 
     compileButton.onClick = [this] { compileSource(); };
+    compileButton.setTooltip("Compile the Patina source");
     addAndMakeVisible(compileButton);
 
     exportButton.onClick = [this]
@@ -49,6 +50,7 @@ export instrument main
         if (lastModule.success && onArtifactExportRequested)
             onArtifactExportRequested(lastModule.artifactJson, makeSuggestedArtifactName());
     };
+    exportButton.setTooltip("Export the compiled artifact as a file");
     addAndMakeVisible(exportButton);
 
     saveButton.onClick = [this]
@@ -56,6 +58,7 @@ export instrument main
         if (lastModule.success && onArtifactSaveToLibraryRequested)
             onArtifactSaveToLibraryRequested(lastModule.artifactJson, makeSuggestedArtifactName());
     };
+    saveButton.setTooltip("Save the compiled artifact to your library");
     addAndMakeVisible(saveButton);
 
     loadButton.onClick = [this]
@@ -63,6 +66,7 @@ export instrument main
         if (onArtifactLoadRequested)
             onArtifactLoadRequested();
     };
+    loadButton.setTooltip("Load a saved artifact from your library");
     addAndMakeVisible(loadButton);
 
     compileSource();

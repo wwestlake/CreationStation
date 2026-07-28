@@ -644,6 +644,7 @@ ArrangeView::ArrangeView()
         applyEditorValuesToSelectedClip();
         refreshTrimUi();
     };
+    reverseButton.setTooltip("Reverse the selected clip");
     addAndMakeVisible(reverseButton);
 
     normalizeButton.onClick = [this]
@@ -651,6 +652,7 @@ ArrangeView::ArrangeView()
         applyEditorValuesToSelectedClip();
         refreshTrimUi();
     };
+    normalizeButton.setTooltip("Normalize the selected clip's gain");
     addAndMakeVisible(normalizeButton);
 
     importAssetButton.onClick = [this]
@@ -658,6 +660,7 @@ ArrangeView::ArrangeView()
         if (onImportAssetRequested)
             onImportAssetRequested();
     };
+    importAssetButton.setTooltip("Import a foley/sound effect asset");
     addAndMakeVisible(importAssetButton);
 
     previewSliceButton.onClick = [this]
@@ -665,12 +668,14 @@ ArrangeView::ArrangeView()
         if (juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size()) && onAssetPreviewRequested)
             onAssetPreviewRequested(assetFiles[(size_t) selectedAssetIndex]);
     };
+    previewSliceButton.setTooltip("Audition the selected asset");
     addAndMakeVisible(previewSliceButton);
 
     placeAssetButton.onClick = [this]
     {
         placeSelectedAssetOnCurrentLayer();
     };
+    placeAssetButton.setTooltip("Place the selected asset on the current layer");
     addAndMakeVisible(placeAssetButton);
 
     duplicateClipButton.onClick = [this]
@@ -688,6 +693,7 @@ ArrangeView::ArrangeView()
         refreshClipInspector();
         notifyArrangementChanged();
     };
+    duplicateClipButton.setTooltip("Duplicate the selected clip");
     addAndMakeVisible(duplicateClipButton);
 
     deleteClipButton.onClick = [this]
@@ -702,6 +708,7 @@ ArrangeView::ArrangeView()
         refreshClipInspector();
         notifyArrangementChanged();
     };
+    deleteClipButton.setTooltip("Delete the selected clip");
     addAndMakeVisible(deleteClipButton);
 
     addTrackButton.setTooltip("Add Foley Layer");

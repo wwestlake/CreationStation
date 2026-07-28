@@ -522,6 +522,7 @@ SignalLabPanel::SignalLabPanel()
         if (onPreviewRequested && generatedBuffer.getNumSamples() > 0)
             onPreviewRequested(generatedBuffer, recipe.sampleRate, recipe.name);
     };
+    previewButton.setTooltip("Preview the generated signal");
     addAndMakeVisible(previewButton);
 
     renderButton.onClick = [this]
@@ -529,6 +530,7 @@ SignalLabPanel::SignalLabPanel()
         if (onRenderRequested && generatedBuffer.getNumSamples() > 0)
             onRenderRequested(generatedBuffer, recipe.sampleRate, recipe.name);
     };
+    renderButton.setTooltip("Render the generated signal into the project as an asset");
     addAndMakeVisible(renderButton);
 
     exportPatchButton.onClick = [this]
@@ -539,6 +541,7 @@ SignalLabPanel::SignalLabPanel()
         auto patchDocument = buildPatchDocument(recipe);
         onPatchExportRequested(cw::serialisePatchDocumentJson(patchDocument), recipe.name);
     };
+    exportPatchButton.setTooltip("Export this patch as a file");
     addAndMakeVisible(exportPatchButton);
 
     savePatchButton.onClick = [this]
@@ -549,6 +552,7 @@ SignalLabPanel::SignalLabPanel()
         auto patchDocument = buildPatchDocument(recipe);
         onPatchSaveToLibraryRequested(cw::serialisePatchDocumentJson(patchDocument), recipe.name);
     };
+    savePatchButton.setTooltip("Save this patch to your sound library");
     addAndMakeVisible(savePatchButton);
 
     loadPatchButton.onClick = [this]
@@ -556,6 +560,7 @@ SignalLabPanel::SignalLabPanel()
         if (onPatchLoadRequested)
             onPatchLoadRequested();
     };
+    loadPatchButton.setTooltip("Load a saved patch from your sound library");
     addAndMakeVisible(loadPatchButton);
 
     addAndMakeVisible(envelopeEditor);
