@@ -34,8 +34,16 @@ SuiteSettingsPanel::SuiteSettingsPanel()
     };
     addAndMakeVisible(applyButton);
 
+    eulaButton.onClick = [this]
+    {
+        if (onReadEulaRequested)
+            onReadEulaRequested();
+    };
+    addAndMakeVisible(eulaButton);
+
     statusLabel.setColour(juce::Label::textColourId, hintColour());
-    statusLabel.setText("Suite settings are stored at the shared suite level for all Creation apps.", juce::dontSendNotification);
+    statusLabel.setText("Suite settings are stored at the shared suite level for all Creation apps. The EULA lives here too.",
+                        juce::dontSendNotification);
     addAndMakeVisible(statusLabel);
 }
 
@@ -88,7 +96,10 @@ void SuiteSettingsPanel::resized()
     layoutRow(liveProjectsRow, area);
 
     area.removeFromTop(10);
-    applyButton.setBounds(area.removeFromTop(34).removeFromLeft(180));
+    auto buttonRow = area.removeFromTop(34);
+    applyButton.setBounds(buttonRow.removeFromLeft(180));
+    buttonRow.removeFromLeft(10);
+    eulaButton.setBounds(buttonRow.removeFromLeft(140));
     area.removeFromTop(8);
     statusLabel.setBounds(area.removeFromTop(40));
 }
