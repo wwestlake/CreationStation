@@ -32,7 +32,7 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
 {
     result = {};
 
-    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(settings.providerName);
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(settings.providerId);
 
     if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, settings.apiKey))
     {

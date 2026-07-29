@@ -11,9 +11,10 @@ namespace
 AiProviderSettings makeAiProviderSettings(const creation::services::SuiteAiResolvedRuntimeSettings& runtimeSettings)
 {
     AiProviderSettings settings;
-    settings.providerName = runtimeSettings.providerDisplayName.isNotEmpty()
-                                ? runtimeSettings.providerDisplayName
-                                : creation::services::SuiteAiProviderRuntime::resolveProfile(runtimeSettings.providerId).displayName;
+    settings.providerDisplayName = runtimeSettings.providerDisplayName.isNotEmpty()
+                                       ? runtimeSettings.providerDisplayName
+                                       : creation::services::SuiteAiProviderRuntime::resolveProfile(runtimeSettings.providerId).displayName;
+    settings.providerId = runtimeSettings.providerId;
     settings.baseUrl = runtimeSettings.baseUrl;
     settings.modelName = runtimeSettings.modelName;
     settings.apiKey = runtimeSettings.apiKey;
@@ -1727,7 +1728,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         settingsPanel.setProjectMetadata(projectManager.getCurrentProject());
     settingsPanel.setAutoloadEnabled(autoloadLastProject);
     settingsPanel.setAiProviderSettings(aiProviderSettings);
-    aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+    aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
     aiPanel.setSelectedModel(aiProviderSettings.modelName);
     refreshAiModelCatalog();
 
@@ -2703,18 +2704,19 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     aiPanel.onProviderChanged = [this](const juce::String& providerName)
     {
         const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(providerName);
-        aiProviderSettings.providerName = profile.displayName;
+        aiProviderSettings.providerDisplayName = profile.displayName;
+        aiProviderSettings.providerId = profile.providerId;
         if (creation::services::SuiteAiProviderRuntime::shouldReplaceBaseUrlOnProviderSwitch(aiProviderSettings.baseUrl, profile))
             aiProviderSettings.baseUrl = profile.defaultBaseUrl;
         aiProviderSettings.modelName = creation::services::SuiteAiProviderRuntime::defaultModelName(profile);
-        aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
         aiPanel.setSelectedModel(aiProviderSettings.modelName);
         settingsPanel.setAiProviderSettings(aiProviderSettings);
 
         saveAppSettings();
 
         refreshAiModelCatalog();
-        transportBar.setStatusText("AI provider: " + aiProviderSettings.providerName + ".");
+        transportBar.setStatusText("AI provider: " + aiProviderSettings.providerDisplayName + ".");
     };
 
     aiPanel.onPromptSubmitted = [this](const juce::String& submittedPrompt)
@@ -2860,7 +2862,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     settingsPanel.onAiProviderSettingsChanged = [this](const AiProviderSettings& settings)
     {
         aiProviderSettings = settings;
-        aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
         aiPanel.setSelectedModel(aiProviderSettings.modelName);
 
         juce::String errorMessage;
@@ -5912,7 +5914,7 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     if (aiCompletionInFlight)
         return;
 
-    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerName);
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerId);
     if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, aiProviderSettings.apiKey))
     {
         aiPanel.setAssistantResponse("Enter your provider API key in Settings first.");
@@ -5991,7 +5993,7 @@ void MainComponent::refreshAiModelCatalog()
         return;
     }
 
-    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerName);
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerId);
     if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, aiProviderSettings.apiKey))
     {
         settingsPanel.setAvailableAiModels({}, "Enter your provider API key, then refresh the list.");
@@ -6002,7 +6004,7 @@ void MainComponent::refreshAiModelCatalog()
     juce::StringArray modelIds;
     juce::String errorMessage;
     if (! modelCatalogClient.fetchModelIds(aiProviderSettings.baseUrl,
-                                           aiProviderSettings.providerName,
+                                           aiProviderSettings.providerId,
                                            aiProviderSettings.apiKey,
                                            modelIds,
                                            errorMessage))
@@ -6031,7 +6033,7 @@ bool MainComponent::loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded)
     {
         aiProviderSettings = makeAiProviderSettings(runtimeSettings);
         settingsPanel.setAiProviderSettings(aiProviderSettings);
-        aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
         aiPanel.setSelectedModel(aiProviderSettings.modelName);
         return true;
     }
@@ -6039,7 +6041,7 @@ bool MainComponent::loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded)
     if (! migrateLegacyIfNeeded)
         return false;
 
-    auto legacyProviderName = aiProviderSettings.providerName.trim();
+    auto legacyProviderName = aiProviderSettings.providerDisplayName.trim();
     auto legacyBaseUrl = aiProviderSettings.baseUrl.trim();
     auto legacyModelName = aiProviderSettings.modelName.trim();
     auto hasLegacySettings = legacyProviderName.isNotEmpty()
@@ -6053,7 +6055,7 @@ bool MainComponent::loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded)
         return false;
 
     settingsPanel.setAiProviderSettings(aiProviderSettings);
-    aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+    aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
     aiPanel.setSelectedModel(aiProviderSettings.modelName);
     return true;
 }
@@ -6065,9 +6067,9 @@ bool MainComponent::saveSuiteAiProviderSettings(const AiProviderSettings& settin
 
     auto resolvedRuntimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
         suiteAiSettings, creation::assets::SuiteAppDomain::station);
-    resolvedRuntimeSettings.providerDisplayName = settings.providerName.trim();
+    resolvedRuntimeSettings.providerDisplayName = settings.providerDisplayName.trim();
     resolvedRuntimeSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
-        settings.providerName);
+        settings.providerId.isNotEmpty() ? settings.providerId : settings.providerDisplayName);
     resolvedRuntimeSettings.baseUrl = settings.baseUrl.trim();
     resolvedRuntimeSettings.modelName = settings.modelName.trim();
     resolvedRuntimeSettings.apiKey = settings.apiKey;
@@ -7575,7 +7577,9 @@ void MainComponent::loadAppSettings()
     autoloadLastProject = (bool) state.getProperty("autoloadLastProject", autoloadLastProject);
     metronomeEnabled = (bool) state.getProperty("metronomeEnabled", metronomeEnabled);
     auto legacyAiProviderSettings = aiProviderSettings;
-    legacyAiProviderSettings.providerName = state.getProperty("aiProviderName", aiProviderSettings.providerName).toString();
+    legacyAiProviderSettings.providerDisplayName = state.getProperty("aiProviderName", aiProviderSettings.providerDisplayName).toString();
+    legacyAiProviderSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
+        legacyAiProviderSettings.providerDisplayName);
     legacyAiProviderSettings.baseUrl = state.getProperty("aiBaseUrl", aiProviderSettings.baseUrl).toString();
     legacyAiProviderSettings.modelName = state.getProperty("aiModelName", aiProviderSettings.modelName).toString();
     legacyAiProviderSettings.apiKey = state.getProperty("aiApiKey", aiProviderSettings.apiKey).toString();

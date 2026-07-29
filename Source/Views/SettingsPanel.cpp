@@ -863,7 +863,9 @@ void SettingsPanel::setAutoloadEnabled(bool enabled)
 
 void SettingsPanel::setAiProviderSettings(const AiProviderSettings& settings)
 {
-    const auto providerId = normalizedProviderId(settings.providerName);
+    const auto providerId = normalizedProviderId(settings.providerId.isNotEmpty()
+                                                     ? settings.providerId
+                                                     : settings.providerDisplayName);
     auto selectedIndex = 0;
     for (int index = 0; index < availableAiProviders().size(); ++index)
         if (availableAiProviders()[index].providerId == providerId)
@@ -961,7 +963,8 @@ void SettingsPanel::setMidiInputDevices(const juce::Array<MidiDeviceInfo>& devic
 AiProviderSettings SettingsPanel::getAiProviderSettings() const
 {
     AiProviderSettings settings;
-    settings.providerName = contentView.aiProviderComboBox.getText().trim();
+    settings.providerDisplayName = contentView.aiProviderComboBox.getText().trim();
+    settings.providerId = normalizedProviderId(settings.providerDisplayName);
     settings.modelName = contentView.aiModelComboBox.getText().trim();
     settings.baseUrl = contentView.aiEndpointEditor.getText().trim();
     settings.apiKey = contentView.aiKeyEditor.getText();
