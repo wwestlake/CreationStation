@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(cmake/CreationSharedLLVM.cmake)
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/CMake/CreationSharedLLVM.cmake")
 configure_creation_shared_llvm(CS "Creation Station")
 
 # Keep full optimizations in Release but still emit PDBs, so a crash dump collected from a
@@ -31,12 +31,26 @@ set(CREATION_SUITE_SHARED_DIR "D:/000 Creation Suite/shared" CACHE PATH "Path to
 add_subdirectory("${JUCE_DIR}" juce)
 
 set(CS_ASSET_SYSTEM_TARGET creation_asset_system)
+set(CS_SERVICES_TARGET "")
+set(CS_UI_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/AssetSystem/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AssetSystem"
                      "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedAssetSystem")
     set(CS_ASSET_SYSTEM_TARGET creation_suite_asset_system)
 else()
     add_subdirectory(AssetSystem)
+endif()
+
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Services/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Services"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedServices")
+    set(CS_SERVICES_TARGET creation_suite_services)
+endif()
+
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/UI/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/UI"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedUI")
+    set(CS_UI_TARGET creation_suite_ui)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
@@ -190,8 +204,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/ScorePanel.h
     Source/Views/SignalLabPanel.cpp
     Source/Views/SignalLabPanel.h
-    Source/Views/SuiteSettingsPanel.cpp
-    Source/Views/SuiteSettingsPanel.h
     Source/Views/TrackerPanel.cpp
     Source/Views/TrackerPanel.h
     Source/Views/SamplePackBuilderPanel.cpp
@@ -230,8 +242,15 @@ target_compile_definitions(CreationStationInstrument PRIVATE
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CreationStationInstrument,JUCE_VERSION>"
 )
 
+if(MSVC)
+    target_compile_options(CreativeWorkstation PRIVATE /FS)
+    target_compile_options(CreationStationInstrument PRIVATE /FS)
+endif()
+
 target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_SERVICES_TARGET}
+    ${CS_UI_TARGET}
     creation_station_language_host
     juce::juce_audio_devices
     juce::juce_audio_processors

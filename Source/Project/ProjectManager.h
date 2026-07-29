@@ -2,7 +2,6 @@
 
 #include <JuceHeader.h>
 #include <optional>
-#include "../AI/AiProviderSettings.h"
 #include "../ControlSurface/ControlSurfaceMappingStore.h"
 #include "ProjectStorage.h"
 
@@ -107,9 +106,6 @@ public:
     juce::File getUserTutorialDirectory() const;
     juce::File getContentManifestFile() const;
     juce::File getAiContextStoreFile() const;
-    juce::File getAiProviderSettingsFile() const;
-    bool loadAiProviderSettings(AiProviderSettings& settings) const;
-    bool saveAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage) const;
     juce::File getVstSearchPathFile() const;
     juce::StringArray loadVstSearchPaths() const;
     bool saveVstSearchPaths(const juce::StringArray& paths, juce::String& errorMessage) const;

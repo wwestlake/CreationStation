@@ -1,4 +1,5 @@
 #include "OpenAiChatClient.h"
+#include <creation/services/SuiteAiProviderRuntime.h>
 
 namespace
 {
@@ -13,11 +14,8 @@ juce::var makeMessage(const juce::String& role, const juce::String& content)
 
 juce::String OpenAiChatClient::normaliseBaseUrl(const juce::String& baseUrl)
 {
-    auto trimmed = baseUrl.trim();
-    if (trimmed.isEmpty())
-        return "https://api.openai.com/v1";
-
-    return trimmed.endsWithChar('/') ? trimmed.dropLastCharacters(1) : trimmed;
+    return creation::services::SuiteAiProviderRuntime::normalizeBaseUrl(
+        baseUrl, creation::services::SuiteAiProviderRuntime::resolveProfile("openai"));
 }
 
 juce::String OpenAiChatClient::buildHeaders(const juce::String& apiKey)
@@ -34,18 +32,17 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
 {
     result = {};
 
-    auto providerName = settings.providerName.toLowerCase();
-    auto isOllama = providerName.contains("ollama");
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(settings.providerName);
 
-    if (! isOllama && settings.apiKey.trim().isEmpty())
+    if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, settings.apiKey))
     {
-        result.errorMessage = "Enter your OpenAI API key in Settings.";
+        result.errorMessage = "Enter your provider API key in Settings.";
         return false;
     }
 
     auto model = settings.modelName.trim();
     if (model.isEmpty())
-        model = "gpt-4.1-mini";
+        model = creation::services::SuiteAiProviderRuntime::defaultModelName(profile);
 
     juce::Array<juce::var> messages;
     if (systemPrompt.isNotEmpty())
@@ -55,24 +52,19 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
     auto* root = new juce::DynamicObject();
     root->setProperty("model", model);
     root->setProperty("temperature", 0.4);
+    root->setProperty("messages", juce::var(messages));
 
-    auto urlPath = "/chat/completions";
-    auto headers = buildHeaders(settings.apiKey);
-    if (isOllama)
+    auto urlPath = profile.chatCompletionsPath;
+    auto headers = creation::services::SuiteAiProviderRuntime::buildAuthHeaders(profile, settings.apiKey);
+    if (profile.isOllamaStyle())
     {
-        root->setProperty("messages", juce::var(messages));
         root->setProperty("stream", false);
-        urlPath = "/api/chat";
-        headers = "Content-Type: application/json\r\nAccept: application/json\r\n";
-    }
-    else
-    {
-        root->setProperty("messages", juce::var(messages));
     }
 
     auto body = juce::JSON::toString(juce::var(root), false);
 
-    auto url = juce::URL(normaliseBaseUrl(settings.baseUrl) + urlPath).withPOSTData(body);
+    auto url = juce::URL(creation::services::SuiteAiProviderRuntime::normalizeBaseUrl(settings.baseUrl, profile) + urlPath)
+                   .withPOSTData(body);
     int statusCode = 0;
     auto stream = url.createInputStream(juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inPostData)
                                             .withHttpRequestCmd("POST")
@@ -82,7 +74,7 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
 
     if (stream == nullptr)
     {
-        result.errorMessage = "Could not connect to the OpenAI API.";
+        result.errorMessage = "Could not connect to the selected AI provider.";
         return false;
     }
 
@@ -91,31 +83,32 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
 
     if (statusCode < 200 || statusCode >= 300)
     {
-        result.errorMessage = "OpenAI error (HTTP " + juce::String(statusCode) + "): " + result.rawResponse.substring(0, 300);
+        result.errorMessage = profile.displayName + " error (HTTP " + juce::String(statusCode) + "): "
+                              + result.rawResponse.substring(0, 300);
         return false;
     }
 
     auto parsed = juce::JSON::parse(result.rawResponse);
     if (! parsed.isObject())
     {
-        result.errorMessage = "OpenAI returned invalid JSON.";
+        result.errorMessage = profile.displayName + " returned invalid JSON.";
         return false;
     }
 
     auto* object = parsed.getDynamicObject();
     if (object == nullptr)
     {
-        result.errorMessage = "OpenAI response was missing its root object.";
+        result.errorMessage = profile.displayName + " response was missing its root object.";
         return false;
     }
 
-    if (isOllama)
+    if (profile.isOllamaStyle())
     {
         auto message = object->getProperty("message");
         auto* messageObject = message.getDynamicObject();
         if (messageObject == nullptr)
         {
-            result.errorMessage = "Ollama response was missing its message object.";
+            result.errorMessage = profile.displayName + " response was missing its message object.";
             return false;
         }
 
@@ -126,7 +119,7 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
         auto choices = object->getProperty("choices");
         if (! choices.isArray() || choices.getArray() == nullptr || choices.getArray()->size() == 0)
         {
-            result.errorMessage = "OpenAI response did not include any choices.";
+            result.errorMessage = profile.displayName + " response did not include any choices.";
             return false;
         }
 
@@ -134,7 +127,7 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
         auto* choiceObject = firstChoice.getDynamicObject();
         if (choiceObject == nullptr)
         {
-            result.errorMessage = "OpenAI response choice was malformed.";
+            result.errorMessage = profile.displayName + " response choice was malformed.";
             return false;
         }
 
@@ -142,7 +135,7 @@ bool OpenAiChatClient::sendChatCompletion(const AiProviderSettings& settings,
         auto* messageObject = message.getDynamicObject();
         if (messageObject == nullptr)
         {
-            result.errorMessage = "OpenAI response choice did not include a message.";
+            result.errorMessage = profile.displayName + " response choice did not include a message.";
             return false;
         }
 

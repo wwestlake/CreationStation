@@ -227,11 +227,6 @@ juce::File ProjectManager::getAiContextStoreFile() const
     return getConfigDirectory().getChildFile("ai-context-store.json");
 }
 
-juce::File ProjectManager::getAiProviderSettingsFile() const
-{
-    return getConfigDirectory().getChildFile("ai-provider-settings.json");
-}
-
 juce::File ProjectManager::getVstSearchPathFile() const
 {
     return getConfigDirectory().getChildFile("vst-search-paths.txt");
@@ -240,58 +235,6 @@ juce::File ProjectManager::getVstSearchPathFile() const
 juce::File ProjectManager::getControlSurfaceMappingsFile() const
 {
     return getConfigDirectory().getChildFile("control-surface-mappings.json");
-}
-
-bool ProjectManager::loadAiProviderSettings(AiProviderSettings& settings) const
-{
-    auto file = getAiProviderSettingsFile();
-    if (! file.existsAsFile())
-        return false;
-
-    auto json = juce::JSON::parse(file.loadFileAsString());
-    if (! json.isObject())
-        return false;
-
-    auto* object = json.getDynamicObject();
-    if (object == nullptr)
-        return false;
-
-    settings.providerName = object->getProperty("providerName").toString();
-    settings.baseUrl = object->getProperty("baseUrl").toString();
-    settings.modelName = object->getProperty("modelName").toString();
-    settings.apiKey = object->getProperty("apiKey").toString();
-    return true;
-}
-
-bool ProjectManager::saveAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage) const
-{
-    if (! hasStorageRoot())
-    {
-        errorMessage = "Choose a storage folder before saving AI settings.";
-        return false;
-    }
-
-    auto configDirectory = getConfigDirectory();
-    if (! configDirectory.exists() && ! configDirectory.createDirectory())
-    {
-        errorMessage = "Could not create the config folder for AI settings.";
-        return false;
-    }
-
-    auto* root = new juce::DynamicObject();
-    root->setProperty("providerName", settings.providerName);
-    root->setProperty("baseUrl", settings.baseUrl);
-    root->setProperty("modelName", settings.modelName);
-    root->setProperty("apiKey", settings.apiKey);
-
-    auto json = juce::JSON::toString(juce::var(root), true);
-    if (! getAiProviderSettingsFile().replaceWithText(json))
-    {
-        errorMessage = "Could not save the AI provider settings.";
-        return false;
-    }
-
-    return true;
 }
 
 juce::StringArray ProjectManager::loadVstSearchPaths() const

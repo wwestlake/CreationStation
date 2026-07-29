@@ -1,11 +1,25 @@
 #include "MainComponent.h"
 #include "Branding.h"
 #include "Patch/PatchModel.h"
+#include <creation/services/SuiteAiProviderRuntime.h>
 #include "Tutorial/TutorialScriptCompiler.h"
+#include <creation/services/SuiteAiSettings.h>
 #include <thread>
 
 namespace
 {
+AiProviderSettings makeAiProviderSettings(const creation::services::SuiteAiResolvedRuntimeSettings& runtimeSettings)
+{
+    AiProviderSettings settings;
+    settings.providerName = runtimeSettings.providerDisplayName.isNotEmpty()
+                                ? runtimeSettings.providerDisplayName
+                                : creation::services::SuiteAiProviderRuntime::resolveProfile(runtimeSettings.providerId).displayName;
+    settings.baseUrl = runtimeSettings.baseUrl;
+    settings.modelName = runtimeSettings.modelName;
+    settings.apiKey = runtimeSettings.apiKey;
+    return settings;
+}
+
 class ManagedDocumentWindow final : public juce::DocumentWindow
 {
 public:
@@ -2688,21 +2702,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     aiPanel.onProviderChanged = [this](const juce::String& providerName)
     {
-        auto isOllama = providerName.toLowerCase().contains("ollama");
-        auto previousEndpoint = aiProviderSettings.baseUrl.trim();
-        auto previousEndpointLower = previousEndpoint.toLowerCase();
-        aiProviderSettings.providerName = isOllama ? "Ollama" : "OpenAI";
-        if (isOllama)
-        {
-            if (previousEndpoint.isEmpty() || previousEndpointLower.contains("api.openai.com"))
-                aiProviderSettings.baseUrl = "http://localhost:11434";
-        }
-        else
-        {
-            if (previousEndpoint.isEmpty() || previousEndpointLower.contains("localhost:11434") || previousEndpointLower.contains("127.0.0.1:11434"))
-                aiProviderSettings.baseUrl = "https://api.openai.com/v1";
-        }
-        aiProviderSettings.modelName = isOllama ? juce::String("llama3.2:3b") : juce::String("gpt-4.1-mini");
+        const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(providerName);
+        aiProviderSettings.providerName = profile.displayName;
+        if (creation::services::SuiteAiProviderRuntime::shouldReplaceBaseUrlOnProviderSwitch(aiProviderSettings.baseUrl, profile))
+            aiProviderSettings.baseUrl = profile.defaultBaseUrl;
+        aiProviderSettings.modelName = creation::services::SuiteAiProviderRuntime::defaultModelName(profile);
         aiPanel.setSelectedProvider(aiProviderSettings.providerName);
         aiPanel.setSelectedModel(aiProviderSettings.modelName);
         settingsPanel.setAiProviderSettings(aiProviderSettings);
@@ -2858,6 +2862,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         aiProviderSettings = settings;
         aiPanel.setSelectedProvider(aiProviderSettings.providerName);
         aiPanel.setSelectedModel(aiProviderSettings.modelName);
+
+        juce::String errorMessage;
+        if (! saveSuiteAiProviderSettings(aiProviderSettings, errorMessage))
+            transportBar.setStatusText(errorMessage);
 
         saveAppSettings();
         refreshAiModelCatalog();
@@ -5904,10 +5912,10 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     if (aiCompletionInFlight)
         return;
 
-    auto providerIsOllama = aiProviderSettings.providerName.toLowerCase().contains("ollama");
-    if (! providerIsOllama && aiProviderSettings.apiKey.trim().isEmpty())
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerName);
+    if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, aiProviderSettings.apiKey))
     {
-        aiPanel.setAssistantResponse("Enter your OpenAI API key in Settings first.");
+        aiPanel.setAssistantResponse("Enter your provider API key in Settings first.");
         transportBar.setStatusText("AI provider key is missing.");
         return;
     }
@@ -5983,11 +5991,11 @@ void MainComponent::refreshAiModelCatalog()
         return;
     }
 
-    auto providerIsOllama = aiProviderSettings.providerName.toLowerCase().contains("ollama");
-    if (! providerIsOllama && aiProviderSettings.apiKey.trim().isEmpty())
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerName);
+    if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, aiProviderSettings.apiKey))
     {
-        settingsPanel.setAvailableAiModels({}, "Enter your OpenAI API key, then refresh the list.");
-        aiPanel.setAvailableModels({}, "Enter your OpenAI API key, then refresh the list.");
+        settingsPanel.setAvailableAiModels({}, "Enter your provider API key, then refresh the list.");
+        aiPanel.setAvailableModels({}, "Enter your provider API key, then refresh the list.");
         return;
     }
 
@@ -6009,6 +6017,68 @@ void MainComponent::refreshAiModelCatalog()
     settingsPanel.setAvailableAiModels(modelIds, statusText);
     aiPanel.setAvailableModels(modelIds, statusText);
     transportBar.setStatusText(statusText);
+}
+
+bool MainComponent::loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded)
+{
+    creation::services::SuiteAiSettingsStore store;
+    juce::String errorMessage;
+    auto suiteAiSettings = store.load(errorMessage);
+
+    const auto runtimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
+        suiteAiSettings, creation::assets::SuiteAppDomain::station);
+    if (runtimeSettings.isValid())
+    {
+        aiProviderSettings = makeAiProviderSettings(runtimeSettings);
+        settingsPanel.setAiProviderSettings(aiProviderSettings);
+        aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+        aiPanel.setSelectedModel(aiProviderSettings.modelName);
+        return true;
+    }
+
+    if (! migrateLegacyIfNeeded)
+        return false;
+
+    auto legacyProviderName = aiProviderSettings.providerName.trim();
+    auto legacyBaseUrl = aiProviderSettings.baseUrl.trim();
+    auto legacyModelName = aiProviderSettings.modelName.trim();
+    auto hasLegacySettings = legacyProviderName.isNotEmpty()
+                             || legacyBaseUrl.isNotEmpty()
+                             || legacyModelName.isNotEmpty()
+                             || aiProviderSettings.apiKey.trim().isNotEmpty();
+    if (! hasLegacySettings)
+        return false;
+
+    if (! saveSuiteAiProviderSettings(aiProviderSettings, errorMessage))
+        return false;
+
+    settingsPanel.setAiProviderSettings(aiProviderSettings);
+    aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+    aiPanel.setSelectedModel(aiProviderSettings.modelName);
+    return true;
+}
+
+bool MainComponent::saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage)
+{
+    creation::services::SuiteAiSettingsStore store;
+    auto suiteAiSettings = store.load(errorMessage);
+
+    auto resolvedRuntimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
+        suiteAiSettings, creation::assets::SuiteAppDomain::station);
+    resolvedRuntimeSettings.providerDisplayName = settings.providerName.trim();
+    resolvedRuntimeSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
+        settings.providerName);
+    resolvedRuntimeSettings.baseUrl = settings.baseUrl.trim();
+    resolvedRuntimeSettings.modelName = settings.modelName.trim();
+    resolvedRuntimeSettings.apiKey = settings.apiKey;
+
+    creation::services::SuiteAiSettingsResolver::upsertRuntimeSettingsForApp(
+        suiteAiSettings,
+        creation::assets::SuiteAppDomain::station,
+        resolvedRuntimeSettings,
+        "Creation Station");
+
+    return store.save(suiteAiSettings, errorMessage);
 }
 
 void MainComponent::syncSemanticAppContext()
@@ -6645,6 +6715,13 @@ void MainComponent::showSuiteSettingsWindow()
 
     auto panel = std::make_unique<SuiteSettingsPanel>();
     panel->setSettings(suiteSettings);
+    {
+        creation::services::SuiteAiSettingsStore aiStore;
+        juce::String aiErrorMessage;
+        panel->setAiSettings(aiStore.load(aiErrorMessage));
+        if (aiErrorMessage.isNotEmpty())
+            panel->setStatusText(aiErrorMessage);
+    }
     panel->onBrowseRequested = [this](const juce::String& fieldId)
     {
         chooseSuiteDirectory(fieldId);
@@ -6652,6 +6729,27 @@ void MainComponent::showSuiteSettingsWindow()
     panel->onApplyRequested = [this](const SuiteSettings& settings)
     {
         applySuiteSettings(settings);
+    };
+    panel->onApplyAiSettingsRequested = [this](const creation::services::SuiteAiSettings& settings)
+    {
+        creation::services::SuiteAiSettingsStore aiStore;
+        juce::String errorMessage;
+        if (! aiStore.save(settings, errorMessage))
+        {
+            transportBar.setStatusText(errorMessage);
+            if (suiteSettingsPanel != nullptr)
+                suiteSettingsPanel->setStatusText(errorMessage);
+            return;
+        }
+
+        loadSuiteAiProviderSettings();
+        transportBar.setStatusText("Saved suite AI account settings.");
+        if (suiteSettingsPanel != nullptr)
+            suiteSettingsPanel->setStatusText("Saved suite-wide storage and AI settings.");
+    };
+    panel->onReadEulaRequested = [this]
+    {
+        showSuiteEulaWindow();
     };
 
     auto* panelRaw = panel.get();
@@ -6665,7 +6763,7 @@ void MainComponent::showSuiteSettingsWindow()
     window->setUsingNativeTitleBar(true);
     window->setResizable(true, true);
     window->setContentOwned(panel.release(), true);
-    window->centreWithSize(940, 560);
+    window->centreWithSize(980, 1240);
     window->setVisible(true);
 
     suiteSettingsPanel = panelRaw;
@@ -6678,11 +6776,52 @@ void MainComponent::closeSuiteSettingsWindow()
     suiteSettingsWindow.reset();
 }
 
+void MainComponent::showSuiteEulaWindow()
+{
+    if (suiteEulaWindow != nullptr)
+    {
+        suiteEulaWindow->toFront(true);
+        return;
+    }
+
+    auto panel = std::make_unique<SuiteEulaPanel>();
+    auto* panelRaw = panel.get();
+    auto window = std::make_unique<ManagedDocumentWindow>("Creation Suite EULA",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              closeSuiteEulaWindow();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(860, 700);
+    window->setVisible(true);
+
+    suiteEulaPanel = panelRaw;
+    suiteEulaWindow = std::move(window);
+}
+
+void MainComponent::closeSuiteEulaWindow()
+{
+    suiteEulaPanel = nullptr;
+    suiteEulaWindow.reset();
+}
+
 void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
 {
     juce::String currentPath = suiteSettings.suiteVfsRoot;
     if (fieldId == "shared_resources_root")
         currentPath = suiteSettings.sharedResourcesRoot;
+    else if (fieldId == "project_containers_root")
+        currentPath = suiteSettings.projectContainersRoot;
+    else if (fieldId == "cache_root")
+        currentPath = suiteSettings.cacheRoot;
+    else if (fieldId == "materialized_files_root")
+        currentPath = suiteSettings.materializedFilesRoot;
+    else if (fieldId == "exports_root")
+        currentPath = suiteSettings.exportsRoot;
     else if (fieldId == "creation_station_projects_root")
         currentPath = suiteSettings.creationStationProjectsRoot;
     else if (fieldId == "creation_engine_projects_root")
@@ -6714,6 +6853,14 @@ void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
                                  suiteSettings.suiteVfsRoot = selectedPath;
                              else if (fieldId == "shared_resources_root")
                                  suiteSettings.sharedResourcesRoot = selectedPath;
+                             else if (fieldId == "project_containers_root")
+                                 suiteSettings.projectContainersRoot = selectedPath;
+                             else if (fieldId == "cache_root")
+                                 suiteSettings.cacheRoot = selectedPath;
+                             else if (fieldId == "materialized_files_root")
+                                 suiteSettings.materializedFilesRoot = selectedPath;
+                             else if (fieldId == "exports_root")
+                                 suiteSettings.exportsRoot = selectedPath;
                              else if (fieldId == "creation_station_projects_root")
                                  suiteSettings.creationStationProjectsRoot = selectedPath;
                              else if (fieldId == "creation_engine_projects_root")
@@ -7375,10 +7522,6 @@ void MainComponent::saveAppSettings()
     state.setProperty("audioSystem", selectedStudioAudioSystem, nullptr);
     state.setProperty("audioInputDevice", selectedStudioInputDevice, nullptr);
     state.setProperty("audioOutputDevice", selectedStudioOutputDevice, nullptr);
-    state.setProperty("aiProviderName", aiProviderSettings.providerName, nullptr);
-    state.setProperty("aiBaseUrl", aiProviderSettings.baseUrl, nullptr);
-    state.setProperty("aiModelName", aiProviderSettings.modelName, nullptr);
-    state.setProperty("aiApiKey", aiProviderSettings.apiKey, nullptr);
     state.addChild(studioIOModel.createState(), -1, nullptr);
 
     juce::ValueTree vstPathsState("VstSearchPaths");
@@ -7410,8 +7553,7 @@ void MainComponent::loadAppSettings()
     if (! settingsFile.existsAsFile())
     {
         autoloadLastProject = projectManager.shouldAutoloadLastProject();
-        if (projectManager.loadAiProviderSettings(aiProviderSettings))
-            settingsPanel.setAiProviderSettings(aiProviderSettings);
+        loadSuiteAiProviderSettings();
         vstPluginCatalog.setSearchPaths(projectManager.loadVstSearchPaths());
         transportBar.clickButton.setToggleState(metronomeEnabled, juce::dontSendNotification);
         engine.setMetronomeEnabled(metronomeEnabled);
@@ -7432,10 +7574,11 @@ void MainComponent::loadAppSettings()
     selectedStudioOutputDevice = state.getProperty("audioOutputDevice").toString();
     autoloadLastProject = (bool) state.getProperty("autoloadLastProject", autoloadLastProject);
     metronomeEnabled = (bool) state.getProperty("metronomeEnabled", metronomeEnabled);
-    aiProviderSettings.providerName = state.getProperty("aiProviderName", aiProviderSettings.providerName).toString();
-    aiProviderSettings.baseUrl = state.getProperty("aiBaseUrl", aiProviderSettings.baseUrl).toString();
-    aiProviderSettings.modelName = state.getProperty("aiModelName", aiProviderSettings.modelName).toString();
-    aiProviderSettings.apiKey = state.getProperty("aiApiKey", aiProviderSettings.apiKey).toString();
+    auto legacyAiProviderSettings = aiProviderSettings;
+    legacyAiProviderSettings.providerName = state.getProperty("aiProviderName", aiProviderSettings.providerName).toString();
+    legacyAiProviderSettings.baseUrl = state.getProperty("aiBaseUrl", aiProviderSettings.baseUrl).toString();
+    legacyAiProviderSettings.modelName = state.getProperty("aiModelName", aiProviderSettings.modelName).toString();
+    legacyAiProviderSettings.apiKey = state.getProperty("aiApiKey", aiProviderSettings.apiKey).toString();
 
     if (auto studioState = state.getChildWithName("StudioIO"); studioState.isValid())
         studioIOModel.restoreState(studioState);
@@ -7456,6 +7599,8 @@ void MainComponent::loadAppSettings()
         for (const auto child : disabledMidiState)
             disabledMidiInputDeviceIds.add(child.getProperty("id").toString());
 
+    aiProviderSettings = legacyAiProviderSettings;
+    loadSuiteAiProviderSettings(true);
     settingsPanel.setAiProviderSettings(aiProviderSettings);
     transportBar.clickButton.setToggleState(metronomeEnabled, juce::dontSendNotification);
     engine.setMetronomeEnabled(metronomeEnabled);

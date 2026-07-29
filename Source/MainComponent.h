@@ -38,9 +38,10 @@
 #include "Views/SettingsPanel.h"
 #include "Views/ScorePanel.h"
 #include "Views/SignalLabPanel.h"
-#include "Views/SuiteSettingsPanel.h"
 #include "Views/TrackerPanel.h"
 #include "Views/TourGuideOverlay.h"
+#include <creation/ui/SuiteEulaPanel.h>
+#include <creation/ui/SuiteSettingsPanel.h>
 
 class MainComponent final : public juce::Component,
                             private juce::Timer,
@@ -325,6 +326,8 @@ private:
     juce::Component::SafePointer<FxStackPanel> fxStackPanel;
     std::unique_ptr<juce::DocumentWindow> suiteSettingsWindow;
     juce::Component::SafePointer<SuiteSettingsPanel> suiteSettingsPanel;
+    std::unique_ptr<juce::DocumentWindow> suiteEulaWindow;
+    juce::Component::SafePointer<SuiteEulaPanel> suiteEulaPanel;
     std::unique_ptr<juce::DocumentWindow> midiEditorWindow;
     juce::Component::SafePointer<MidiEditorPanel> midiEditorPanel;
     std::array<std::unique_ptr<juce::DocumentWindow>, 12> workspacePopoutWindows;
@@ -487,6 +490,8 @@ private:
     void showProjectMenu();
     void showSuiteSettingsWindow();
     void closeSuiteSettingsWindow();
+    void showSuiteEulaWindow();
+    void closeSuiteEulaWindow();
     void chooseSuiteDirectory(const juce::String& fieldId);
     void applySuiteSettings(const SuiteSettings& settings);
     void createNewProject();
@@ -560,6 +565,8 @@ private:
     void showAiSidebar();
     void setAiSidebarCollapsed(bool shouldCollapse);
     void syncSemanticAppContext();
+    bool loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded = false);
+    bool saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage);
     void refreshAiModelCatalog();
     WorkspaceMode workspaceModeFromString(const juce::String& modeName) const;
     void configureTutorialOverlay();

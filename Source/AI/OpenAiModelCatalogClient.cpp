@@ -1,24 +1,10 @@
 #include "OpenAiModelCatalogClient.h"
-
-namespace
-{
-juce::String buildHeaders(const juce::String& apiKey)
-{
-    if (apiKey.trim().isEmpty())
-        return "Accept: application/json\r\n";
-
-    return "Authorization: Bearer " + apiKey + "\r\n"
-           "Accept: application/json\r\n";
-}
-}
+#include <creation/services/SuiteAiProviderRuntime.h>
 
 juce::String OpenAiModelCatalogClient::normaliseBaseUrl(const juce::String& baseUrl)
 {
-    auto trimmed = baseUrl.trim();
-    if (trimmed.isEmpty())
-        return "https://api.openai.com/v1";
-
-    return trimmed.endsWithChar('/') ? trimmed.dropLastCharacters(1) : trimmed;
+    return creation::services::SuiteAiProviderRuntime::normalizeBaseUrl(
+        baseUrl, creation::services::SuiteAiProviderRuntime::resolveProfile("openai"));
 }
 
 bool OpenAiModelCatalogClient::fetchModelIds(const juce::String& baseUrl,
@@ -29,22 +15,22 @@ bool OpenAiModelCatalogClient::fetchModelIds(const juce::String& baseUrl,
 {
     modelIds.clear();
 
-    auto isOllama = providerName.toLowerCase().contains("ollama");
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(providerName);
 
-    if (! isOllama && apiKey.trim().isEmpty())
+    if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, apiKey))
     {
-        errorMessage = "Enter your OpenAI API key before fetching models.";
+        errorMessage = "Enter your provider API key before fetching models.";
         return false;
     }
 
-    auto path = isOllama ? "/api/tags" : "/models";
-    auto url = juce::URL(normaliseBaseUrl(baseUrl) + path);
+    auto url = juce::URL(creation::services::SuiteAiProviderRuntime::normalizeBaseUrl(baseUrl, profile)
+                         + profile.modelCatalogPath);
     int statusCode = 0;
     auto stream = url.createInputStream(juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
                                             .withHttpRequestCmd("GET")
                                             .withConnectionTimeoutMs(15000)
                                             .withStatusCode(&statusCode)
-                                            .withExtraHeaders(buildHeaders(apiKey)));
+                                            .withExtraHeaders(creation::services::SuiteAiProviderRuntime::buildAuthHeaders(profile, apiKey)));
 
     if (stream == nullptr)
     {
@@ -74,7 +60,7 @@ bool OpenAiModelCatalogClient::fetchModelIds(const juce::String& baseUrl,
         return false;
     }
 
-    auto listProperty = object->getProperty(isOllama ? "models" : "data");
+    auto listProperty = object->getProperty(profile.modelCatalogArrayProperty);
     if (! listProperty.isArray())
     {
         errorMessage = "Model list response was missing the model array.";
@@ -87,7 +73,7 @@ bool OpenAiModelCatalogClient::fetchModelIds(const juce::String& baseUrl,
         {
             if (auto* itemObject = item.getDynamicObject())
             {
-                auto id = itemObject->getProperty(isOllama ? "name" : "id").toString().trim();
+                auto id = itemObject->getProperty(profile.modelCatalogIdProperty).toString().trim();
                 if (id.isNotEmpty())
                     modelIds.addIfNotAlreadyThere(id);
             }
