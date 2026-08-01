@@ -1,4 +1,5 @@
 #include "ControlSurfaceMappingStore.h"
+#include <creation/ui/TransportActionIds.h>
 
 namespace
 {
@@ -263,11 +264,11 @@ ControlSurfaceMappingStore ControlSurfaceMappingStore::createDefaultLibrary()
     xTouchMix.devicePattern = "x-touch,xtouch,x touch,mackie";
     xTouchMix.usage = "mix";
     xTouchMix.description = "Hands-on track mixing and transport control.";
-    xTouchMix.bindings.add({ "transport", "play", "transport_play", "momentary", 1, 94, -1 });
-    xTouchMix.bindings.add({ "transport", "stop", "transport_stop", "momentary", 1, 93, -1 });
-    xTouchMix.bindings.add({ "transport", "record", "transport_record", "momentary", 1, 95, -1 });
-    xTouchMix.bindings.add({ "transport", "rewind", "transport_rewind", "momentary", 1, 91, -1 });
-    xTouchMix.bindings.add({ "transport", "fast_forward", "transport_fast_forward", "momentary", 1, 92, -1 });
+    xTouchMix.bindings.add({ "transport", "play", creation::ui::transport_actions::play, "momentary", 1, 94, -1 });
+    xTouchMix.bindings.add({ "transport", "stop", creation::ui::transport_actions::stop, "momentary", 1, 93, -1 });
+    xTouchMix.bindings.add({ "transport", "record", creation::ui::transport_actions::record, "momentary", 1, 95, -1 });
+    xTouchMix.bindings.add({ "transport", "rewind", creation::ui::transport_actions::rewind, "momentary", 1, 91, -1 });
+    xTouchMix.bindings.add({ "transport", "fast_forward", creation::ui::transport_actions::fastForward, "momentary", 1, 92, -1 });
     xTouchMix.bindings.add({ "bank", "step", "bank_left", "momentary", -1, -8, -1 });
     xTouchMix.bindings.add({ "bank", "step", "bank_right", "momentary", -1, 8, -1 });
     store.addProfile(std::move(xTouchMix));

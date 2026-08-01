@@ -9,6 +9,8 @@
 #include <creation/services/SuiteAiProviderRuntime.h>
 #include "Tutorial/TutorialScriptCompiler.h"
 #include <creation/services/SuiteAiSettings.h>
+#include <creation/ui/ControlSurfaceActionIds.h>
+#include <creation/ui/CreationSuiteLogos.h>
 #include <thread>
 
 namespace
@@ -156,6 +158,19 @@ AiProviderSettings makeAiProviderSettings(const creation::services::SuiteAiResol
     settings.modelName = runtimeSettings.modelName;
     settings.apiKey = runtimeSettings.apiKey;
     return settings;
+=======
+CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const DesktopAuthSession::SessionData& session)
+{
+    CreationSuiteHeaderBar::ProfileData profile;
+    profile.displayName = session.user.displayName.isNotEmpty() ? session.user.displayName : session.user.email;
+
+    auto tierId = branding::getBestPatreonTierId(session.user.entitlements);
+    auto tierName = branding::getPatreonTierDisplayName(tierId);
+    profile.detailText = tierName.isNotEmpty() ? session.user.email + "  |  " + tierName
+                                               : session.user.email;
+    profile.badgeImage = branding::createPatreonBadgeImage(tierId, 36);
+    return profile;
+>>>>>>> origin/master
 }
 
 class ManagedDocumentWindow final : public juce::DocumentWindow
@@ -183,6 +198,52 @@ public:
 
 private:
     std::function<void()> onClose;
+};
+
+class EulaPanel final : public juce::Component
+{
+public:
+    explicit EulaPanel(const juce::String& text)
+    {
+        titleLabel.setText("End User License Agreement", juce::dontSendNotification);
+        titleLabel.setFont(juce::Font(22.0f).boldened());
+        titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+        addAndMakeVisible(titleLabel);
+
+        hintLabel.setText("This same agreement is bundled with the installer and installed files.",
+                          juce::dontSendNotification);
+        hintLabel.setColour(juce::Label::textColourId, juce::Colour(0xff97a9c1));
+        addAndMakeVisible(hintLabel);
+
+        textEditor.setMultiLine(true);
+        textEditor.setReadOnly(true);
+        textEditor.setScrollbarsShown(true);
+        textEditor.setCaretVisible(false);
+        textEditor.setText(text, juce::dontSendNotification);
+        textEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff111822));
+        textEditor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff2a3a50));
+        textEditor.setColour(juce::TextEditor::textColourId, juce::Colour(0xffdce6f5));
+        addAndMakeVisible(textEditor);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        g.fillAll(juce::Colour(0xff121822));
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(18);
+        titleLabel.setBounds(area.removeFromTop(30));
+        hintLabel.setBounds(area.removeFromTop(24));
+        area.removeFromTop(10);
+        textEditor.setBounds(area);
+    }
+
+private:
+    juce::Label titleLabel;
+    juce::Label hintLabel;
+    juce::TextEditor textEditor;
 };
 
 // Right-click a transport button -> Learn MIDI Binding. Opens armed by default (Any Device) so
@@ -410,329 +471,7 @@ private:
     juce::ComboBox deviceCombo;
     juce::TextEditor channelEditor, numberEditor;
     juce::ToggleButton isCCToggle;
-    juce::TextButton applyManualButton, closeButton;
-};
-
-class TransportButtonLookAndFeel final : public juce::LookAndFeel_V4
-{
-public:
-    void drawButtonBackground(juce::Graphics& g,
-                              juce::Button& button,
-                              const juce::Colour& backgroundColour,
-                              bool isMouseOverButton,
-                              bool isButtonDown) override
-    {
-        juce::ignoreUnused(backgroundColour);
-
-        auto bounds = button.getLocalBounds().toFloat().reduced(1.5f);
-        auto isToggle = button.getToggleState();
-        auto isRecord = button.getButtonText() == "record";
-        auto isPrimaryActive = isToggle && (button.getButtonText() == "play" || isRecord);
-        auto accent = isRecord ? juce::Colour(0xffff4f5f) : juce::Colour(0xff59dfff);
-        if (button.getProperties().contains("borderAccentArgb"))
-            accent = juce::Colour(static_cast<juce::uint32>(int(button.getProperties()["borderAccentArgb"])));
-        auto fill = juce::Colour(0xff17222c);
-
-        if (isToggle)
-            fill = accent.withAlpha(isPrimaryActive ? 0.48f : 0.25f).overlaidWith(juce::Colour(0xff13202b));
-        else if (isButtonDown)
-            fill = accent.withAlpha(0.20f).overlaidWith(fill);
-        else if (isMouseOverButton)
-            fill = accent.withAlpha(0.12f).overlaidWith(fill);
-
-        g.setColour(accent.withAlpha(isToggle ? (isPrimaryActive ? 0.62f : 0.35f)
-                                               : isMouseOverButton ? 0.35f : 0.14f));
-        g.fillRoundedRectangle(bounds.expanded(isPrimaryActive ? 4.0f : 2.0f), 13.0f);
-        g.setColour(fill);
-        g.fillRoundedRectangle(bounds, 11.0f);
-
-        g.setColour(accent.withAlpha(isToggle ? 1.0f : 0.62f));
-        g.drawRoundedRectangle(bounds, 11.0f, isToggle ? (isPrimaryActive ? 2.8f : 2.0f) : 1.3f);
-
-        auto ring = bounds.reduced(7.0f, 5.0f);
-        if (ring.getWidth() > 18.0f && ring.getHeight() > 18.0f)
-        {
-            auto diameter = juce::jmin(ring.getWidth(), ring.getHeight());
-            auto circle = juce::Rectangle<float>(diameter, diameter).withCentre(ring.getCentre());
-            g.setColour(accent.withAlpha(isToggle ? 0.96f : 0.36f));
-            g.drawEllipse(circle, isPrimaryActive ? 3.0f : 2.0f);
-        }
-    }
-
-    void drawButtonText(juce::Graphics& g,
-                        juce::TextButton& button,
-                        bool isMouseOverButton,
-                        bool isButtonDown) override
-    {
-        auto bounds = button.getLocalBounds().toFloat().reduced(8.0f, 7.0f);
-        auto text = button.getButtonText();
-
-        g.setColour(button.getToggleState() ? juce::Colours::white
-                                            : (isButtonDown ? juce::Colour(0xffeaf6ff)
-                                                            : isMouseOverButton ? juce::Colour(0xffdcecff)
-                                                                                : juce::Colour(0xffb8c4d5)));
-        if (button.getToggleState() && button.getButtonText() == "play")
-            g.setColour(juce::Colour(0xffffffff));
-        if (button.getButtonText() == "record")
-            g.setColour(juce::Colour(0xffff4f5f));
-
-        drawTransportIcon(g, bounds, text);
-    }
-
-    void drawToggleButton(juce::Graphics& g,
-                          juce::ToggleButton& button,
-                          bool isMouseOverButton,
-                          bool isButtonDown) override
-    {
-        drawButtonBackground(g,
-                             button,
-                             button.findColour(juce::TextButton::buttonColourId),
-                             isMouseOverButton,
-                             isButtonDown);
-
-        auto bounds = button.getLocalBounds().toFloat().reduced(8.0f, 7.0f);
-        g.setColour(button.getToggleState() ? juce::Colours::white : juce::Colour(0xffb8c4d5));
-        if (button.getToggleState())
-            g.setColour(juce::Colour(0xff5ce8ff));
-
-        drawTransportIcon(g, bounds, button.getButtonText());
-    }
-
-private:
-    static void drawTransportIcon(juce::Graphics& g, juce::Rectangle<float> bounds, const juce::String& iconName)
-    {
-        auto centre = bounds.getCentre();
-        auto size = juce::jmin(bounds.getWidth(), bounds.getHeight());
-
-        if (iconName == "play")
-        {
-            juce::Path path;
-            path.addTriangle(centre.x - size * 0.22f, centre.y - size * 0.32f,
-                             centre.x - size * 0.22f, centre.y + size * 0.32f,
-                             centre.x + size * 0.32f, centre.y);
-            g.fillPath(path);
-            return;
-        }
-
-        if (iconName == "pause")
-        {
-            auto barWidth = size * 0.17f;
-            auto gap = size * 0.10f;
-            auto height = size * 0.62f;
-            g.fillRoundedRectangle(centre.x - gap - barWidth, centre.y - height * 0.5f, barWidth, height, 1.5f);
-            g.fillRoundedRectangle(centre.x + gap, centre.y - height * 0.5f, barWidth, height, 1.5f);
-            return;
-        }
-
-        if (iconName == "stop")
-        {
-            auto square = juce::Rectangle<float>(size * 0.55f, size * 0.55f).withCentre(centre);
-            g.fillRoundedRectangle(square, 2.0f);
-            return;
-        }
-
-        if (iconName == "record")
-        {
-            g.setColour(juce::Colour(0xffff5f6d));
-            g.fillEllipse(juce::Rectangle<float>(size * 0.58f, size * 0.58f).withCentre(centre));
-            return;
-        }
-
-        if (iconName == "prev" || iconName == "next")
-        {
-            auto direction = iconName == "prev" ? 1.0f : -1.0f;
-            auto barX = centre.x + direction * size * 0.33f;
-            g.fillRoundedRectangle(barX - size * 0.04f, centre.y - size * 0.33f, size * 0.08f, size * 0.66f, 1.5f);
-
-            for (auto offset : { -0.08f, 0.18f })
-            {
-                juce::Path path;
-                path.addTriangle(centre.x - direction * size * (0.24f + offset), centre.y,
-                                 centre.x + direction * size * (0.02f - offset), centre.y - size * 0.30f,
-                                 centre.x + direction * size * (0.02f - offset), centre.y + size * 0.30f);
-                g.fillPath(path);
-            }
-            return;
-        }
-
-        if (iconName == "loop")
-        {
-            auto arc = bounds.reduced(size * 0.12f);
-            g.drawEllipse(arc, 2.0f);
-            juce::Path arrow;
-            arrow.addTriangle(arc.getRight() - size * 0.02f, arc.getCentreY() - size * 0.20f,
-                              arc.getRight() + size * 0.16f, arc.getCentreY() - size * 0.06f,
-                              arc.getRight() - size * 0.02f, arc.getCentreY() + size * 0.08f);
-            g.fillPath(arrow);
-            return;
-        }
-
-        if (iconName == "click")
-        {
-            g.fillEllipse(juce::Rectangle<float>(size * 0.18f, size * 0.18f).withCentre({ centre.x, centre.y - size * 0.18f }));
-            g.fillEllipse(juce::Rectangle<float>(size * 0.18f, size * 0.18f).withCentre({ centre.x - size * 0.18f, centre.y + size * 0.14f }));
-            g.fillEllipse(juce::Rectangle<float>(size * 0.18f, size * 0.18f).withCentre({ centre.x + size * 0.18f, centre.y + size * 0.14f }));
-            return;
-        }
-
-        if (iconName == "gear" || iconName == "\xe2\x9a\x99")
-        {
-            const auto radius = size * 0.28f;
-            juce::Path gearPath;
-            const int numTeeth = 8;
-            for (int i = 0; i < numTeeth; ++i)
-            {
-                const float angle = i * juce::MathConstants<float>::twoPi / numTeeth;
-                const float outerR = radius * 1.25f;
-                const float innerR = radius * 0.85f;
-
-                const float a1 = angle - 0.18f;
-                const float a2 = angle - 0.09f;
-                const float a3 = angle + 0.09f;
-                const float a4 = angle + 0.18f;
-
-                if (i == 0)
-                    gearPath.startNewSubPath(centre.x + innerR * std::cos(a1), centre.y + innerR * std::sin(a1));
-                else
-                    gearPath.lineTo(centre.x + innerR * std::cos(a1), centre.y + innerR * std::sin(a1));
-
-                gearPath.lineTo(centre.x + outerR * std::cos(a2), centre.y + outerR * std::sin(a2));
-                gearPath.lineTo(centre.x + outerR * std::cos(a3), centre.y + outerR * std::sin(a3));
-                gearPath.lineTo(centre.x + innerR * std::cos(a4), centre.y + innerR * std::sin(a4));
-            }
-            gearPath.closeSubPath();
-            g.fillPath(gearPath);
-
-            juce::Path holePath;
-            holePath.addEllipse(centre.x - radius * 0.45f, centre.y - radius * 0.45f, radius * 0.90f, radius * 0.90f);
-            g.setColour(juce::Colour(0xff17222c));
-            g.fillPath(holePath);
-            return;
-        }
-
-        g.setFont(juce::Font(13.0f).boldened());
-        g.drawText(iconName, bounds.toNearestInt(), juce::Justification::centred, true);
-    }
-};
-
-class HeaderActionButtonLookAndFeel final : public juce::LookAndFeel_V4
-{
-public:
-    void drawButtonBackground(juce::Graphics& g,
-                              juce::Button& button,
-                              const juce::Colour& backgroundColour,
-                              bool isMouseOverButton,
-                              bool isButtonDown) override
-    {
-        juce::ignoreUnused(backgroundColour);
-
-        auto bounds = button.getLocalBounds().toFloat().reduced(1.5f);
-        auto fill = juce::Colour(0xff151d28);
-        auto outline = juce::Colour(0xff34465d);
-        auto glow = juce::Colour(0xff5b6f8e);
-
-        if (isMouseOverButton)
-            fill = fill.brighter(0.08f);
-        if (isButtonDown)
-            fill = juce::Colour(0xff1c2835);
-
-        g.setColour(glow.withAlpha(isMouseOverButton ? 0.22f : 0.10f));
-        g.fillRoundedRectangle(bounds.expanded(isMouseOverButton ? 2.5f : 1.5f), 12.0f);
-        g.setColour(fill);
-        g.fillRoundedRectangle(bounds, 10.0f);
-        g.setColour(outline.withAlpha(isMouseOverButton ? 0.92f : 0.72f));
-        g.drawRoundedRectangle(bounds, 10.0f, isMouseOverButton ? 1.8f : 1.2f);
-    }
-
-    void drawButtonText(juce::Graphics& g,
-                        juce::TextButton& button,
-                        bool isMouseOverButton,
-                        bool isButtonDown) override
-    {
-        auto bounds = button.getLocalBounds().toFloat().reduced(10.0f, 8.0f);
-        auto textColour = isButtonDown ? juce::Colour(0xfff6fbff)
-                                       : isMouseOverButton ? juce::Colour(0xffe7f1ff)
-                                                           : juce::Colour(0xffc7d3e3);
-        auto buttonText = button.getButtonText();
-
-        if (buttonText == "speaker" || buttonText == "gear")
-        {
-            drawHeaderActionIcon(g, bounds, buttonText, textColour);
-            return;
-        }
-
-        if (buttonText == "plus" || buttonText == "+" || buttonText == "plus-circle")
-        {
-            drawHeaderActionIcon(g, bounds, "plus-circle", textColour);
-            return;
-        }
-
-        auto iconBounds = bounds.removeFromLeft(22.0f);
-        auto isNewProject = buttonText == "+ Project" || buttonText.startsWith("+");
-        drawHeaderActionIcon(g, iconBounds, isNewProject ? "plus-circle" : "folder", textColour);
-        if (! isNewProject)
-        {
-            auto chevronBounds = bounds.removeFromRight(18.0f);
-            bounds.removeFromRight(6.0f);
-            drawHeaderActionIcon(g, chevronBounds, "chevron-down", textColour.withAlpha(0.78f));
-        }
-
-        g.setColour(textColour);
-        g.setFont(juce::Font(15.0f, juce::Font::bold));
-        g.drawFittedText(buttonText,
-                         bounds.toNearestInt(),
-                         juce::Justification::centredLeft,
-                         1,
-                         1.0f);
-    }
-};
-
-TransportButtonLookAndFeel& getTransportButtonLookAndFeel()
-{
-    static TransportButtonLookAndFeel lookAndFeel;
-    return lookAndFeel;
-}
-
-HeaderActionButtonLookAndFeel& getHeaderActionButtonLookAndFeel()
-{
-    static HeaderActionButtonLookAndFeel lookAndFeel;
-    return lookAndFeel;
-}
-
-juce::String makeInitials(const juce::String& displayName, const juce::String& email)
-{
-    auto source = displayName.isNotEmpty() ? displayName : email;
-    source = source.trim();
-
-    if (source.isEmpty())
-        return "C";
-
-    juce::StringArray words;
-    words.addTokens(source, " ._-@", "");
-    words.removeEmptyStrings();
-
-    juce::String initials;
-    for (int index = 0; index < words.size() && initials.length() < 2; ++index)
-        initials << words[index].substring(0, 1).toUpperCase();
-
-    if (initials.isEmpty())
-        initials = source.substring(0, 1).toUpperCase();
-
-    return initials;
-}
-
-juce::String profileDetailText(const DesktopAuthSession::SessionData& session)
-{
-    auto tierId = branding::getBestPatreonTierId(session.user.entitlements);
-    auto tierName = branding::getPatreonTierDisplayName(tierId);
-
-    if (tierName.isNotEmpty())
-        return session.user.email + " - " + tierName;
-
-    return session.user.email;
-}
-
-bool writeWavFile(const juce::File& destination,
+    juce::TextButton applyManualButton, bool writeWavFile(const juce::File& destination,
                   const juce::AudioBuffer<float>& buffer,
                   double sampleRate,
                   juce::String& errorMessage)
@@ -907,648 +646,6 @@ bool isAdminRole(const juce::String& role)
     auto normalized = role.trim().toLowerCase();
     return normalized == "admin" || normalized == "administrator";
 }
-}
-
-MainComponent::TransportBar::TransportBar()
-{
-    setName("Transport");
-    logoImage = creation::ui::getSuiteLogoImage(creation::ui::SuiteLogoId::station);
-
-    titleLabel.setText("Creation Station", juce::dontSendNotification);
-    titleLabel.setJustificationType(juce::Justification::centredLeft);
-    titleLabel.setFont(juce::Font(28.0f).boldened());
-    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(titleLabel);
-
-    midiStatusLabel.setVisible(false);
-
-    playButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-    pauseButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-    stopButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-    recordButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-    loopButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-    clickButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-    rewindButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-    fastForwardButton.setLookAndFeel(&getTransportButtonLookAndFeel());
-
-    playButton.setButtonText("play");
-    pauseButton.setButtonText("pause");
-    stopButton.setButtonText("stop");
-    recordButton.setButtonText("record");
-    loopButton.setButtonText("loop");
-    clickButton.setButtonText("click");
-    rewindButton.setButtonText("prev");
-    fastForwardButton.setButtonText("next");
-
-    playButton.setTooltip("Play");
-    pauseButton.setTooltip("Pause");
-    stopButton.setTooltip("Stop");
-    recordButton.setTooltip("Record");
-    loopButton.setTooltip("Loop");
-    clickButton.setTooltip("Metronome click");
-    rewindButton.setTooltip("Rewind");
-    fastForwardButton.setTooltip("Fast forward");
-
-    playButton.setMouseClickGrabsKeyboardFocus(false);
-    pauseButton.setMouseClickGrabsKeyboardFocus(false);
-    stopButton.setMouseClickGrabsKeyboardFocus(false);
-    recordButton.setMouseClickGrabsKeyboardFocus(false);
-    loopButton.setMouseClickGrabsKeyboardFocus(false);
-    clickButton.setMouseClickGrabsKeyboardFocus(false);
-    rewindButton.setMouseClickGrabsKeyboardFocus(false);
-    fastForwardButton.setMouseClickGrabsKeyboardFocus(false);
-
-    // Right-click any transport button to bind it to a hardware controller - TransportBar::
-    // mouseDown() checks event.eventComponent against these to know which one was clicked.
-    playButton.addMouseListener(this, false);
-    stopButton.addMouseListener(this, false);
-    recordButton.addMouseListener(this, false);
-    rewindButton.addMouseListener(this, false);
-    fastForwardButton.addMouseListener(this, false);
-
-    newProjectButton.setLookAndFeel(&getHeaderActionButtonLookAndFeel());
-    newProjectButton.setButtonText("+ Project");
-    newProjectButton.setTooltip("Create a new Creation Station project container (.csproj)");
-    newProjectButton.setMouseClickGrabsKeyboardFocus(false);
-    newProjectButton.onClick = [this]
-    {
-        if (onNewProjectRequested)
-            onNewProjectRequested();
-    };
-    addAndMakeVisible(newProjectButton);
-
-    projectButton.setLookAndFeel(&getHeaderActionButtonLookAndFeel());
-    projectButton.setButtonText("No project open");
-    projectButton.setTooltip("Open a Creation Station project from suite storage");
-    projectButton.setMouseClickGrabsKeyboardFocus(false);
-    projectButton.onClick = [this]
-    {
-        if (onProjectMenuRequested)
-            onProjectMenuRequested();
-    };
-    addAndMakeVisible(projectButton);
-
-    audioButton.setLookAndFeel(&getHeaderActionButtonLookAndFeel());
-    audioButton.setButtonText("speaker");
-    audioButton.onClick = [this]
-    {
-        if (onAudioRequested)
-            onAudioRequested();
-    };
-    audioButton.setTooltip("Open the audio device settings window");
-    audioButton.setMouseClickGrabsKeyboardFocus(false);
-    addAndMakeVisible(audioButton);
-
-    suiteButton.setLookAndFeel(&getHeaderActionButtonLookAndFeel());
-    suiteButton.setButtonText("gear");
-    suiteButton.onClick = [this]
-    {
-        if (onSuiteRequested)
-            onSuiteRequested();
-    };
-    suiteButton.setTooltip("Open the Creation Suite control panel");
-    suiteButton.setMouseClickGrabsKeyboardFocus(false);
-    addAndMakeVisible(suiteButton);
-
-    tourButton.onClick = [this]
-    {
-        if (onTourRequested)
-            onTourRequested();
-    };
-    tourButton.setTooltip("Start the guided tour");
-    addAndMakeVisible(tourButton);
-
-    statusLabel.setText("Ready for audio work.", juce::dontSendNotification);
-    statusLabel.setJustificationType(juce::Justification::centredRight);
-    statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff99a6b8));
-    addAndMakeVisible(statusLabel);
-
-    scrubModeLabel.setText("SCRUB", juce::dontSendNotification);
-    scrubModeLabel.setJustificationType(juce::Justification::centred);
-    scrubModeLabel.setColour(juce::Label::textColourId, juce::Colour(0xff11151c));
-    scrubModeLabel.setColour(juce::Label::backgroundColourId, juce::Colour(0xfff5c96a));
-    scrubModeLabel.setVisible(false);
-    addAndMakeVisible(scrubModeLabel);
-
-    playButton.onClick = [this]
-    {
-        statusLabel.setText("Transport: play", juce::dontSendNotification);
-        if (onPlay)
-            onPlay();
-    };
-    pauseButton.onClick = [this]
-    {
-        statusLabel.setText("Transport: pause", juce::dontSendNotification);
-        if (onPause)
-            onPause();
-    };
-    stopButton.onClick = [this]
-    {
-        statusLabel.setText("Transport: stop", juce::dontSendNotification);
-        if (onStop)
-            onStop();
-    };
-    recordButton.onClick = [this]
-    {
-        statusLabel.setText("Transport: record armed", juce::dontSendNotification);
-        if (onRecord)
-            onRecord();
-    };
-    loopButton.setClickingTogglesState(true);
-    loopButton.onClick = [this]
-    {
-        statusLabel.setText(loopButton.getToggleState() ? "Transport: loop on" : "Transport: loop off",
-                            juce::dontSendNotification);
-        if (onLoopChanged)
-            onLoopChanged(loopButton.getToggleState());
-    };
-    clickButton.onClick = [this]
-    {
-        advanceMetronomeMode();
-        if (onClickChanged)
-            onClickChanged(metronomeMode);
-    };
-    rewindButton.onClick = [this]
-    {
-        statusLabel.setText("Transport: rewind", juce::dontSendNotification);
-        if (onRewind)
-            onRewind();
-    };
-    fastForwardButton.onClick = [this]
-    {
-        statusLabel.setText("Transport: fast forward", juce::dontSendNotification);
-        if (onFastForward)
-            onFastForward();
-    };
-
-    addAndMakeVisible(playButton);
-    addAndMakeVisible(pauseButton);
-    addAndMakeVisible(stopButton);
-    addAndMakeVisible(recordButton);
-    addAndMakeVisible(loopButton);
-    addAndMakeVisible(clickButton);
-    addAndMakeVisible(rewindButton);
-    addAndMakeVisible(fastForwardButton);
-
-    signInButton.onClick = [this]
-    {
-        if (onSignInRequested)
-            onSignInRequested();
-    };
-    signInButton.setTooltip("Sign in to sync your account");
-    addAndMakeVisible(signInButton);
-
-    profileNameLabel.setJustificationType(juce::Justification::centredLeft);
-    profileNameLabel.setFont(juce::Font(17.0f).boldened());
-    profileNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(profileNameLabel);
-
-    profileDetailLabel.setJustificationType(juce::Justification::centredLeft);
-    profileDetailLabel.setFont(juce::Font(13.0f));
-    profileDetailLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9fb0c8));
-    addAndMakeVisible(profileDetailLabel);
-
-    clearProfile();
-    setMetronomeMode(MetronomeMode::off);
-    setScrubModeEnabled(false);
-}
-
-void MainComponent::TransportBar::advanceMetronomeMode()
-{
-    switch (metronomeMode)
-    {
-        case MetronomeMode::off: metronomeMode = MetronomeMode::playOrRecord; break;
-        case MetronomeMode::playOrRecord: metronomeMode = MetronomeMode::always; break;
-        case MetronomeMode::always: metronomeMode = MetronomeMode::off; break;
-    }
-
-    refreshMetronomeButton();
-}
-
-void MainComponent::TransportBar::setMetronomeMode(MetronomeMode mode)
-{
-    metronomeMode = mode;
-    refreshMetronomeButton();
-}
-
-void MainComponent::TransportBar::refreshMetronomeButton()
-{
-    metronomeAudible = metronomeMode == MetronomeMode::always
-                        || (metronomeMode == MetronomeMode::playOrRecord && (playbackPlaying || playbackRecording));
-
-    switch (metronomeMode)
-    {
-        case MetronomeMode::off:
-            clickButton.setButtonText("click");
-            clickButton.setToggleState(false, juce::dontSendNotification);
-            clickButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff18222f));
-            clickButton.setTooltip("Metronome off");
-            statusLabel.setText("Transport: click off", juce::dontSendNotification);
-            break;
-        case MetronomeMode::playOrRecord:
-            clickButton.setButtonText("CLICK");
-            clickButton.setToggleState(true, juce::dontSendNotification);
-            clickButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2b3c52));
-            clickButton.setTooltip("Metronome on while playing or recording");
-            statusLabel.setText("Transport: click on while playing or recording", juce::dontSendNotification);
-            break;
-        case MetronomeMode::always:
-            clickButton.setButtonText("CLICK!");
-            clickButton.setToggleState(true, juce::dontSendNotification);
-            clickButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff7a1d25));
-            clickButton.setTooltip("Metronome always on");
-            statusLabel.setText("Transport: click always on", juce::dontSendNotification);
-            break;
-    }
-
-    if (metronomeAudible)
-        clickButton.getProperties().set("borderAccentArgb", int(juce::Colour(0xffff4f5f).getARGB()));
-    else
-        clickButton.getProperties().remove("borderAccentArgb");
-
-    clickButton.repaint();
-}
-
-MainComponent::ViewModeBar::ViewModeBar()
-{
-    titleLabel.setText("Creative Modes", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(18.0f).boldened());
-    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(titleLabel);
-
-    auto setupButton = [this](juce::TextButton& button, WorkspaceMode mode)
-    {
-        button.setClickingTogglesState(true);
-        button.onClick = [this, mode]
-        {
-            setActiveMode(mode);
-            if (onModeSelected)
-                onModeSelected(mode);
-        };
-        addAndMakeVisible(button);
-    };
-
-    setupButton(trackerButton, WorkspaceMode::tracker);
-    setupButton(samplerButton, WorkspaceMode::sampler);
-    setupButton(arrangeButton, WorkspaceMode::arrange);
-    setupButton(signalButton, WorkspaceMode::signal);
-    setupButton(libraryButton, WorkspaceMode::library);
-    setupButton(mixButton, WorkspaceMode::mix);
-    setupButton(pluginsButton, WorkspaceMode::plugins);
-    setupButton(nodeButton, WorkspaceMode::node);
-    setupButton(codeButton, WorkspaceMode::code);
-    setupButton(recordButton, WorkspaceMode::record);
-    setupButton(scoreButton, WorkspaceMode::score);
-    setupButton(settingsButton, WorkspaceMode::settings);
-
-    trackerButton.setTooltip("Tracker - arrange and edit tracks");
-    samplerButton.setTooltip("Sampler - build and manage pitch-mapped sample packs");
-    arrangeButton.setTooltip("Foley - arrange sound effects and foley clips");
-    signalButton.setTooltip("Signal Lab - sound design and synthesis");
-    libraryButton.setTooltip("Content library - browse and manage assets");
-    mixButton.setTooltip("Mixer - adjust levels, pan, and sends");
-    pluginsButton.setTooltip("Plugin browser - find and load VST plugins");
-    nodeButton.setTooltip("Node graph - patch signal routing visually");
-    codeButton.setTooltip("Patina script editor - write DSL patches");
-    recordButton.setTooltip("Recording workspace - capture new takes");
-    scoreButton.setTooltip("Score view - notation and piano roll editing");
-    settingsButton.setTooltip("App settings - project, audio, MIDI, and AI configuration");
-    popOutButton.setTooltip("Pop the current workspace out into its own window");
-
-    popOutButton.onClick = [this]
-    {
-        if (onPopOutRequested)
-            onPopOutRequested();
-    };
-    addAndMakeVisible(popOutButton);
-
-    setActiveMode(WorkspaceMode::tracker);
-}
-
-void MainComponent::ViewModeBar::setActiveMode(WorkspaceMode newMode)
-{
-    activeMode = newMode;
-    trackerButton.setToggleState(activeMode == WorkspaceMode::tracker, juce::dontSendNotification);
-    samplerButton.setToggleState(activeMode == WorkspaceMode::sampler, juce::dontSendNotification);
-    arrangeButton.setToggleState(activeMode == WorkspaceMode::arrange, juce::dontSendNotification);
-    signalButton.setToggleState(activeMode == WorkspaceMode::signal, juce::dontSendNotification);
-    libraryButton.setToggleState(activeMode == WorkspaceMode::library, juce::dontSendNotification);
-    mixButton.setToggleState(activeMode == WorkspaceMode::mix, juce::dontSendNotification);
-    pluginsButton.setToggleState(activeMode == WorkspaceMode::plugins, juce::dontSendNotification);
-    nodeButton.setToggleState(activeMode == WorkspaceMode::node, juce::dontSendNotification);
-    codeButton.setToggleState(activeMode == WorkspaceMode::code, juce::dontSendNotification);
-    recordButton.setToggleState(activeMode == WorkspaceMode::record, juce::dontSendNotification);
-    scoreButton.setToggleState(activeMode == WorkspaceMode::score, juce::dontSendNotification);
-    settingsButton.setToggleState(activeMode == WorkspaceMode::settings, juce::dontSendNotification);
-    repaint();
-}
-
-void MainComponent::ViewModeBar::paint(juce::Graphics& g)
-{
-    g.fillAll(juce::Colour(0xff10141a));
-    g.setColour(juce::Colour(0xff263140));
-    g.drawLine(0.0f,
-               static_cast<float>(getHeight()) - 1.0f,
-               static_cast<float>(getWidth()),
-               static_cast<float>(getHeight()) - 1.0f,
-               1.0f);
-
-    g.setColour(juce::Colour(0xff8ea0b7));
-        g.setFont(juce::Font(13.0f));
-    g.drawText(workspaceModeName(activeMode) + " active", getLocalBounds().reduced(12, 0), juce::Justification::centredRight, true);
-}
-
-void MainComponent::ViewModeBar::resized()
-{
-    auto area = getLocalBounds().reduced(14, 8);
-    titleLabel.setBounds(area.removeFromLeft(140));
-    area.removeFromLeft(8);
-    popOutButton.setBounds(area.removeFromRight(92));
-    area.removeFromRight(8);
-    auto buttonWidth = 78;
-    trackerButton.setBounds(area.removeFromLeft(buttonWidth));
-    samplerButton.setBounds(area.removeFromLeft(buttonWidth));
-    arrangeButton.setBounds(area.removeFromLeft(buttonWidth));
-    signalButton.setBounds(area.removeFromLeft(buttonWidth));
-    libraryButton.setBounds(area.removeFromLeft(buttonWidth));
-    mixButton.setBounds(area.removeFromLeft(buttonWidth));
-    pluginsButton.setBounds(area.removeFromLeft(buttonWidth));
-    nodeButton.setBounds(area.removeFromLeft(buttonWidth));
-    codeButton.setBounds(area.removeFromLeft(buttonWidth));
-    recordButton.setBounds(area.removeFromLeft(buttonWidth));
-    scoreButton.setBounds(area.removeFromLeft(buttonWidth));
-    settingsButton.setBounds(area.removeFromLeft(buttonWidth));
-}
-
-void MainComponent::TransportBar::setStatusText(const juce::String& text)
-{
-    statusLabel.setText(text, juce::dontSendNotification);
-}
-
-void MainComponent::TransportBar::setMidiStatusText(const juce::String& text)
-{
-    juce::ignoreUnused(text);
-}
-
-void MainComponent::TransportBar::setPlaybackVisualState(bool playing, bool recording)
-{
-    playbackPlaying = playing;
-    playbackRecording = recording;
-
-    // Play and Pause occupy the same slot - only the one matching current state is shown, so
-    // one button (and one hardware press) drives both directions instead of needing two.
-    playButton.setVisible(! playing);
-    pauseButton.setVisible(playing);
-    playButton.setToggleState(playing && ! recording, juce::dontSendNotification);
-    pauseButton.setToggleState(false, juce::dontSendNotification);
-    stopButton.setToggleState(! playing && ! recording, juce::dontSendNotification);
-    recordButton.setToggleState(recording, juce::dontSendNotification);
-    refreshMetronomeButton();
-    repaint();
-}
-
-void MainComponent::TransportBar::setScrubModeEnabled(bool enabled)
-{
-    scrubModeEnabled = enabled;
-    scrubModeLabel.setVisible(false);
-    repaint();
-}
-
-void MainComponent::TransportBar::setProjectLabel(const juce::String& label)
-{
-    projectText = makeDisplayProjectLabel(label);
-    projectButton.setButtonText(projectText);
-    repaint();
-}
-
-juce::Rectangle<int> MainComponent::TransportBar::getProjectButtonScreenBounds() const
-{
-    return localAreaToGlobal(projectButton.getBounds());
-}
-
-void MainComponent::TransportBar::setProfile(const DesktopAuthSession::SessionData& session)
-{
-    profileVisible = true;
-    profileNameLabel.setVisible(true);
-    profileDetailLabel.setVisible(true);
-    signInButton.setVisible(false);
-
-    profileNameLabel.setText(session.user.displayName.isNotEmpty() ? session.user.displayName : session.user.email,
-                             juce::dontSendNotification);
-    profileDetailLabel.setText(profileDetailText(session), juce::dontSendNotification);
-    profileInitials = makeInitials(session.user.displayName, session.user.email);
-
-    auto tierId = branding::getBestPatreonTierId(session.user.entitlements);
-    profileTierName = branding::getPatreonTierDisplayName(tierId);
-    profileBadgeImage = branding::createPatreonBadgeImage(tierId, 36);
-
-    repaint();
-}
-
-void MainComponent::TransportBar::clearProfile()
-{
-    profileVisible = false;
-    profileNameLabel.setText({}, juce::dontSendNotification);
-    profileDetailLabel.setText({}, juce::dontSendNotification);
-    profileBadgeImage = {};
-    profileInitials.clear();
-    profileTierName.clear();
-    profileNameLabel.setVisible(false);
-    profileDetailLabel.setVisible(false);
-    signInButton.setButtonText("Sign In");
-    signInButton.setVisible(true);
-    repaint();
-}
-
-void MainComponent::TransportBar::paint(juce::Graphics& g)
-{
-    g.fillAll(juce::Colour(0xff0f1115));
-    if (logoImage.isValid())
-        g.drawImageWithin(logoImage, 14, 9, 44, 44, juce::RectanglePlacement::centred, false);
-
-    g.setColour(juce::Colour(0xff242a36));
-    g.drawLine(0.0f,
-               static_cast<float>(getHeight()) - 1.0f,
-               static_cast<float>(getWidth()),
-               static_cast<float>(getHeight()) - 1.0f,
-               1.0f);
-
-    if (! transportControlBounds.isEmpty())
-    {
-        auto panel = transportControlBounds.toFloat().expanded(12.0f, 9.0f);
-        auto accentGlowTop = scrubModeEnabled ? juce::Colour(0x55ff5b6e) : juce::Colour(0x4426d9ff);
-        auto accentGlowBottom = scrubModeEnabled ? juce::Colour(0x001f0f14) : juce::Colour(0x00101820);
-        juce::ColourGradient glow(accentGlowTop, panel.getCentreX(), panel.getY(),
-                                  accentGlowBottom, panel.getCentreX(), panel.getBottom(), false);
-        g.setGradientFill(glow);
-        g.fillRoundedRectangle(panel.expanded(4.0f), 18.0f);
-
-        g.setColour(juce::Colour(0xff151b23));
-        g.fillRoundedRectangle(panel, 16.0f);
-        if (scrubModeEnabled)
-        {
-            g.setColour(juce::Colour(0xffff5b6e));
-            g.drawRoundedRectangle(panel, 16.0f, 2.6f);
-        }
-        else
-        {
-            g.setColour(juce::Colour(0xff36506b));
-            g.drawRoundedRectangle(panel, 16.0f, 1.4f);
-        }
-    }
-
-    if (profileVisible)
-    {
-        auto chip = profileChipBounds.toFloat();
-        g.setColour(juce::Colour(0xff151b23));
-        g.fillRoundedRectangle(chip.toFloat(), 16.0f);
-        g.setColour(juce::Colour(0xff2c394c));
-        g.drawRoundedRectangle(chip.toFloat(), 16.0f, 1.0f);
-
-        auto avatar = chip.removeFromLeft(44).reduced(4);
-        g.setColour(juce::Colour(0xff223041));
-        g.fillEllipse(avatar.toFloat());
-        g.setColour(juce::Colour(0xff8ea0b7));
-        g.setFont(juce::Font(15.0f).boldened());
-        g.drawText(profileInitials, avatar, juce::Justification::centred, false);
-
-        auto badgeArea = chip.removeFromRight(38).withSizeKeepingCentre(28, 28);
-        if (profileBadgeImage.isValid())
-            g.drawImageWithin(profileBadgeImage, badgeArea.getX(), badgeArea.getY(), badgeArea.getWidth(), badgeArea.getHeight(),
-                              juce::RectanglePlacement::centred, false);
-        else
-        {
-            g.setColour(juce::Colour(0xfff2cc60));
-            g.setFont(juce::Font(12.0f).boldened());
-            g.drawText("*", badgeArea, juce::Justification::centred, false);
-        }
-    }
-}
-
-void MainComponent::TransportBar::mouseDown(const juce::MouseEvent& event)
-{
-    if (event.mods.isPopupMenu())
-    {
-        juce::String targetId;
-        juce::String label;
-
-        if (event.eventComponent == &rewindButton) { targetId = "transport_rewind"; label = "Rewind"; }
-        else if (event.eventComponent == &fastForwardButton) { targetId = "transport_fast_forward"; label = "Fast Forward"; }
-        else if (event.eventComponent == &playButton) { targetId = "transport_play"; label = "Play"; }
-        else if (event.eventComponent == &stopButton) { targetId = "transport_stop"; label = "Stop"; }
-        else if (event.eventComponent == &recordButton) { targetId = "transport_record"; label = "Record"; }
-
-        if (targetId.isNotEmpty())
-        {
-            juce::PopupMenu menu;
-            menu.addItem(1, "Learn MIDI Binding...");
-            menu.showMenuAsync(juce::PopupMenu::Options(), [this, targetId, label](int result)
-            {
-                if (result == 1 && onLearnMidiRequested)
-                    onLearnMidiRequested(targetId, label);
-            });
-            return;
-        }
-    }
-
-    if (profileVisible && profileChipBounds.contains(event.getPosition()))
-    {
-        juce::PopupMenu menu;
-        menu.addItem(1, "View profile page");
-        menu.addSeparator();
-        menu.addItem(2, "Log out");
-
-        auto chipTopLeft = localPointToGlobal(profileChipBounds.getTopLeft());
-        auto chipOnScreen = juce::Rectangle<int>(chipTopLeft.x,
-                                                 chipTopLeft.y,
-                                                 profileChipBounds.getWidth(),
-                                                 profileChipBounds.getHeight());
-
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(chipOnScreen),
-                           [this](int result)
-                           {
-                               if (result == 1)
-                               {
-                                   if (onOpenProfilePageRequested)
-                                       onOpenProfilePageRequested();
-                               }
-                               else if (result == 2)
-                               {
-                                   if (onLogoutRequested)
-                                       onLogoutRequested();
-                               }
-                           });
-    }
-}
-
-void MainComponent::TransportBar::resized()
-{
-    auto area = getLocalBounds().reduced(18, 10);
-    area.removeFromLeft(56);
-    auto profileArea = area.removeFromRight(268);
-
-    auto topRow = area.removeFromTop(30);
-    auto bottomRow = area;
-
-    titleLabel.setBounds(topRow.removeFromLeft(420));
-    logoRailBounds = {};
-
-    auto transportRow = bottomRow.removeFromLeft(560);
-    newProjectButton.setBounds(bottomRow.removeFromLeft(90));
-    bottomRow.removeFromLeft(8);
-    projectButton.setBounds(bottomRow.removeFromLeft(280));
-    bottomRow.removeFromLeft(8);
-    audioButton.setBounds(bottomRow.removeFromLeft(48));
-    bottomRow.removeFromLeft(8);
-    suiteButton.setBounds(bottomRow.removeFromLeft(48));
-    bottomRow.removeFromLeft(8);
-    tourButton.setBounds(bottomRow.removeFromLeft(78));
-
-    auto placeTransportButton = [&transportRow](juce::Button& button, int width)
-    {
-        button.setBounds(transportRow.removeFromLeft(width));
-        transportRow.removeFromLeft(7);
-    };
-
-    placeTransportButton(rewindButton, 62);
-    placeTransportButton(fastForwardButton, 62);
-    placeTransportButton(stopButton, 66);
-    placeTransportButton(playButton, 82);
-    pauseButton.setBounds(playButton.getBounds()); // same slot - only one of the two is ever visible
-    placeTransportButton(loopButton, 64);
-    placeTransportButton(clickButton, 64);
-    placeTransportButton(recordButton, 82);
-    scrubModeLabel.setBounds(0, 0, 0, 0);
-    statusLabel.setBounds(bottomRow.removeFromRight(220));
-
-    auto combineBounds = [](juce::Rectangle<int> left, juce::Rectangle<int> right)
-    {
-        auto minX = juce::jmin(left.getX(), right.getX());
-        auto minY = juce::jmin(left.getY(), right.getY());
-        auto maxX = juce::jmax(left.getRight(), right.getRight());
-        auto maxY = juce::jmax(left.getBottom(), right.getBottom());
-        return juce::Rectangle<int>(minX, minY, maxX - minX, maxY - minY);
-    };
-
-    transportControlBounds = combineBounds(rewindButton.getBounds(), stopButton.getBounds());
-    transportControlBounds = combineBounds(transportControlBounds, fastForwardButton.getBounds());
-    transportControlBounds = combineBounds(transportControlBounds, pauseButton.getBounds());
-    transportControlBounds = combineBounds(transportControlBounds, playButton.getBounds());
-    transportControlBounds = combineBounds(transportControlBounds, loopButton.getBounds());
-    transportControlBounds = combineBounds(transportControlBounds, clickButton.getBounds());
-    transportControlBounds = combineBounds(transportControlBounds, recordButton.getBounds());
-
-    auto profileContent = profileArea.reduced(12, 6);
-    signInButton.setBounds(profileContent);
-
-    auto profileTextArea = profileContent.withTrimmedLeft(48).withTrimmedRight(42);
-    profileNameLabel.setBounds(profileTextArea.removeFromTop(24));
-    profileDetailLabel.setBounds(profileTextArea.removeFromTop(18));
-    profileChipBounds = profileArea;
-    signInButton.setVisible(! profileVisible);
-    projectButton.setVisible(true);
-    profileNameLabel.setVisible(profileVisible);
-    profileDetailLabel.setVisible(profileVisible);
 }
 
 MainComponent::PluginRackBar::PluginRackBar()
@@ -1928,6 +1025,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     reportStartup("Preparing application shell...", 0.08f);
     setWantsKeyboardFocus(true);
+    transportBar.setAppTitle("Creation Station");
+    transportBar.setLogoImage(creation::ui::getSuiteLogoImage(creation::ui::SuiteLogoId::station));
 
     appManifest = CreationStationAppManifest::createDefault(
         juce::JUCEApplicationBase::getInstance() != nullptr
@@ -1976,7 +1075,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     authSession.onAuthenticated = [this](const DesktopAuthSession::SessionData& session)
     {
         authenticated = true;
-        transportBar.setProfile(session);
+        transportBar.setProfile(makeHeaderProfile(session));
         authGateView.setAccountText(session.user.displayName.isNotEmpty()
                                         ? session.user.displayName + " <" + session.user.email + ">"
                                         : session.user.email);
@@ -2040,7 +1139,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         authenticated = true;
         const auto& session = authSession.getSession();
-        transportBar.setProfile(session);
+        transportBar.setProfile(makeHeaderProfile(session));
         authGateView.setAccountText(session.user.displayName.isNotEmpty()
                                         ? session.user.displayName + " <" + session.user.email + ">"
                                         : session.user.email);
@@ -3792,46 +2891,46 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             setWorkspaceMode(mode);
         };
 
-        if (button == "cursor_left")
+        if (button == creation::ui::surface_actions::cursorLeft)
         {
             auto trackIndex = pluginRackBar.isTrackContext() ? pluginRackBar.getTrackIndex() - 1 : mixerPanel.getBankOffset();
             selectTrack(juce::jmax(0, trackIndex));
         }
-        else if (button == "cursor_right")
+        else if (button == creation::ui::surface_actions::cursorRight)
         {
             auto trackIndex = pluginRackBar.isTrackContext() ? pluginRackBar.getTrackIndex() + 1 : mixerPanel.getBankOffset();
             if (engine.getTrackCount() > 0)
                 selectTrack(juce::jlimit(0, engine.getTrackCount() - 1, trackIndex));
         }
-        else if (button == "cursor_up")
+        else if (button == creation::ui::surface_actions::cursorUp)
         {
             advanceMode(-1);
         }
-        else if (button == "cursor_down")
+        else if (button == creation::ui::surface_actions::cursorDown)
         {
             advanceMode(1);
         }
-        else if (button == "assign_track")
+        else if (button == creation::ui::surface_actions::assignTrack)
         {
             setMode(WorkspaceMode::mix);
         }
-        else if (button == "assign_send")
+        else if (button == creation::ui::surface_actions::assignSend)
         {
             setMode(WorkspaceMode::plugins);
         }
-        else if (button == "assign_pan")
+        else if (button == creation::ui::surface_actions::assignPan)
         {
             setMode(WorkspaceMode::signal);
         }
-        else if (button == "assign_plugin")
+        else if (button == creation::ui::surface_actions::assignPlugin)
         {
             setMode(WorkspaceMode::node);
         }
-        else if (button == "assign_eq")
+        else if (button == creation::ui::surface_actions::assignEq)
         {
             setMode(WorkspaceMode::signal);
         }
-        else if (button == "assign_instrument")
+        else if (button == creation::ui::surface_actions::assignInstrument)
         {
             setMode(WorkspaceMode::score);
         }
@@ -3947,11 +3046,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                 refreshVisibleBank();
             });
         }
-        else if (button == "transport_cycle")
+        else if (button == creation::ui::surface_actions::transportCycle)
         {
             transportBar.loopButton.triggerClick();
         }
-        else if (button == "transport_solo")
+        else if (button == creation::ui::surface_actions::transportSolo)
         {
             auto selectedChannel = mixerPanel.getSelectedChannel();
             if (selectedChannel < 0)
@@ -3970,23 +3069,23 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         {
             transportBar.clickButton.triggerClick();
         }
-        else if (button == "transport_marker")
+        else if (button == creation::ui::surface_actions::transportMarker)
         {
             transportBar.setStatusText("Marker pressed.");
         }
-        else if (button == "transport_nudge")
+        else if (button == creation::ui::surface_actions::transportNudge)
         {
             transportBar.setStatusText("Nudge pressed.");
         }
-        else if (button == "transport_drop")
+        else if (button == creation::ui::surface_actions::transportDrop)
         {
             transportBar.setStatusText("Drop pressed.");
         }
-        else if (button == "transport_replace")
+        else if (button == creation::ui::surface_actions::transportReplace)
         {
             transportBar.setStatusText("Replace pressed.");
         }
-        else if (button == "zoom")
+        else if (button == creation::ui::surface_actions::zoom)
         {
             if (pluginRackBar.isTrackContext() && engine.hasTrackPlugin(pluginRackBar.getTrackIndex()))
             {
@@ -4019,7 +3118,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                 setWorkspaceMode(WorkspaceMode::node);
             }
         }
-        else if (button == "scrub")
+        else if (button == creation::ui::surface_actions::scrub)
         {
             midiScrubModeEnabled = ! midiScrubModeEnabled;
             transportBar.setScrubModeEnabled(midiScrubModeEnabled);
@@ -4027,12 +3126,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                 ? "X-Touch scrub mode armed. Jog wheel hookup is next."
                 : "X-Touch scrub mode off.");
         }
-        else if (button == "user_a")
+        else if (button == creation::ui::surface_actions::userA)
         {
             saveSessionToDisk();
             transportBar.setStatusText("Session saved from X-Touch");
         }
-        else if (button == "user_b")
+        else if (button == creation::ui::surface_actions::userB)
         {
             loadSessionFromDisk();
             refreshVisibleBank();
@@ -4836,7 +3935,7 @@ void MainComponent::refreshAuthState()
     if (authenticated)
     {
         const auto& session = authSession.getSession();
-        transportBar.setProfile(session);
+        transportBar.setProfile(makeHeaderProfile(session));
         transportBar.setStatusText("Signed in. Welcome back.");
         syncSemanticAppContext();
     }
@@ -7181,6 +6280,150 @@ void MainComponent::showProjectMenu()
                            if (result == 0 && listError.isNotEmpty())
                                transportBar.setStatusText("Project list warning: " + listError);
                        });
+}
+
+void MainComponent::showSuiteSettingsWindow()
+{
+    if (suiteSettingsWindow != nullptr)
+    {
+        suiteSettingsWindow->toFront(true);
+        return;
+    }
+
+    auto panel = std::make_unique<SuiteSettingsPanel>();
+    panel->setSettings(suiteSettings);
+    panel->onBrowseRequested = [this](const juce::String& fieldId)
+    {
+        chooseSuiteDirectory(fieldId);
+    };
+    panel->onApplyRequested = [this](const SuiteSettings& settings)
+    {
+        applySuiteSettings(settings);
+    };
+    panel->onReadEulaRequested = [this]
+    {
+        showEulaWindow();
+    };
+
+    auto* panelRaw = panel.get();
+    auto window = std::make_unique<ManagedDocumentWindow>("Creation Suite Control",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              closeSuiteSettingsWindow();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(940, 560);
+    window->setVisible(true);
+
+    suiteSettingsPanel = panelRaw;
+    suiteSettingsWindow = std::move(window);
+}
+
+void MainComponent::closeSuiteSettingsWindow()
+{
+    suiteSettingsPanel = nullptr;
+    suiteSettingsWindow.reset();
+}
+
+void MainComponent::showEulaWindow()
+{
+    if (eulaWindow != nullptr)
+    {
+        eulaWindow->toFront(true);
+        return;
+    }
+
+    auto* panel = new EulaPanel(creation_station::legal::getEulaText());
+    auto window = std::make_unique<ManagedDocumentWindow>("Creation Station EULA",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              closeEulaWindow();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setContentOwned(panel, true);
+    window->centreWithSize(860, 680);
+    window->setVisible(true);
+    eulaWindow = std::move(window);
+}
+
+void MainComponent::closeEulaWindow()
+{
+    eulaWindow.reset();
+}
+
+void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
+{
+    juce::String currentPath = suiteSettings.suiteVfsRoot;
+    if (fieldId == "shared_resources_root")
+        currentPath = suiteSettings.sharedResourcesRoot;
+    else if (fieldId == "creation_station_projects_root")
+        currentPath = suiteSettings.creationStationProjectsRoot;
+    else if (fieldId == "creation_engine_projects_root")
+        currentPath = suiteSettings.creationEngineProjectsRoot;
+    else if (fieldId == "creation_movie_projects_root")
+        currentPath = suiteSettings.creationMovieProjectsRoot;
+    else if (fieldId == "creation_live_projects_root")
+        currentPath = suiteSettings.creationLiveProjectsRoot;
+
+    suiteDirectoryChooser = std::make_unique<juce::FileChooser>("Choose a folder for the Creation Suite",
+                                                                currentPath.isNotEmpty()
+                                                                    ? juce::File(currentPath)
+                                                                    : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+                                                                "*",
+                                                                true);
+    auto chooser = suiteDirectoryChooser.get();
+    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                         [this, chooser, fieldId](const juce::FileChooser& result)
+                         {
+                             auto selected = result.getResult();
+                             if (chooser == suiteDirectoryChooser.get())
+                                 suiteDirectoryChooser.reset();
+
+                             if (selected == juce::File())
+                                 return;
+
+                             auto selectedPath = selected.getFullPathName();
+                             if (fieldId == "suite_vfs_root")
+                                 suiteSettings.suiteVfsRoot = selectedPath;
+                             else if (fieldId == "shared_resources_root")
+                                 suiteSettings.sharedResourcesRoot = selectedPath;
+                             else if (fieldId == "creation_station_projects_root")
+                                 suiteSettings.creationStationProjectsRoot = selectedPath;
+                             else if (fieldId == "creation_engine_projects_root")
+                                 suiteSettings.creationEngineProjectsRoot = selectedPath;
+                             else if (fieldId == "creation_movie_projects_root")
+                                 suiteSettings.creationMovieProjectsRoot = selectedPath;
+                             else if (fieldId == "creation_live_projects_root")
+                                 suiteSettings.creationLiveProjectsRoot = selectedPath;
+
+                             if (suiteSettingsPanel != nullptr)
+                                 suiteSettingsPanel->setSettings(suiteSettings);
+                         });
+}
+
+void MainComponent::applySuiteSettings(const SuiteSettings& settings)
+{
+    juce::String errorMessage;
+    if (! suiteSettingsStore.save(settings, errorMessage))
+    {
+        transportBar.setStatusText(errorMessage);
+        if (suiteSettingsPanel != nullptr)
+            suiteSettingsPanel->setStatusText(errorMessage);
+        return;
+    }
+
+    suiteSettings = settings;
+    transportBar.setStatusText("Saved Creation Suite settings.");
+    if (suiteSettingsPanel != nullptr)
+        suiteSettingsPanel->setStatusText("Saved suite-wide settings for all Creation apps.");
+}
 }
 
 void MainComponent::createNewProject()

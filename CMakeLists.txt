@@ -41,12 +41,14 @@ else()
     add_subdirectory(AssetSystem)
 endif()
 
+set(CS_SERVICES_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Services/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Services"
                      "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedServices")
     set(CS_SERVICES_TARGET creation_suite_services)
 endif()
 
+set(CS_UI_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/UI/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/UI"
                      "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedUI")
@@ -138,6 +140,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Project/ProjectStorage.cpp
     Source/Project/ProjectStorage.h
     Source/Suite/SuiteSettings.h
+    Source/Legal/EulaText.cpp
+    Source/Legal/EulaText.h
     Source/Tutorial/GuidedTutorial.cpp
     Source/Tutorial/GuidedTutorial.h
     Source/Tutorial/TutorialScriptCompiler.cpp
@@ -263,6 +267,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
 
 target_link_libraries(CreationStationInstrument PRIVATE
     ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_SERVICES_TARGET}
     creation_station_language_host
     juce::juce_audio_utils
     juce::juce_audio_processors
@@ -443,7 +448,7 @@ install(TARGETS CreativeWorkstation
     RUNTIME DESTINATION . COMPONENT CreativeWorkstation
     RESOURCE DESTINATION . COMPONENT CreativeWorkstation
 )
-install(FILES README.md LICENSE DESTINATION . COMPONENT CreativeWorkstation)
+install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "Creation Station")
 set(CPACK_PACKAGE_VENDOR "LagDaemon Software")
@@ -456,6 +461,7 @@ set(CPACK_GENERATOR "ZIP;WIX")
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_WIX_COMPONENT_INSTALL ON)
 set(CPACK_WIX_PROGRAM_MENU_FOLDER "Creation Station")
+set(CPACK_WIX_LICENSE_RTF "${CMAKE_CURRENT_SOURCE_DIR}/installer/EULA.rtf")
 set(CPACK_PACKAGE_EXECUTABLES "Creative Workstation" "Creation Station")
 set(CPACK_CREATE_DESKTOP_LINKS "Creative Workstation")
 set(CPACK_COMPONENTS_ALL CreativeWorkstation)

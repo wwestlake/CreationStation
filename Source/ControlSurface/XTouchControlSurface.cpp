@@ -1,5 +1,7 @@
 #include "XTouchControlSurface.h"
 #include "../Audio/WorkstationAudioEngine.h"
+#include <creation/ui/ControlSurfaceActionIds.h>
+#include <creation/ui/TransportActionIds.h>
 
 #include <cmath>
 
@@ -268,15 +270,15 @@ bool XTouchControlSurface::tryDispatchMappedTransport(const ControlSurfaceMappin
             if (binding.number != -1 && binding.number != number)
                 continue;
 
-            if (binding.targetId == "transport_play")
+            if (binding.targetId == creation::ui::transport_actions::play)
                 outCommand = TransportCommand::play;
-            else if (binding.targetId == "transport_stop")
+            else if (binding.targetId == creation::ui::transport_actions::stop)
                 outCommand = TransportCommand::stop;
-            else if (binding.targetId == "transport_record")
+            else if (binding.targetId == creation::ui::transport_actions::record)
                 outCommand = TransportCommand::record;
-            else if (binding.targetId == "transport_rewind")
+            else if (binding.targetId == creation::ui::transport_actions::rewind)
                 outCommand = TransportCommand::rewind;
-            else if (binding.targetId == "transport_fast_forward")
+            else if (binding.targetId == creation::ui::transport_actions::fastForward)
                 outCommand = TransportCommand::fastForward;
             else
                 continue;
@@ -629,29 +631,29 @@ void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput* source, co
     else if (note == bankRight && message.getVelocity() > 0 && onBankStep)
         onBankStep(8);
     else if (note == cursorLeftNote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("cursor_left");
+        onSpecialButtonPressed(creation::ui::surface_actions::cursorLeft);
     else if (note == cursorRightNote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("cursor_right");
+        onSpecialButtonPressed(creation::ui::surface_actions::cursorRight);
     else if (note == cursorUpNote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("cursor_up");
+        onSpecialButtonPressed(creation::ui::surface_actions::cursorUp);
     else if (note == cursorDownNote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("cursor_down");
+        onSpecialButtonPressed(creation::ui::surface_actions::cursorDown);
     else if (note == zoomNote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("zoom");
+        onSpecialButtonPressed(creation::ui::surface_actions::zoom);
     else if (note == scrubNote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("scrub");
+        onSpecialButtonPressed(creation::ui::surface_actions::scrub);
     else if (note == assignmentTrack && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("assign_track");
+        onSpecialButtonPressed(creation::ui::surface_actions::assignTrack);
     else if (note == assignmentSend && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("assign_send");
+        onSpecialButtonPressed(creation::ui::surface_actions::assignSend);
     else if (note == assignmentPan && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("assign_pan");
+        onSpecialButtonPressed(creation::ui::surface_actions::assignPan);
     else if (note == assignmentPlugin && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("assign_plugin");
+        onSpecialButtonPressed(creation::ui::surface_actions::assignPlugin);
     else if (note == assignmentEq && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("assign_eq");
+        onSpecialButtonPressed(creation::ui::surface_actions::assignEq);
     else if (note == assignmentInstrument && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("assign_instrument");
+        onSpecialButtonPressed(creation::ui::surface_actions::assignInstrument);
     else if (note == bankLeftFull && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("bank_left_full");
     else if (note == bankRightFull && message.getVelocity() > 0 && onSpecialButtonPressed)
@@ -729,23 +731,23 @@ void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput* source, co
     else if (note == utilityEnter && message.getVelocity() > 0 && onSpecialButtonPressed)
         onSpecialButtonPressed("utility_enter");
     else if (note == transportMarker && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("transport_marker");
+        onSpecialButtonPressed(creation::ui::surface_actions::transportMarker);
     else if (note == transportNudge && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("transport_nudge");
+        onSpecialButtonPressed(creation::ui::surface_actions::transportNudge);
     else if (note == transportCycle && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("transport_cycle");
+        onSpecialButtonPressed(creation::ui::surface_actions::transportCycle);
     else if (note == transportDrop && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("transport_drop");
+        onSpecialButtonPressed(creation::ui::surface_actions::transportDrop);
     else if (note == transportReplace && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("transport_replace");
+        onSpecialButtonPressed(creation::ui::surface_actions::transportReplace);
     else if (note == transportClick && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("transport_click");
+        onSpecialButtonPressed(creation::ui::transport_actions::click);
     else if (note == transportSolo && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("transport_solo");
+        onSpecialButtonPressed(creation::ui::surface_actions::transportSolo);
     else if (note == userANote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("user_a");
+        onSpecialButtonPressed(creation::ui::surface_actions::userA);
     else if (note == userBNote && message.getVelocity() > 0 && onSpecialButtonPressed)
-        onSpecialButtonPressed("user_b");
+        onSpecialButtonPressed(creation::ui::surface_actions::userB);
 
     reportStatus("MIDI: " + message.getDescription());
 }

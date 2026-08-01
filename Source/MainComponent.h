@@ -19,11 +19,13 @@
 #include "Content/ContentLibrary.h"
 #include "Content/ContentApiClient.h"
 #include <creation/assets/ProjectSession.h>
+#include <creation/ui/CreationSuiteHeaderBar.h>
+#include <creation/ui/SuiteShellController.h>
 #include "Suite/SuiteSettings.h"
 #include "Tutorial/GuidedTutorial.h"
 #include "Timeline/TimelineModel.h"
 #include "Language/PatinaArtifactLoader.h"
-#include <creation/ui/SuiteShellController.h>
+#include "Legal/EulaText.h"
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ArrangeView.h"
@@ -210,88 +212,6 @@ private:
         juce::Array<bool> pluginBypassStates;
     };
 
-    class TransportBar final : public juce::Component
-    {
-    public:
-        enum class MetronomeMode { off, playOrRecord, always };
-
-        TransportBar();
-
-        std::function<void()> onPlay;
-        std::function<void()> onPause;
-        std::function<void()> onStop;
-        std::function<void()> onRecord;
-        std::function<void()> onRewind;
-        std::function<void()> onFastForward;
-        std::function<void(bool)> onLoopChanged;
-        std::function<void(MetronomeMode)> onClickChanged;
-        std::function<void()> onSignInRequested;
-        std::function<void()> onOpenProfilePageRequested;
-        std::function<void()> onLogoutRequested;
-        std::function<void()> onNewProjectRequested;
-        std::function<void()> onProjectMenuRequested;
-        std::function<void()> onTourRequested;
-        std::function<void()> onAudioRequested;
-        std::function<void()> onSuiteRequested;
-        // Right-click a transport button -> "Learn MIDI Binding..." - targetId matches
-        // ControlSurfaceMappingStore::Binding::targetId (e.g. "transport_rewind").
-        std::function<void(const juce::String& targetId, const juce::String& displayLabel)> onLearnMidiRequested;
-
-        void setProfile(const DesktopAuthSession::SessionData& session);
-        void clearProfile();
-        void setProjectLabel(const juce::String& label);
-        juce::Rectangle<int> getProjectButtonScreenBounds() const;
-        void setStatusText(const juce::String& text);
-        void setMidiStatusText(const juce::String& text);
-        void setPlaybackVisualState(bool playing, bool recording);
-        void setScrubModeEnabled(bool enabled);
-        void setMetronomeMode(MetronomeMode mode);
-
-        void resized() override;
-        void paint(juce::Graphics&) override;
-        void mouseDown(const juce::MouseEvent& event) override;
-
-        juce::Label titleLabel;
-        juce::Image logoImage;
-        juce::Label midiStatusLabel;
-        juce::TextButton playButton { "Play" };
-        juce::TextButton pauseButton { "Pause" };
-        juce::TextButton stopButton { "Stop" };
-        juce::TextButton recordButton { "Record" };
-        juce::ToggleButton loopButton { "Loop" };
-        juce::ToggleButton clickButton { "Click" };
-        juce::TextButton rewindButton { "Rew" };
-        juce::TextButton fastForwardButton { "Fwd" };
-        juce::TextButton signInButton { "Sign In" };
-        juce::TextButton newProjectButton { "New" };
-        juce::TextButton projectButton { "Project" };
-        juce::TextButton audioButton { "Audio" };
-        juce::TextButton suiteButton { juce::String(juce::CharPointer_UTF8("\xe2\x9a\x99")) };
-        juce::TextButton tourButton { "Tour" };
-        juce::Label profileNameLabel;
-        juce::Label profileDetailLabel;
-        juce::Image profileBadgeImage;
-        juce::Label statusLabel;
-        juce::Label scrubModeLabel;
-        juce::Rectangle<int> transportControlBounds;
-        juce::Rectangle<int> logoRailBounds;
-
-    private:
-        void advanceMetronomeMode();
-        void refreshMetronomeButton();
-
-        juce::String profileInitials;
-        juce::String profileTierName;
-        juce::String projectText;
-        juce::Rectangle<int> profileChipBounds;
-        bool profileVisible = false;
-        bool scrubModeEnabled = false;
-        MetronomeMode metronomeMode = MetronomeMode::off;
-        bool metronomeAudible = false;
-        bool playbackPlaying = false;
-        bool playbackRecording = false;
-    };
-
     juce::AudioDeviceManager deviceManager;
     DesktopAuthSession authSession { "creative-workstation" };
     creation::ui::SuiteShellController suiteShellController;
@@ -305,7 +225,7 @@ private:
     WorkstationAudioEngine engine;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
-    TransportBar transportBar;
+    CreationSuiteHeaderBar transportBar;
     ViewModeBar viewModeBar;
     PluginRackBar pluginRackBar;
     TrackerPanel trackerPanel;
@@ -341,13 +261,12 @@ private:
     juce::Component::SafePointer<FxStackPanel> fxStackPanel;
     std::unique_ptr<juce::DocumentWindow> suiteSettingsWindow;
     juce::Component::SafePointer<SuiteSettingsPanel> suiteSettingsPanel;
-    std::unique_ptr<juce::DocumentWindow> suiteEulaWindow;
-    juce::Component::SafePointer<SuiteEulaPanel> suiteEulaPanel;
+    std::unique_ptr<juce::DocumentWindow> eulaWindow;
     std::unique_ptr<juce::DocumentWindow> midiEditorWindow;
     juce::Component::SafePointer<MidiEditorPanel> midiEditorPanel;
     std::array<std::unique_ptr<juce::DocumentWindow>, 12> workspacePopoutWindows;
     juce::Label poppedWorkspacePlaceholder;
-    juce::Component::SafePointer<TransportBar> transportBarSafe;
+    juce::Component::SafePointer<CreationSuiteHeaderBar> transportBarSafe;
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     creation::assets::ProjectSession projectSession;
@@ -506,8 +425,8 @@ private:
     void showProjectMenu();
     void showSuiteSettingsWindow();
     void closeSuiteSettingsWindow();
-    void showSuiteEulaWindow();
-    void closeSuiteEulaWindow();
+    void showEulaWindow();
+    void closeEulaWindow();
     void chooseSuiteDirectory(const juce::String& fieldId);
     void applySuiteSettings(const SuiteSettings& settings);
     void createNewProject();
