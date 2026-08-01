@@ -18,8 +18,9 @@
 #include "ControlSurface/ControlSurfaceMappingStore.h"
 #include "Content/ContentLibrary.h"
 #include "Content/ContentApiClient.h"
-#include "Project/ProjectManager.h"
+#include <creation/assets/ProjectSession.h>
 #include <creation/ui/CreationSuiteHeaderBar.h>
+#include <creation/ui/SuiteShellController.h>
 #include "Suite/SuiteSettings.h"
 #include "Tutorial/GuidedTutorial.h"
 #include "Timeline/TimelineModel.h"
@@ -40,9 +41,10 @@
 #include "Views/SettingsPanel.h"
 #include "Views/ScorePanel.h"
 #include "Views/SignalLabPanel.h"
-#include "Views/SuiteSettingsPanel.h"
 #include "Views/TrackerPanel.h"
 #include "Views/TourGuideOverlay.h"
+#include <creation/ui/SuiteEulaPanel.h>
+#include <creation/ui/SuiteSettingsPanel.h>
 
 class MainComponent final : public juce::Component,
                             private juce::Timer,
@@ -212,6 +214,7 @@ private:
 
     juce::AudioDeviceManager deviceManager;
     DesktopAuthSession authSession { "creative-workstation" };
+    creation::ui::SuiteShellController suiteShellController;
     CreationStationContextEngine contextEngine;
     CreationStationContextStore contextStore;
     CreationStationTaskPlanner taskPlanner;
@@ -266,7 +269,7 @@ private:
     juce::Component::SafePointer<CreationSuiteHeaderBar> transportBarSafe;
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
-    ProjectManager projectManager;
+    creation::assets::ProjectSession projectSession;
     VstPluginCatalog vstPluginCatalog;
     ContentLibrary contentLibrary;
     ContentApiClient contentApiClient;
@@ -430,6 +433,7 @@ private:
     void createProjectFromTemplate();
     void beginCreateProjectFromTemplate();
     void openProject();
+    void openProject(const juce::File& containerFile);
     void beginOpenProject();
     void saveProject();
     void saveProjectAs();
@@ -473,20 +477,21 @@ private:
     void refreshAiContextStore();
     void downloadContentItem(const ContentLibrary::Item& item);
     void activateContentItem(const ContentLibrary::Item& item);
-    void openProjectAsset(const ProjectManager::ProjectAsset& asset);
-    void placeProjectAssetOnTracker(const ProjectManager::ProjectAsset& asset);
-    void exportProjectAssetRaw(const ProjectManager::ProjectAsset& asset);
-    int placeAudioAssetOnTracker(const ProjectManager::ProjectAsset& asset,
+    void openProjectAsset(const creation::assets::AssetDescriptor& asset);
+    void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset);
+    void exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset);
+    int placeAudioAssetOnTracker(const creation::assets::AssetDescriptor& asset,
                                  int targetTrack,
                                  double startSeconds,
                                  const juce::String& sourceTool,
                                  juce::String& errorMessage);
     bool importAudioFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    std::optional<ProjectManager::ProjectAsset> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
+    std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
     void resolveTrackerClipAssetFiles();
     void launchTutorialItem(const ContentPanel::TutorialItem& item);
     bool chooseStorageRoot(bool promptWhenAlreadyConfigured = false);
     bool ensureStorageRootConfigured();
+    bool ensureProjectSessionActive(juce::String& errorMessage);
     juce::String createRecordingTakeName() const;
     void refreshRecentTakes();
     bool startRecordingSession();
@@ -496,6 +501,8 @@ private:
     void showAiSidebar();
     void setAiSidebarCollapsed(bool shouldCollapse);
     void syncSemanticAppContext();
+    bool loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded = false);
+    bool saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage);
     void refreshAiModelCatalog();
     WorkspaceMode workspaceModeFromString(const juce::String& modeName) const;
     void configureTutorialOverlay();

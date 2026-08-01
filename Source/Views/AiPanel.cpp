@@ -1,7 +1,19 @@
 #include "AiPanel.h"
+#include <creation/services/SuiteAiProviderRuntime.h>
 
 namespace
 {
+    const juce::Array<creation::services::SuiteAiProviderRuntimeProfile>& availableAiProviders()
+    {
+        static const auto providers = creation::services::SuiteAiProviderRuntime::createChatCapableProfiles();
+        return providers;
+    }
+
+    juce::String normalizedProviderId(const juce::String& providerName)
+    {
+        return creation::services::SuiteAiProviderRuntime::normalizeProviderId(providerName);
+    }
+
     struct MarkdownRenderStyle
     {
         juce::Font bodyFont { 14.0f };
@@ -351,8 +363,8 @@ AiPanel::AiPanel()
     providerLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
     addAndMakeVisible(providerLabel);
 
-    providerComboBox.addItem("OpenAI", 1);
-    providerComboBox.addItem("Ollama", 2);
+    for (int index = 0; index < availableAiProviders().size(); ++index)
+        providerComboBox.addItem(availableAiProviders()[index].displayName, index + 1);
     providerComboBox.addListener(this);
     addAndMakeVisible(providerComboBox);
 
@@ -578,8 +590,12 @@ void AiPanel::setAvailableModels(const juce::StringArray& modelIds, const juce::
 void AiPanel::setSelectedProvider(const juce::String& providerName)
 {
     updatingComboBoxes = true;
-    auto isOllama = providerName.toLowerCase().contains("ollama");
-    providerComboBox.setSelectedId(isOllama ? 2 : 1, juce::dontSendNotification);
+    const auto providerId = normalizedProviderId(providerName);
+    auto selectedIndex = 0;
+    for (int index = 0; index < availableAiProviders().size(); ++index)
+        if (availableAiProviders()[index].providerId == providerId)
+            selectedIndex = index;
+    providerComboBox.setSelectedId(selectedIndex + 1, juce::dontSendNotification);
     updatingComboBoxes = false;
 }
 

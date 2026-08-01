@@ -1,9 +1,10 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <creation/assets/ProjectSession.h>
+#include <creation/suite/SuiteSettings.h>
 #include "CreationStationContextEngine.h"
 #include "../Content/ContentLibrary.h"
-#include "../Project/ProjectManager.h"
 
 class CreationStationContextStore final
 {
@@ -14,7 +15,8 @@ public:
         juce::String generatedAt;
     };
 
-    bool rebuild(const ProjectManager& projectManager,
+    bool rebuild(const creation::assets::ProjectSession& session,
+                 const creation::suite::SuiteSettings& suiteSettings,
                  const ContentLibrary& contentLibrary,
                  const juce::String& workspaceMode,
                  const juce::String& patinaSource,

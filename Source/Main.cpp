@@ -2,8 +2,9 @@
 #if JUCE_WINDOWS
  #include <windows.h>
 #endif
-#include "Branding.h"
 #include "MainComponent.h"
+#include <creation/ui/CreationSuiteLogos.h>
+#include <creation/ui/SuiteCommonSpacePanel.h>
 
 namespace
 {
@@ -79,67 +80,29 @@ private:
     public:
         StartupSplashContent()
         {
-            logo = branding::createCreationStationLogoImage(180);
+            commonSpacePanel.setMode(creation::ui::SuiteCommonSpacePanel::Mode::splash);
+            commonSpacePanel.setSelectedLogoId(creation::ui::SuiteLogoId::station);
+            commonSpacePanel.setFooterText("Creation Station loading inside the shared Creation Suite surface.");
+            addAndMakeVisible(commonSpacePanel);
         }
 
         void setProgress(juce::String newStatus, float newProgress)
         {
             status = std::move(newStatus);
             progress = juce::jlimit(0.0f, 1.0f, newProgress);
-            repaint();
+            commonSpacePanel.setStatusText(status);
+            commonSpacePanel.setProgress(progress);
         }
 
-        void paint(juce::Graphics& g) override
+        void resized() override
         {
-            auto bounds = getLocalBounds().toFloat();
-            g.fillAll(juce::Colour(0xff090b10));
-            g.setGradientFill(juce::ColourGradient(juce::Colour(0xff15253b), bounds.getX(), bounds.getY(),
-                                                    juce::Colour(0xff090b10), bounds.getX(), bounds.getBottom(), false));
-            g.fillRoundedRectangle(bounds.reduced(14.0f), 30.0f);
-
-            g.setColour(juce::Colour(0xff273451));
-            g.drawRoundedRectangle(bounds.reduced(14.0f), 30.0f, 1.0f);
-
-            g.setColour(juce::Colour(0x22394a6a));
-            for (int i = 0; i < 7; ++i)
-            {
-                auto y = 74.0f + (float) (i * 40);
-                g.drawLine(320.0f, y, 676.0f, y, 1.0f);
-            }
-
-            g.drawImageWithin(logo, 58, 112, 180, 180, juce::RectanglePlacement::centred, false);
-
-            g.setColour(juce::Colours::white);
-            g.setFont(juce::Font(34.0f).boldened());
-            g.drawText("Creation Station", 274, 92, 380, 40, juce::Justification::left, false);
-
-            g.setColour(juce::Colour(0xff9fb0c8));
-            g.setFont(juce::Font(18.0f));
-            g.drawText("Audio workstation - mixer - node graph - AI assist",
-                       274, 136, 380, 28, juce::Justification::left, false);
-
-            g.setColour(juce::Colour(0xff7fcfff));
-            g.setFont(juce::Font(17.0f).boldened());
-            g.drawText(status.isNotEmpty() ? status : "Loading your creative deck...",
-                       274, 176, 380, 26, juce::Justification::left, false);
-
-            auto bar = juce::Rectangle<float>(274.0f, 218.0f, 376.0f, 8.0f);
-            g.setColour(juce::Colour(0x403c4a66));
-            g.fillRoundedRectangle(bar, 4.0f);
-            g.setGradientFill(juce::ColourGradient(juce::Colour(0xff56f4ff), bar.getX(), bar.getY(),
-                                                    juce::Colour(0xff7fcfff), bar.getRight(), bar.getY(), false));
-            g.fillRoundedRectangle(bar.withWidth(bar.getWidth() * progress), 4.0f);
-
-            g.setColour(juce::Colour(0xffd8e2ff));
-            g.setFont(juce::Font(15.0f));
-            g.drawText(juce::String(juce::roundToInt(progress * 100.0f)) + "%  -  Banked mixer - X-Touch control - VST hosting - DSP graph",
-                       274, 258, 410, 24, juce::Justification::left, false);
+            commonSpacePanel.setBounds(getLocalBounds());
         }
 
     private:
-        juce::Image logo;
         juce::String status { "Starting Creation Station..." };
         float progress = 0.02f;
+        creation::ui::SuiteCommonSpacePanel commonSpacePanel;
     };
 
     class StartupSplashWindow final : public juce::DocumentWindow
@@ -147,7 +110,7 @@ private:
     public:
         StartupSplashWindow()
             : juce::DocumentWindow("Creation Station",
-                                   juce::Colour(0x00000000),
+                                   juce::Colour(0xff0b0f14),
                                    0)
         {
             setUsingNativeTitleBar(false);
@@ -155,10 +118,11 @@ private:
             setDropShadowEnabled(true);
             setResizable(false, false);
             setAlwaysOnTop(true);
-            setBackgroundColour(juce::Colour(0x00000000));
+            setOpaque(true);
+            setBackgroundColour(juce::Colour(0xff0b0f14));
             content = new StartupSplashContent();
             setContentOwned(content, true);
-            centreWithSize(720, 420);
+            centreWithSize(1040, 620);
         }
 
         void setProgress(const juce::String& statusText, float progress)
@@ -186,7 +150,7 @@ private:
                                  .findColour(juce::ResizableWindow::backgroundColourId),
                              DocumentWindow::allButtons)
         {
-            setIcon(branding::createCreationStationLogoImage(128));
+            setIcon(creation::ui::getSuiteLogoImage(creation::ui::SuiteLogoId::station));
             setUsingNativeTitleBar(true);
             setResizable(true, true);
             setContentOwned(new MainComponent(std::move(startupProgressCallback)), true);

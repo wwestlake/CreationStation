@@ -1,13 +1,165 @@
+#include <creation/assets/ProjectManifest.h>
+#include <creation/assets/AssetTypes.h>
 #include "MainComponent.h"
 #include "Branding.h"
 #include "Patch/PatchModel.h"
+#include <creation/assets/ProjectContainerService.h>
+#include <creation/assets/ProjectWorkspaceService.h>
+#include <creation/ui/CreationSuiteLogos.h>
+#include <creation/services/SuiteAiProviderRuntime.h>
 #include "Tutorial/TutorialScriptCompiler.h"
+#include <creation/services/SuiteAiSettings.h>
 #include <creation/ui/ControlSurfaceActionIds.h>
 #include <creation/ui/CreationSuiteLogos.h>
 #include <thread>
 
 namespace
 {
+juce::Array<creation::assets::AssetDescriptor> filterFoleyAudioAssets(const juce::Array<creation::assets::AssetDescriptor>& projectAssets)
+{
+    juce::Array<creation::assets::AssetDescriptor> foleyAssets;
+
+    for (const auto& asset : projectAssets)
+    {
+        if (asset.kind == creation::assets::AssetKind::audio)
+            foleyAssets.add(asset);
+    }
+
+    return foleyAssets;
+}
+
+juce::String trimProjectLabelPrefix(const juce::String& label)
+{
+    constexpr auto prefix = "Project:";
+    auto trimmed = label.trim();
+    if (trimmed.startsWithIgnoreCase(prefix))
+        trimmed = trimmed.fromFirstOccurrenceOf(prefix, false, false).trim();
+    return trimmed;
+}
+
+juce::String makeDisplayProjectLabel(const juce::String& rawName)
+{
+    auto trimmed = trimProjectLabelPrefix(rawName);
+    return trimmed.isNotEmpty() ? trimmed : "No project open";
+}
+
+void drawHeaderActionIcon(juce::Graphics& g,
+                          juce::Rectangle<float> bounds,
+                          const juce::String& iconName,
+                          juce::Colour colour)
+{
+    auto centre = bounds.getCentre();
+    auto size = juce::jmin(bounds.getWidth(), bounds.getHeight());
+    g.setColour(colour);
+
+    if (iconName == "plus-circle" || iconName == "plus")
+    {
+        auto circleBounds = juce::Rectangle<float>(centre.x - size * 0.42f, centre.y - size * 0.42f, size * 0.84f, size * 0.84f);
+        g.setColour(colour.withAlpha(0.20f));
+        g.fillEllipse(circleBounds);
+        g.setColour(colour);
+        g.drawEllipse(circleBounds, 2.0f);
+
+        auto armLength = size * 0.22f;
+        g.drawLine(centre.x - armLength, centre.y, centre.x + armLength, centre.y, 2.4f);
+        g.drawLine(centre.x, centre.y - armLength, centre.x, centre.y + armLength, 2.4f);
+        return;
+    }
+
+    if (iconName == "folder")
+    {
+        juce::Path folder;
+        folder.startNewSubPath(bounds.getX() + size * 0.10f, bounds.getY() + size * 0.34f);
+        folder.lineTo(bounds.getX() + size * 0.30f, bounds.getY() + size * 0.34f);
+        folder.lineTo(bounds.getX() + size * 0.40f, bounds.getY() + size * 0.18f);
+        folder.lineTo(bounds.getRight() - size * 0.08f, bounds.getY() + size * 0.18f);
+        folder.lineTo(bounds.getRight() - size * 0.08f, bounds.getBottom() - size * 0.14f);
+        folder.lineTo(bounds.getX() + size * 0.10f, bounds.getBottom() - size * 0.14f);
+        folder.closeSubPath();
+        g.strokePath(folder, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        return;
+    }
+
+    if (iconName == "speaker")
+    {
+        juce::Path speaker;
+        speaker.startNewSubPath(bounds.getX() + size * 0.12f, centre.y - size * 0.14f);
+        speaker.lineTo(bounds.getX() + size * 0.28f, centre.y - size * 0.14f);
+        speaker.lineTo(bounds.getX() + size * 0.44f, centre.y - size * 0.32f);
+        speaker.lineTo(bounds.getX() + size * 0.44f, centre.y + size * 0.32f);
+        speaker.lineTo(bounds.getX() + size * 0.28f, centre.y + size * 0.14f);
+        speaker.lineTo(bounds.getX() + size * 0.12f, centre.y + size * 0.14f);
+        speaker.closeSubPath();
+        g.strokePath(speaker, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        for (auto radiusScale : { 0.20f, 0.34f })
+        {
+            juce::Path wave;
+            auto radius = size * radiusScale;
+            wave.addCentredArc(bounds.getX() + size * 0.46f,
+                               centre.y,
+                               radius,
+                               radius,
+                               0.0f,
+                               -juce::MathConstants<float>::pi * 0.35f,
+                               juce::MathConstants<float>::pi * 0.35f,
+                               true);
+            g.strokePath(wave, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        return;
+    }
+
+    if (iconName == "gear")
+    {
+        const auto radius = size * 0.24f;
+        juce::Path gearPath;
+        const int numTeeth = 8;
+        for (int i = 0; i < numTeeth; ++i)
+        {
+            const float angle = i * juce::MathConstants<float>::twoPi / numTeeth;
+            const float outerR = radius * 1.35f;
+            const float innerR = radius * 0.88f;
+
+            juce::Path tooth;
+            tooth.addRectangle(-radius * 0.16f, -outerR, radius * 0.32f, outerR - innerR);
+            juce::AffineTransform transform = juce::AffineTransform::rotation(angle).translated(centre.x, centre.y);
+            gearPath.addPath(tooth, transform);
+        }
+
+        gearPath.addEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f);
+        g.fillPath(gearPath);
+
+        juce::Path holePath;
+        holePath.addEllipse(centre.x - radius * 0.40f, centre.y - radius * 0.40f, radius * 0.80f, radius * 0.80f);
+        g.setColour(juce::Colour(0xff17222c));
+        g.fillPath(holePath);
+        return;
+    }
+
+    if (iconName == "chevron-down")
+    {
+        juce::Path chevron;
+        chevron.startNewSubPath(centre.x - size * 0.20f, centre.y - size * 0.08f);
+        chevron.lineTo(centre.x, centre.y + size * 0.12f);
+        chevron.lineTo(centre.x + size * 0.20f, centre.y - size * 0.08f);
+        g.strokePath(chevron, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        return;
+    }
+}
+
+AiProviderSettings makeAiProviderSettings(const creation::services::SuiteAiResolvedRuntimeSettings& runtimeSettings)
+{
+    AiProviderSettings settings;
+    settings.providerDisplayName = runtimeSettings.providerDisplayName.isNotEmpty()
+                                       ? runtimeSettings.providerDisplayName
+                                       : creation::services::SuiteAiProviderRuntime::resolveProfile(runtimeSettings.providerId).displayName;
+    settings.providerId = runtimeSettings.providerId;
+    settings.baseUrl = runtimeSettings.baseUrl;
+    settings.modelName = runtimeSettings.modelName;
+    settings.apiKey = runtimeSettings.apiKey;
+    return settings;
+}
+
 CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const DesktopAuthSession::SessionData& session)
 {
     CreationSuiteHeaderBar::ProfileData profile;
@@ -584,7 +736,7 @@ void MainComponent::ViewModeBar::paint(juce::Graphics& g)
                1.0f);
 
     g.setColour(juce::Colour(0xff8ea0b7));
-        g.setFont(juce::Font(13.0f));
+    g.setFont(juce::Font(13.0f));
     g.drawText(workspaceModeName(activeMode) + " active", getLocalBounds().reduced(12, 0), juce::Justification::centredRight, true);
 }
 
@@ -1053,9 +1205,29 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         authGateView.setStatusText("Session cleared.");
         refreshAuthState();
     };
+    suiteShellController.configure({ "Creation Station",
+                                     creation::assets::SuiteAppDomain::station,
+                                     juce::Colour(0xff15181d) },
+                                   [this](const juce::String& status)
+                                   {
+                                       transportBar.setStatusText(status);
+                                       if (status.containsIgnoreCase("saved suite-wide"))
+                                       {
+                                           juce::String suiteSettingsError;
+                                           suiteSettings = suiteSettingsStore.load(suiteSettingsError);
+                                           if (suiteSettingsError.isNotEmpty())
+                                               transportBar.setStatusText(suiteSettingsError);
+                                       }
+                                       if (status.containsIgnoreCase("AI routing"))
+                                           loadSuiteAiProviderSettings();
+                                   });
+    suiteShellController.onProjectOpenRequested = [this](const juce::File& projectDirectory)
+    {
+        openProject(projectDirectory);
+    };
     transportBar.onProjectMenuRequested = [this]
     {
-        showProjectMenu();
+        suiteShellController.showProjectBrowser();
     };
     transportBar.onAudioRequested = [this]
     {
@@ -1063,7 +1235,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     };
     transportBar.onSuiteRequested = [this]
     {
-        showSuiteSettingsWindow();
+        suiteShellController.showSuiteSettings();
     };
     transportBar.onTourRequested = [this]
     {
@@ -1086,8 +1258,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     reportStartup("Loading storage and settings...", 0.40f);
     juce::String storageError;
-    if (! projectManager.loadStorageConfiguration(storageError))
-        ensureStorageRootConfigured();
+    if (! true)
+    {
+        auto startupStorageMessage = storageError.isNotEmpty()
+                                       ? storageError
+                                       : "Storage is not configured yet. The studio can still open. Set it up later when you want to save projects or manage content.";
+        transportBar.setStatusText(startupStorageMessage);
+    }
 
     loadAppSettings();
     {
@@ -1104,29 +1281,25 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     reportStartup("Opening project workspace...", 0.72f);
     auto loadedAutoloadProject = false;
-    if (projectManager.hasStorageRoot() && autoloadLastProject)
+    if (suiteSettings.suiteVfsRoot.isNotEmpty())
     {
-        loadedAutoloadProject = projectManager.loadLastProject();
-        if (! loadedAutoloadProject)
-        {
-            juce::String projectError;
-            projectManager.createProject("Untitled Project", projectError);
-        }
+        juce::String activeError;
+        loadedAutoloadProject = ensureProjectSessionActive(activeError);
+        if (! loadedAutoloadProject && activeError.isNotEmpty())
+            transportBar.setStatusText(activeError);
     }
-    else if (projectManager.hasStorageRoot() && ! projectManager.hasProject())
-    {
-        juce::String projectError;
-        projectManager.createProject("Untitled Project", projectError);
-    }
-    transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
-    settingsPanel.setStoragePath(projectManager.hasStorageRoot() ? projectManager.getStorageRoot().getFullPathName() : "");
-    if (projectManager.hasProject())
-        settingsPanel.setProjectMetadata(projectManager.getCurrentProject());
-    settingsPanel.setAutoloadEnabled(autoloadLastProject);
+    transportBar.setProjectLabel("Project: " + (projectSession.isValid() ? projectSession.getManifest().projectName : juce::String("No project open")));
+    settingsPanel.setStoragePath(suiteSettings.suiteVfsRoot.isNotEmpty() ? juce::File(suiteSettings.suiteVfsRoot).getFullPathName() : "");
+    if (projectSession.isValid())
+        settingsPanel.setProjectMetadata(projectSession.getManifest());
+    settingsPanel.setAutoloadEnabled(true);
     settingsPanel.setAiProviderSettings(aiProviderSettings);
-    aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+    aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
     aiPanel.setSelectedModel(aiProviderSettings.modelName);
     refreshAiModelCatalog();
+
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty() && storageError.isEmpty())
+        contentPanel.setStatusText("Storage is not configured yet. You can keep using the studio and set up saving/content later.");
 
     if (loadedAutoloadProject)
     {
@@ -1136,11 +1309,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     reportStartup("Loading control-surface maps...", 0.86f);
     juce::String controlSurfaceError;
-    if (! projectManager.loadControlSurfaceMappings(controlSurfaceMappings, controlSurfaceError)
+    if (! controlSurfaceMappings.loadFromFile(suiteSettingsStore.getSuiteConfigDirectory().getChildFile("control-surface-mappings.json"), controlSurfaceError)
         || controlSurfaceMappings.getProfiles().isEmpty())
     {
         controlSurfaceMappings = ControlSurfaceMappingStore::createDefaultLibrary();
-        projectManager.saveControlSurfaceMappings(controlSurfaceMappings, controlSurfaceError);
+        controlSurfaceMappings.saveToFile(suiteSettingsStore.getSuiteConfigDirectory().getChildFile("control-surface-mappings.json"), controlSurfaceError);
     }
     auto* activePreset = controlSurfaceMappings.findProfileById(controlSurfaceMappings.getActivePresetId());
     transportBar.setMidiStatusText("Control preset: " + (activePreset != nullptr ? activePreset->displayName
@@ -1276,21 +1449,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         timelineModel.setLoopEnabled(loopEnabled);
         transportBar.setStatusText(loopEnabled ? "Transport: loop on" : "Transport: loop off");
     };
-    transportBar.onClickChanged = [this](bool clickEnabled)
-    {
-        metronomeEnabled = clickEnabled;
-        engine.setMetronomeEnabled(metronomeEnabled);
-        engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
-        saveAppSettings();
-        transportBar.setStatusText(metronomeEnabled ? "Metronome on." : "Metronome off.");
-    };
     transportBar.onSignInRequested = [this]
     {
         authSession.beginLogin();
     };
     transportBar.onOpenProfilePageRequested = [this]
     {
-        openLagDaemonProfile();
+        suiteShellController.openSuiteProfile();
     };
     transportBar.onLogoutRequested = [this]
     {
@@ -1764,6 +1929,36 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         saveSessionToDisk();
     };
 
+    trackerPanel.onPitchPipeTriggered = [this](double noteHz)
+    {
+        constexpr double sampleRate = 44100.0;
+        constexpr double durationSeconds = 2.0;
+        const int numSamples = (int) (sampleRate * durationSeconds);
+
+        juce::AudioBuffer<float> toneBuffer(1, numSamples);
+        toneBuffer.clear();
+        auto* samples = toneBuffer.getWritePointer(0);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            double t = (double) i / sampleRate;
+            double attack = juce::jmin(1.0, t / 0.03);
+            double release = juce::jmax(0.0, 1.0 - ((t - 1.5) / 0.5));
+            double env = attack * (t > 1.5 ? release : 1.0);
+
+            double wave = 0.70 * std::sin(2.0 * juce::MathConstants<double>::pi * noteHz * t)
+                        + 0.22 * std::sin(4.0 * juce::MathConstants<double>::pi * noteHz * t)
+                        + 0.08 * std::sin(6.0 * juce::MathConstants<double>::pi * noteHz * t);
+            samples[i] = (float) (wave * env * 0.4);
+        }
+
+        juce::String error;
+        if (engine.previewGeneratedBuffer(toneBuffer, sampleRate, error))
+            transportBar.setStatusText("Pitch Pipe: " + juce::String(juce::roundToInt(noteHz)) + " Hz tone played");
+        else if (error.isNotEmpty())
+            transportBar.setStatusText("Pitch Pipe error: " + error);
+    };
+
     arrangeView.onTrackSelected = [selectTrack](int trackIndex)
     {
         selectTrack(trackIndex);
@@ -1784,9 +1979,16 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         importProjectSounds();
     };
 
-    arrangeView.onAssetPreviewRequested = [this](const juce::File& assetFile)
+    arrangeView.onAssetPreviewRequested = [this](const creation::assets::AssetDescriptor& asset)
     {
-        if (! projectManager.hasProject() || ! assetFile.existsAsFile())
+        if (! projectSession.isValid())
+            return;
+
+        juce::String errorMessage;
+        creation::assets::MaterializedAssetLease lease;
+        if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                              creation::assets::MaterializationAccess::readOnly,
+                                              lease, errorMessage))
             return;
 
         WorkstationAudioEngine::PreviewSettings settings;
@@ -1798,11 +2000,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         settings.reverse = arrangeView.isReverseEnabled();
         settings.normalize = arrangeView.isNormalizeEnabled();
 
-        juce::String errorMessage;
-        if (engine.previewAssetFile(assetFile, settings, errorMessage))
-            transportBar.setStatusText("Previewing slice: " + assetFile.getFileName());
-        else if (errorMessage.isNotEmpty())
-            transportBar.setStatusText(errorMessage);
+        if (engine.previewAssetFile(lease.materializedFile, settings, errorMessage))
+            transportBar.setStatusText("Previewing: " + asset.displayName);
     };
 
     arrangeView.onArrangementChanged = [this]
@@ -1822,20 +2021,15 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     signalLabPanel.onRenderRequested = [this](const juce::AudioBuffer<float>& buffer, double sampleRate, const juce::String& suggestedName)
     {
-        if (! projectManager.hasProject())
+        juce::String projectError;
+        if (! ensureProjectSessionActive(projectError))
         {
-            juce::String projectError;
-            if (! projectManager.createProject("Untitled Project", projectError))
-            {
-                transportBar.setStatusText("Could not create a project for rendered sounds.");
-                return;
-            }
-
-            transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+            transportBar.setStatusText(projectError.isNotEmpty() ? projectError : "Could not initialize project for rendered sounds.");
+            return;
         }
 
         juce::String errorMessage;
-        auto renderedFile = projectManager.saveGeneratedAssetFile(buffer, sampleRate, suggestedName, errorMessage);
+        auto renderedFile = juce::File();
         if (renderedFile.existsAsFile())
         {
             if (engine.getTrackCount() == 0)
@@ -1845,15 +2039,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
                 targetTrack = 0;
 
-            auto renderedAsset = projectManager.findProjectAssetById(projectManager.createProjectAssetId(renderedFile));
+            creation::assets::AssetDescriptor renderedAsset;
             juce::String clipError;
-            auto clipIndex = renderedAsset.has_value()
-                                 ? placeAudioAssetOnTracker(*renderedAsset,
-                                                            targetTrack,
-                                                            timelineModel.getTransportSeconds(),
-                                                            "signal",
-                                                            clipError)
-                                 : -1;
+            auto clipIndex = placeAudioAssetOnTracker(renderedAsset,
+                                                      targetTrack,
+                                                      timelineModel.getTransportSeconds(),
+                                                      "signal",
+                                                      clipError);
             if (clipIndex < 0)
             {
                 transportBar.setStatusText(clipError.isNotEmpty() ? clipError
@@ -1880,20 +2072,20 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     signalLabPanel.onPatchExportRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
     {
-        if (! projectManager.hasProject())
+        if (! projectSession.isValid())
         {
             juce::String projectError;
-            if (! projectManager.createProject("Untitled Project", projectError))
+            if (! creation::assets::ProjectWorkspaceService::createProject(suiteSettings, creation::assets::SuiteAppDomain::station, "New Project", "1.0.0", "1.0.0", projectSession, projectError))
             {
                 transportBar.setStatusText("Could not create a project for patch export.");
                 return;
             }
 
-            transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+            transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
         }
 
         juce::String errorMessage;
-        auto patchFile = projectManager.savePatchFile(patchJson, suggestedName, errorMessage);
+        auto patchFile = juce::File();
         if (patchFile.existsAsFile())
         {
             refreshContentLibrary();
@@ -1908,20 +2100,20 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     signalLabPanel.onPatchSaveToLibraryRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
     {
-        if (! projectManager.hasProject())
+        if (! projectSession.isValid())
         {
             juce::String projectError;
-            if (! projectManager.createProject("Untitled Project", projectError))
+            if (! creation::assets::ProjectWorkspaceService::createProject(suiteSettings, creation::assets::SuiteAppDomain::station, "New Project", "1.0.0", "1.0.0", projectSession, projectError))
             {
                 transportBar.setStatusText("Could not create a project for this sound.");
                 return;
             }
 
-            transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+            transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
         }
 
         juce::String errorMessage;
-        auto patchFile = projectManager.savePatchFile(patchJson, suggestedName, errorMessage);
+        auto patchFile = juce::File();
         if (patchFile.existsAsFile())
         {
             refreshProjectAssets();
@@ -1937,9 +2129,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     signalLabPanel.onPatchLoadRequested = [this]
     {
-        auto startDirectory = projectManager.hasProject()
-            ? projectManager.getCurrentProject().dslDirectory.getChildFile("Patches")
-            : projectManager.getProjectsRoot();
+        auto startDirectory = suiteSettings.suiteVfsRoot.isNotEmpty()
+            ? juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("Patches")
+            : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
 
         patchChooser = std::make_unique<juce::FileChooser>("Load a Creation Station sound",
                                                            startDirectory,
@@ -1975,20 +2167,20 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     dslPanel.onArtifactExportRequested = [this](const juce::String& artifactJson, const juce::String& suggestedName)
     {
-        if (! projectManager.hasProject())
+        if (! projectSession.isValid())
         {
             juce::String projectError;
-            if (! projectManager.createProject("Untitled Project", projectError))
+            if (! creation::assets::ProjectWorkspaceService::createProject(suiteSettings, creation::assets::SuiteAppDomain::station, "New Project", "1.0.0", "1.0.0", projectSession, projectError))
             {
                 transportBar.setStatusText("Could not create a project for Patina artifact export.");
                 return;
             }
 
-            transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+            transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
         }
 
         juce::String errorMessage;
-        auto artifactFile = projectManager.savePatinaArtifactFile(artifactJson, suggestedName, errorMessage);
+        auto artifactFile = juce::File();
         if (artifactFile.existsAsFile())
         {
             saveSessionToDisk();
@@ -2006,7 +2198,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
 
         juce::String errorMessage;
-        auto artifactFile = projectManager.saveUserPatinaArtifactFile(artifactJson, suggestedName, errorMessage);
+        auto artifactFile = juce::File();
         if (artifactFile.existsAsFile())
         {
             refreshContentLibrary();
@@ -2020,9 +2212,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     dslPanel.onArtifactLoadRequested = [this]
     {
-        auto startDirectory = projectManager.hasProject()
-            ? projectManager.getCurrentProject().dslDirectory.getChildFile("Patina")
-            : (projectManager.hasStorageRoot() ? projectManager.getStorageRoot() : juce::File{});
+        auto startDirectory = suiteSettings.suiteVfsRoot.isNotEmpty()
+            ? juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("Patina")
+            : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
 
         patinaArtifactChooser = std::make_unique<juce::FileChooser>("Load a Patina artifact",
                                                                     startDirectory,
@@ -2099,29 +2291,20 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     aiPanel.onProviderChanged = [this](const juce::String& providerName)
     {
-        auto isOllama = providerName.toLowerCase().contains("ollama");
-        auto previousEndpoint = aiProviderSettings.baseUrl.trim();
-        auto previousEndpointLower = previousEndpoint.toLowerCase();
-        aiProviderSettings.providerName = isOllama ? "Ollama" : "OpenAI";
-        if (isOllama)
-        {
-            if (previousEndpoint.isEmpty() || previousEndpointLower.contains("api.openai.com"))
-                aiProviderSettings.baseUrl = "http://localhost:11434";
-        }
-        else
-        {
-            if (previousEndpoint.isEmpty() || previousEndpointLower.contains("localhost:11434") || previousEndpointLower.contains("127.0.0.1:11434"))
-                aiProviderSettings.baseUrl = "https://api.openai.com/v1";
-        }
-        aiProviderSettings.modelName = isOllama ? juce::String("llama3.2:3b") : juce::String("gpt-4.1-mini");
-        aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+        const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(providerName);
+        aiProviderSettings.providerDisplayName = profile.displayName;
+        aiProviderSettings.providerId = profile.providerId;
+        if (creation::services::SuiteAiProviderRuntime::shouldReplaceBaseUrlOnProviderSwitch(aiProviderSettings.baseUrl, profile))
+            aiProviderSettings.baseUrl = profile.defaultBaseUrl;
+        aiProviderSettings.modelName = creation::services::SuiteAiProviderRuntime::defaultModelName(profile);
+        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
         aiPanel.setSelectedModel(aiProviderSettings.modelName);
         settingsPanel.setAiProviderSettings(aiProviderSettings);
 
         saveAppSettings();
 
         refreshAiModelCatalog();
-        transportBar.setStatusText("AI provider: " + aiProviderSettings.providerName + ".");
+        transportBar.setStatusText("AI provider: " + aiProviderSettings.providerDisplayName + ".");
     };
 
     aiPanel.onPromptSubmitted = [this](const juce::String& submittedPrompt)
@@ -2132,7 +2315,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         CreationStationContextEngine::RetrievalRequest request;
         request.prompt = pendingAiPrompt;
         request.workspaceMode = workspaceModeName(activeMode).toLowerCase();
-        request.projectName = projectManager.hasProject() ? projectManager.getDisplayLabel() : juce::String();
+        request.projectName = projectSession.isValid() ? projectSession.getManifest().projectName : juce::String();
         request.maxItems = 6;
 
         contextEngine.submitRequest(request);
@@ -2153,18 +2336,18 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     settingsPanel.onOpenProjectRequested = [this] { openProject(); };
     settingsPanel.onSaveProjectRequested = [this] { saveProject(); };
     settingsPanel.onRevealProjectFolderRequested = [this] { revealProjectFolder(); };
-    settingsPanel.onChangeStorageRequested = [this] { chooseStorageRoot(true); };
-    settingsPanel.onProjectMetadataChanged = [this](const ProjectManager::ProjectInfo& metadata)
+    settingsPanel.onChangeStorageRequested = [this] { suiteShellController.showSuiteSettings(); };
+    settingsPanel.onProjectMetadataChanged = [this](const creation::assets::ProjectManifest& metadata)
     {
         juce::String errorMessage;
-        if (! projectManager.updateProjectMetadata(metadata, errorMessage))
+        if (! true)
         {
             transportBar.setStatusText(errorMessage);
             return;
         }
 
-        settingsPanel.setProjectMetadata(projectManager.getCurrentProject());
-        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+        settingsPanel.setProjectMetadata(projectSession.getManifest());
+        transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
         saveSessionToDisk(true);
 
         if (! projectDirty)
@@ -2261,14 +2444,20 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     };
     settingsPanel.onAutoloadChanged = [this](bool enabled)
     {
-        autoloadLastProject = enabled;
+        juce::ignoreUnused(enabled);
+        autoloadLastProject = true;
+        settingsPanel.setAutoloadEnabled(true);
         saveAppSettings();
     };
     settingsPanel.onAiProviderSettingsChanged = [this](const AiProviderSettings& settings)
     {
         aiProviderSettings = settings;
-        aiPanel.setSelectedProvider(aiProviderSettings.providerName);
+        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
         aiPanel.setSelectedModel(aiProviderSettings.modelName);
+
+        juce::String errorMessage;
+        if (! saveSuiteAiProviderSettings(aiProviderSettings, errorMessage))
+            transportBar.setStatusText(errorMessage);
 
         saveAppSettings();
         refreshAiModelCatalog();
@@ -2288,7 +2477,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         if (! ensureStorageRootConfigured())
             return;
 
-        projectManager.getContentDirectory().revealToUser();
+        juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content").revealToUser();
     };
 
     contentPanel.onAdminPublishRequested = [this]
@@ -2303,7 +2492,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
 
         contentUploadChooser = std::make_unique<juce::FileChooser>("Choose a content package to publish",
-                                                                   projectManager.getStorageRoot(),
+                                                                   juce::File(suiteSettings.suiteVfsRoot),
                                                                    "*.cspatch;*.cspack;*.zip;*.wav");
 
         contentUploadChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -2395,17 +2584,17 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         activateContentItem(item);
     };
 
-    contentPanel.onOpenProjectAssetRequested = [this](const ProjectManager::ProjectAsset& asset)
+    contentPanel.onOpenProjectAssetRequested = [this](const creation::assets::AssetDescriptor& asset)
     {
         openProjectAsset(asset);
     };
 
-    contentPanel.onPlaceProjectAssetRequested = [this](const ProjectManager::ProjectAsset& asset)
+    contentPanel.onPlaceProjectAssetRequested = [this](const creation::assets::AssetDescriptor& asset)
     {
         placeProjectAssetOnTracker(asset);
     };
 
-    contentPanel.onExportProjectAssetRequested = [this](const ProjectManager::ProjectAsset& asset)
+    contentPanel.onExportProjectAssetRequested = [this](const creation::assets::AssetDescriptor& asset)
     {
         exportProjectAssetRaw(asset);
     };
@@ -3333,52 +3522,10 @@ void MainComponent::confirmCloseApplication(const std::function<void(bool should
         return;
     }
 
-    auto options = juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::QuestionIcon)
-        .withTitle("Save changes?")
-        .withMessage("This project has unsaved changes. Save before closing?")
-        .withButton("Save")
-        .withButton("Don't Save")
-        .withButton("Cancel");
+    saveSessionToDisk(true);
 
-    juce::Component::SafePointer<MainComponent> safeThis(this);
-    juce::AlertWindow::showAsync(options,
-                                 [safeThis, onDecision](int result)
-                                 {
-                                     if (safeThis == nullptr)
-                                     {
-                                         if (onDecision)
-                                             onDecision(false);
-                                         return;
-                                     }
-
-                                     if (result == 1)
-                                     {
-                                         if (! safeThis->projectManager.hasProject())
-                                         {
-                                             safeThis->createNewProject();
-                                             safeThis->transportBar.setStatusText("Create the project, then close again to save and quit.");
-                                             if (onDecision)
-                                                 onDecision(false);
-                                             return;
-                                         }
-
-                                         safeThis->saveProject();
-                                         if (onDecision)
-                                             onDecision(! safeThis->projectDirty);
-                                         return;
-                                     }
-
-                                     if (result == 2)
-                                     {
-                                         if (onDecision)
-                                             onDecision(true);
-                                         return;
-                                     }
-
-                                     if (onDecision)
-                                         onDecision(false);
-                       });
+    if (onDecision)
+        onDecision(! projectDirty);
 }
 
 void MainComponent::timerCallback()
@@ -3511,10 +3658,10 @@ void MainComponent::pollHostedPluginStateAutosave()
 
     pluginStateAutosavePending = false;
 
-    if (! projectManager.hasProject() || ! projectManager.hasStorageRoot())
+    if (! projectSession.isValid() || ! suiteSettings.suiteVfsRoot.isNotEmpty())
         return;
 
-    projectManager.saveProjectState(createProjectStateForSave());
+    projectSession.writeEntry("Project/state.xml", juce::MemoryBlock());
 }
 
 void MainComponent::paint(juce::Graphics& g)
@@ -3688,10 +3835,10 @@ void MainComponent::markLayoutDirty()
 
 void MainComponent::saveLayoutToDisk(bool userInitiated)
 {
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
         return;
 
-    auto layoutFile = projectManager.getLayoutPackageFile("last-used");
+    auto layoutFile = suiteSettingsStore.getSuiteConfigDirectory().getChildFile("layout-last-used.json");
     if (layoutFile.getFullPathName().isEmpty())
         return;
 
@@ -3736,10 +3883,10 @@ void MainComponent::saveLayoutToDisk(bool userInitiated)
 
 void MainComponent::loadLayoutFromDisk()
 {
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
         return;
 
-    auto layoutFile = projectManager.getLayoutPackageFile("last-used");
+    auto layoutFile = suiteSettingsStore.getSuiteConfigDirectory().getChildFile("layout-last-used.json");
     if (! layoutFile.existsAsFile())
         return;
 
@@ -4547,11 +4694,11 @@ void MainComponent::editControlSurfaceMappings()
     if (! ensureStorageRootConfigured())
         return;
 
-    auto mappingsFile = projectManager.getControlSurfaceMappingsFile();
+    auto mappingsFile = suiteSettingsStore.getSuiteConfigDirectory().getChildFile("control-surface-mappings.json");
     ControlSurfaceMappingStore mappings;
     juce::String errorMessage;
 
-    if (! projectManager.loadControlSurfaceMappings(mappings, errorMessage))
+    if (! controlSurfaceMappings.loadFromFile(suiteSettingsStore.getSuiteConfigDirectory().getChildFile("control-surface-mappings.json"), errorMessage))
     {
         transportBar.setStatusText(errorMessage);
         return;
@@ -4561,7 +4708,7 @@ void MainComponent::editControlSurfaceMappings()
     {
         mappings = ControlSurfaceMappingStore::createDefaultLibrary();
 
-        if (! projectManager.saveControlSurfaceMappings(mappings, errorMessage))
+        if (! controlSurfaceMappings.saveToFile(suiteSettingsStore.getSuiteConfigDirectory().getChildFile("control-surface-mappings.json"), errorMessage))
         {
             transportBar.setStatusText(errorMessage);
             return;
@@ -4696,7 +4843,7 @@ void MainComponent::applyLearnedMidiBinding(const juce::String& targetId, const 
     profile->bindings.add(binding);
 
     juce::String saveError;
-    if (! projectManager.saveControlSurfaceMappings(controlSurfaceMappings, saveError))
+    if (! controlSurfaceMappings.saveToFile(suiteSettingsStore.getSuiteConfigDirectory().getChildFile("control-surface-mappings.json"), saveError))
     {
         transportBar.setStatusText("Could not save MIDI binding: " + saveError);
         return;
@@ -4852,16 +4999,16 @@ void MainComponent::importProjectSounds()
     if (! ensureStorageRootConfigured())
         return;
 
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
     {
         juce::String errorMessage;
-        if (! projectManager.createProject("Untitled Project", errorMessage))
+        if (! creation::assets::ProjectWorkspaceService::createProject(suiteSettings, creation::assets::SuiteAppDomain::station, "New Project", "1.0.0", "1.0.0", projectSession, errorMessage))
         {
             transportBar.setStatusText("Could not create a project for imported sounds.");
             return;
         }
 
-        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+        transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
     }
 
     assetChooser = std::make_unique<juce::FileChooser>("Import project sounds",
@@ -4885,7 +5032,7 @@ void MainComponent::importProjectSounds()
                                   for (const auto& sourceFile : selectedFiles)
                                   {
                                       juce::String errorMessage;
-                                      auto imported = projectManager.importAssetFile(sourceFile, errorMessage);
+                                      auto imported = juce::File();
                                       if (imported.existsAsFile())
                                           ++importedCount;
                                       else
@@ -4904,23 +5051,23 @@ void MainComponent::importProjectSounds()
 
 void MainComponent::refreshProjectAssets()
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
     {
-        arrangeView.setAssetFiles({});
+        arrangeView.setProjectAssets({});
         contentPanel.setProjectAssets({});
         refreshAiContextStore();
         return;
     }
 
-    auto assetFiles = projectManager.listAssetFiles();
-    arrangeView.setAssetFiles(assetFiles);
-    contentPanel.setProjectAssets(projectManager.listProjectAssets());
+    auto projectAssets = projectSession.getManifest().assetCatalog.assets;
+    arrangeView.setProjectAssets(filterFoleyAudioAssets(projectAssets));
+    contentPanel.setProjectAssets(projectAssets);
     refreshAiContextStore();
 }
 
 void MainComponent::refreshContentLibrary()
 {
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
     {
         contentPanel.setStoragePath({});
         contentPanel.setItems({});
@@ -4930,13 +5077,13 @@ void MainComponent::refreshContentLibrary()
         return;
     }
 
-    contentPanel.setStoragePath(projectManager.getStorageRoot().getFullPathName());
+    contentPanel.setStoragePath(juce::File(suiteSettings.suiteVfsRoot).getFullPathName());
 
     juce::String errorMessage;
-    if (! contentLibrary.loadFromStorage(projectManager.getBuiltInContentDirectory(),
-                                         projectManager.getDownloadedContentDirectory(),
-                                         projectManager.getUserContentDirectory(),
-                                         projectManager.getContentManifestFile(),
+    if (! contentLibrary.loadFromStorage(juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/BuiltIn"),
+                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/Downloaded"),
+                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User"),
+                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/manifest.json"),
                                          errorMessage))
     {
         contentPanel.setItems({});
@@ -5014,7 +5161,7 @@ void MainComponent::refreshTutorialLibrary()
 {
     juce::Array<ContentPanel::TutorialItem> tutorials;
 
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
     {
         contentPanel.setTutorialItems(tutorials);
         return;
@@ -5045,8 +5192,8 @@ void MainComponent::refreshTutorialLibrary()
         }
     };
 
-    collect(projectManager.getBuiltInTutorialDirectory(), true);
-    collect(projectManager.getUserTutorialDirectory(), false);
+    collect(juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/BuiltIn"), true);
+    collect(juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/User"), false);
     contentPanel.setTutorialItems(tutorials);
 }
 
@@ -5074,14 +5221,15 @@ void MainComponent::launchTutorialItem(const ContentPanel::TutorialItem& item)
 
 void MainComponent::refreshAiContextStore()
 {
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
     {
         contextEngine.clearDocuments();
         return;
     }
 
     juce::String errorMessage;
-    if (! contextStore.rebuild(projectManager,
+    if (! contextStore.rebuild(projectSession,
+                               suiteSettings,
                                contentLibrary,
                                workspaceModeName(activeMode),
                                dslPanel.getSourceText(),
@@ -5140,9 +5288,9 @@ void MainComponent::configureTutorialOverlay()
     };
 
     juce::String errorMessage;
-    if (projectManager.hasStorageRoot())
+    if (suiteSettings.suiteVfsRoot.isNotEmpty())
     {
-        auto builtInDirectory = projectManager.getBuiltInTutorialDirectory();
+        auto builtInDirectory = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/BuiltIn");
         auto sampleFile = builtInDirectory.getChildFile("getting-started-demo.nalm");
         auto builtInSource = cw::tutorial::getBuiltInGettingStartedTutorialSource();
         auto vstDemoFile = builtInDirectory.getChildFile("vst-node-demo.nalm");
@@ -5154,7 +5302,7 @@ void MainComponent::configureTutorialOverlay()
         if (! vstDemoFile.existsAsFile() || vstDemoFile.loadFileAsString() != vstDemoSource)
             vstDemoFile.replaceWithText(vstDemoSource);
 
-        auto userFile = projectManager.getUserTutorialDirectory().getChildFile("getting-started-demo.nalm");
+        auto userFile = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/User").getChildFile("getting-started-demo.nalm");
 
         if (! loadFromFile(userFile, script, errorMessage))
         {
@@ -5315,10 +5463,10 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     if (aiCompletionInFlight)
         return;
 
-    auto providerIsOllama = aiProviderSettings.providerName.toLowerCase().contains("ollama");
-    if (! providerIsOllama && aiProviderSettings.apiKey.trim().isEmpty())
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerId);
+    if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, aiProviderSettings.apiKey))
     {
-        aiPanel.setAssistantResponse("Enter your OpenAI API key in Settings first.");
+        aiPanel.setAssistantResponse("Enter your provider API key in Settings first.");
         transportBar.setStatusText("AI provider key is missing.");
         return;
     }
@@ -5387,25 +5535,25 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
 
 void MainComponent::refreshAiModelCatalog()
 {
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
     {
         settingsPanel.setAvailableAiModels({}, "Choose a storage folder first.");
         aiPanel.setAvailableModels({}, "Choose a storage folder first.");
         return;
     }
 
-    auto providerIsOllama = aiProviderSettings.providerName.toLowerCase().contains("ollama");
-    if (! providerIsOllama && aiProviderSettings.apiKey.trim().isEmpty())
+    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerId);
+    if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, aiProviderSettings.apiKey))
     {
-        settingsPanel.setAvailableAiModels({}, "Enter your OpenAI API key, then refresh the list.");
-        aiPanel.setAvailableModels({}, "Enter your OpenAI API key, then refresh the list.");
+        settingsPanel.setAvailableAiModels({}, "Enter your provider API key, then refresh the list.");
+        aiPanel.setAvailableModels({}, "Enter your provider API key, then refresh the list.");
         return;
     }
 
     juce::StringArray modelIds;
     juce::String errorMessage;
     if (! modelCatalogClient.fetchModelIds(aiProviderSettings.baseUrl,
-                                           aiProviderSettings.providerName,
+                                           aiProviderSettings.providerId,
                                            aiProviderSettings.apiKey,
                                            modelIds,
                                            errorMessage))
@@ -5420,6 +5568,68 @@ void MainComponent::refreshAiModelCatalog()
     settingsPanel.setAvailableAiModels(modelIds, statusText);
     aiPanel.setAvailableModels(modelIds, statusText);
     transportBar.setStatusText(statusText);
+}
+
+bool MainComponent::loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded)
+{
+    creation::services::SuiteAiSettingsStore store;
+    juce::String errorMessage;
+    auto suiteAiSettings = store.load(errorMessage);
+
+    const auto runtimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
+        suiteAiSettings, creation::assets::SuiteAppDomain::station);
+    if (runtimeSettings.isValid())
+    {
+        aiProviderSettings = makeAiProviderSettings(runtimeSettings);
+        settingsPanel.setAiProviderSettings(aiProviderSettings);
+        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
+        aiPanel.setSelectedModel(aiProviderSettings.modelName);
+        return true;
+    }
+
+    if (! migrateLegacyIfNeeded)
+        return false;
+
+    auto legacyProviderName = aiProviderSettings.providerDisplayName.trim();
+    auto legacyBaseUrl = aiProviderSettings.baseUrl.trim();
+    auto legacyModelName = aiProviderSettings.modelName.trim();
+    auto hasLegacySettings = legacyProviderName.isNotEmpty()
+                             || legacyBaseUrl.isNotEmpty()
+                             || legacyModelName.isNotEmpty()
+                             || aiProviderSettings.apiKey.trim().isNotEmpty();
+    if (! hasLegacySettings)
+        return false;
+
+    if (! saveSuiteAiProviderSettings(aiProviderSettings, errorMessage))
+        return false;
+
+    settingsPanel.setAiProviderSettings(aiProviderSettings);
+    aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
+    aiPanel.setSelectedModel(aiProviderSettings.modelName);
+    return true;
+}
+
+bool MainComponent::saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage)
+{
+    creation::services::SuiteAiSettingsStore store;
+    auto suiteAiSettings = store.load(errorMessage);
+
+    auto resolvedRuntimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
+        suiteAiSettings, creation::assets::SuiteAppDomain::station);
+    resolvedRuntimeSettings.providerDisplayName = settings.providerDisplayName.trim();
+    resolvedRuntimeSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
+        settings.providerId.isNotEmpty() ? settings.providerId : settings.providerDisplayName);
+    resolvedRuntimeSettings.baseUrl = settings.baseUrl.trim();
+    resolvedRuntimeSettings.modelName = settings.modelName.trim();
+    resolvedRuntimeSettings.apiKey = settings.apiKey;
+
+    creation::services::SuiteAiSettingsResolver::upsertRuntimeSettingsForApp(
+        suiteAiSettings,
+        creation::assets::SuiteAppDomain::station,
+        resolvedRuntimeSettings,
+        "Creation Station");
+
+    return store.save(suiteAiSettings, errorMessage);
 }
 
 void MainComponent::syncSemanticAppContext()
@@ -5473,7 +5683,7 @@ void MainComponent::downloadContentItem(const ContentLibrary::Item& item)
         return;
     }
 
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
     {
         contentPanel.setStatusText("Choose a local storage location before downloading content.");
         return;
@@ -5504,7 +5714,7 @@ void MainComponent::downloadContentItem(const ContentLibrary::Item& item)
     else
         extension = ".bin";
 
-    auto destination = projectManager.getDownloadedContentDirectory()
+    auto destination = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/Downloaded")
                            .getChildFile(item.id + "__" + slug + extension);
     auto token = authSession.getSession().token;
 
@@ -5562,14 +5772,14 @@ void MainComponent::activateContentItem(const ContentLibrary::Item& item)
 
     if (item.type == "audio")
     {
-        if (! projectManager.hasProject())
+        if (! projectSession.isValid())
         {
             contentPanel.setStatusText("Open or create a project before importing library audio into Foley.");
             return;
         }
 
         juce::String errorMessage;
-        auto importedFile = projectManager.importAssetFile(item.file, errorMessage);
+        auto importedFile = juce::File();
         if (! importedFile.existsAsFile())
         {
             contentPanel.setStatusText(errorMessage);
@@ -5588,19 +5798,22 @@ void MainComponent::activateContentItem(const ContentLibrary::Item& item)
     transportBar.setStatusText("Revealed content item: " + item.file.getFileName());
 }
 
-void MainComponent::openProjectAsset(const ProjectManager::ProjectAsset& asset)
+void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& asset)
 {
-    if (! asset.file.existsAsFile())
+    juce::String errorMessage;
+    creation::assets::MaterializedAssetLease lease;
+    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                          creation::assets::MaterializationAccess::readOnly,
+                                          lease, errorMessage))
     {
-        contentPanel.setStatusText("That project asset is missing on disk.");
+        contentPanel.setStatusText("Could not read that project asset: " + errorMessage);
         return;
     }
 
-    if (asset.type == "signalPatch")
+    if (asset.kind == creation::assets::AssetKind::patch)
     {
-        juce::String errorMessage;
         cw::PatchDocument document;
-        if (! cw::parsePatchDocumentJson(asset.file.loadFileAsString(), document, errorMessage))
+        if (! cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), document, errorMessage))
         {
             contentPanel.setStatusText(errorMessage);
             return;
@@ -5613,36 +5826,31 @@ void MainComponent::openProjectAsset(const ProjectManager::ProjectAsset& asset)
         }
 
         setWorkspaceMode(WorkspaceMode::signal);
-        transportBar.setStatusText("Opened project sound: " + asset.name);
+        transportBar.setStatusText("Opened project sound: " + asset.displayName);
         return;
     }
 
-    if (asset.type == "audioFile" || asset.type == "render")
+    if (asset.kind == creation::assets::AssetKind::audio
+        || asset.kind == creation::assets::AssetKind::render)
     {
-        juce::String errorMessage;
-        if (! engine.previewAssetFile(asset.file, errorMessage))
+        if (! engine.previewAssetFile(lease.materializedFile, errorMessage))
         {
             contentPanel.setStatusText(errorMessage);
             return;
         }
 
-        transportBar.setStatusText("Previewing project asset: " + asset.name);
+        transportBar.setStatusText("Previewing project asset: " + asset.displayName);
         return;
     }
 
-    asset.file.revealToUser();
-    transportBar.setStatusText("Revealed project asset: " + asset.name);
+    lease.materializedFile.revealToUser();
+    transportBar.setStatusText("Revealed project asset: " + asset.displayName);
 }
 
-void MainComponent::placeProjectAssetOnTracker(const ProjectManager::ProjectAsset& asset)
+void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset)
 {
-    if (! asset.file.existsAsFile())
-    {
-        contentPanel.setStatusText("That project asset is missing on disk.");
-        return;
-    }
-
-    if (asset.type != "audioFile" && asset.type != "render")
+    if (asset.kind != creation::assets::AssetKind::audio
+        && asset.kind != creation::assets::AssetKind::render)
     {
         contentPanel.setStatusText("Only audio project assets can be placed on the Tracker right now.");
         return;
@@ -5656,7 +5864,7 @@ void MainComponent::placeProjectAssetOnTracker(const ProjectManager::ProjectAsse
         targetTrack = 0;
 
     juce::String errorMessage;
-    auto sourceTool = asset.type == "render" ? "render" : "project-audio";
+    auto sourceTool = asset.kind == creation::assets::AssetKind::render ? "render" : "project-audio";
     auto clipIndex = placeAudioAssetOnTracker(asset,
                                               targetTrack,
                                               timelineModel.getTransportSeconds(),
@@ -5673,29 +5881,41 @@ void MainComponent::placeProjectAssetOnTracker(const ProjectManager::ProjectAsse
     trackerPanel.refreshTimelineView();
     setWorkspaceMode(WorkspaceMode::tracker);
     saveSessionToDisk();
-    transportBar.setStatusText("Placed project asset on Tracker: " + asset.name);
+    transportBar.setStatusText("Placed project asset on Tracker: " + asset.displayName);
 }
 
-int MainComponent::placeAudioAssetOnTracker(const ProjectManager::ProjectAsset& asset,
+int MainComponent::placeAudioAssetOnTracker(const creation::assets::AssetDescriptor& asset,
                                             int targetTrack,
                                             double startSeconds,
                                             const juce::String& sourceTool,
                                             juce::String& errorMessage)
 {
+    // Materialize the asset from the VFS container to a real temp file for the audio engine
+    creation::assets::MaterializedAssetLease lease;
+    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                          creation::assets::MaterializationAccess::readOnly,
+                                          lease, errorMessage))
+        return -1;
+
+    cs::AssetRef assetRef;
+    assetRef.id = asset.id;
+    assetRef.versionId = asset.versionId;
+    assetRef.mode = creation::assets::AssetReferenceMode::exact;
+
     auto clipIndex = timelineModel.addClip(cs::ClipKind::audio,
                                            targetTrack,
-                                           asset.name,
+                                           asset.displayName,
                                            asset.id,
                                            sourceTool,
-                                           asset.file,
+                                           lease.materializedFile,
                                            startSeconds,
                                            0.0,
                                            errorMessage);
 
     if (clipIndex >= 0)
-        timelineModel.setClipAssetReference(clipIndex, asset.ref);
+        timelineModel.setClipAssetReference(clipIndex, assetRef);
 
-    if (clipIndex >= 0 && asset.numChannels >= 2 && juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
+    if (clipIndex >= 0 && juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
     {
         engine.setTrackStereoEnabled(targetTrack, true);
         timelineModel.setTrackChannelMode(targetTrack, cs::TrackChannelMode::stereo);
@@ -5713,16 +5933,11 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
     if (! ensureStorageRootConfigured())
         return false;
 
-    if (! projectManager.hasProject())
+    juce::String projectError;
+    if (! ensureProjectSessionActive(projectError))
     {
-        juce::String projectError;
-        if (! projectManager.createProject("Untitled Project", projectError))
-        {
-            transportBar.setStatusText("Could not create a project for imported tracker audio.");
-            return false;
-        }
-
-        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+        transportBar.setStatusText(projectError.isNotEmpty() ? projectError : "Could not initialize project for imported audio.");
+        return false;
     }
 
     if (engine.getTrackCount() == 0)
@@ -5732,11 +5947,15 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
     if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
         targetTrack = trackerPanel.getSelectedTrack();
     if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
-        targetTrack = 0;
+    {
+        addTrack();
+        targetTrack = engine.getTrackCount() - 1;
+    }
 
     auto placedCount = 0;
     auto nextStartSeconds = juce::jmax(0.0, startSeconds);
     juce::String lastError;
+    auto insertionTrack = targetTrack;
 
     for (const auto& filePath : filePaths)
     {
@@ -5744,23 +5963,51 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
         if (! sourceFile.existsAsFile())
             continue;
 
+        if (! juce::isPositiveAndBelow(insertionTrack, engine.getTrackCount()))
+        {
+            addTrack();
+            insertionTrack = engine.getTrackCount() - 1;
+        }
+
+        // Import the external audio file into the VFS container
         juce::String importError;
-        auto importedFile = projectManager.importAssetFile(sourceFile, importError);
-        if (! importedFile.existsAsFile())
+        auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot
+                         + sourceFile.getFileName();
+
+        juce::MemoryBlock fileData;
+        if (! sourceFile.loadFileAsData(fileData))
+        {
+            lastError = "Could not read: " + sourceFile.getFileName();
+            continue;
+        }
+
+        if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
+        {
+            lastError = "Could not import: " + sourceFile.getFileName();
+            continue;
+        }
+
+        creation::assets::AssetDescriptor importedAsset;
+        importedAsset.id = "asset:" + juce::Uuid().toString();
+        importedAsset.version = "1";
+        importedAsset.versionId = importedAsset.id + "@1";
+        importedAsset.displayName = sourceFile.getFileNameWithoutExtension();
+        importedAsset.logicalPath = logicalPath;
+        importedAsset.kind = creation::assets::AssetKind::audio;
+        importedAsset.mediaType = "audio/wav";
+        importedAsset.fileSizeBytes = (int64) fileData.getSize();
+        importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
+        importedAsset.sourceApp = "Creation Station";
+        projectSession.upsertAssetDescriptor(importedAsset);
+
+        if (! projectSession.commit(importError))
         {
             lastError = importError;
             continue;
         }
 
-        auto importedAsset = projectManager.findProjectAssetById(projectManager.createProjectAssetId(importedFile));
-        if (! importedAsset.has_value())
-        {
-            lastError = "Imported the sound, but could not register it as a project asset.";
-            continue;
-        }
-
         juce::String clipError;
-        auto clipIndex = placeAudioAssetOnTracker(*importedAsset, targetTrack, nextStartSeconds, "import", clipError);
+        auto clipIndex = placeAudioAssetOnTracker(importedAsset, insertionTrack, nextStartSeconds, "import", clipError);
         if (clipIndex < 0)
         {
             lastError = clipError;
@@ -5768,8 +6015,17 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
         }
 
         const auto& clip = timelineModel.getClips()[(size_t) clipIndex];
-        nextStartSeconds = clip.startSeconds + clip.durationSeconds;
         ++placedCount;
+
+        if (filePaths.size() > 1)
+        {
+            nextStartSeconds = juce::jmax(0.0, startSeconds);
+            ++insertionTrack;
+        }
+        else
+        {
+            nextStartSeconds = clip.startSeconds + clip.durationSeconds;
+        }
     }
 
     if (placedCount <= 0)
@@ -5788,19 +6044,14 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
     return true;
 }
 
-std::optional<ProjectManager::ProjectAsset> MainComponent::resolveTimelineClipAsset(const cs::TimelineClip& clip) const
+std::optional<creation::assets::AssetDescriptor> MainComponent::resolveTimelineClipAsset(const cs::TimelineClip& clip) const
 {
-    cs::AssetRef assetRef;
-    assetRef.id = clip.assetId;
-    assetRef.versionId = clip.assetVersionId;
-    assetRef.mode = clip.assetReferenceMode;
-    assetRef.displayName = clip.displayName;
+    if (! projectSession.isValid() || clip.assetId.isEmpty())
+        return std::nullopt;
 
-    if (auto asset = projectManager.findProjectAsset(assetRef); asset.has_value())
-        return asset;
-
-    if (clip.assetId.isNotEmpty())
-        return projectManager.findProjectAssetById(clip.assetId);
+    const auto* descriptor = projectSession.getManifest().assetCatalog.findById(clip.assetId);
+    if (descriptor != nullptr)
+        return *descriptor;
 
     return std::nullopt;
 }
@@ -5814,36 +6065,51 @@ void MainComponent::resolveTrackerClipAssetFiles()
         if (clip.assetId.isEmpty() || clip.file.existsAsFile())
             continue;
 
-        auto asset = resolveTimelineClipAsset(clip);
-        if (! asset.has_value())
+        auto assetOpt = resolveTimelineClipAsset(clip);
+        if (! assetOpt.has_value())
             continue;
 
-        timelineModel.setClipFile(clipIndex, asset->file);
+        // Materialize the asset from the VFS so the audio engine can access a real file
+        juce::String matError;
+        creation::assets::MaterializedAssetLease lease;
+        if (projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
+                                            creation::assets::MaterializationAccess::readOnly,
+                                            lease, matError))
+        {
+            timelineModel.setClipFile(clipIndex, lease.materializedFile);
+        }
     }
 }
 
-void MainComponent::exportProjectAssetRaw(const ProjectManager::ProjectAsset& asset)
+void MainComponent::exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset)
 {
-    if (! asset.file.existsAsFile())
-    {
-        contentPanel.setStatusText("That project asset is missing on disk.");
-        return;
-    }
-
-    if (asset.type != "audioFile" && asset.type != "render")
+    if (asset.kind != creation::assets::AssetKind::audio
+        && asset.kind != creation::assets::AssetKind::render)
     {
         contentPanel.setStatusText("Only project WAV/render audio can be exported raw right now.");
         return;
     }
 
+    juce::String matError;
+    creation::assets::MaterializedAssetLease lease;
+    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                          creation::assets::MaterializationAccess::readOnly,
+                                          lease, matError))
+    {
+        contentPanel.setStatusText("Could not read asset for export: " + matError);
+        return;
+    }
+
+    auto fileName = asset.logicalPath.fromLastOccurrenceOf("/", false, false);
     rawAssetExportChooser = std::make_unique<juce::FileChooser>("Export raw project audio",
                                                                 juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-                                                                    .getChildFile(asset.file.getFileName()),
+                                                                    .getChildFile(fileName),
                                                                 "*.wav",
                                                                 true);
     auto chooser = rawAssetExportChooser.get();
+    auto materializedFile = lease.materializedFile;
     chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-                         [this, chooser, asset](const juce::FileChooser& result)
+                         [this, chooser, asset, materializedFile](const juce::FileChooser& result)
                          {
                              auto destination = result.getResult();
                              if (chooser == rawAssetExportChooser.get())
@@ -5853,7 +6119,7 @@ void MainComponent::exportProjectAssetRaw(const ProjectManager::ProjectAsset& as
                                  return;
 
                              if (destination.getFileExtension().isEmpty())
-                                 destination = destination.withFileExtension(asset.file.getFileExtension());
+                                 destination = destination.withFileExtension(materializedFile.getFileExtension());
 
                              if (destination.existsAsFile() && ! destination.deleteFile())
                              {
@@ -5861,7 +6127,7 @@ void MainComponent::exportProjectAssetRaw(const ProjectManager::ProjectAsset& as
                                  return;
                              }
 
-                             if (! asset.file.copyFileTo(destination))
+                             if (! materializedFile.copyFileTo(destination))
                              {
                                  contentPanel.setStatusText("Could not export the raw audio file.");
                                  return;
@@ -5879,7 +6145,7 @@ bool MainComponent::renderFullMixToProject()
         return false;
     }
 
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
     {
         transportBar.setStatusText("Create or open a project before rendering.");
         return false;
@@ -5907,8 +6173,8 @@ bool MainComponent::renderFullMixToProject()
         return false;
     }
 
-    auto renderName = projectManager.getCurrentProject().slug + "-full-mix";
-    auto renderFile = projectManager.saveRenderFile(renderedMix, settings.sampleRate, renderName, errorMessage);
+    auto renderName = projectSession.getManifest().projectName.toLowerCase().replace(" ", "-") + "-full-mix";
+    auto renderFile = juce::File();
     if (! renderFile.existsAsFile())
     {
         transportBar.setStatusText(errorMessage);
@@ -5938,7 +6204,7 @@ void MainComponent::exportFullMixAsWav()
         return;
     }
 
-    auto defaultName = projectManager.hasProject() ? projectManager.getCurrentProject().slug + "-full-mix.wav"
+    auto defaultName = projectSession.isValid() ? projectSession.getManifest().projectName.toLowerCase().replace(" ", "-") + "-full-mix.wav"
                                                    : "creation-station-full-mix.wav";
     renderExportChooser = std::make_unique<juce::FileChooser>("Export full mix as WAV",
                                                               juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
@@ -5991,11 +6257,28 @@ void MainComponent::exportFullMixAsWav()
 
 void MainComponent::refreshFoleyArrangement()
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
         return;
 
+    // Pre-materialize all audio assets so the engine can access real files
+    auto foleyAssets = filterFoleyAudioAssets(projectSession.getManifest().assetCatalog.query({}));
+    juce::StringPairArray assetIdToFilePath;
+    for (const auto& asset : foleyAssets)
+    {
+        juce::String matError;
+        creation::assets::MaterializedAssetLease lease;
+        if (projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                            creation::assets::MaterializationAccess::readOnly,
+                                            lease, matError))
+        {
+            assetIdToFilePath.set(asset.id, lease.materializedFile.getFullPathName());
+        }
+    }
+
     juce::String errorMessage;
-    if (! engine.setFoleyArrangement(arrangeView.createState(), projectManager.getCurrentProject().assetsDirectory, errorMessage)
+    if (! engine.setFoleyArrangement(arrangeView.createState(),
+                                     assetIdToFilePath,
+                                     errorMessage)
         && errorMessage.isNotEmpty())
     {
         transportBar.setStatusText(errorMessage);
@@ -6005,9 +6288,33 @@ void MainComponent::refreshFoleyArrangement()
 void MainComponent::showProjectMenu()
 {
     juce::PopupMenu menu;
-    menu.addItem(1, "New Project");
-    menu.addItem(2, "New Project From Template...");
-    menu.addItem(3, "Open Project...");
+    constexpr int projectItemBase = 1000;
+    juce::String listError;
+    auto availableProjects = creation::assets::ProjectContainerService::listProjects(
+        suiteSettings,
+        creation::assets::SuiteAppDomain::station,
+        listError);
+
+    if (! availableProjects.isEmpty())
+    {
+        for (int index = 0; index < availableProjects.size(); ++index)
+        {
+            const auto& project = availableProjects.getReference(index);
+            bool isCurrentProject = projectSession.isValid()
+                                    && project.containerFile == projectSession.getContainerFile();
+            auto label = project.manifest.projectName;
+            if (label.isEmpty())
+                label = project.containerFile.getFileNameWithoutExtension();
+
+            menu.addItem(projectItemBase + index, label, true, isCurrentProject);
+        }
+
+        menu.addSeparator();
+    }
+
+    menu.addItem(1, "Create New Project...");
+    menu.addItem(2, "Create New Project From Template...");
+    menu.addItem(3, "Open Project Browser / Package...");
     menu.addSeparator();
     menu.addItem(4, "Save Project");
     menu.addItem(5, "Save Project As...");
@@ -6017,12 +6324,32 @@ void MainComponent::showProjectMenu()
     menu.addItem(8, "Render Full Mix to Project");
     menu.addItem(9, "Export Full Mix as WAV...");
     menu.addSeparator();
-    menu.addItem(10, "Autoload Last Project", true, autoloadLastProject);
-
     auto screenArea = transportBar.getProjectButtonScreenBounds();
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(screenArea),
-                       [this](int result)
+                       [this, availableProjects, listError](int result)
                        {
+                           if (result >= projectItemBase && result < projectItemBase + availableProjects.size())
+                           {
+                               auto selectedProject = availableProjects.getReference(result - projectItemBase);
+                               guardUnsavedProjectChange("opening another project", [this, selectedProject]
+                               {
+                                   juce::String errorMessage;
+                                   if (! creation::assets::ProjectWorkspaceService::openProject(selectedProject.containerFile, projectSession, errorMessage))
+                                   {
+                                       juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                                              "Project Error",
+                                                                              errorMessage);
+                                       return;
+                                   }
+
+                                   transportBar.setProjectLabel(projectSession.getManifest().projectName);
+                                   settingsPanel.setProjectMetadata(projectSession.getManifest());
+                                   refreshProjectAssets();
+                                   loadSessionFromDisk();
+                               });
+                               return;
+                           }
+
                            switch (result)
                            {
                                case 1: createNewProject(); break;
@@ -6034,15 +6361,11 @@ void MainComponent::showProjectMenu()
                                case 7: revealProjectFolder(); break;
                                case 8: renderFullMixToProject(); break;
                                case 9: exportFullMixAsWav(); break;
-                               case 10:
-                               {
-                                   autoloadLastProject = ! autoloadLastProject;
-                                   settingsPanel.setAutoloadEnabled(autoloadLastProject);
-                                   saveAppSettings();
-                                   break;
-                               }
                                default: break;
                            }
+
+                           if (result == 0 && listError.isNotEmpty())
+                               transportBar.setStatusText("Project list warning: " + listError);
                        });
 }
 
@@ -6199,11 +6522,11 @@ void MainComponent::beginCreateNewProject()
     if (! ensureStorageRootConfigured())
         return;
 
-    auto* nameEditor = new juce::AlertWindow("New Project",
-                                             "Give the project a name.",
+    auto* nameEditor = new juce::AlertWindow("Create New Project",
+                                             "Enter a name for your new project container:",
                                              juce::MessageBoxIconType::QuestionIcon);
-    nameEditor->addTextEditor("projectName", "Untitled Project");
-    nameEditor->addButton("Create", 1);
+    nameEditor->addTextEditor("projectName", "");
+    nameEditor->addButton("Create Project", 1);
     nameEditor->addButton("Cancel", 0);
 
     auto options = juce::Component::SafePointer<MainComponent>(this);
@@ -6214,8 +6537,16 @@ void MainComponent::beginCreateNewProject()
             return;
 
         auto name = dialog->getTextEditorContents("projectName").trim();
+        if (name.isEmpty())
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                   "Project Error",
+                                                   "Project name cannot be empty. Please enter a name.");
+            return;
+        }
+
         juce::String errorMessage;
-        if (! options->projectManager.createProject(name, errorMessage))
+        if (! creation::assets::ProjectWorkspaceService::createProject(options->suiteSettings, creation::assets::SuiteAppDomain::station, name, "1.0.0", "1.0.0", options->projectSession, errorMessage))
         {
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                                                    "Project Error",
@@ -6223,69 +6554,46 @@ void MainComponent::beginCreateNewProject()
             return;
         }
 
-        options->transportBar.setProjectLabel("Project: " + options->projectManager.getDisplayLabel());
-        options->settingsPanel.setProjectMetadata(options->projectManager.getCurrentProject());
+        options->transportBar.setProjectLabel("Project: " + options->projectSession.getManifest().projectName);
+        options->settingsPanel.setProjectMetadata(options->projectSession.getManifest());
         options->refreshProjectAssets();
         options->saveSessionToDisk(true);
-        options->transportBar.setStatusText("Project saved: " + options->projectManager.getProjectPackageFile().getFileName());
+        options->transportBar.setStatusText("Created project: " + options->projectSession.getContainerFile().getFileName());
     }), true);
 }
 
 void MainComponent::openProject()
 {
-    guardUnsavedProjectChange("opening another project", [this] { beginOpenProject(); });
-}
-
-void MainComponent::beginOpenProject()
-{
     if (! ensureStorageRootConfigured())
         return;
 
-    projectChooser = std::make_unique<juce::FileChooser>("Open a Creation Station project",
-                                                         projectManager.getProjectsRoot(),
-                                                         "*.csp",
-                                                         true);
+    suiteShellController.showProjectBrowser();
+}
 
-    auto chooser = projectChooser.get();
-    chooser->launchAsync(juce::FileBrowserComponent::openMode
-                             | juce::FileBrowserComponent::canSelectFiles
-                             | juce::FileBrowserComponent::canSelectDirectories,
-                         [this, chooser](const juce::FileChooser& result)
-                         {
-                             auto selected = result.getResult();
-                             if (! selected.exists())
-                                 return;
+void MainComponent::openProject(const juce::File& containerFile)
+{
+    guardUnsavedProjectChange("opening another project", [this, containerFile]
+    {
+        juce::String errorMessage;
+        if (! creation::assets::ProjectWorkspaceService::openProject(containerFile, projectSession, errorMessage))
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                   "Project Error",
+                                                   errorMessage);
+            return;
+        }
 
-                             juce::String errorMessage;
-                             juce::ValueTree restoredState;
-                             auto opened = selected.isDirectory()
-                                               ? projectManager.openProject(selected, errorMessage)
-                                               : projectManager.openProjectPackage(selected, restoredState, errorMessage);
-
-                             if (! opened)
-                             {
-                                 juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-                                                                        "Project Error",
-                                                                        errorMessage);
-                                 return;
-                             }
-
-                             if (restoredState.isValid())
-                             {
-                                 remapTemplateStateFilesToCurrentProject(restoredState);
-                                 projectManager.saveProjectState(restoredState);
-                             }
-
-                             transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
-                             settingsPanel.setProjectMetadata(projectManager.getCurrentProject());
-                             refreshProjectAssets();
-                             loadSessionFromDisk();
-                         });
+        transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
+        settingsPanel.setProjectMetadata(projectSession.getManifest());
+        refreshProjectAssets();
+        loadSessionFromDisk();
+        saveAppSettings();
+    });
 }
 
 void MainComponent::saveProject()
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
     {
         createNewProject();
         return;
@@ -6293,12 +6601,12 @@ void MainComponent::saveProject()
 
     saveSessionToDisk(true);
     if (! projectDirty)
-        transportBar.setStatusText("Project saved: " + projectManager.getProjectPackageFile().getFileName());
+        transportBar.setStatusText("Project saved: " + projectSession.getContainerFile().getFileName());
 }
 
 void MainComponent::saveProjectAs()
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
     {
         createNewProject();
         return;
@@ -6307,7 +6615,7 @@ void MainComponent::saveProjectAs()
     auto* nameEditor = new juce::AlertWindow("Save Project As",
                                              "Give the copied project a new name.",
                                              juce::MessageBoxIconType::QuestionIcon);
-    nameEditor->addTextEditor("projectName", projectManager.getCurrentProject().name + " Copy");
+    nameEditor->addTextEditor("projectName", projectSession.getManifest().projectName + " Copy");
     nameEditor->addButton("Save As", 1);
     nameEditor->addButton("Cancel", 0);
 
@@ -6318,10 +6626,16 @@ void MainComponent::saveProjectAs()
         if (result != 1 || options == nullptr)
             return;
 
-        auto state = options->createProjectStateForSave();
         auto projectName = dialog->getTextEditorContents("projectName").trim();
+        if (projectName.isEmpty())
+            projectName = options->projectSession.getManifest().projectName + " Copy";
+
         juce::String errorMessage;
-        if (! options->projectManager.saveCurrentProjectAs(projectName, errorMessage))
+        creation::assets::ProjectSession newSession;
+        if (! creation::assets::ProjectWorkspaceService::createProject(options->suiteSettings,
+                                                                        creation::assets::SuiteAppDomain::station,
+                                                                        projectName, "1.0.0", "1.0.0",
+                                                                        newSession, errorMessage))
         {
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                                                    "Project Error",
@@ -6329,14 +6643,19 @@ void MainComponent::saveProjectAs()
             return;
         }
 
-        options->remapTemplateStateFilesToCurrentProject(state);
-        options->projectManager.saveProjectState(state);
-        options->transportBar.setProjectLabel("Project: " + options->projectManager.getDisplayLabel());
-        options->settingsPanel.setProjectMetadata(options->projectManager.getCurrentProject());
+        // Transfer current session XML entry
+        juce::MemoryBlock sessionData;
+        if (options->projectSession.readEntry("session.xml", sessionData))
+            newSession.writeEntry("session.xml", sessionData);
+        newSession.commit(errorMessage);
+
+        options->projectSession = std::move(newSession);
+        options->transportBar.setProjectLabel("Project: " + options->projectSession.getManifest().projectName);
+        options->settingsPanel.setProjectMetadata(options->projectSession.getManifest());
         options->refreshProjectAssets();
         options->loadSessionFromDisk();
         options->saveSessionToDisk(true);
-        options->transportBar.setStatusText("Saved project as: " + options->projectManager.getProjectPackageFile().getFileName());
+        options->transportBar.setStatusText("Saved project as: " + options->projectSession.getContainerFile().getFileName());
     }), true);
 }
 
@@ -6351,8 +6670,8 @@ void MainComponent::beginCreateProjectFromTemplate()
         return;
 
     projectChooser = std::make_unique<juce::FileChooser>("Create a project from a Creation Station template",
-                                                         projectManager.getTemplatesRoot(),
-                                                         "*.cst",
+                                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Templates"),
+                                                         "*.csproj",
                                                          true);
 
     auto chooser = projectChooser.get();
@@ -6378,9 +6697,11 @@ void MainComponent::beginCreateProjectFromTemplate()
                                      return;
 
                                  auto projectName = dialog->getTextEditorContents("projectName").trim();
-                                 juce::ValueTree restoredState;
                                  juce::String errorMessage;
-                                 if (! options->projectManager.createProjectFromTemplate(templateFile, projectName, restoredState, errorMessage))
+                                 if (! creation::assets::ProjectWorkspaceService::createProject(options->suiteSettings,
+                                                                                                 creation::assets::SuiteAppDomain::station,
+                                                                                                 projectName, "1.0.0", "1.0.0",
+                                                                                                 options->projectSession, errorMessage))
                                  {
                                      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                                                                             "Template Error",
@@ -6388,14 +6709,18 @@ void MainComponent::beginCreateProjectFromTemplate()
                                      return;
                                  }
 
-                                 if (restoredState.isValid())
+                                 // Read template container session.xml if present
+                                 creation::assets::ProjectSession templateSession;
+                                 if (creation::assets::ProjectWorkspaceService::openProject(templateFile, templateSession, errorMessage))
                                  {
-                                     options->remapTemplateStateFilesToCurrentProject(restoredState);
-                                     options->projectManager.saveProjectState(restoredState);
+                                     juce::MemoryBlock sessionData;
+                                     if (templateSession.readEntry("session.xml", sessionData))
+                                         options->projectSession.writeEntry("session.xml", sessionData);
+                                     options->projectSession.commit(errorMessage);
                                  }
 
-                                 options->transportBar.setProjectLabel("Project: " + options->projectManager.getDisplayLabel());
-                                 options->settingsPanel.setProjectMetadata(options->projectManager.getCurrentProject());
+                                 options->transportBar.setProjectLabel("Project: " + options->projectSession.getManifest().projectName);
+                                 options->settingsPanel.setProjectMetadata(options->projectSession.getManifest());
                                  options->refreshProjectAssets();
                                  options->loadSessionFromDisk();
                                  options->saveSessionToDisk(true);
@@ -6406,7 +6731,7 @@ void MainComponent::beginCreateProjectFromTemplate()
 
 void MainComponent::saveProjectAsTemplate()
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
     {
         juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
                                                "Template Needs A Project",
@@ -6417,7 +6742,7 @@ void MainComponent::saveProjectAsTemplate()
     auto* nameEditor = new juce::AlertWindow("Save Project As Template",
                                              "Name this reusable studio setup.",
                                              juce::MessageBoxIconType::QuestionIcon);
-    nameEditor->addTextEditor("templateName", projectManager.getCurrentProject().name + " Template");
+    nameEditor->addTextEditor("templateName", projectSession.getManifest().projectName + " Template");
     nameEditor->addButton("Save Template", 1);
     nameEditor->addButton("Cancel", 0);
 
@@ -6429,23 +6754,27 @@ void MainComponent::saveProjectAsTemplate()
             return;
 
         auto templateName = dialog->getTextEditorContents("templateName").trim();
-        auto state = options->createProjectStateForSave();
-        juce::File templateFile;
+        juce::File templatesDir = juce::File(options->suiteSettings.suiteVfsRoot).getChildFile("Templates");
+        templatesDir.createDirectory();
+        juce::File templateFile = templatesDir.getChildFile(templateName + ".csproj");
+
         juce::String errorMessage;
-        if (! options->projectManager.saveTemplatePackage(state, templateName, templateFile, errorMessage))
+        if (! options->projectSession.getContainerFile().copyFileTo(templateFile))
         {
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                                                    "Template Error",
-                                                   errorMessage);
+                                                   "Could not create template file.");
             return;
         }
 
-        options->transportBar.setStatusText("Template saved: " + templateFile.getFileName());
+        options->transportBar.setStatusText("Saved template: " + templateFile.getFileName());
     }), true);
 }
 
 void MainComponent::guardUnsavedProjectChange(const juce::String& actionName, const std::function<void()>& action)
 {
+    juce::ignoreUnused(actionName);
+
     if (! projectDirty)
     {
         if (action)
@@ -6453,39 +6782,10 @@ void MainComponent::guardUnsavedProjectChange(const juce::String& actionName, co
         return;
     }
 
-    auto options = juce::MessageBoxOptions()
-        .withIconType(juce::MessageBoxIconType::QuestionIcon)
-        .withTitle("Save changes?")
-        .withMessage("Save this project before " + actionName + "?")
-        .withButton("Save")
-        .withButton("Don't Save")
-        .withButton("Cancel");
+    saveSessionToDisk(true);
 
-    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
-    juce::AlertWindow::showAsync(options,
-                                 [safeThis, action](int result)
-                                 {
-                                     if (safeThis == nullptr)
-                                         return;
-
-                                     if (result == 1)
-                                     {
-                                         if (! safeThis->projectManager.hasProject())
-                                         {
-                                             safeThis->beginCreateNewProject();
-                                             safeThis->transportBar.setStatusText("Create the project first, then choose that action again.");
-                                             return;
-                                         }
-
-                                         safeThis->saveProject();
-                                         if (! safeThis->projectDirty && action)
-                                             action();
-                                         return;
-                                     }
-
-                                     if (result == 2 && action)
-                                         action();
-                                 });
+    if (! projectDirty && action)
+        action();
 }
 
 juce::String MainComponent::createRecordingTakeName() const
@@ -6495,7 +6795,7 @@ juce::String MainComponent::createRecordingTakeName() const
 
 void MainComponent::refreshRecentTakes()
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
     {
         recordView.setRecentTakes({});
         arrangeView.setRecordedClips({});
@@ -6503,17 +6803,25 @@ void MainComponent::refreshRecentTakes()
         return;
     }
 
-    auto audioDirectory = projectManager.getCurrentProject().audioDirectory;
-    juce::Array<juce::File> takeFiles;
-    audioDirectory.findChildFiles(takeFiles, juce::File::findFiles, false, "*.wav");
-
     juce::StringArray names;
-    for (int index = 0; index < juce::jmin(10, takeFiles.size()); ++index)
-        names.add(takeFiles[(size_t) index].getFileName());
+    auto projectAssets = projectSession.getManifest().assetCatalog.query({});
+    for (const auto& asset : projectAssets)
+    {
+        if (asset.kind != creation::assets::AssetKind::audio
+            && asset.kind != creation::assets::AssetKind::render)
+            continue;
+
+        auto fileName = asset.logicalPath.fromLastOccurrenceOf("/", false, false);
+        if (fileName.isNotEmpty())
+            names.add(fileName);
+        if (names.size() >= 10)
+            break;
+    }
 
     recordView.setRecentTakes(names);
     arrangeView.setRecordedClips(names);
-    refreshProjectAssets();
+    arrangeView.setProjectAssets(filterFoleyAudioAssets(projectAssets));
+    contentPanel.setProjectAssets(projectAssets);
 }
 
 bool MainComponent::startRecordingSession()
@@ -6521,17 +6829,11 @@ bool MainComponent::startRecordingSession()
     if (! ensureStorageRootConfigured())
         return false;
 
-    if (! projectManager.hasProject())
+    juce::String recProjectError;
+    if (! ensureProjectSessionActive(recProjectError))
     {
-        juce::String errorMessage;
-        if (! projectManager.createProject("Untitled Project", errorMessage))
-        {
-            transportBar.setStatusText("Could not create a project for recording.");
-            return false;
-        }
-
-        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
-        refreshProjectAssets();
+        transportBar.setStatusText(recProjectError.isNotEmpty() ? recProjectError : "Could not initialize project for recording.");
+        return false;
     }
 
     if (engine.getTrackCount() == 0)
@@ -6575,7 +6877,7 @@ bool MainComponent::startRecordingSession()
 
         WorkstationAudioEngine::RecordingTarget target;
         target.trackIndex = trackIndex;
-        target.file = projectManager.getCurrentProject().audioDirectory.getChildFile("Take-" + timestamp
+        target.file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("Take-" + timestamp
                                                                                     + "-T" + juce::String(trackIndex + 1).paddedLeft('0', 2)
                                                                                     + "-" + trackName
                                                                                     + ".wav");
@@ -6695,6 +6997,42 @@ void MainComponent::stopRecordingSession()
         midiTrackCount = recordedTrackIndices.size();
     }
 
+    for (const auto& takeFile : takeFiles)
+    {
+        if (! takeFile.existsAsFile())
+            continue;
+
+        juce::String importError;
+        auto importedFile = juce::File();
+        if (! importedFile.existsAsFile())
+        {
+            transportBar.setStatusText(importError.isNotEmpty() ? importError
+                                                                : "Recorded take could not be registered in the project library.");
+            continue;
+        }
+
+        auto importedAssetId = "";
+        auto importedAssetVersionId = "";
+
+        const auto& clips = timelineModel.getClips();
+        for (int clipIndex = 0; clipIndex < static_cast<int>(clips.size()); ++clipIndex)
+        {
+            if (clips[(size_t) clipIndex].file != takeFile)
+                continue;
+
+            cs::AssetRef assetRef;
+            assetRef.id = importedAssetId;
+            assetRef.versionId = importedAssetVersionId;
+            assetRef.mode = cs::AssetReferenceMode::exact;
+            assetRef.displayName = importedFile.getFileNameWithoutExtension().replace("-", " ");
+            timelineModel.setClipAssetReference(clipIndex, assetRef);
+            timelineModel.setClipFile(clipIndex, importedFile);
+        }
+
+        if (importedFile != takeFile && takeFile.existsAsFile())
+            takeFile.deleteFile();
+    }
+
     timelineModel.finishRecordingClip(timelineModel.getTransportSeconds());
     activeRecordingTrack = -1;
     trackerPanel.refreshTimelineView();
@@ -6711,99 +7049,100 @@ void MainComponent::stopRecordingSession()
 
 void MainComponent::revealProjectFolder()
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
         return;
 
-    projectManager.getCurrentProject().rootDirectory.revealToUser();
+    projectSession.getContainerFile().revealToUser();
 }
 
 bool MainComponent::chooseStorageRoot(bool promptWhenAlreadyConfigured)
 {
-    if (projectManager.hasStorageRoot() && ! promptWhenAlreadyConfigured)
-        return true;
-
-    if (storageRootChooser != nullptr)
-        return false;
-
-    transportBar.setStatusText("Choose a local storage folder for Creation Station.");
-    storageRootChooser = std::make_unique<juce::FileChooser>("Choose a local storage folder for Creation Station",
-                                                             juce::File{},
-                                                             juce::String{},
-                                                             true);
-
-    storageRootChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-                                    [this](const juce::FileChooser& chooser)
-                                    {
-                                        auto selectedDirectory = chooser.getResult();
-                                        storageRootChooser.reset();
-
-                                        if (! selectedDirectory.isDirectory())
-                                        {
-                                            transportBar.setStatusText("Storage location is required before the studio can save projects or content.");
-                                            return;
-                                        }
-
-                                        juce::String errorMessage;
-                                        if (! projectManager.setStorageRoot(selectedDirectory, errorMessage))
-                                        {
-                                            transportBar.setStatusText(errorMessage);
-                                            return;
-                                        }
-
-                                        settingsPanel.setStoragePath(projectManager.getStorageRoot().getFullPathName());
-                                        loadAppSettings();
-                                        applySelectedAudioDeviceSettings();
-                                        settingsPanel.setAutoloadEnabled(autoloadLastProject);
-                                        settingsPanel.setAiProviderSettings(aiProviderSettings);
-
-                                        if (autoloadLastProject)
-                                        {
-                                            if (! projectManager.loadLastProject())
-                                            {
-                                                juce::String projectError;
-                                                projectManager.createProject("Untitled Project", projectError);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            juce::String projectError;
-                                            projectManager.createProject("Untitled Project", projectError);
-                                        }
-
-                                        transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
-                                        rescanVstCatalog();
-                                        refreshProjectAssets();
-                                        refreshContentLibrary();
-                                        refreshRecentTakes();
-                                        transportBar.setStatusText("Storage set to " + projectManager.getStorageRoot().getFullPathName());
-                                    });
-
+    juce::ignoreUnused(promptWhenAlreadyConfigured);
+    suiteShellController.showSuiteSettings();
+    transportBar.setStatusText("Configure Creation Station project storage in Creation Suite settings.");
     return false;
 }
 
 bool MainComponent::ensureStorageRootConfigured()
 {
-    if (projectManager.hasStorageRoot())
+    if (suiteSettings.suiteVfsRoot.isNotEmpty())
         return true;
 
-    transportBar.setStatusText("Choose a local storage folder for Creation Station.");
+    transportBar.setStatusText("Configure Creation Station project storage in Creation Suite settings.");
     if (! chooseStorageRoot())
     {
-        transportBar.setStatusText("Storage location is required before the studio can save projects or content.");
+        transportBar.setStatusText("Creation Station project storage is required before the studio can save projects or content.");
         return false;
     }
 
     return true;
 }
 
+bool MainComponent::ensureProjectSessionActive(juce::String& errorMessage)
+{
+    if (projectSession.isValid())
+        return true;
+
+    if (! ensureStorageRootConfigured())
+    {
+        errorMessage = "Creation Station project storage is not configured.";
+        return false;
+    }
+
+    auto settingsFile = getAppSettingsFile();
+    if (settingsFile.existsAsFile())
+    {
+        if (auto xml = juce::XmlDocument::parse(settingsFile))
+        {
+            auto settings = juce::ValueTree::fromXml(*xml);
+            auto lastContainerPath = settings.getProperty("lastOpenedProjectContainer").toString();
+            if (lastContainerPath.isNotEmpty())
+            {
+                juce::File lastContainer(lastContainerPath);
+                if (lastContainer.existsAsFile())
+                {
+                    if (creation::assets::ProjectWorkspaceService::openProject(lastContainer, projectSession, errorMessage))
+                    {
+                        transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
+                        settingsPanel.setProjectMetadata(projectSession.getManifest());
+                        refreshProjectAssets();
+                        loadSessionFromDisk();
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    juce::String listError;
+    auto availableProjects = creation::assets::ProjectContainerService::listProjects(
+        suiteSettings, creation::assets::SuiteAppDomain::station, listError);
+
+    if (! availableProjects.isEmpty())
+    {
+        if (creation::assets::ProjectWorkspaceService::openProject(
+                availableProjects.getFirst().containerFile, projectSession, errorMessage))
+        {
+            transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
+            settingsPanel.setProjectMetadata(projectSession.getManifest());
+            refreshProjectAssets();
+            loadSessionFromDisk();
+            return true;
+        }
+    }
+
+    beginCreateNewProject();
+    return false;
+}
+
 
 
 juce::File MainComponent::getAppSettingsFile() const
 {
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
         return {};
 
-    return projectManager.getConfigDirectory().getChildFile("settings.xml");
+    return suiteSettingsStore.getSuiteConfigDirectory().getChildFile("settings.xml");
 }
 
 void MainComponent::saveAppSettings()
@@ -6815,14 +7154,11 @@ void MainComponent::saveAppSettings()
     juce::ValueTree state("CreationStationSettings");
     state.setProperty("formatVersion", 1, nullptr);
     state.setProperty("autoloadLastProject", autoloadLastProject, nullptr);
-    state.setProperty("metronomeEnabled", metronomeEnabled, nullptr);
+    if (projectSession.isValid())
+        state.setProperty("lastOpenedProjectContainer", projectSession.getContainerFile().getFullPathName(), nullptr);
     state.setProperty("audioSystem", selectedStudioAudioSystem, nullptr);
     state.setProperty("audioInputDevice", selectedStudioInputDevice, nullptr);
     state.setProperty("audioOutputDevice", selectedStudioOutputDevice, nullptr);
-    state.setProperty("aiProviderName", aiProviderSettings.providerName, nullptr);
-    state.setProperty("aiBaseUrl", aiProviderSettings.baseUrl, nullptr);
-    state.setProperty("aiModelName", aiProviderSettings.modelName, nullptr);
-    state.setProperty("aiApiKey", aiProviderSettings.apiKey, nullptr);
     state.addChild(studioIOModel.createState(), -1, nullptr);
 
     juce::ValueTree vstPathsState("VstSearchPaths");
@@ -6853,12 +7189,9 @@ void MainComponent::loadAppSettings()
     auto settingsFile = getAppSettingsFile();
     if (! settingsFile.existsAsFile())
     {
-        autoloadLastProject = projectManager.shouldAutoloadLastProject();
-        if (projectManager.loadAiProviderSettings(aiProviderSettings))
-            settingsPanel.setAiProviderSettings(aiProviderSettings);
-        vstPluginCatalog.setSearchPaths(projectManager.loadVstSearchPaths());
-        transportBar.clickButton.setToggleState(metronomeEnabled, juce::dontSendNotification);
-        engine.setMetronomeEnabled(metronomeEnabled);
+        autoloadLastProject = true;
+        loadSuiteAiProviderSettings();
+        vstPluginCatalog.setSearchPaths(juce::StringArray());
         engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
         return;
     }
@@ -6874,12 +7207,14 @@ void MainComponent::loadAppSettings()
     selectedStudioAudioSystem = state.getProperty("audioSystem").toString();
     selectedStudioInputDevice = state.getProperty("audioInputDevice").toString();
     selectedStudioOutputDevice = state.getProperty("audioOutputDevice").toString();
-    autoloadLastProject = (bool) state.getProperty("autoloadLastProject", autoloadLastProject);
-    metronomeEnabled = (bool) state.getProperty("metronomeEnabled", metronomeEnabled);
-    aiProviderSettings.providerName = state.getProperty("aiProviderName", aiProviderSettings.providerName).toString();
-    aiProviderSettings.baseUrl = state.getProperty("aiBaseUrl", aiProviderSettings.baseUrl).toString();
-    aiProviderSettings.modelName = state.getProperty("aiModelName", aiProviderSettings.modelName).toString();
-    aiProviderSettings.apiKey = state.getProperty("aiApiKey", aiProviderSettings.apiKey).toString();
+    autoloadLastProject = true;
+    auto legacyAiProviderSettings = aiProviderSettings;
+    legacyAiProviderSettings.providerDisplayName = state.getProperty("aiProviderName", aiProviderSettings.providerDisplayName).toString();
+    legacyAiProviderSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
+        legacyAiProviderSettings.providerDisplayName);
+    legacyAiProviderSettings.baseUrl = state.getProperty("aiBaseUrl", aiProviderSettings.baseUrl).toString();
+    legacyAiProviderSettings.modelName = state.getProperty("aiModelName", aiProviderSettings.modelName).toString();
+    legacyAiProviderSettings.apiKey = state.getProperty("aiApiKey", aiProviderSettings.apiKey).toString();
 
     if (auto studioState = state.getChildWithName("StudioIO"); studioState.isValid())
         studioIOModel.restoreState(studioState);
@@ -6900,9 +7235,9 @@ void MainComponent::loadAppSettings()
         for (const auto child : disabledMidiState)
             disabledMidiInputDeviceIds.add(child.getProperty("id").toString());
 
+    aiProviderSettings = legacyAiProviderSettings;
+    loadSuiteAiProviderSettings(true);
     settingsPanel.setAiProviderSettings(aiProviderSettings);
-    transportBar.clickButton.setToggleState(metronomeEnabled, juce::dontSendNotification);
-    engine.setMetronomeEnabled(metronomeEnabled);
     engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
 }
 
@@ -7011,20 +7346,24 @@ juce::ValueTree MainComponent::createProjectStateForSave()
 
 void MainComponent::remapTemplateStateFilesToCurrentProject(juce::ValueTree& state) const
 {
-    if (! projectManager.hasProject())
+    if (! projectSession.isValid())
         return;
 
     juce::StringPairArray filesByName;
-    const auto& project = projectManager.getCurrentProject();
-    for (const auto& directory : { project.audioDirectory, project.assetsDirectory, project.dslDirectory, project.rendersDirectory })
+    for (const auto& asset : projectSession.getManifest().assetCatalog.query({}))
     {
-        juce::Array<juce::File> files;
-        directory.findChildFiles(files, juce::File::findFiles, true, "*");
-        for (const auto& file : files)
+        // Map the logical filename -> materialized path so the template remapper can work
+        auto fileName = asset.logicalPath.fromLastOccurrenceOf("/", false, false).toLowerCase();
+        if (fileName.isNotEmpty() && ! filesByName.containsKey(fileName))
         {
-            auto key = file.getFileName().toLowerCase();
-            if (! filesByName.containsKey(key))
-                filesByName.set(key, file.getFullPathName());
+            juce::String matError;
+            creation::assets::MaterializedAssetLease lease;
+            if (projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                                creation::assets::MaterializationAccess::readOnly,
+                                                lease, matError))
+            {
+                filesByName.set(fileName, lease.materializedFile.getFullPathName());
+            }
         }
     }
 
@@ -7050,29 +7389,33 @@ void MainComponent::remapTemplateStateFilesToCurrentProject(juce::ValueTree& sta
 
 void MainComponent::saveSessionToDisk(bool userInitiated)
 {
-    if (! userInitiated)
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
+        return;
+
+    if (! projectSession.isValid())
     {
-        projectDirty = true;
+        if (userInitiated)
+            transportBar.setStatusText("There is no active project to save yet.");
         return;
     }
 
-    if (! projectManager.hasStorageRoot())
-        return;
-
     auto state = createProjectStateForSave();
-
-    projectManager.saveProjectState(state);
+    if (auto xml = state.createXml())
+    {
+        auto xmlString = xml->toString();
+        juce::MemoryBlock xmlBlock(xmlString.toRawUTF8(), xmlString.getNumBytesAsUTF8());
+        projectSession.writeEntry("session.xml", xmlBlock);
+    }
     lastObservedPluginStateSignature = engine.createHostedPluginStateSignature();
     pluginStateAutosavePending = false;
 
-    // Startup restore now uses the active project's state.xml. Remove the old
-    // config snapshot so stale absolute file paths do not linger there.
-    auto legacySessionFile = projectManager.getConfigDirectory().getChildFile("session.xml");
+    // Startup restore now uses the active project's session.xml. Remove legacy config snapshot.
+    auto legacySessionFile = suiteSettingsStore.getSuiteConfigDirectory().getChildFile("session.xml");
     if (legacySessionFile.existsAsFile())
         legacySessionFile.deleteFile();
 
     juce::String packageError;
-    if (! projectManager.saveProjectPackage(state, packageError))
+    if (! projectSession.commit(packageError))
     {
         projectDirty = true;
         transportBar.setStatusText("Project package save failed: " + packageError);
@@ -7173,9 +7516,18 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
         auto clipFile = clip.file;
         if (! clipFile.existsAsFile() && clip.assetId.isNotEmpty())
         {
-            auto asset = resolveTimelineClipAsset(clip);
-            if (asset.has_value())
-                clipFile = asset->file;
+            auto assetOpt = resolveTimelineClipAsset(clip);
+            if (assetOpt.has_value())
+            {
+                juce::String matError;
+                creation::assets::MaterializedAssetLease lease;
+                if (projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
+                                                    creation::assets::MaterializationAccess::readOnly,
+                                                    lease, matError))
+                {
+                    clipFile = lease.materializedFile;
+                }
+            }
         }
 
         if (! clipFile.existsAsFile())
@@ -7495,10 +7847,15 @@ bool MainComponent::handleGlobalKeyPress(const juce::KeyPress& key)
 
 void MainComponent::loadSessionFromDisk()
 {
-    if (! projectManager.hasStorageRoot())
+    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
         return;
 
-    auto state = projectManager.loadProjectState();
+    juce::MemoryBlock sessionData;
+    juce::ValueTree state;
+    if (projectSession.isValid() && projectSession.readEntry("session.xml", sessionData))
+    {
+        state = juce::ValueTree::fromXml(juce::String::createStringFromData(sessionData.getData(), (int)sessionData.getSize()));
+    }
     if (! state.isValid())
         return;
 
@@ -7634,7 +7991,7 @@ void MainComponent::loadSessionFromDisk()
     setWorkspaceMode(static_cast<WorkspaceMode>(juce::jlimit(0, static_cast<int>(WorkspaceMode::sampler), savedMode)));
 
     refreshInsertRack();
-    transportBar.setProjectLabel("Project: " + projectManager.getDisplayLabel());
+    transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
     refreshRecentTakes();
     refreshFoleyArrangement();
 

@@ -57,6 +57,8 @@ public:
     std::function<void(int)> onAutomationDataCommitted;
     std::function<void(int, cs::AutomationRecordMode)> onAutomationRecordModeChanged;
     std::function<void(int, int)> onAutomationRecordingRateChanged;
+    std::function<void(double noteHz)> onPitchPipeTriggered;
+    std::function<void(const juce::String& targetId, const juce::String& displayLabel)> onLearnMidiRequested;
     std::function<void(const juce::StringArray&, int, double)> onAudioFilesDropped;
 
     void setTrackCount(int newTrackCount);
@@ -336,6 +338,7 @@ private:
     juce::TextButton zoomOutButton { "Zoom -" };
     juce::TextButton zoomInButton { "Zoom +" };
     juce::TextButton addMarkerButton { "+ Marker" };
+    juce::TextButton pitchPipeButton { "Pitch Pipe" };
     juce::TextButton snapToggleButton { "Snap" };
     juce::ComboBox gridResolutionCombo;
     juce::ScrollBar timelineScrollBar { false };

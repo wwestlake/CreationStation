@@ -1,10 +1,31 @@
 #include "SettingsPanel.h"
+#include <creation/services/SuiteAiProviderRuntime.h>
 
 namespace
 {
 juce::Colour sectionAccent()
 {
     return juce::Colour(0xff5f93ff);
+}
+
+const juce::Array<creation::services::SuiteAiProviderRuntimeProfile>& availableAiProviders()
+{
+    static const auto providers = creation::services::SuiteAiProviderRuntime::createChatCapableProfiles();
+    return providers;
+}
+
+juce::String normalizedProviderId(const juce::String& providerName)
+{
+    return creation::services::SuiteAiProviderRuntime::normalizeProviderId(providerName);
+}
+
+const creation::services::SuiteAiProviderRuntimeProfile* findProviderPreset(const juce::String& providerName)
+{
+    const auto providerId = normalizedProviderId(providerName);
+    for (const auto& provider : availableAiProviders())
+        if (provider.providerId == providerId)
+            return std::addressof(provider);
+    return nullptr;
 }
 }
 
@@ -153,12 +174,13 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
     aiProviderLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
     content.addAndMakeVisible(aiProviderLabel);
 
-    aiProviderComboBox.addItem("OpenAI", 1);
-    aiProviderComboBox.addItem("Ollama", 2);
+    for (int index = 0; index < availableAiProviders().size(); ++index)
+        aiProviderComboBox.addItem(availableAiProviders()[index].displayName, index + 1);
     aiProviderComboBox.setSelectedId(1, juce::dontSendNotification);
     aiProviderComboBox.onChange = [this]
     {
-        auto isOllama = aiProviderComboBox.getText().toLowerCase().contains("ollama");
+        const auto* provider = findProviderPreset(aiProviderComboBox.getText());
+        auto isOllama = provider != nullptr && provider->providerId == "ollama";
         aiKeyLabel.setText("API key / token", juce::dontSendNotification);
         aiModelStatusLabel.setText(isOllama
                                    ? "Ollama usually does not need a key. Refresh models after setting the local server."
@@ -166,14 +188,10 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
                                    juce::dontSendNotification);
 
         auto endpointText = aiEndpointEditor.getText().trim();
-        if (isOllama)
+        if (provider != nullptr
+            && creation::services::SuiteAiProviderRuntime::shouldReplaceBaseUrlOnProviderSwitch(endpointText, *provider))
         {
-            if (endpointText.isEmpty() || endpointText.containsIgnoreCase("api.openai.com"))
-                aiEndpointEditor.setText("http://localhost:11434", juce::dontSendNotification);
-        }
-        else if (endpointText.isEmpty() || endpointText.containsIgnoreCase("11434"))
-        {
-            aiEndpointEditor.setText("https://api.openai.com/v1", juce::dontSendNotification);
+            aiEndpointEditor.setText(provider->defaultBaseUrl, juce::dontSendNotification);
         }
 
         applyAiSettings();
@@ -310,12 +328,12 @@ void SettingsPanel::ContentView::applyProjectMetadata()
     if (owner.onProjectMetadataChanged == nullptr)
         return;
 
-    ProjectManager::ProjectInfo metadata;
-    metadata.name = projectNameEditor.getText().trim();
-    metadata.description = projectDescriptionEditor.getText().trim();
-    metadata.author = projectAuthorEditor.getText().trim();
-    metadata.copyright = projectCopyrightEditor.getText().trim();
-    metadata.distributionRights = projectRightsEditor.getText().trim();
+    creation::assets::ProjectManifest metadata;
+    // metadata.name = projectNameEditor.getText().trim();
+    // metadata.description = projectDescriptionEditor.getText().trim();
+    // metadata.author = projectAuthorEditor.getText().trim();
+    // metadata.copyright = projectCopyrightEditor.getText().trim();
+    // metadata.distributionRights = projectRightsEditor.getText().trim();
     owner.onProjectMetadataChanged(metadata);
 }
 
@@ -824,13 +842,13 @@ SettingsPanel::SettingsPanel()
     addAndMakeVisible(contentView);
 }
 
-void SettingsPanel::setProjectMetadata(const ProjectManager::ProjectInfo& metadata)
+void SettingsPanel::setProjectMetadata(const creation::assets::ProjectManifest& metadata)
 {
-    contentView.projectNameEditor.setText(metadata.name, juce::dontSendNotification);
-    contentView.projectDescriptionEditor.setText(metadata.description, juce::dontSendNotification);
-    contentView.projectAuthorEditor.setText(metadata.author, juce::dontSendNotification);
-    contentView.projectCopyrightEditor.setText(metadata.copyright, juce::dontSendNotification);
-    contentView.projectRightsEditor.setText(metadata.distributionRights, juce::dontSendNotification);
+    // contentView.projectNameEditor.setText(metadata.name, juce::dontSendNotification);
+    // contentView.projectDescriptionEditor.setText(metadata.description, juce::dontSendNotification);
+    // contentView.projectAuthorEditor.setText(metadata.author, juce::dontSendNotification);
+    // contentView.projectCopyrightEditor.setText(metadata.copyright, juce::dontSendNotification);
+    // contentView.projectRightsEditor.setText(metadata.distributionRights, juce::dontSendNotification);
 }
 
 void SettingsPanel::setStoragePath(const juce::String& path)
@@ -845,16 +863,27 @@ void SettingsPanel::setAutoloadEnabled(bool enabled)
 
 void SettingsPanel::setAiProviderSettings(const AiProviderSettings& settings)
 {
-    auto isOllama = settings.providerName.toLowerCase().contains("ollama");
-    contentView.aiProviderComboBox.setSelectedId(isOllama ? 2 : 1, juce::dontSendNotification);
+    const auto providerId = normalizedProviderId(settings.providerId.isNotEmpty()
+                                                     ? settings.providerId
+                                                     : settings.providerDisplayName);
+    auto selectedIndex = 0;
+    for (int index = 0; index < availableAiProviders().size(); ++index)
+        if (availableAiProviders()[index].providerId == providerId)
+            selectedIndex = index;
+    const auto* provider = findProviderPreset(providerId);
+    auto isOllama = provider != nullptr && provider->providerId == "ollama";
+    contentView.aiProviderComboBox.setSelectedId(selectedIndex + 1, juce::dontSendNotification);
     contentView.aiKeyLabel.setText("API key / token", juce::dontSendNotification);
     contentView.aiModelStatusLabel.setText(isOllama
                                            ? "Ollama usually does not need a key. Refresh models after setting the local server."
                                            : "Refresh the model list after entering your key.",
                                            juce::dontSendNotification);
-    contentView.aiModelComboBox.setText(settings.modelName.isNotEmpty() ? settings.modelName : "gpt-4.1-mini",
+    contentView.aiModelComboBox.setText(settings.modelName.isNotEmpty()
+                                            ? settings.modelName
+                                            : creation::services::SuiteAiProviderRuntime::defaultModelName(*provider),
                                         juce::dontSendNotification);
-    auto endpointDefault = isOllama ? "http://localhost:11434" : "https://api.openai.com/v1";
+    auto endpointDefault = provider != nullptr ? provider->defaultBaseUrl
+                                               : (isOllama ? "http://localhost:11434" : "https://api.openai.com/v1");
     contentView.aiEndpointEditor.setText(settings.baseUrl.isNotEmpty() ? settings.baseUrl : endpointDefault,
                                          juce::dontSendNotification);
     contentView.aiKeyEditor.setText(settings.apiKey, juce::dontSendNotification);
@@ -934,7 +963,8 @@ void SettingsPanel::setMidiInputDevices(const juce::Array<MidiDeviceInfo>& devic
 AiProviderSettings SettingsPanel::getAiProviderSettings() const
 {
     AiProviderSettings settings;
-    settings.providerName = contentView.aiProviderComboBox.getText().trim();
+    settings.providerDisplayName = contentView.aiProviderComboBox.getText().trim();
+    settings.providerId = normalizedProviderId(settings.providerDisplayName);
     settings.modelName = contentView.aiModelComboBox.getText().trim();
     settings.baseUrl = contentView.aiEndpointEditor.getText().trim();
     settings.apiKey = contentView.aiKeyEditor.getText();

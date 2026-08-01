@@ -117,10 +117,10 @@ ContentPanel::ProjectAssetCard::ProjectAssetCard()
     addAndMakeVisible(exportButton);
 }
 
-void ContentPanel::ProjectAssetCard::setAsset(const ProjectManager::ProjectAsset& newAsset)
+void ContentPanel::ProjectAssetCard::setAsset(const creation::assets::AssetDescriptor& newAsset)
 {
     asset = newAsset;
-    const auto isAudioAsset = asset.type == "audioFile" || asset.type == "render";
+    const auto isAudioAsset = asset.kind == creation::assets::AssetKind::audio || asset.kind == creation::assets::AssetKind::render;
     placeButton.setVisible(isAudioAsset);
     exportButton.setVisible(isAudioAsset);
     repaint();
@@ -140,43 +140,23 @@ void ContentPanel::ProjectAssetCard::paint(juce::Graphics& g)
 
     g.setColour(juce::Colours::white);
     g.setFont(juce::Font(17.0f).boldened());
-    g.drawText(asset.name, textArea.removeFromTop(22), juce::Justification::centredLeft, true);
+    g.drawText(asset.displayName, textArea.removeFromTop(22), juce::Justification::centredLeft, true);
 
     g.setColour(juce::Colour(0xff9fb0c8));
     g.setFont(juce::Font(13.0f));
-    g.drawText(asset.category + "  |  " + asset.type, textArea.removeFromTop(18), juce::Justification::centredLeft, true);
-    g.drawText(asset.description, textArea.removeFromTop(20), juce::Justification::centredLeft, true);
+    g.drawText((asset.category.isNotEmpty() ? asset.category + "  |  " : "") + creation::assets::toDisplayName(asset.kind), textArea.removeFromTop(18), juce::Justification::centredLeft, true);
+    g.drawText(asset.description.isNotEmpty() ? asset.description : asset.logicalPath, textArea.removeFromTop(20), juce::Justification::centredLeft, true);
 
-    if (asset.numChannels > 0 || asset.sampleRate > 0.0 || asset.bitDepth > 0 || asset.durationSeconds > 0.0)
+    if (asset.fileSizeBytes > 0)
     {
-        juce::String metadataLine;
-        if (asset.numChannels > 0)
-            metadataLine << juce::String(asset.numChannels) << (asset.numChannels == 1 ? " ch" : " ch");
-        if (asset.sampleRate > 0.0)
-        {
-            if (metadataLine.isNotEmpty())
-                metadataLine << "  |  ";
-            metadataLine << juce::String(juce::roundToInt(asset.sampleRate)) << " Hz";
-        }
-        if (asset.bitDepth > 0)
-        {
-            if (metadataLine.isNotEmpty())
-                metadataLine << "  |  ";
-            metadataLine << juce::String(asset.bitDepth) << "-bit";
-        }
-        if (asset.durationSeconds > 0.0)
-        {
-            if (metadataLine.isNotEmpty())
-                metadataLine << "  |  ";
-            metadataLine << juce::String(asset.durationSeconds, 2) << " s";
-        }
-
-        g.setColour(juce::Colour(0xff7ec6ff));
-        g.drawText(metadataLine, textArea.removeFromTop(18), juce::Justification::centredLeft, true);
+        juce::String metadataLine = juce::File::descriptionOfSizeInBytes(asset.fileSizeBytes);
+        g.setColour(juce::Colour(0xff6e83a3));
+        g.setFont(juce::Font(12.0f));
+        g.drawText(metadataLine, textArea.removeFromTop(16), juce::Justification::centredLeft, true);
     }
 
     g.setColour(juce::Colour(0xff7dd36f));
-    g.drawText(asset.relativePath, textArea.removeFromBottom(20), juce::Justification::centredLeft, true);
+    g.drawText(asset.logicalPath, textArea.removeFromBottom(20), juce::Justification::centredLeft, true);
 }
 
 void ContentPanel::ProjectAssetCard::resized()
@@ -353,7 +333,7 @@ void ContentPanel::setItems(const juce::Array<ContentLibrary::Item>& newItems)
     resized();
 }
 
-void ContentPanel::setProjectAssets(const juce::Array<ProjectManager::ProjectAsset>& newAssets)
+void ContentPanel::setProjectAssets(const juce::Array<creation::assets::AssetDescriptor>& newAssets)
 {
     projectAssets = newAssets;
     projectAssetCards.clear(true);
@@ -361,17 +341,17 @@ void ContentPanel::setProjectAssets(const juce::Array<ProjectManager::ProjectAss
     for (const auto& asset : projectAssets)
     {
         auto* card = projectAssetCards.add(new ProjectAssetCard());
-        card->onOpenRequested = [this](const ProjectManager::ProjectAsset& selectedAsset)
+        card->onOpenRequested = [this](const creation::assets::AssetDescriptor& selectedAsset)
         {
             if (onOpenProjectAssetRequested)
                 onOpenProjectAssetRequested(selectedAsset);
         };
-        card->onPlaceRequested = [this](const ProjectManager::ProjectAsset& selectedAsset)
+        card->onPlaceRequested = [this](const creation::assets::AssetDescriptor& selectedAsset)
         {
             if (onPlaceProjectAssetRequested)
                 onPlaceProjectAssetRequested(selectedAsset);
         };
-        card->onExportRequested = [this](const ProjectManager::ProjectAsset& selectedAsset)
+        card->onExportRequested = [this](const creation::assets::AssetDescriptor& selectedAsset)
         {
             if (onExportProjectAssetRequested)
                 onExportProjectAssetRequested(selectedAsset);

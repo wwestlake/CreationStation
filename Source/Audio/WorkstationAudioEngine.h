@@ -11,6 +11,13 @@ class WorkstationAudioEngine final : public juce::AudioIODeviceCallback,
                                      private juce::MidiInputCallback
 {
 public:
+    enum class MetronomeMode
+    {
+        off = 0,
+        playOrRecord = 1,
+        always = 2
+    };
+
     struct InputSourceDescriptor
     {
         int channelIndex = -1;
@@ -72,7 +79,9 @@ public:
     void setPlaying(bool shouldPlay);
     bool isPlaying() const noexcept { return playing; }
     void setPlaybackPositionSeconds(double seconds);
-    void setMetronomeEnabled(bool shouldEnable) noexcept { metronomeEnabled.store(shouldEnable); }
+    void setMetronomeEnabled(bool shouldEnable) noexcept;
+    void setMetronomeMode(MetronomeMode mode) noexcept;
+    MetronomeMode getMetronomeMode() const noexcept { return metronomeMode.load(); }
     bool isMetronomeEnabled() const noexcept { return metronomeEnabled.load(); }
     void setMetronomeTempo(double bpm, int numerator) noexcept;
     bool isRecording() const noexcept { return recording; }
@@ -85,7 +94,9 @@ public:
     bool previewAssetFile(const juce::File& file, juce::String& errorMessage);
     bool previewAssetFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
     bool previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer, double sampleRate, juce::String& errorMessage);
-    bool setFoleyArrangement(const juce::ValueTree& arrangementState, const juce::File& assetsDirectory, juce::String& errorMessage);
+    bool setFoleyArrangement(const juce::ValueTree& arrangementState,
+                             const juce::StringPairArray& assetIdToFilePath,
+                             juce::String& errorMessage);
     bool setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets, juce::String& errorMessage);
     void setTrackerMidiClips(const juce::Array<MidiPlaybackClip>& clips);
 
@@ -730,6 +741,7 @@ private:
     std::atomic<bool> playing { false };
     std::atomic<bool> recording { false };
     std::atomic<bool> metronomeEnabled { false };
+    std::atomic<MetronomeMode> metronomeMode { MetronomeMode::off };
     std::atomic<double> metronomeBpm { 120.0 };
     std::atomic<int> metronomeBeatsPerMeasure { 4 };
     int64 metronomeSampleCounter = 0;

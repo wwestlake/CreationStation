@@ -1,5 +1,10 @@
+#include <creation/assets/ProjectManifest.h>
+#include <creation/assets/AssetTypes.h>
 #include "ProjectStorage.h"
-#include "ProjectManager.h"
+
+#include <creation/assets/ProjectSession.h>
+#include <creation/assets/ProjectWorkspaceService.h>
+#include <creation/assets/AssetMaterializer.h>
 
 namespace cs
 {
@@ -85,16 +90,6 @@ juce::String defaultExtensionForAsset(const AssetDescriptor& asset)
     return ".bin";
 }
 
-AssetKind inferKindFromLegacyType(const juce::String& type)
-{
-    auto normalized = type.trim().toLowerCase();
-    if (normalized == "audiofile") return AssetKind::audio;
-    if (normalized == "render") return AssetKind::render;
-    if (normalized == "signalpatch") return AssetKind::patch;
-    if (normalized == "patinaprogram") return AssetKind::script;
-    return AssetKind::unknown;
-}
-
 juce::String inferMediaType(const juce::File& file, AssetKind kind)
 {
     auto ext = file.getFileExtension().toLowerCase();
@@ -116,20 +111,55 @@ juce::String inferMediaType(const juce::File& file, AssetKind kind)
     return "application/octet-stream";
 }
 
-AssetDescriptor makeDescriptorFromProjectAsset(const ProjectManager::ProjectAsset& asset)
+juce::String defaultLogicalRootForKind(AssetKind kind)
 {
-    AssetDescriptor descriptor;
-    descriptor.id = asset.id;
-    descriptor.versionId = asset.versionId;
-    descriptor.displayName = asset.name;
-    descriptor.kind = inferKindFromLegacyType(asset.type);
-    descriptor.category = asset.category;
-    descriptor.description = asset.description;
-    descriptor.mediaType = inferMediaType(asset.file, descriptor.kind);
-    descriptor.logicalPath = normalizeLogicalPath(asset.relativePath);
-    descriptor.fileSizeBytes = asset.fileSizeBytes;
-    descriptor.modifiedAt = asset.file.getLastModificationTime();
-    descriptor.tags.add(asset.type.trim().toLowerCase());
+    switch (kind)
+    {
+        case AssetKind::render:
+            return creation::assets::ProjectContainerPaths::derivedAssetRoot;
+        case AssetKind::patch:
+        case AssetKind::script:
+        case AssetKind::metadata:
+        case AssetKind::audio:
+        case AssetKind::preset:
+        case AssetKind::samplePack:
+        case AssetKind::midi:
+        case AssetKind::binary:
+        case AssetKind::unknown:
+        default:
+            return creation::assets::ProjectContainerPaths::sourceAssetRoot;
+    }
+}
+
+juce::String defaultLogicalPathForAsset(const AssetDescriptor& asset)
+{
+    return defaultLogicalRootForKind(asset.kind)
+         + slugForAssetName(asset.displayName.isNotEmpty() ? asset.displayName : asset.id)
+         + defaultExtensionForAsset(asset);
+}
+
+AssetDescriptor buildSuiteDescriptor(const AssetDescriptor& requested,
+                                     const juce::String& logicalPath,
+                                     int64 fileSizeBytes,
+                                     juce::Time modifiedAt)
+{
+    AssetDescriptor descriptor = requested;
+    if (descriptor.id.isEmpty())
+        descriptor.id = "asset:" + juce::Uuid().toString();
+    if (descriptor.version.isEmpty())
+        descriptor.version = "1";
+    if (descriptor.versionId.isEmpty())
+        descriptor.versionId = descriptor.id + "@" + descriptor.version;
+    descriptor.displayName = descriptor.displayName.isNotEmpty()
+        ? descriptor.displayName
+        : logicalPath.fromLastOccurrenceOf("/", false, false).upToLastOccurrenceOf(".", false, false);
+    descriptor.logicalPath = logicalPath;
+    descriptor.sourceApp = "Creation Station";
+    descriptor.fileSizeBytes = fileSizeBytes;
+    descriptor.modifiedAt = modifiedAt;
+    if (descriptor.createdAt == juce::Time())
+        descriptor.createdAt = modifiedAt;
+    descriptor.revision = juce::jmax(1, descriptor.revision + 1);
     return descriptor;
 }
 
@@ -157,51 +187,56 @@ bool assetMatchesQuery(const AssetDescriptor& asset, const AssetQuery& query)
     return true;
 }
 
-class FolderProjectStorage final : public IProjectStorage
+class SuiteProjectStorage final : public IProjectStorage
 {
 public:
-    explicit FolderProjectStorage(ProjectManager& managerIn) : manager(managerIn) {}
+    SuiteProjectStorage(creation::assets::ProjectSession& sessionIn,
+                        const creation::suite::SuiteSettings& settingsIn)
+        : session(sessionIn), suiteSettings(settingsIn) {}
 
-    bool hasProject() const override { return manager.hasProject(); }
-    juce::String getProjectDisplayName() const override { return manager.getDisplayLabel(); }
+    bool hasProject() const override { return session.isValid(); }
+    juce::String getProjectDisplayName() const override
+    {
+        return session.isValid() ? session.getManifest().projectName : juce::String();
+    }
 
     juce::Array<AssetDescriptor> enumerateAssets(const AssetQuery& query) const override
     {
-        juce::Array<AssetDescriptor> results;
-        for (const auto& legacyAsset : manager.listProjectAssets())
-        {
-            auto descriptor = makeDescriptorFromProjectAsset(legacyAsset);
-            if (assetMatchesQuery(descriptor, query))
-                results.add(std::move(descriptor));
-        }
-
-        return results;
+        if (! session.isValid())
+            return {};
+        return session.getManifest().assetCatalog.query(query);
     }
 
     std::optional<AssetDescriptor> getAssetDescriptor(const AssetId& assetId) const override
     {
-        for (const auto& legacyAsset : manager.listProjectAssets())
-            if (legacyAsset.id == assetId)
-                return makeDescriptorFromProjectAsset(legacyAsset);
-
+        if (! session.isValid())
+            return std::nullopt;
+        if (const auto* descriptor = session.getManifest().assetCatalog.findById(assetId))
+            return *descriptor;
         return std::nullopt;
     }
 
     std::unique_ptr<juce::InputStream> openReadStream(const AssetId& assetId,
                                                       juce::String& errorMessage) const override
     {
-        auto file = resolveAssetFile(assetId);
-        if (! file.existsAsFile())
+        if (! session.isValid())
         {
-            errorMessage = "That asset does not exist in the current project.";
+            errorMessage = "No active project session.";
             return {};
         }
-
-        auto stream = file.createInputStream();
-        if (stream == nullptr)
-            errorMessage = "Could not open the asset for reading.";
-
-        return stream;
+        const auto* descriptor = session.getManifest().assetCatalog.findById(assetId);
+        if (descriptor == nullptr)
+        {
+            errorMessage = "That asset does not exist in the container.";
+            return {};
+        }
+        juce::MemoryBlock data;
+        if (! session.readEntry(descriptor->logicalPath, data))
+        {
+            errorMessage = "That asset entry was not found in the suite container.";
+            return {};
+        }
+        return std::make_unique<juce::MemoryInputStream>(data, false);
     }
 
     bool readBytes(const AssetId& assetId,
@@ -211,7 +246,6 @@ public:
         auto stream = openReadStream(assetId, errorMessage);
         if (stream == nullptr)
             return false;
-
         destination.reset();
         stream->readIntoMemoryBlock(destination);
         return true;
@@ -221,14 +255,11 @@ public:
                   juce::String& destination,
                   juce::String& errorMessage) const override
     {
-        auto file = resolveAssetFile(assetId);
-        if (! file.existsAsFile())
-        {
-            errorMessage = "That asset does not exist in the current project.";
+        juce::MemoryBlock data;
+        if (! readBytes(assetId, data, errorMessage))
             return false;
-        }
-
-        destination = file.loadFileAsString();
+        destination = juce::String::fromUTF8(static_cast<const char*>(data.getData()),
+                                             static_cast<int>(data.getSize()));
         return true;
     }
 
@@ -237,25 +268,31 @@ public:
                     AssetDescriptor& storedAsset,
                     juce::String& errorMessage) override
     {
-        auto file = resolveWritableFile(desiredAsset, errorMessage);
-        if (file == juce::File())
-            return false;
-
-        auto stream = std::unique_ptr<juce::FileOutputStream>(file.createOutputStream());
-        if (stream == nullptr)
+        if (! session.isValid())
         {
-            errorMessage = "Could not open the asset destination for writing.";
+            errorMessage = "No active project session.";
             return false;
         }
 
-        if (! stream->write(source.getData(), source.getSize()))
+        auto logicalPath = normalizeLogicalPath(desiredAsset.logicalPath);
+        if (logicalPath.isEmpty())
+            logicalPath = defaultLogicalPathForAsset(desiredAsset);
+
+        if (! session.writeEntry(logicalPath, source, juce::Time::getCurrentTime()))
         {
-            errorMessage = "Could not write the asset data.";
+            errorMessage = "Could not stage the asset into the suite container.";
             return false;
         }
 
-        stream->flush();
-        storedAsset = describeStoredAsset(desiredAsset, file);
+        auto descriptor = buildSuiteDescriptor(desiredAsset,
+                                               logicalPath,
+                                               static_cast<int64>(source.getSize()),
+                                               juce::Time::getCurrentTime());
+        session.upsertAssetDescriptor(descriptor);
+        if (! session.commit(errorMessage))
+            return false;
+
+        storedAsset = descriptor;
         return true;
     }
 
@@ -264,162 +301,115 @@ public:
                    AssetDescriptor& storedAsset,
                    juce::String& errorMessage) override
     {
-        auto file = resolveWritableFile(desiredAsset, errorMessage);
-        if (file == juce::File())
-            return false;
-
-        if (! file.replaceWithText(source))
-        {
-            errorMessage = "Could not write the asset text.";
-            return false;
-        }
-
-        storedAsset = describeStoredAsset(desiredAsset, file);
-        return true;
+        juce::MemoryBlock data(source.toRawUTF8(), static_cast<size_t>(source.getNumBytesAsUTF8()));
+        return writeBytes(desiredAsset, data, storedAsset, errorMessage);
     }
 
     bool removeAsset(const AssetId& assetId, juce::String& errorMessage) override
     {
-        auto file = resolveAssetFile(assetId);
-        if (! file.existsAsFile())
+        if (! session.isValid())
         {
-            errorMessage = "That asset does not exist in the current project.";
+            errorMessage = "No active project session.";
             return false;
         }
 
-        if (! file.deleteFile())
+        const auto* descriptor = session.getManifest().assetCatalog.findById(assetId);
+        if (descriptor == nullptr)
         {
-            errorMessage = "Could not remove the asset from the current project.";
+            errorMessage = "That asset does not exist in the suite container.";
             return false;
         }
 
-        return true;
+        if (! session.removeEntry(descriptor->logicalPath))
+        {
+            errorMessage = "Could not remove the asset entry from the suite container.";
+            return false;
+        }
+
+        session.removeAssetDescriptorByVersionId(descriptor->versionId);
+        return session.commit(errorMessage);
     }
 
 private:
-    juce::File resolveAssetFile(const AssetId& assetId) const
-    {
-        for (const auto& legacyAsset : manager.listProjectAssets())
-            if (legacyAsset.id == assetId)
-                return legacyAsset.file;
-
-        return {};
-    }
-
-    juce::File defaultFolderForKind(AssetKind kind) const
-    {
-        const auto& project = manager.getCurrentProject();
-        switch (kind)
-        {
-            case AssetKind::audio:
-            case AssetKind::binary:
-            case AssetKind::midi:
-            case AssetKind::preset:
-            case AssetKind::samplePack:
-            case AssetKind::unknown:
-                return project.assetsDirectory;
-            case AssetKind::render:
-                return project.rendersDirectory;
-            case AssetKind::patch:
-                return project.dslDirectory.getChildFile("Patches");
-            case AssetKind::script:
-                return project.dslDirectory.getChildFile("Patina");
-            case AssetKind::metadata:
-                return project.rootDirectory.getChildFile("Data");
-        }
-
-        return project.assetsDirectory;
-    }
-
-    juce::File resolveWritableFile(const AssetDescriptor& desiredAsset, juce::String& errorMessage) const
-    {
-        if (! manager.hasProject())
-        {
-            errorMessage = "Open or create a project before writing assets.";
-            return {};
-        }
-
-        if (desiredAsset.id.isNotEmpty())
-        {
-            auto existing = resolveAssetFile(desiredAsset.id);
-            if (existing != juce::File())
-                return existing;
-        }
-
-        juce::File destination;
-        auto logicalPath = normalizeLogicalPath(desiredAsset.logicalPath);
-        if (logicalPath.isNotEmpty())
-            destination = manager.getCurrentProject().rootDirectory.getChildFile(logicalPath);
-        else
-            destination = defaultFolderForKind(desiredAsset.kind)
-                            .getChildFile(slugForAssetName(desiredAsset.displayName) + defaultExtensionForAsset(desiredAsset));
-
-        auto parent = destination.getParentDirectory();
-        if (! parent.exists() && ! parent.createDirectory())
-        {
-            errorMessage = "Could not create the destination folder for that asset.";
-            return {};
-        }
-
-        if (desiredAsset.id.isEmpty() && destination.existsAsFile())
-        {
-            auto baseName = destination.getFileNameWithoutExtension();
-            auto extension = destination.getFileExtension();
-            auto suffix = 2;
-            while (destination.existsAsFile())
-            {
-                destination = parent.getChildFile(baseName + "-" + juce::String(suffix) + extension);
-                ++suffix;
-            }
-        }
-
-        return destination;
-    }
-
-    AssetDescriptor describeStoredAsset(const AssetDescriptor& requested, const juce::File& file) const
-    {
-        AssetDescriptor stored = requested;
-        stored.displayName = stored.displayName.isNotEmpty() ? stored.displayName : file.getFileNameWithoutExtension();
-        stored.logicalPath = normalizeLogicalPath(file.getRelativePathFrom(manager.getCurrentProject().rootDirectory));
-        stored.id = stored.id.isNotEmpty() ? stored.id
-                                           : manager.getCurrentProject().slug + ":" + stored.logicalPath;
-        stored.mediaType = stored.mediaType.isNotEmpty() ? stored.mediaType
-                                                         : inferMediaType(file, stored.kind);
-        stored.fileSizeBytes = file.getSize();
-        stored.modifiedAt = file.getLastModificationTime();
-        return stored;
-    }
-
-    ProjectManager& manager;
+    creation::assets::ProjectSession& session;
+    const creation::suite::SuiteSettings& suiteSettings;
 };
 
-class FolderExternalFileBridge final : public IExternalFileBridge
+class SuiteExternalFileBridge final : public IExternalFileBridge
 {
 public:
-    explicit FolderExternalFileBridge(ProjectManager& managerIn) : manager(managerIn) {}
+    SuiteExternalFileBridge(creation::assets::ProjectSession& sessionIn,
+                            const creation::suite::SuiteSettings& settingsIn)
+        : session(sessionIn), suiteSettings(settingsIn) {}
+
+    ~SuiteExternalFileBridge() override
+    {
+        for (auto& lease : leases)
+        {
+            juce::String errorMessage;
+            creation::assets::AssetMaterializer::releaseLease(lease, errorMessage);
+        }
+    }
 
     juce::File materializeAssetFile(const AssetId& assetId, juce::String& errorMessage) override
     {
-        for (const auto& asset : manager.listProjectAssets())
-            if (asset.id == assetId && asset.file.existsAsFile())
-                return asset.file;
+        if (! session.isValid())
+        {
+            errorMessage = "No active project session.";
+            return {};
+        }
 
-        errorMessage = "That asset could not be materialized as a real file.";
-        return {};
+        const auto* descriptor = session.getManifest().assetCatalog.findById(assetId);
+        if (descriptor == nullptr)
+        {
+            errorMessage = "That asset could not be found in the suite container.";
+            return {};
+        }
+
+        creation::assets::AssetRef reference;
+        reference.id = assetId;
+        reference.mode = creation::assets::AssetReferenceMode::exact;
+
+        creation::assets::MaterializedAssetLease lease;
+        if (! creation::assets::ProjectWorkspaceService::materializeAsset(session,
+                                                                          suiteSettings,
+                                                                          reference,
+                                                                          creation::assets::MaterializationAccess::readOnly,
+                                                                          lease,
+                                                                          errorMessage))
+            return {};
+
+        for (int index = leases.size(); --index >= 0;)
+        {
+            if (leases.getReference(index).logicalPath == descriptor->logicalPath)
+            {
+                juce::String releaseError;
+                creation::assets::AssetMaterializer::releaseLease(leases.getReference(index), releaseError);
+                leases.remove(index);
+            }
+        }
+
+        auto materializedFile = lease.materializedFile;
+        leases.add(std::move(lease));
+        return materializedFile;
     }
 
 private:
-    ProjectManager& manager;
+    creation::assets::ProjectSession& session;
+    const creation::suite::SuiteSettings& suiteSettings;
+    juce::Array<creation::assets::MaterializedAssetLease> leases;
 };
 }
 
-std::unique_ptr<IProjectStorage> createFolderProjectStorage(ProjectManager& manager)
+std::unique_ptr<cs::IProjectStorage> cs::createSuiteProjectStorage(creation::assets::ProjectSession& session,
+                                                                    const creation::suite::SuiteSettings& settings)
 {
-    return std::make_unique<FolderProjectStorage>(manager);
+    return std::make_unique<SuiteProjectStorage>(session, settings);
 }
 
-std::unique_ptr<IExternalFileBridge> createFolderExternalFileBridge(ProjectManager& manager)
+std::unique_ptr<cs::IExternalFileBridge> cs::createSuiteExternalFileBridge(creation::assets::ProjectSession& session,
+                                                                            const creation::suite::SuiteSettings& settings)
 {
-    return std::make_unique<FolderExternalFileBridge>(manager);
+    return std::make_unique<SuiteExternalFileBridge>(session, settings);
 }
 }
