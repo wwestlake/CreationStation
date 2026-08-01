@@ -158,7 +158,8 @@ AiProviderSettings makeAiProviderSettings(const creation::services::SuiteAiResol
     settings.modelName = runtimeSettings.modelName;
     settings.apiKey = runtimeSettings.apiKey;
     return settings;
-=======
+}
+
 CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const DesktopAuthSession::SessionData& session)
 {
     CreationSuiteHeaderBar::ProfileData profile;
@@ -170,7 +171,6 @@ CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const DesktopAuthSession::
                                                : session.user.email;
     profile.badgeImage = branding::createPatreonBadgeImage(tierId, 36);
     return profile;
->>>>>>> origin/master
 }
 
 class ManagedDocumentWindow final : public juce::DocumentWindow
@@ -471,7 +471,10 @@ private:
     juce::ComboBox deviceCombo;
     juce::TextEditor channelEditor, numberEditor;
     juce::ToggleButton isCCToggle;
-    juce::TextButton applyManualButton, bool writeWavFile(const juce::File& destination,
+    juce::TextButton applyManualButton, closeButton;
+};
+
+bool writeWavFile(const juce::File& destination,
                   const juce::AudioBuffer<float>& buffer,
                   double sampleRate,
                   juce::String& errorMessage)
@@ -646,6 +649,117 @@ bool isAdminRole(const juce::String& role)
     auto normalized = role.trim().toLowerCase();
     return normalized == "admin" || normalized == "administrator";
 }
+}
+
+MainComponent::ViewModeBar::ViewModeBar()
+{
+    titleLabel.setText("Creative Modes", juce::dontSendNotification);
+    titleLabel.setFont(juce::Font(18.0f).boldened());
+    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(titleLabel);
+
+    auto setupButton = [this](juce::TextButton& button, WorkspaceMode mode)
+    {
+        button.setClickingTogglesState(true);
+        button.onClick = [this, mode]
+        {
+            setActiveMode(mode);
+            if (onModeSelected)
+                onModeSelected(mode);
+        };
+        addAndMakeVisible(button);
+    };
+
+    setupButton(trackerButton, WorkspaceMode::tracker);
+    setupButton(samplerButton, WorkspaceMode::sampler);
+    setupButton(arrangeButton, WorkspaceMode::arrange);
+    setupButton(signalButton, WorkspaceMode::signal);
+    setupButton(libraryButton, WorkspaceMode::library);
+    setupButton(mixButton, WorkspaceMode::mix);
+    setupButton(pluginsButton, WorkspaceMode::plugins);
+    setupButton(nodeButton, WorkspaceMode::node);
+    setupButton(codeButton, WorkspaceMode::code);
+    setupButton(recordButton, WorkspaceMode::record);
+    setupButton(scoreButton, WorkspaceMode::score);
+    setupButton(settingsButton, WorkspaceMode::settings);
+
+    trackerButton.setTooltip("Tracker - arrange and edit tracks");
+    samplerButton.setTooltip("Sampler - build and manage pitch-mapped sample packs");
+    arrangeButton.setTooltip("Foley - arrange sound effects and foley clips");
+    signalButton.setTooltip("Signal Lab - sound design and synthesis");
+    libraryButton.setTooltip("Content library - browse and manage assets");
+    mixButton.setTooltip("Mixer - adjust levels, pan, and sends");
+    pluginsButton.setTooltip("Plugin browser - find and load VST plugins");
+    nodeButton.setTooltip("Node graph - patch signal routing visually");
+    codeButton.setTooltip("Patina script editor - write DSL patches");
+    recordButton.setTooltip("Recording workspace - capture new takes");
+    scoreButton.setTooltip("Score view - notation and piano roll editing");
+    settingsButton.setTooltip("App settings - project, audio, MIDI, and AI configuration");
+    popOutButton.setTooltip("Pop the current workspace out into its own window");
+
+    popOutButton.onClick = [this]
+    {
+        if (onPopOutRequested)
+            onPopOutRequested();
+    };
+    addAndMakeVisible(popOutButton);
+
+    setActiveMode(WorkspaceMode::tracker);
+}
+
+void MainComponent::ViewModeBar::setActiveMode(WorkspaceMode newMode)
+{
+    activeMode = newMode;
+    trackerButton.setToggleState(activeMode == WorkspaceMode::tracker, juce::dontSendNotification);
+    samplerButton.setToggleState(activeMode == WorkspaceMode::sampler, juce::dontSendNotification);
+    arrangeButton.setToggleState(activeMode == WorkspaceMode::arrange, juce::dontSendNotification);
+    signalButton.setToggleState(activeMode == WorkspaceMode::signal, juce::dontSendNotification);
+    libraryButton.setToggleState(activeMode == WorkspaceMode::library, juce::dontSendNotification);
+    mixButton.setToggleState(activeMode == WorkspaceMode::mix, juce::dontSendNotification);
+    pluginsButton.setToggleState(activeMode == WorkspaceMode::plugins, juce::dontSendNotification);
+    nodeButton.setToggleState(activeMode == WorkspaceMode::node, juce::dontSendNotification);
+    codeButton.setToggleState(activeMode == WorkspaceMode::code, juce::dontSendNotification);
+    recordButton.setToggleState(activeMode == WorkspaceMode::record, juce::dontSendNotification);
+    scoreButton.setToggleState(activeMode == WorkspaceMode::score, juce::dontSendNotification);
+    settingsButton.setToggleState(activeMode == WorkspaceMode::settings, juce::dontSendNotification);
+    repaint();
+}
+
+void MainComponent::ViewModeBar::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour(0xff10141a));
+    g.setColour(juce::Colour(0xff263140));
+    g.drawLine(0.0f,
+               static_cast<float>(getHeight()) - 1.0f,
+               static_cast<float>(getWidth()),
+               static_cast<float>(getHeight()) - 1.0f,
+               1.0f);
+
+    g.setColour(juce::Colour(0xff8ea0b7));
+    g.setFont(juce::Font(13.0f));
+    g.drawText(workspaceModeName(activeMode) + " active", getLocalBounds().reduced(12, 0), juce::Justification::centredRight, true);
+}
+
+void MainComponent::ViewModeBar::resized()
+{
+    auto area = getLocalBounds().reduced(14, 8);
+    titleLabel.setBounds(area.removeFromLeft(140));
+    area.removeFromLeft(8);
+    popOutButton.setBounds(area.removeFromRight(92));
+    area.removeFromRight(8);
+    auto buttonWidth = 78;
+    trackerButton.setBounds(area.removeFromLeft(buttonWidth));
+    samplerButton.setBounds(area.removeFromLeft(buttonWidth));
+    arrangeButton.setBounds(area.removeFromLeft(buttonWidth));
+    signalButton.setBounds(area.removeFromLeft(buttonWidth));
+    libraryButton.setBounds(area.removeFromLeft(buttonWidth));
+    mixButton.setBounds(area.removeFromLeft(buttonWidth));
+    pluginsButton.setBounds(area.removeFromLeft(buttonWidth));
+    nodeButton.setBounds(area.removeFromLeft(buttonWidth));
+    codeButton.setBounds(area.removeFromLeft(buttonWidth));
+    recordButton.setBounds(area.removeFromLeft(buttonWidth));
+    scoreButton.setBounds(area.removeFromLeft(buttonWidth));
+    settingsButton.setBounds(area.removeFromLeft(buttonWidth));
 }
 
 MainComponent::PluginRackBar::PluginRackBar()
@@ -1115,10 +1229,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         suiteShellController.showProjectBrowser();
     };
-    transportBar.onNewProjectRequested = [this]
-    {
-        createNewProject();
-    };
     transportBar.onAudioRequested = [this]
     {
         showAudioSettings();
@@ -1338,29 +1448,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         timelineModel.setLoopEnabled(loopEnabled);
         transportBar.setStatusText(loopEnabled ? "Transport: loop on" : "Transport: loop off");
-    };
-    transportBar.onClickChanged = [this](TransportBar::MetronomeMode mode)
-    {
-        metronomeMode = mode;
-        engine.setMetronomeMode(mode == TransportBar::MetronomeMode::off
-                                    ? WorkstationAudioEngine::MetronomeMode::off
-                                    : mode == TransportBar::MetronomeMode::playOrRecord
-                                        ? WorkstationAudioEngine::MetronomeMode::playOrRecord
-                                        : WorkstationAudioEngine::MetronomeMode::always);
-        engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
-        saveAppSettings();
-        switch (metronomeMode)
-        {
-            case TransportBar::MetronomeMode::off:
-                transportBar.setStatusText("Metronome off.");
-                break;
-            case TransportBar::MetronomeMode::playOrRecord:
-                transportBar.setStatusText("Metronome on while playing or recording.");
-                break;
-            case TransportBar::MetronomeMode::always:
-                transportBar.setStatusText("Metronome always on.");
-                break;
-        }
     };
     transportBar.onSignInRequested = [this]
     {
@@ -6424,7 +6511,6 @@ void MainComponent::applySuiteSettings(const SuiteSettings& settings)
     if (suiteSettingsPanel != nullptr)
         suiteSettingsPanel->setStatusText("Saved suite-wide settings for all Creation apps.");
 }
-}
 
 void MainComponent::createNewProject()
 {
@@ -7070,8 +7156,6 @@ void MainComponent::saveAppSettings()
     state.setProperty("autoloadLastProject", autoloadLastProject, nullptr);
     if (projectSession.isValid())
         state.setProperty("lastOpenedProjectContainer", projectSession.getContainerFile().getFullPathName(), nullptr);
-    state.setProperty("metronomeMode", static_cast<int>(metronomeMode), nullptr);
-    state.setProperty("metronomeEnabled", metronomeMode != TransportBar::MetronomeMode::off, nullptr);
     state.setProperty("audioSystem", selectedStudioAudioSystem, nullptr);
     state.setProperty("audioInputDevice", selectedStudioInputDevice, nullptr);
     state.setProperty("audioOutputDevice", selectedStudioOutputDevice, nullptr);
@@ -7108,12 +7192,6 @@ void MainComponent::loadAppSettings()
         autoloadLastProject = true;
         loadSuiteAiProviderSettings();
         vstPluginCatalog.setSearchPaths(juce::StringArray());
-        transportBar.setMetronomeMode(metronomeMode);
-        engine.setMetronomeMode(metronomeMode == TransportBar::MetronomeMode::off
-                                    ? WorkstationAudioEngine::MetronomeMode::off
-                                    : metronomeMode == TransportBar::MetronomeMode::playOrRecord
-                                        ? WorkstationAudioEngine::MetronomeMode::playOrRecord
-                                        : WorkstationAudioEngine::MetronomeMode::always);
         engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
         return;
     }
@@ -7130,11 +7208,6 @@ void MainComponent::loadAppSettings()
     selectedStudioInputDevice = state.getProperty("audioInputDevice").toString();
     selectedStudioOutputDevice = state.getProperty("audioOutputDevice").toString();
     autoloadLastProject = true;
-    const auto storedMetronomeMode = static_cast<int>(state.getProperty("metronomeMode", -1));
-    if (storedMetronomeMode >= 0 && storedMetronomeMode <= 2)
-        metronomeMode = static_cast<TransportBar::MetronomeMode>(storedMetronomeMode);
-    else
-        metronomeMode = (bool) state.getProperty("metronomeEnabled", false) ? TransportBar::MetronomeMode::always : TransportBar::MetronomeMode::off;
     auto legacyAiProviderSettings = aiProviderSettings;
     legacyAiProviderSettings.providerDisplayName = state.getProperty("aiProviderName", aiProviderSettings.providerDisplayName).toString();
     legacyAiProviderSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
@@ -7165,12 +7238,6 @@ void MainComponent::loadAppSettings()
     aiProviderSettings = legacyAiProviderSettings;
     loadSuiteAiProviderSettings(true);
     settingsPanel.setAiProviderSettings(aiProviderSettings);
-    transportBar.setMetronomeMode(metronomeMode);
-    engine.setMetronomeMode(metronomeMode == TransportBar::MetronomeMode::off
-                                ? WorkstationAudioEngine::MetronomeMode::off
-                                : metronomeMode == TransportBar::MetronomeMode::playOrRecord
-                                    ? WorkstationAudioEngine::MetronomeMode::playOrRecord
-                                    : WorkstationAudioEngine::MetronomeMode::always);
     engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
 }
 
