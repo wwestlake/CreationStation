@@ -1,3 +1,5 @@
+#include <creation/assets/ProjectManifest.h>
+#include <creation/assets/AssetTypes.h>
 #pragma once
 
 #include <JuceHeader.h>
@@ -9,6 +11,7 @@ public:
     struct ClipPlacement
     {
         juce::String displayName;
+        juce::String projectAssetId;
         juce::String assetFileName;
         int trackIndex = 0;
         int startBeat = 0;
@@ -31,7 +34,7 @@ public:
     void setTrackName(int trackIndex, const juce::String& name);
     void setTrackKind(int trackIndex, cs::TrackKind kind);
     void setRecordedClips(const juce::StringArray& clipNames);
-    void setAssetFiles(const juce::Array<juce::File>& files);
+    void setProjectAssets(const juce::Array<creation::assets::AssetDescriptor>& assets);
     void setSelectedTrack(int trackIndex);
     void addAssetClipToSelectedTrack(const juce::String& clipName);
     juce::ValueTree createState() const;
@@ -50,7 +53,7 @@ public:
     std::function<void()> onAddTrackRequested;
     std::function<void(int)> onRemoveTrackRequested;
     std::function<void()> onImportAssetRequested;
-    std::function<void(const juce::File&)> onAssetPreviewRequested;
+    std::function<void(const creation::assets::AssetDescriptor&)> onAssetPreviewRequested;
     std::function<void()> onArrangementChanged;
 
     void paint(juce::Graphics&) override;
@@ -198,7 +201,7 @@ private:
     Canvas canvas;
     juce::StringArray trackNames;
     std::vector<cs::TrackKind> trackKinds;
-    juce::Array<juce::File> assetFiles;
+    juce::Array<creation::assets::AssetDescriptor> projectAssets;
     int totalTrackCount = 0;
     int visibleTrackCount = 0;
     int selectedTrack = 0;

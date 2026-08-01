@@ -1802,7 +1802,12 @@ void WorkstationAudioEngine::renderMetronome(float* const* outputChannelData,
                                              int totalNumOutputChannels,
                                              int numSamples)
 {
-    if (! metronomeEnabled.load() || ! playing.load() || outputChannelData == nullptr || totalNumOutputChannels <= 0 || numSamples <= 0)
+    const auto mode = metronomeMode.load();
+    const auto shouldRender =
+        mode == MetronomeMode::always
+        || (mode == MetronomeMode::playOrRecord && (playing.load() || recording.load()));
+
+    if (! metronomeEnabled.load() || ! shouldRender || outputChannelData == nullptr || totalNumOutputChannels <= 0 || numSamples <= 0)
         return;
 
     auto sampleRate = juce::jmax(1.0, graphSampleRate);
@@ -2110,6 +2115,24 @@ void WorkstationAudioEngine::handleIncomingMidiMessage(juce::MidiInput* source, 
     getOrCreateMidiDeviceCollector(source->getIdentifier()).addMessageToQueue(message);
 }
 
+void WorkstationAudioEngine::setMetronomeEnabled(bool shouldEnable) noexcept
+{
+    const auto wasEnabled = metronomeEnabled.exchange(shouldEnable);
+    metronomeMode.store(shouldEnable ? MetronomeMode::always : MetronomeMode::off);
+
+    if (shouldEnable && ! wasEnabled)
+        metronomeSampleCounter = 0;
+}
+
+void WorkstationAudioEngine::setMetronomeMode(MetronomeMode mode) noexcept
+{
+    const auto previousMode = metronomeMode.exchange(mode);
+    metronomeEnabled.store(mode != MetronomeMode::off);
+
+    if (mode != MetronomeMode::off && previousMode == MetronomeMode::off)
+        metronomeSampleCounter = 0;
+}
+
 void WorkstationAudioEngine::setPlaying(bool shouldPlay)
 {
     playing.store(shouldPlay);
@@ -2157,7 +2180,7 @@ bool WorkstationAudioEngine::previewGeneratedBuffer(const juce::AudioBuffer<floa
 }
 
 bool WorkstationAudioEngine::setFoleyArrangement(const juce::ValueTree& arrangementState,
-                                                 const juce::File& assetsDirectory,
+                                                 const juce::StringPairArray& assetIdToFilePath,
                                                  juce::String& errorMessage)
 {
     juce::AudioFormatManager formatManager;
@@ -2180,7 +2203,31 @@ bool WorkstationAudioEngine::setFoleyArrangement(const juce::ValueTree& arrangem
         settings.reverse = (bool) clipState.getProperty("reverse", false);
         settings.normalize = (bool) clipState.getProperty("normalize", false);
 
-        auto assetFile = assetsDirectory.getChildFile(clipState.getProperty("assetFileName").toString());
+        juce::File assetFile;
+        auto requestedAssetId = clipState.getProperty("projectAssetId").toString();
+        auto requestedAssetName = clipState.getProperty("assetFileName").toString();
+
+        if (requestedAssetId.isNotEmpty())
+        {
+            auto path = assetIdToFilePath[requestedAssetId];
+            if (path.isNotEmpty())
+                assetFile = juce::File(path);
+        }
+
+        if (! assetFile.existsAsFile() && requestedAssetName.isNotEmpty())
+        {
+            // Fallback: search by filename
+            for (int i = 0; i < assetIdToFilePath.size(); ++i)
+            {
+                auto path = assetIdToFilePath.getAllValues()[i];
+                if (juce::File(path).getFileName() == requestedAssetName)
+                {
+                    assetFile = juce::File(path);
+                    break;
+                }
+            }
+        }
+
         if (! assetFile.existsAsFile())
             continue;
 

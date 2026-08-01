@@ -1,8 +1,9 @@
+#include <creation/assets/ProjectManifest.h>
+#include <creation/assets/AssetTypes.h>
 #pragma once
 
 #include <JuceHeader.h>
 #include "../AI/AiProviderSettings.h"
-#include "../Project/ProjectManager.h"
 
 class SettingsPanel final : public juce::Component
 {
@@ -34,14 +35,14 @@ public:
     std::function<void(bool)> onAutoloadChanged;
     std::function<void()> onRefreshAiModelsRequested;
     std::function<void(const AiProviderSettings&)> onAiProviderSettingsChanged;
-    std::function<void(const ProjectManager::ProjectInfo&)> onProjectMetadataChanged;
+    std::function<void(const creation::assets::ProjectManifest&)> onProjectMetadataChanged;
     std::function<void()> onRefreshMidiDevicesRequested;
     std::function<void(const juce::String& deviceId, bool enabled)> onMidiInputDeviceEnabledChanged;
     std::function<void(const juce::String& deviceId, int trackIndexOrMinusOne)> onMidiInputDeviceRouteChanged;
 
     void setMidiInputDevices(const juce::Array<MidiDeviceInfo>& devices, const juce::StringArray& midiTrackNames);
 
-    void setProjectMetadata(const ProjectManager::ProjectInfo& metadata);
+    void setProjectMetadata(const creation::assets::ProjectManifest& metadata);
     void setStoragePath(const juce::String& path);
     void setAutoloadEnabled(bool enabled);
     void setAiProviderSettings(const AiProviderSettings& settings);

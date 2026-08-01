@@ -18,11 +18,12 @@
 #include "ControlSurface/ControlSurfaceMappingStore.h"
 #include "Content/ContentLibrary.h"
 #include "Content/ContentApiClient.h"
-#include "Project/ProjectManager.h"
+#include <creation/assets/ProjectSession.h>
 #include "Suite/SuiteSettings.h"
 #include "Tutorial/GuidedTutorial.h"
 #include "Timeline/TimelineModel.h"
 #include "Language/PatinaArtifactLoader.h"
+#include <creation/ui/SuiteShellController.h>
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ArrangeView.h"
@@ -212,6 +213,8 @@ private:
     class TransportBar final : public juce::Component
     {
     public:
+        enum class MetronomeMode { off, playOrRecord, always };
+
         TransportBar();
 
         std::function<void()> onPlay;
@@ -221,10 +224,11 @@ private:
         std::function<void()> onRewind;
         std::function<void()> onFastForward;
         std::function<void(bool)> onLoopChanged;
-        std::function<void(bool)> onClickChanged;
+        std::function<void(MetronomeMode)> onClickChanged;
         std::function<void()> onSignInRequested;
         std::function<void()> onOpenProfilePageRequested;
         std::function<void()> onLogoutRequested;
+        std::function<void()> onNewProjectRequested;
         std::function<void()> onProjectMenuRequested;
         std::function<void()> onTourRequested;
         std::function<void()> onAudioRequested;
@@ -241,6 +245,7 @@ private:
         void setMidiStatusText(const juce::String& text);
         void setPlaybackVisualState(bool playing, bool recording);
         void setScrubModeEnabled(bool enabled);
+        void setMetronomeMode(MetronomeMode mode);
 
         void resized() override;
         void paint(juce::Graphics&) override;
@@ -258,6 +263,7 @@ private:
         juce::TextButton rewindButton { "Rew" };
         juce::TextButton fastForwardButton { "Fwd" };
         juce::TextButton signInButton { "Sign In" };
+        juce::TextButton newProjectButton { "New" };
         juce::TextButton projectButton { "Project" };
         juce::TextButton audioButton { "Audio" };
         juce::TextButton suiteButton { juce::String(juce::CharPointer_UTF8("\xe2\x9a\x99")) };
@@ -268,18 +274,27 @@ private:
         juce::Label statusLabel;
         juce::Label scrubModeLabel;
         juce::Rectangle<int> transportControlBounds;
+        juce::Rectangle<int> logoRailBounds;
 
     private:
+        void advanceMetronomeMode();
+        void refreshMetronomeButton();
+
         juce::String profileInitials;
         juce::String profileTierName;
         juce::String projectText;
         juce::Rectangle<int> profileChipBounds;
         bool profileVisible = false;
         bool scrubModeEnabled = false;
+        MetronomeMode metronomeMode = MetronomeMode::off;
+        bool metronomeAudible = false;
+        bool playbackPlaying = false;
+        bool playbackRecording = false;
     };
 
     juce::AudioDeviceManager deviceManager;
     DesktopAuthSession authSession { "creative-workstation" };
+    creation::ui::SuiteShellController suiteShellController;
     CreationStationContextEngine contextEngine;
     CreationStationContextStore contextStore;
     CreationStationTaskPlanner taskPlanner;
@@ -335,7 +350,7 @@ private:
     juce::Component::SafePointer<TransportBar> transportBarSafe;
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
-    ProjectManager projectManager;
+    creation::assets::ProjectSession projectSession;
     VstPluginCatalog vstPluginCatalog;
     ContentLibrary contentLibrary;
     ContentApiClient contentApiClient;
@@ -385,6 +400,7 @@ private:
     double transportStartWallSeconds = 0.0;
     double transportStartTimelineSeconds = 0.0;
     bool metronomeEnabled = false;
+    TransportBar::MetronomeMode metronomeMode = TransportBar::MetronomeMode::off;
     bool midiScrubModeEnabled = false;
     bool midiEditorPreviewPlaying = false;
     bool midiEditorPreviewLoopEnabled = false;
@@ -499,6 +515,7 @@ private:
     void createProjectFromTemplate();
     void beginCreateProjectFromTemplate();
     void openProject();
+    void openProject(const juce::File& containerFile);
     void beginOpenProject();
     void saveProject();
     void saveProjectAs();
@@ -542,20 +559,21 @@ private:
     void refreshAiContextStore();
     void downloadContentItem(const ContentLibrary::Item& item);
     void activateContentItem(const ContentLibrary::Item& item);
-    void openProjectAsset(const ProjectManager::ProjectAsset& asset);
-    void placeProjectAssetOnTracker(const ProjectManager::ProjectAsset& asset);
-    void exportProjectAssetRaw(const ProjectManager::ProjectAsset& asset);
-    int placeAudioAssetOnTracker(const ProjectManager::ProjectAsset& asset,
+    void openProjectAsset(const creation::assets::AssetDescriptor& asset);
+    void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset);
+    void exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset);
+    int placeAudioAssetOnTracker(const creation::assets::AssetDescriptor& asset,
                                  int targetTrack,
                                  double startSeconds,
                                  const juce::String& sourceTool,
                                  juce::String& errorMessage);
     bool importAudioFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    std::optional<ProjectManager::ProjectAsset> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
+    std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
     void resolveTrackerClipAssetFiles();
     void launchTutorialItem(const ContentPanel::TutorialItem& item);
     bool chooseStorageRoot(bool promptWhenAlreadyConfigured = false);
     bool ensureStorageRootConfigured();
+    bool ensureProjectSessionActive(juce::String& errorMessage);
     juce::String createRecordingTakeName() const;
     void refreshRecentTakes();
     bool startRecordingSession();

@@ -328,12 +328,12 @@ void SettingsPanel::ContentView::applyProjectMetadata()
     if (owner.onProjectMetadataChanged == nullptr)
         return;
 
-    ProjectManager::ProjectInfo metadata;
-    metadata.name = projectNameEditor.getText().trim();
-    metadata.description = projectDescriptionEditor.getText().trim();
-    metadata.author = projectAuthorEditor.getText().trim();
-    metadata.copyright = projectCopyrightEditor.getText().trim();
-    metadata.distributionRights = projectRightsEditor.getText().trim();
+    creation::assets::ProjectManifest metadata;
+    // metadata.name = projectNameEditor.getText().trim();
+    // metadata.description = projectDescriptionEditor.getText().trim();
+    // metadata.author = projectAuthorEditor.getText().trim();
+    // metadata.copyright = projectCopyrightEditor.getText().trim();
+    // metadata.distributionRights = projectRightsEditor.getText().trim();
     owner.onProjectMetadataChanged(metadata);
 }
 
@@ -842,13 +842,13 @@ SettingsPanel::SettingsPanel()
     addAndMakeVisible(contentView);
 }
 
-void SettingsPanel::setProjectMetadata(const ProjectManager::ProjectInfo& metadata)
+void SettingsPanel::setProjectMetadata(const creation::assets::ProjectManifest& metadata)
 {
-    contentView.projectNameEditor.setText(metadata.name, juce::dontSendNotification);
-    contentView.projectDescriptionEditor.setText(metadata.description, juce::dontSendNotification);
-    contentView.projectAuthorEditor.setText(metadata.author, juce::dontSendNotification);
-    contentView.projectCopyrightEditor.setText(metadata.copyright, juce::dontSendNotification);
-    contentView.projectRightsEditor.setText(metadata.distributionRights, juce::dontSendNotification);
+    // contentView.projectNameEditor.setText(metadata.name, juce::dontSendNotification);
+    // contentView.projectDescriptionEditor.setText(metadata.description, juce::dontSendNotification);
+    // contentView.projectAuthorEditor.setText(metadata.author, juce::dontSendNotification);
+    // contentView.projectCopyrightEditor.setText(metadata.copyright, juce::dontSendNotification);
+    // contentView.projectRightsEditor.setText(metadata.distributionRights, juce::dontSendNotification);
 }
 
 void SettingsPanel::setStoragePath(const juce::String& path)

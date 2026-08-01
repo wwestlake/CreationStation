@@ -1,8 +1,9 @@
+#include <creation/assets/ProjectManifest.h>
+#include <creation/assets/AssetTypes.h>
 #pragma once
 
 #include <JuceHeader.h>
 #include "../Content/ContentLibrary.h"
-#include "../Project/ProjectManager.h"
 
 class ContentPanel final : public juce::Component
 {
@@ -18,7 +19,7 @@ public:
     ContentPanel();
 
     void setItems(const juce::Array<ContentLibrary::Item>& newItems);
-    void setProjectAssets(const juce::Array<ProjectManager::ProjectAsset>& newAssets);
+    void setProjectAssets(const juce::Array<creation::assets::AssetDescriptor>& newAssets);
     void setTutorialItems(const juce::Array<TutorialItem>& newItems);
     void setStoragePath(const juce::String& path);
     void setStatusText(const juce::String& text);
@@ -29,9 +30,9 @@ public:
     std::function<void()> onAdminPublishRequested;
     std::function<void(const ContentLibrary::Item&)> onDownloadRequested;
     std::function<void(const ContentLibrary::Item&)> onRevealItemRequested;
-    std::function<void(const ProjectManager::ProjectAsset&)> onOpenProjectAssetRequested;
-    std::function<void(const ProjectManager::ProjectAsset&)> onPlaceProjectAssetRequested;
-    std::function<void(const ProjectManager::ProjectAsset&)> onExportProjectAssetRequested;
+    std::function<void(const creation::assets::AssetDescriptor&)> onOpenProjectAssetRequested;
+    std::function<void(const creation::assets::AssetDescriptor&)> onPlaceProjectAssetRequested;
+    std::function<void(const creation::assets::AssetDescriptor&)> onExportProjectAssetRequested;
     std::function<void(const TutorialItem&)> onLaunchTutorialRequested;
     std::function<void(const TutorialItem&)> onRevealTutorialRequested;
 
@@ -81,16 +82,16 @@ private:
     public:
         ProjectAssetCard();
 
-        void setAsset(const ProjectManager::ProjectAsset& newAsset);
+        void setAsset(const creation::assets::AssetDescriptor& newAsset);
         void paint(juce::Graphics& g) override;
         void resized() override;
 
-        std::function<void(const ProjectManager::ProjectAsset&)> onOpenRequested;
-        std::function<void(const ProjectManager::ProjectAsset&)> onPlaceRequested;
-        std::function<void(const ProjectManager::ProjectAsset&)> onExportRequested;
+        std::function<void(const creation::assets::AssetDescriptor&)> onOpenRequested;
+        std::function<void(const creation::assets::AssetDescriptor&)> onPlaceRequested;
+        std::function<void(const creation::assets::AssetDescriptor&)> onExportRequested;
 
     private:
-        ProjectManager::ProjectAsset asset;
+        creation::assets::AssetDescriptor asset;
         juce::TextButton openButton { "Open" };
         juce::TextButton placeButton { "Place" };
         juce::TextButton exportButton { "Export Raw" };
@@ -108,7 +109,7 @@ private:
     juce::Viewport projectAssetsViewport;
     juce::Component projectAssetsHost;
     juce::OwnedArray<ProjectAssetCard> projectAssetCards;
-    juce::Array<ProjectManager::ProjectAsset> projectAssets;
+    juce::Array<creation::assets::AssetDescriptor> projectAssets;
     juce::Viewport tutorialViewport;
     juce::Component tutorialHost;
     juce::OwnedArray<TutorialCard> tutorialCards;

@@ -135,8 +135,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Content/ContentLibrary.h
     Source/Content/ContentApiClient.cpp
     Source/Content/ContentApiClient.h
-    Source/Project/ProjectManager.cpp
-    Source/Project/ProjectManager.h
     Source/Project/ProjectStorage.cpp
     Source/Project/ProjectStorage.h
     Source/Suite/SuiteSettings.h
@@ -431,6 +429,14 @@ target_sources(CreationStationSamplePlayer PRIVATE
     Source/Plugins/SamplePlayer/SamplePlayerLibrarySettings.h
     Source/Audio/SamplePackCatalog.cpp
     Source/Audio/SamplePackCatalog.h
+)
+
+add_creation_station_instrument_plugin(CreationStationPitchPipe "Creation Station Pitch Pipe" CSPp "Instrument")
+target_sources(CreationStationPitchPipe PRIVATE
+    Source/Plugins/PitchPipe/CreationStationPitchPipeProcessor.cpp
+    Source/Plugins/PitchPipe/CreationStationPitchPipeProcessor.h
+    Source/Plugins/PitchPipe/CreationStationPitchPipeEditor.cpp
+    Source/Plugins/PitchPipe/CreationStationPitchPipeEditor.h
 )
 
 install(TARGETS CreativeWorkstation

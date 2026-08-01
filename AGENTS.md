@@ -1,9 +1,18 @@
 # Agent Instructions
 
+## Development Storage Rule
+
+- This checkout is a development/evaluation environment by default, not a preservation environment.
+- Do not preserve or extend folder-era project storage just because old code paths still exist.
+- When the active task is to move Creation Station onto the suite VFS/container model, prefer removing filesystem-first fallback behavior over supporting both systems at once.
+- Do not add sync bridges, dual-write logic, or "temporary" legacy compatibility paths unless the user explicitly asks for backward compatibility with real existing projects/assets.
+- Treat old local project folders and test assets as disposable in this environment unless the user explicitly says they must be preserved.
+
 ## Build Output
 
 - Always build Creation Station in the existing `D:\000 Creation Station\build` directory.
-- The runnable app path must remain `D:\000 Creation Station\build\CreativeWorkstation_artefacts\Release\Creative Workstation.exe`.
+- The runnable app path must remain inside that build tree, and the default development target is the `Debug` configuration.
+- Use `Release` only for intentional release work, such as a tagged version release or explicit release-build verification requested by the user.
 - Do not create alternate or scratch build folders such as `build-asio`, `build-cleancheck`, `build-phase4`, or similar.
 - If a different build directory ever seems necessary, stop and discuss it with the user before doing anything.
 

@@ -42,7 +42,8 @@ CreationStationContextEngine::SourceDocument documentFromVar(const juce::var& va
 }
 }
 
-bool CreationStationContextStore::rebuild(const ProjectManager& projectManager,
+bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession& session,
+                                          const creation::suite::SuiteSettings& suiteSettings,
                                           const ContentLibrary& contentLibrary,
                                           const juce::String& workspaceMode,
                                           const juce::String& patinaSource,
@@ -50,13 +51,13 @@ bool CreationStationContextStore::rebuild(const ProjectManager& projectManager,
 {
     documents.clearQuick();
 
-    if (! projectManager.hasStorageRoot())
+    if (suiteSettings.suiteVfsRoot.isEmpty())
     {
         errorMessage = "Storage root is not configured yet.";
         return false;
     }
 
-    snapshotFile = projectManager.getConfigDirectory().getChildFile("ai-context-store.json");
+    snapshotFile = juce::File(suiteSettings.cacheRoot).getChildFile("ai-context-store.json");
 
     CreationStationContextEngine::SourceDocument modeDocument;
     modeDocument.id = "workspace-mode";
@@ -76,85 +77,91 @@ bool CreationStationContextStore::rebuild(const ProjectManager& projectManager,
     patinaDocument.updatedAt = juce::Time::getCurrentTime();
     documents.add(patinaDocument);
 
-    if (projectManager.hasProject())
+    if (session.isValid())
     {
-        const auto& project = projectManager.getCurrentProject();
+        const auto& manifest = session.getManifest();
 
         CreationStationContextEngine::SourceDocument projectDocument;
         projectDocument.id = "project-state";
-        projectDocument.title = project.name;
+        projectDocument.title = manifest.projectName;
         projectDocument.category = "project";
-        projectDocument.body = "Project: " + project.name
-                             + "\nSlug: " + project.slug
-                             + "\nRoot: " + project.rootDirectory.getFullPathName()
-                             + "\nAudio: " + project.audioDirectory.getFullPathName()
-                             + "\nDSL: " + project.dslDirectory.getFullPathName()
-                             + "\nAssets: " + project.assetsDirectory.getFullPathName();
-        projectDocument.sourcePath = project.rootDirectory.getFullPathName();
+        projectDocument.body = "Project: " + manifest.projectName
+                             + "\nContainer: " + session.getContainerFile().getFullPathName();
+        projectDocument.sourcePath = session.getContainerFile().getFullPathName();
         projectDocument.tags.addArray({ "project", "session" });
         projectDocument.updatedAt = juce::Time::getCurrentTime();
         documents.add(projectDocument);
 
-        juce::Array<juce::File> patinaFiles;
-        project.dslDirectory.getChildFile("Patina").findChildFiles(patinaFiles, juce::File::findFiles, false, "*.patina.json");
-        for (const auto& file : patinaFiles)
+        for (const auto& asset : manifest.assetCatalog.query({}))
         {
-            CreationStationContextEngine::SourceDocument document;
-            document.id = documentIdForFile("patina", file);
-            document.title = file.getFileNameWithoutExtension();
-            document.category = "patina-artifact";
-            document.body = readTextPreview(file, 3000);
-            document.sourcePath = file.getFullPathName();
-            document.tags.addArray({ "patina", "artifact", "language" });
-            document.updatedAt = file.getLastModificationTime();
-            documents.add(document);
-        }
-
-        juce::Array<juce::File> patchFiles;
-        project.dslDirectory.getChildFile("Patches").findChildFiles(patchFiles, juce::File::findFiles, false, "*.cspatch");
-        for (const auto& file : patchFiles)
-        {
-            CreationStationContextEngine::SourceDocument document;
-            document.id = documentIdForFile("patch", file);
-            document.title = file.getFileNameWithoutExtension();
-            document.category = "patch";
-
-            juce::String patchError;
-            cw::PatchDocument patch;
-            if (cw::parsePatchDocumentJson(file.loadFileAsString(), patch, patchError))
+            if (asset.kind == creation::assets::AssetKind::script)
             {
-                document.body = "Patch: " + patch.name
-                              + "\nType: " + patch.type
-                              + "\nAuthor: " + patch.author
-                              + "\nDescription: " + patch.description
-                              + "\nSources: " + juce::String(patch.sources.size())
-                              + "\nNodes: " + juce::String(patch.nodes.size())
-                              + "\nConnections: " + juce::String(patch.connections.size())
-                              + "\nParameters: " + juce::String(patch.parameters.size());
-            }
-            else
-            {
-                document.body = readTextPreview(file, 2500);
+                CreationStationContextEngine::SourceDocument document;
+                document.id = "patina-" + asset.id;
+                document.title = asset.displayName;
+                document.category = "patina-artifact";
+                juce::MemoryBlock data;
+                if (session.readEntry(asset.logicalPath, data))
+                    document.body = juce::String::fromUTF8(static_cast<const char*>(data.getData()),
+                                                           juce::jmin((int)data.getSize(), 3000));
+                document.sourcePath = asset.logicalPath;
+                document.tags.addArray({ "patina", "artifact", "language" });
+                document.updatedAt = asset.modifiedAt;
+                documents.add(document);
             }
 
-            document.sourcePath = file.getFullPathName();
-            document.tags.addArray({ "patch", "signal", "runtime" });
-            document.updatedAt = file.getLastModificationTime();
-            documents.add(document);
-        }
+            if (asset.kind == creation::assets::AssetKind::patch)
+            {
+                CreationStationContextEngine::SourceDocument document;
+                document.id = "patch-" + asset.id;
+                document.title = asset.displayName;
+                document.category = "patch";
 
-        auto assetFiles = projectManager.listAssetFiles();
-        for (const auto& file : assetFiles)
-        {
-            CreationStationContextEngine::SourceDocument document;
-            document.id = documentIdForFile("asset", file);
-            document.title = file.getFileName();
-            document.category = "asset";
-            document.body = makeAssetSummary(file);
-            document.sourcePath = file.getFullPathName();
-            document.tags.addArray({ "asset", "audio", "foley" });
-            document.updatedAt = file.getLastModificationTime();
-            documents.add(document);
+                juce::MemoryBlock data;
+                if (session.readEntry(asset.logicalPath, data))
+                {
+                    auto patchText = juce::String::fromUTF8(static_cast<const char*>(data.getData()),
+                                                            (int)data.getSize());
+                    juce::String patchError;
+                    cw::PatchDocument patch;
+                    if (cw::parsePatchDocumentJson(patchText, patch, patchError))
+                    {
+                        document.body = "Patch: " + patch.name
+                                      + "\nType: " + patch.type
+                                      + "\nAuthor: " + patch.author
+                                      + "\nDescription: " + patch.description
+                                      + "\nSources: " + juce::String(patch.sources.size())
+                                      + "\nNodes: " + juce::String(patch.nodes.size())
+                                      + "\nConnections: " + juce::String(patch.connections.size())
+                                      + "\nParameters: " + juce::String(patch.parameters.size());
+                    }
+                    else
+                    {
+                        document.body = patchText.substring(0, 2500);
+                    }
+                }
+
+                document.sourcePath = asset.logicalPath;
+                document.tags.addArray({ "patch", "signal", "runtime" });
+                document.updatedAt = asset.modifiedAt;
+                documents.add(document);
+            }
+
+            if (asset.kind == creation::assets::AssetKind::audio
+                || asset.kind == creation::assets::AssetKind::render)
+            {
+                CreationStationContextEngine::SourceDocument document;
+                document.id = "asset-" + asset.id;
+                document.title = asset.displayName;
+                document.category = "asset";
+                document.body = "Asset: " + asset.displayName
+                              + "\nLogical path: " + asset.logicalPath
+                              + "\nSize: " + juce::String(asset.fileSizeBytes) + " bytes";
+                document.sourcePath = asset.logicalPath;
+                document.tags.addArray({ "asset", "audio", "foley" });
+                document.updatedAt = asset.modifiedAt;
+                documents.add(document);
+            }
         }
     }
 

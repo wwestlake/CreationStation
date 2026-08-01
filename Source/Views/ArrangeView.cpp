@@ -50,6 +50,11 @@ juce::String formatDecibels(float value)
 {
     return juce::String(value, 1) + " dB";
 }
+
+const creation::assets::AssetDescriptor* getAssetAtIndex(const juce::Array<creation::assets::AssetDescriptor>& projectAssets, int index)
+{
+    return juce::isPositiveAndBelow(index, projectAssets.size()) ? &projectAssets.getReference(index) : nullptr;
+}
 }
 
 ArrangeView::WaveformPanel::WaveformPanel()
@@ -665,8 +670,8 @@ ArrangeView::ArrangeView()
 
     previewSliceButton.onClick = [this]
     {
-        if (juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size()) && onAssetPreviewRequested)
-            onAssetPreviewRequested(assetFiles[(size_t) selectedAssetIndex]);
+        if (auto* asset = getAssetAtIndex(projectAssets, selectedAssetIndex); asset != nullptr && onAssetPreviewRequested)
+            onAssetPreviewRequested(*asset);
     };
     previewSliceButton.setTooltip("Audition the selected asset");
     addAndMakeVisible(previewSliceButton);
@@ -852,9 +857,9 @@ void ArrangeView::setRecordedClips(const juce::StringArray& clipNames)
     canvas.setSeedClips(clipNames);
 }
 
-void ArrangeView::setAssetFiles(const juce::Array<juce::File>& files)
+void ArrangeView::setProjectAssets(const juce::Array<creation::assets::AssetDescriptor>& assets)
 {
-    assetFiles = files;
+    projectAssets = assets;
     refreshAssetSelector();
 }
 
@@ -867,22 +872,22 @@ void ArrangeView::setSelectedTrack(int trackIndex)
 void ArrangeView::addAssetClipToSelectedTrack(const juce::String& clipName)
 {
     auto targetIndex = -1;
-    for (int index = 0; index < assetFiles.size(); ++index)
+    for (int index = 0; index < projectAssets.size(); ++index)
     {
-        auto& file = assetFiles.getReference(index);
-        if (file.getFileNameWithoutExtension() == clipName || file.getFileName() == clipName)
+        auto& asset = projectAssets.getReference(index);
+        auto assetFileName = asset.logicalPath.fromLastOccurrenceOf("/", false, false);
+        if (asset.displayName == clipName || assetFileName == clipName || assetFileName.upToLastOccurrenceOf(".", false, false) == clipName)
         {
             targetIndex = index;
             break;
         }
     }
 
-    if (! juce::isPositiveAndBelow(targetIndex, assetFiles.size()))
+    if (getAssetAtIndex(projectAssets, targetIndex) == nullptr)
         return;
 
     selectedAssetIndex = targetIndex;
     assetSelector.setSelectedItemIndex(targetIndex, juce::dontSendNotification);
-    waveformPanel.setAudioFile(assetFiles[(size_t) targetIndex]);
     placeAssetButton.setEnabled(true);
 
     placeSelectedAssetOnCurrentLayer();
@@ -892,8 +897,12 @@ juce::ValueTree ArrangeView::createState() const
 {
     juce::ValueTree state("ArrangeView");
     state.setProperty("selectedTrack", selectedTrack, nullptr);
-    state.setProperty("selectedAssetName", juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size())
-                                             ? assetFiles[(size_t) selectedAssetIndex].getFileName()
+    state.setProperty("selectedAssetId", juce::isPositiveAndBelow(selectedAssetIndex, projectAssets.size())
+                                           ? projectAssets[(size_t) selectedAssetIndex].id
+                                           : juce::String(),
+                      nullptr);
+    state.setProperty("selectedAssetName", juce::isPositiveAndBelow(selectedAssetIndex, projectAssets.size())
+                                             ? projectAssets[(size_t) selectedAssetIndex].logicalPath.fromLastOccurrenceOf("/", false, false)
                                              : juce::String(),
                       nullptr);
     state.setProperty("trimStart", trimStart, nullptr);
@@ -909,6 +918,7 @@ juce::ValueTree ArrangeView::createState() const
         const auto& clip = placedClips.getReference(clipIndex);
         juce::ValueTree clipState("Clip");
         clipState.setProperty("displayName", clip.displayName, nullptr);
+        clipState.setProperty("projectAssetId", clip.projectAssetId, nullptr);
         clipState.setProperty("assetFileName", clip.assetFileName, nullptr);
         clipState.setProperty("trackIndex", clip.trackIndex, nullptr);
         clipState.setProperty("startBeat", clip.startBeat, nullptr);
@@ -952,6 +962,7 @@ void ArrangeView::restoreState(const juce::ValueTree& state)
 
         ClipPlacement clip;
         clip.displayName = clipState.getProperty("displayName").toString();
+        clip.projectAssetId = clipState.getProperty("projectAssetId").toString();
         clip.assetFileName = clipState.getProperty("assetFileName").toString();
         clip.trackIndex = (int) clipState.getProperty("trackIndex", 0);
         clip.startBeat = (int) clipState.getProperty("startBeat", 0);
@@ -972,12 +983,27 @@ void ArrangeView::restoreState(const juce::ValueTree& state)
     refreshClipInspector();
     setSelectedTrack((int) state.getProperty("selectedTrack", 0));
 
+    auto selectedAssetId = state.getProperty("selectedAssetId").toString();
+    if (selectedAssetId.isNotEmpty())
+    {
+        for (int index = 0; index < projectAssets.size(); ++index)
+        {
+            if (projectAssets[(size_t) index].id == selectedAssetId)
+            {
+                assetSelector.setSelectedItemIndex(index, juce::dontSendNotification);
+                selectAssetIndex(index);
+                return;
+            }
+        }
+    }
+
     auto selectedAssetName = state.getProperty("selectedAssetName").toString();
     if (selectedAssetName.isNotEmpty())
     {
-        for (int index = 0; index < assetFiles.size(); ++index)
+        for (int index = 0; index < projectAssets.size(); ++index)
         {
-            if (assetFiles[(size_t) index].getFileName() == selectedAssetName)
+            auto fileName = projectAssets[(size_t) index].logicalPath.fromLastOccurrenceOf("/", false, false);
+            if (fileName == selectedAssetName)
             {
                 assetSelector.setSelectedItemIndex(index, juce::dontSendNotification);
                 selectAssetIndex(index);
@@ -1008,15 +1034,19 @@ void ArrangeView::refreshAssetSelector()
 {
     assetSelector.clear(juce::dontSendNotification);
 
-    for (int index = 0; index < assetFiles.size(); ++index)
-        assetSelector.addItem(assetFiles[(size_t) index].getFileName(), index + 1);
+    for (int index = 0; index < projectAssets.size(); ++index)
+    {
+        auto name = projectAssets[(size_t) index].displayName;
+        if (name.isEmpty())
+            name = projectAssets[(size_t) index].logicalPath.fromLastOccurrenceOf("/", false, false);
+        assetSelector.addItem(name, index + 1);
+    }
 
-    if (assetFiles.isEmpty())
+    if (projectAssets.isEmpty())
     {
         selectedAssetIndex = -1;
         assetSelector.setTextWhenNoChoicesAvailable("Import or render a Foley sound to begin");
         assetSelector.setText({}, juce::dontSendNotification);
-        waveformPanel.setAudioFile({});
         previewSliceButton.setEnabled(false);
         placeAssetButton.setEnabled(false);
     }
@@ -1045,45 +1075,49 @@ void ArrangeView::refreshTrimUi()
 
 void ArrangeView::selectAssetIndex(int index)
 {
-    if (! juce::isPositiveAndBelow(index, assetFiles.size()))
+    if (! juce::isPositiveAndBelow(index, projectAssets.size()))
     {
         selectedAssetIndex = -1;
-        waveformPanel.setAudioFile({});
         previewSliceButton.setEnabled(false);
         placeAssetButton.setEnabled(false);
         return;
     }
 
     selectedAssetIndex = index;
-    waveformPanel.setAudioFile(assetFiles[(size_t) index]);
     previewSliceButton.setEnabled(true);
     placeAssetButton.setEnabled(true);
 }
 
 juce::String ArrangeView::makePlacedClipLabel() const
 {
-    if (! juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size()))
+    if (! juce::isPositiveAndBelow(selectedAssetIndex, projectAssets.size()))
         return {};
 
-    return assetFiles[(size_t) selectedAssetIndex].getFileNameWithoutExtension()
+    auto name = projectAssets[(size_t) selectedAssetIndex].displayName;
+    if (name.isEmpty())
+        name = projectAssets[(size_t) selectedAssetIndex].logicalPath.fromLastOccurrenceOf("/", false, false).upToLastOccurrenceOf(".", false, false);
+
+    return name
          + " ["
          + formatPercent(trimStart)
          + "-"
          + formatPercent(trimEnd)
          + ", " + formatDecibels(gainDecibels)
          + (reverseButton.getToggleState() ? ", rev" : "")
-         + (normalizeButton.getToggleState() ? ", norm" : "")
+         + (normalizeButton.getToggleState() ? ", norm" : "");
          + "]";
 }
 
 void ArrangeView::placeSelectedAssetOnCurrentLayer()
 {
-    if (! juce::isPositiveAndBelow(selectedAssetIndex, assetFiles.size()))
+    if (! juce::isPositiveAndBelow(selectedAssetIndex, projectAssets.size()))
         return;
 
+    const auto& asset = projectAssets.getReference(selectedAssetIndex);
     ClipPlacement placement;
     placement.displayName = makePlacedClipLabel();
-    placement.assetFileName = assetFiles[(size_t) selectedAssetIndex].getFileName();
+    placement.projectAssetId = asset.id;
+    placement.assetFileName = asset.logicalPath.fromLastOccurrenceOf("/", false, false);
     placement.trackIndex = selectedTrack;
     placement.trimStart = trimStart;
     placement.trimEnd = trimEnd;

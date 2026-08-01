@@ -2,10 +2,10 @@
 
 #include <JuceHeader.h>
 #include <creation/assets/AssetTypes.h>
+#include <creation/assets/ProjectSession.h>
+#include <creation/suite/SuiteSettings.h>
 #include <memory>
 #include <optional>
-
-class ProjectManager;
 
 namespace cs
 {
@@ -63,6 +63,8 @@ public:
                                             juce::String& errorMessage) = 0;
 };
 
-std::unique_ptr<IProjectStorage> createFolderProjectStorage(ProjectManager& manager);
-std::unique_ptr<IExternalFileBridge> createFolderExternalFileBridge(ProjectManager& manager);
+std::unique_ptr<IProjectStorage> createSuiteProjectStorage(creation::assets::ProjectSession& session,
+                                                           const creation::suite::SuiteSettings& settings);
+std::unique_ptr<IExternalFileBridge> createSuiteExternalFileBridge(creation::assets::ProjectSession& session,
+                                                                   const creation::suite::SuiteSettings& settings);
 }

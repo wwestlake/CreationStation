@@ -271,6 +271,37 @@ TrackerPanel::TrackerPanel()
     gridResolutionCombo.setTooltip("Grid resolution used for snapping");
     addAndMakeVisible(gridResolutionCombo);
 
+    pitchPipeButton.setTooltip("Click to play a Pitch Pipe tone, or right-click to learn a MIDI binding");
+    pitchPipeButton.onClick = [this]
+    {
+        juce::PopupMenu menu;
+        menu.addSectionHeader("Pitch Pipe Note (A4 = 440 Hz)");
+        static constexpr struct { const char* label; double hz; } pitchNotes[] = {
+            { "C4 (261.63 Hz)", 261.63 },
+            { "C#4 (277.18 Hz)", 277.18 },
+            { "D4 (293.66 Hz)", 293.66 },
+            { "D#4 (311.13 Hz)", 311.13 },
+            { "E4 (329.63 Hz)", 329.63 },
+            { "F4 (349.23 Hz)", 349.23 },
+            { "F#4 (369.99 Hz)", 369.99 },
+            { "G4 (392.00 Hz)", 392.00 },
+            { "G#4 (415.30 Hz)", 415.30 },
+            { "A4 (440.00 Hz)", 440.00 },
+            { "A#4 (466.16 Hz)", 466.16 },
+            { "B4 (493.88 Hz)", 493.88 }
+        };
+
+        for (int i = 0; i < 12; ++i)
+            menu.addItem(i + 1, pitchNotes[i].label);
+
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&pitchPipeButton), [this](int result)
+        {
+            if (result >= 1 && result <= 12 && onPitchPipeTriggered)
+                onPitchPipeTriggered(pitchNotes[result - 1].hz);
+        });
+    };
+    addAndMakeVisible(pitchPipeButton);
+
     canvas.onLoopRegionCleared = [this]
     {
         if (onLoopRegionCleared)
@@ -680,6 +711,8 @@ void TrackerPanel::resized()
     snapToggleButton.setBounds(snapRow.removeFromLeft(70));
     snapRow.removeFromLeft(6);
     gridResolutionCombo.setBounds(snapRow.removeFromLeft(90));
+    snapRow.removeFromLeft(6);
+    pitchPipeButton.setBounds(snapRow.removeFromLeft(110));
 
     area.removeFromTop(12);
     timelineScrollBar.setBounds(area.removeFromBottom(16));
