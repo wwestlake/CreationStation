@@ -26,7 +26,7 @@ endif()
 
 option(CREATION_STATION_ENABLE_ASIO "Enable Steinberg ASIO support in Creation Station" OFF)
 set(CREATION_STATION_ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK folder containing iasiodrv.h")
-set(CREATION_SUITE_SHARED_DIR "D:/000 Creation Suite/shared" CACHE PATH "Path to the Creation Suite shared code root")
+set(CREATION_SUITE_SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared" CACHE PATH "Path to the Creation Suite shared code root")
 
 add_subdirectory("${JUCE_DIR}" juce)
 
@@ -53,6 +53,13 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/UI/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/UI"
                      "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedUI")
     set(CS_UI_TARGET creation_suite_ui)
+endif()
+
+set(CS_INTEROP_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Interop/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Interop"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedInterop")
+    set(CS_INTEROP_TARGET creation_suite_interop)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
@@ -140,8 +147,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Project/ProjectStorage.cpp
     Source/Project/ProjectStorage.h
     Source/Suite/SuiteSettings.h
-    Source/Legal/EulaText.cpp
-    Source/Legal/EulaText.h
     Source/Tutorial/GuidedTutorial.cpp
     Source/Tutorial/GuidedTutorial.h
     Source/Tutorial/TutorialScriptCompiler.cpp
@@ -253,6 +258,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_SERVICES_TARGET}
     ${CS_UI_TARGET}
+    ${CS_INTEROP_TARGET}
     creation_station_language_host
     juce::juce_audio_devices
     juce::juce_audio_processors
@@ -436,13 +442,19 @@ target_sources(CreationStationSamplePlayer PRIVATE
     Source/Audio/SamplePackCatalog.h
 )
 
-add_creation_station_instrument_plugin(CreationStationPitchPipe "Creation Station Pitch Pipe" CSPp "Instrument")
-target_sources(CreationStationPitchPipe PRIVATE
-    Source/Plugins/PitchPipe/CreationStationPitchPipeProcessor.cpp
-    Source/Plugins/PitchPipe/CreationStationPitchPipeProcessor.h
-    Source/Plugins/PitchPipe/CreationStationPitchPipeEditor.cpp
-    Source/Plugins/PitchPipe/CreationStationPitchPipeEditor.h
-)
+# CreationStationPitchPipe: disabled -- Source/Plugins/PitchPipe/ has never
+# existed in this repo's history on any branch. This target was added in
+# 185ec4c ("feat(station): complete VFS container cutover and remove legacy
+# ProjectManager") referencing four source files that were never committed,
+# which broke configure for every clean checkout since. Re-enable once the
+# plugin is actually built.
+# add_creation_station_instrument_plugin(CreationStationPitchPipe "Creation Station Pitch Pipe" CSPp "Instrument")
+# target_sources(CreationStationPitchPipe PRIVATE
+#     Source/Plugins/PitchPipe/CreationStationPitchPipeProcessor.cpp
+#     Source/Plugins/PitchPipe/CreationStationPitchPipeProcessor.h
+#     Source/Plugins/PitchPipe/CreationStationPitchPipeEditor.cpp
+#     Source/Plugins/PitchPipe/CreationStationPitchPipeEditor.h
+# )
 
 install(TARGETS CreativeWorkstation
     RUNTIME DESTINATION . COMPONENT CreativeWorkstation

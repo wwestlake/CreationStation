@@ -25,7 +25,6 @@
 #include "Tutorial/GuidedTutorial.h"
 #include "Timeline/TimelineModel.h"
 #include "Language/PatinaArtifactLoader.h"
-#include "Legal/EulaText.h"
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ArrangeView.h"
@@ -43,7 +42,6 @@
 #include "Views/SignalLabPanel.h"
 #include "Views/TrackerPanel.h"
 #include "Views/TourGuideOverlay.h"
-#include <creation/ui/SuiteEulaPanel.h>
 #include <creation/ui/SuiteSettingsPanel.h>
 
 class MainComponent final : public juce::Component,
@@ -261,7 +259,6 @@ private:
     juce::Component::SafePointer<FxStackPanel> fxStackPanel;
     std::unique_ptr<juce::DocumentWindow> suiteSettingsWindow;
     juce::Component::SafePointer<SuiteSettingsPanel> suiteSettingsPanel;
-    std::unique_ptr<juce::DocumentWindow> eulaWindow;
     std::unique_ptr<juce::DocumentWindow> midiEditorWindow;
     juce::Component::SafePointer<MidiEditorPanel> midiEditorPanel;
     std::array<std::unique_ptr<juce::DocumentWindow>, 12> workspacePopoutWindows;
@@ -424,8 +421,6 @@ private:
     void showProjectMenu();
     void showSuiteSettingsWindow();
     void closeSuiteSettingsWindow();
-    void showEulaWindow();
-    void closeEulaWindow();
     void chooseSuiteDirectory(const juce::String& fieldId);
     void applySuiteSettings(const SuiteSettings& settings);
     void createNewProject();

@@ -200,52 +200,6 @@ private:
     std::function<void()> onClose;
 };
 
-class EulaPanel final : public juce::Component
-{
-public:
-    explicit EulaPanel(const juce::String& text)
-    {
-        titleLabel.setText("End User License Agreement", juce::dontSendNotification);
-        titleLabel.setFont(juce::Font(22.0f).boldened());
-        titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-        addAndMakeVisible(titleLabel);
-
-        hintLabel.setText("This same agreement is bundled with the installer and installed files.",
-                          juce::dontSendNotification);
-        hintLabel.setColour(juce::Label::textColourId, juce::Colour(0xff97a9c1));
-        addAndMakeVisible(hintLabel);
-
-        textEditor.setMultiLine(true);
-        textEditor.setReadOnly(true);
-        textEditor.setScrollbarsShown(true);
-        textEditor.setCaretVisible(false);
-        textEditor.setText(text, juce::dontSendNotification);
-        textEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff111822));
-        textEditor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xff2a3a50));
-        textEditor.setColour(juce::TextEditor::textColourId, juce::Colour(0xffdce6f5));
-        addAndMakeVisible(textEditor);
-    }
-
-    void paint(juce::Graphics& g) override
-    {
-        g.fillAll(juce::Colour(0xff121822));
-    }
-
-    void resized() override
-    {
-        auto area = getLocalBounds().reduced(18);
-        titleLabel.setBounds(area.removeFromTop(30));
-        hintLabel.setBounds(area.removeFromTop(24));
-        area.removeFromTop(10);
-        textEditor.setBounds(area);
-    }
-
-private:
-    juce::Label titleLabel;
-    juce::Label hintLabel;
-    juce::TextEditor textEditor;
-};
-
 // Right-click a transport button -> Learn MIDI Binding. Opens armed by default (Any Device) so
 // the common case is just "wiggle the hardware and it's bound" - manual entry is the fallback.
 class MidiLearnPanel final : public juce::Component,
@@ -6389,7 +6343,7 @@ void MainComponent::showSuiteSettingsWindow()
     };
     panel->onReadEulaRequested = [this]
     {
-        showEulaWindow();
+        suiteShellController.showSuiteEula();
     };
 
     auto* panelRaw = panel.get();
@@ -6414,35 +6368,6 @@ void MainComponent::closeSuiteSettingsWindow()
 {
     suiteSettingsPanel = nullptr;
     suiteSettingsWindow.reset();
-}
-
-void MainComponent::showEulaWindow()
-{
-    if (eulaWindow != nullptr)
-    {
-        eulaWindow->toFront(true);
-        return;
-    }
-
-    auto* panel = new EulaPanel(creation_station::legal::getEulaText());
-    auto window = std::make_unique<ManagedDocumentWindow>("Creation Station EULA",
-                                                          juce::Colour(0xff11151c),
-                                                          juce::DocumentWindow::allButtons,
-                                                          [this]
-                                                          {
-                                                              closeEulaWindow();
-                                                          });
-    window->setUsingNativeTitleBar(true);
-    window->setResizable(true, true);
-    window->setContentOwned(panel, true);
-    window->centreWithSize(860, 680);
-    window->setVisible(true);
-    eulaWindow = std::move(window);
-}
-
-void MainComponent::closeEulaWindow()
-{
-    eulaWindow.reset();
 }
 
 void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
