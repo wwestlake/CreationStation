@@ -41,6 +41,13 @@ else()
     add_subdirectory(AssetSystem)
 endif()
 
+set(CS_VFS_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/VFS/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/VFS"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedVFS")
+    set(CS_VFS_TARGET creation_suite_vfs)
+endif()
+
 set(CS_SERVICES_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Services/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Services"
