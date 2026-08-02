@@ -110,8 +110,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/AI/CreationStationAppManifest.h
     Source/AI/LiteSemRagApiClient.cpp
     Source/AI/LiteSemRagApiClient.h
-    Source/AI/OpenAiChatClient.cpp
-    Source/AI/OpenAiChatClient.h
     Source/AI/OpenAiModelCatalogClient.cpp
     Source/AI/OpenAiModelCatalogClient.h
     Source/AI/CreationStationTaskPlanner.cpp

@@ -7,7 +7,7 @@
 #include "AI/CreationStationAppManifest.h"
 #include "AI/CreationStationContextStore.h"
 #include "AI/CreationStationTaskPlanner.h"
-#include "AI/OpenAiChatClient.h"
+#include <creation/services/SuiteAiChatClient.h>
 #include "AI/LiteSemRagApiClient.h"
 #include "AI/OpenAiModelCatalogClient.h"
 #include "Auth/DesktopAuthSession.h"
@@ -218,7 +218,7 @@ private:
     CreationStationTaskPlanner taskPlanner;
     CreationStationAppManifest appManifest;
     LiteSemRagApiClient semanticApiClient;
-    OpenAiChatClient openAiChatClient;
+    creation::services::SuiteAiChatClient openAiChatClient;
     OpenAiModelCatalogClient modelCatalogClient;
     WorkstationAudioEngine engine;
     XTouchControlSurface midiSurface;

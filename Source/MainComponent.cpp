@@ -5458,7 +5458,7 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
         if (safeThis == nullptr)
             return;
 
-        OpenAiChatClient::ChatResult result;
+        creation::services::SuiteAiChatClient::ChatResult result;
         auto ok = safeThis->openAiChatClient.sendChatCompletion(safeThis->aiProviderSettings,
                                                                 systemPrompt,
                                                                 userPrompt,
