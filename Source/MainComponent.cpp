@@ -1403,6 +1403,21 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         timelineModel.setLoopEnabled(loopEnabled);
         transportBar.setStatusText(loopEnabled ? "Transport: loop on" : "Transport: loop off");
     };
+    transportBar.onMetronomeModeChanged = [this](CreationSuiteHeaderBar::MetronomeMode mode)
+    {
+        switch (mode)
+        {
+            case CreationSuiteHeaderBar::MetronomeMode::off:
+                engine.setMetronomeMode(WorkstationAudioEngine::MetronomeMode::off);
+                break;
+            case CreationSuiteHeaderBar::MetronomeMode::playOrRecord:
+                engine.setMetronomeMode(WorkstationAudioEngine::MetronomeMode::playOrRecord);
+                break;
+            case CreationSuiteHeaderBar::MetronomeMode::always:
+                engine.setMetronomeMode(WorkstationAudioEngine::MetronomeMode::always);
+                break;
+        }
+    };
     transportBar.onSignInRequested = [this]
     {
         authSession.beginLogin();
@@ -5722,17 +5737,45 @@ void MainComponent::activateContentItem(const ContentLibrary::Item& item)
         }
 
         juce::String errorMessage;
-        auto importedFile = juce::File();
-        if (! importedFile.existsAsFile())
+        auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot
+                         + item.file.getFileName();
+
+        juce::MemoryBlock fileData;
+        if (! item.file.loadFileAsData(fileData))
         {
-            contentPanel.setStatusText(errorMessage);
+            contentPanel.setStatusText("Could not read: " + item.file.getFileName());
+            return;
+        }
+
+        if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
+        {
+            contentPanel.setStatusText("Could not import: " + item.file.getFileName());
+            return;
+        }
+
+        creation::assets::AssetDescriptor importedAsset;
+        importedAsset.id = "asset:" + juce::Uuid().toString();
+        importedAsset.version = "1";
+        importedAsset.versionId = importedAsset.id + "@1";
+        importedAsset.displayName = item.file.getFileNameWithoutExtension();
+        importedAsset.logicalPath = logicalPath;
+        importedAsset.kind = creation::assets::AssetKind::audio;
+        importedAsset.mediaType = "audio/wav";
+        importedAsset.fileSizeBytes = (int64) fileData.getSize();
+        importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
+        importedAsset.sourceApp = "Creation Station";
+        projectSession.upsertAssetDescriptor(importedAsset);
+
+        if (! projectSession.commit(errorMessage))
+        {
+            contentPanel.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save imported library audio.");
             return;
         }
 
         refreshProjectAssets();
-        arrangeView.addAssetClipToSelectedTrack(importedFile.getFileName());
+        arrangeView.addAssetClipToSelectedTrack(item.file.getFileName());
         refreshFoleyArrangement();
-        transportBar.setStatusText("Imported library audio into Foley: " + importedFile.getFileName());
+        transportBar.setStatusText("Imported library audio into Foley: " + item.file.getFileName());
         setWorkspaceMode(WorkspaceMode::arrange);
         return;
     }
@@ -6917,16 +6960,62 @@ void MainComponent::stopRecordingSession()
             continue;
 
         juce::String importError;
-        auto importedFile = juce::File();
-        if (! importedFile.existsAsFile())
+        if (! ensureProjectSessionActive(importError))
         {
             transportBar.setStatusText(importError.isNotEmpty() ? importError
-                                                                : "Recorded take could not be registered in the project library.");
+                                                                : "Could not initialize project to save the recorded take.");
             continue;
         }
 
-        auto importedAssetId = "";
-        auto importedAssetVersionId = "";
+        auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot
+                         + takeFile.getFileName();
+
+        juce::MemoryBlock fileData;
+        if (! takeFile.loadFileAsData(fileData))
+        {
+            transportBar.setStatusText("Could not read recorded take: " + takeFile.getFileName());
+            continue;
+        }
+
+        if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
+        {
+            transportBar.setStatusText("Recorded take could not be registered in the project library.");
+            continue;
+        }
+
+        creation::assets::AssetDescriptor importedAsset;
+        importedAsset.id = "asset:" + juce::Uuid().toString();
+        importedAsset.version = "1";
+        importedAsset.versionId = importedAsset.id + "@1";
+        importedAsset.displayName = takeFile.getFileNameWithoutExtension().replace("-", " ");
+        importedAsset.logicalPath = logicalPath;
+        importedAsset.kind = creation::assets::AssetKind::audio;
+        importedAsset.mediaType = "audio/wav";
+        importedAsset.fileSizeBytes = (int64) fileData.getSize();
+        importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
+        importedAsset.sourceApp = "Creation Station";
+        projectSession.upsertAssetDescriptor(importedAsset);
+
+        if (! projectSession.commit(importError))
+        {
+            transportBar.setStatusText(importError.isNotEmpty() ? importError : "Could not save the recorded take.");
+            continue;
+        }
+
+        creation::assets::MaterializedAssetLease lease;
+        if (! projectSession.materializeEntry(suiteSettings, importedAsset.logicalPath,
+                                              creation::assets::MaterializationAccess::readOnly,
+                                              lease, importError))
+        {
+            transportBar.setStatusText(importError.isNotEmpty() ? importError : "Could not read back the recorded take.");
+            continue;
+        }
+
+        cs::AssetRef assetRef;
+        assetRef.id = importedAsset.id;
+        assetRef.versionId = importedAsset.versionId;
+        assetRef.mode = creation::assets::AssetReferenceMode::exact;
+        assetRef.displayName = importedAsset.displayName;
 
         const auto& clips = timelineModel.getClips();
         for (int clipIndex = 0; clipIndex < static_cast<int>(clips.size()); ++clipIndex)
@@ -6934,16 +7023,11 @@ void MainComponent::stopRecordingSession()
             if (clips[(size_t) clipIndex].file != takeFile)
                 continue;
 
-            cs::AssetRef assetRef;
-            assetRef.id = importedAssetId;
-            assetRef.versionId = importedAssetVersionId;
-            assetRef.mode = cs::AssetReferenceMode::exact;
-            assetRef.displayName = importedFile.getFileNameWithoutExtension().replace("-", " ");
             timelineModel.setClipAssetReference(clipIndex, assetRef);
-            timelineModel.setClipFile(clipIndex, importedFile);
+            timelineModel.setClipFile(clipIndex, lease.materializedFile);
         }
 
-        if (importedFile != takeFile && takeFile.existsAsFile())
+        if (lease.materializedFile != takeFile && takeFile.existsAsFile())
             takeFile.deleteFile();
     }
 
