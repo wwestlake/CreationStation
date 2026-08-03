@@ -24,7 +24,6 @@
 #include "Suite/SuiteSettings.h"
 #include "Tutorial/GuidedTutorial.h"
 #include "Timeline/TimelineModel.h"
-#include "Language/PatinaArtifactLoader.h"
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ArrangeView.h"
@@ -276,7 +275,7 @@ private:
     std::unique_ptr<juce::FileChooser> renderExportChooser;
     std::unique_ptr<juce::FileChooser> rawAssetExportChooser;
     std::unique_ptr<juce::FileChooser> patchChooser;
-    std::unique_ptr<juce::FileChooser> patinaArtifactChooser;
+    std::unique_ptr<juce::FileChooser> celSourceChooser;
     std::unique_ptr<juce::FileChooser> contentUploadChooser;
     std::unique_ptr<juce::FileChooser> suiteDirectoryChooser;
     std::unique_ptr<juce::DocumentWindow> audioDeviceWindow;

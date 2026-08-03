@@ -1,72 +1,60 @@
 #include "DslPanel.h"
 
+#include <sstream>
+
+#include "lang/ast.h"
+#include "lang/compiler.h"
+#include "lang/diagnostics.h"
+#include "lang/sema.h"
+
 DslPanel::DslPanel()
 {
-    setName("DSL");
-    headerLabel.setText("Patina Surface Language", juce::dontSendNotification);
+    setName("Code");
+    headerLabel.setText("Creation Engine Language (CEL)", juce::dontSendNotification);
     headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 
     sourceEditor.setMultiLine(true);
     sourceEditor.setReturnKeyStartsNewLine(true);
-    sourceEditor.setText(R"(# Patina starter patch
-package "@lagdaemon/soft-keys"
-version "0.1.0"
-
-import "@lagdaemon/core-audio"
-
-graph main:
-    param cutoff: control<f32> = 1200.0
-    let base_hz = 220.0
-    node midi   = event.midi_input()
-    node notehz = event.note_to_frequency()
-    node osc    = audio.oscillator(waveform: "triangle", frequency: base_hz)
-    node env    = control.envelope.adsr(attack: 0.05, decay: 0.12, sustain: 0.72, release: 0.28)
-    node amp    = audio.gain()
-    node out    = audio.output()
-
-    connect midi.note -> notehz.note
-    connect notehz.frequency -> osc.frequency
-    connect osc.out -> amp.in
-    connect env.out -> amp.gain
-    connect amp.out -> out.in
-
-export instrument main
+    sourceEditor.setText(R"(// Starter CEL patch
+func gain(input: float, amount: float) -> float {
+    return input * amount;
+}
 )");
     addAndMakeVisible(sourceEditor);
 
     outputEditor.setMultiLine(true);
     outputEditor.setReadOnly(true);
-    outputEditor.setText("Compile to see Patina AST and graph diagnostics.");
+    outputEditor.setText("Compile to see CEL diagnostics.");
     addAndMakeVisible(outputEditor);
 
     compileButton.onClick = [this] { compileSource(); };
-    compileButton.setTooltip("Compile the Patina source");
+    compileButton.setTooltip("Parse and analyze the CEL source");
     addAndMakeVisible(compileButton);
 
     exportButton.onClick = [this]
     {
-        if (lastModule.success && onArtifactExportRequested)
-            onArtifactExportRequested(lastModule.artifactJson, makeSuggestedArtifactName());
+        if (lastCompileSucceeded && onSourceExportRequested)
+            onSourceExportRequested(sourceEditor.getText(), makeSuggestedFileName());
     };
-    exportButton.setTooltip("Export the compiled artifact as a file");
+    exportButton.setTooltip("Export this source as a .cel file");
     addAndMakeVisible(exportButton);
 
     saveButton.onClick = [this]
     {
-        if (lastModule.success && onArtifactSaveToLibraryRequested)
-            onArtifactSaveToLibraryRequested(lastModule.artifactJson, makeSuggestedArtifactName());
+        if (lastCompileSucceeded && onSourceSaveToLibraryRequested)
+            onSourceSaveToLibraryRequested(sourceEditor.getText(), makeSuggestedFileName());
     };
-    saveButton.setTooltip("Save the compiled artifact to your library");
+    saveButton.setTooltip("Save this source to your library");
     addAndMakeVisible(saveButton);
 
     loadButton.onClick = [this]
     {
-        if (onArtifactLoadRequested)
-            onArtifactLoadRequested();
+        if (onSourceLoadRequested)
+            onSourceLoadRequested();
     };
-    loadButton.setTooltip("Load a saved artifact from your library");
+    loadButton.setTooltip("Load a saved .cel file");
     addAndMakeVisible(loadButton);
 
     compileSource();
@@ -109,62 +97,48 @@ void DslPanel::resized()
 
 void DslPanel::compileSource()
 {
-    auto result = compiler.compile(sourceEditor.getText());
-    lastModule = result;
-    juce::String output;
+    std::istringstream stream(sourceEditor.getText().toStdString());
+    ce::lang::AstArena arena;
+    ce::lang::DiagnosticEngine diagnostics;
+    ce::lang::Program* program = ce::lang::ParseProgram(stream, arena, diagnostics);
+    if (program != nullptr && !diagnostics.HasErrors())
+        ce::lang::AnalyzeProgram(*program, diagnostics);
 
-    if (result.success)
+    lastCompileSucceeded = program != nullptr && !diagnostics.HasErrors();
+
+    juce::String output;
+    if (lastCompileSucceeded)
     {
-        output << result.summary;
+        int functionCount = 0;
+        int globalCount = 0;
+        for (const auto* decl : program->decls)
+        {
+            if (decl->kind == ce::lang::DeclKind::Func)
+                ++functionCount;
+            else
+                ++globalCount;
+        }
+
+        output << functionCount << " function(s), " << globalCount << " global(s) parsed and analyzed cleanly.";
     }
     else
     {
-        for (const auto& diagnostic : result.diagnostics)
-            output << "Line " << diagnostic.line << ": " << diagnostic.message << "\n";
+        for (const auto& diagnostic : diagnostics.Diagnostics())
+            output << "Line " << diagnostic.loc.line << ": " << diagnostic.message << "\n";
     }
 
     outputEditor.setText(output, juce::dontSendNotification);
-    exportButton.setEnabled(result.success);
-    saveButton.setEnabled(result.success);
+    exportButton.setEnabled(lastCompileSucceeded);
+    saveButton.setEnabled(lastCompileSucceeded);
 }
 
-juce::String DslPanel::makeSuggestedArtifactName() const
+void DslPanel::loadSourceFromFile(const juce::File& sourceFile)
 {
-    auto packageName = lastModule.packageName;
-    if (packageName.isEmpty())
-        return "patina-artifact";
-
-    auto suggested = packageName.toLowerCase();
-    suggested = suggested.replace("@", "");
-    suggested = suggested.replace("/", "-");
-    suggested = suggested.retainCharacters("abcdefghijklmnopqrstuvwxyz0123456789-_");
-    return suggested.isNotEmpty() ? suggested : "patina-artifact";
+    setSourceText(sourceFile.loadFileAsString());
+    compileSource();
 }
 
-void DslPanel::showLoadedArtifactSummary(const cw::patina::ir::Document& document, const juce::File& sourceFile)
+juce::String DslPanel::makeSuggestedFileName() const
 {
-    juce::StringArray lines;
-    lines.add("Loaded Patina artifact");
-    lines.add("File: " + sourceFile.getFullPathName());
-    lines.add("Package: " + document.packageName);
-    lines.add("Version: " + document.packageVersion);
-    lines.add("Schema: " + document.schemaVersion + "  Runtime: " + document.runtimeVersion + "  ABI: " + document.abiVersion);
-    lines.add("Graphs: " + juce::String(document.graphs.size()) + "  |  Exports: " + juce::String(document.exports.size()));
-    lines.add("");
-
-    for (const auto& graph : document.graphs)
-    {
-        lines.add("graph " + graph.name);
-        for (const auto& parameter : graph.parameters)
-            lines.add("  param " + parameter.name + " : " + parameter.type.toString());
-        for (const auto& node : graph.nodes)
-            lines.add("  node " + node.id + " :: " + node.kind);
-        for (const auto& edge : graph.edges)
-            lines.add("  edge " + edge.sourceNode + "." + edge.sourcePort
-                      + " -> " + edge.destinationNode + "." + edge.destinationPort
-                      + " : " + edge.signalType.toString());
-        lines.add("");
-    }
-
-    outputEditor.setText(lines.joinIntoString("\n"), juce::dontSendNotification);
+    return "patch";
 }

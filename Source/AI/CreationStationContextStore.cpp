@@ -46,7 +46,7 @@ bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession
                                           const creation::suite::SuiteSettings& suiteSettings,
                                           const ContentLibrary& contentLibrary,
                                           const juce::String& workspaceMode,
-                                          const juce::String& patinaSource,
+                                          const juce::String& celSource,
                                           juce::String& errorMessage)
 {
     documents.clearQuick();
@@ -68,14 +68,14 @@ bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession
     modeDocument.updatedAt = juce::Time::getCurrentTime();
     documents.add(modeDocument);
 
-    CreationStationContextEngine::SourceDocument patinaDocument;
-    patinaDocument.id = "patina-source-live";
-    patinaDocument.title = "Patina source buffer";
-    patinaDocument.category = "language";
-    patinaDocument.body = patinaSource;
-    patinaDocument.tags.addArray({ "patina", "dsl", "script" });
-    patinaDocument.updatedAt = juce::Time::getCurrentTime();
-    documents.add(patinaDocument);
+    CreationStationContextEngine::SourceDocument celDocument;
+    celDocument.id = "cel-source-live";
+    celDocument.title = "CEL source buffer";
+    celDocument.category = "language";
+    celDocument.body = celSource;
+    celDocument.tags.addArray({ "cel", "script" });
+    celDocument.updatedAt = juce::Time::getCurrentTime();
+    documents.add(celDocument);
 
     if (session.isValid())
     {
@@ -97,15 +97,15 @@ bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession
             if (asset.kind == creation::assets::AssetKind::script)
             {
                 CreationStationContextEngine::SourceDocument document;
-                document.id = "patina-" + asset.id;
+                document.id = "cel-" + asset.id;
                 document.title = asset.displayName;
-                document.category = "patina-artifact";
+                document.category = "cel-script";
                 juce::MemoryBlock data;
                 if (session.readEntry(asset.logicalPath, data))
                     document.body = juce::String::fromUTF8(static_cast<const char*>(data.getData()),
                                                            juce::jmin((int)data.getSize(), 3000));
                 document.sourcePath = asset.logicalPath;
-                document.tags.addArray({ "patina", "artifact", "language" });
+                document.tags.addArray({ "cel", "script", "language" });
                 document.updatedAt = asset.modifiedAt;
                 documents.add(document);
             }

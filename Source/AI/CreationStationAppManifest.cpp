@@ -31,7 +31,7 @@ Primary workspaces and capabilities:
 - Layers / Mixer: shape routing, gain, pan, sends, buses, and mixes
 - Plugins: manage plugin folders, load VSTs, and host effects or instruments
 - Patch: build node graphs for sources, effects, and sinks
-- Script / Patina: author AI-assisted audio logic and DSL artifacts
+- Script / CEL: author AI-assisted audio logic and DSL artifacts
 - Capture: record takes and render outputs
 - Score: compose with notation, lyrics, rests, timing, and teaching cues
 - Settings: manage storage, startup behavior, audio devices, and plugin paths

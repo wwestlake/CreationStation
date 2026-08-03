@@ -19,7 +19,7 @@ public:
                  const creation::suite::SuiteSettings& suiteSettings,
                  const ContentLibrary& contentLibrary,
                  const juce::String& workspaceMode,
-                 const juce::String& patinaSource,
+                 const juce::String& celSource,
                  juce::String& errorMessage);
 
     bool load(const juce::File& snapshotFile, juce::String& errorMessage);

@@ -190,7 +190,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
         case WorkflowKind::instrumentDesign:
             plan.workflow = "Instrument Build";
             plan.summary = "Shape a playable sound source, define control movement, and validate it from MIDI or scripted triggers.";
-            plan.suggestedTools.addArray({ "Signal Lab", "Patina", "Patch Graph", "Creation Station Instrument" });
+            plan.suggestedTools.addArray({ "Signal Lab", "CEL", "Patch Graph", "Creation Station Instrument" });
             plan.verificationNote = "A note-on event should produce the intended sound shape with predictable dynamics and controllable tone.";
             plan.dataSchema.add({ "instrument.targetCharacter", "Plain-language sound target", {}, 0.0, false });
             plan.dataSchema.add({ "instrument.templateName", "Starting template selected for the voice", {}, 0.0, false });
@@ -220,7 +220,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
                                       makeAction(ActionTarget::patchGraph, "apply-macro", "Seed instrument voice graph", "Instrument Voice") }));
             plan.steps.add(makeStep("build-patch", StepType::act,
                                     "Build the playable patch",
-                                    "Create the patch in Patina or the node system and bind the main controls for level, tone, and articulation.",
+                                    "Create the patch in CEL or the node system and bind the main controls for level, tone, and articulation.",
                                     "A playable instrument patch exists.",
                                     "If the first build is unstable, reduce the graph to a single voice and add modules back one at a time.",
                                     { "patina", "instrument" },
@@ -322,7 +322,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
         default:
             plan.workflow = "Creative Iteration";
             plan.summary = "Frame the goal, gather context, make a focused change, and validate the result before expanding scope.";
-            plan.suggestedTools.addArray({ "AI Context", "Signal Lab", "Patina", "Patch Graph" });
+            plan.suggestedTools.addArray({ "AI Context", "Signal Lab", "CEL", "Patch Graph" });
             plan.verificationNote = "Every pass should end with a concrete result or a tighter next question, never a vague blob.";
             plan.dataSchema.add({ "task.goalAnchor", "Restated goal anchor for the current pass", {}, 0.0, false });
             plan.steps.add(makeStep("observe-goal", StepType::observe,

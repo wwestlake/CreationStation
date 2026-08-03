@@ -645,7 +645,7 @@ MainComponent::ViewModeBar::ViewModeBar()
     mixButton.setTooltip("Mixer - adjust levels, pan, and sends");
     pluginsButton.setTooltip("Plugin browser - find and load VST plugins");
     nodeButton.setTooltip("Node graph - patch signal routing visually");
-    codeButton.setTooltip("Patina script editor - write DSL patches");
+    codeButton.setTooltip("CEL script editor - write and validate CEL patches");
     recordButton.setTooltip("Recording workspace - capture new takes");
     scoreButton.setTooltip("Score view - notation and piano roll editing");
     settingsButton.setTooltip("App settings - project, audio, MIDI, and AI configuration");
@@ -2119,81 +2119,70 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                   });
     };
 
-    dslPanel.onArtifactExportRequested = [this](const juce::String& artifactJson, const juce::String& suggestedName)
+    dslPanel.onSourceExportRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
     {
-        if (! projectSession.isValid())
-        {
-            juce::String projectError;
-            if (! creation::assets::ProjectWorkspaceService::createProject(suiteSettings, creation::assets::SuiteAppDomain::station, "New Project", "1.0.0", "1.0.0", projectSession, projectError))
-            {
-                transportBar.setStatusText("Could not create a project for Patina artifact export.");
-                return;
-            }
+        auto startDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+        celSourceChooser = std::make_unique<juce::FileChooser>("Export CEL source",
+                                                                    startDirectory.getChildFile(suggestedName + ".cel"),
+                                                                    "*.cel");
 
-            transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
-        }
+        celSourceChooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                                           [this, sourceText](const juce::FileChooser& chooser)
+                                           {
+                                               auto file = chooser.getResult();
+                                               celSourceChooser.reset();
 
-        juce::String errorMessage;
-        auto artifactFile = juce::File();
-        if (artifactFile.existsAsFile())
-        {
-            saveSessionToDisk();
-            transportBar.setStatusText("Exported Patina artifact: " + artifactFile.getFileName());
-        }
-        else if (errorMessage.isNotEmpty())
-        {
-            transportBar.setStatusText(errorMessage);
-        }
+                                               if (file == juce::File())
+                                                   return;
+
+                                               if (file.replaceWithText(sourceText))
+                                                   transportBar.setStatusText("Exported CEL source: " + file.getFileName());
+                                               else
+                                                   transportBar.setStatusText("Could not write " + file.getFileName());
+                                           });
     };
 
-    dslPanel.onArtifactSaveToLibraryRequested = [this](const juce::String& artifactJson, const juce::String& suggestedName)
+    dslPanel.onSourceSaveToLibraryRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
     {
         if (! ensureStorageRootConfigured())
             return;
 
-        juce::String errorMessage;
-        auto artifactFile = juce::File();
-        if (artifactFile.existsAsFile())
+        auto celDirectory = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("CEL");
+        celDirectory.createDirectory();
+        auto celFile = celDirectory.getChildFile(suggestedName + ".cel").getNonexistentSibling();
+
+        if (celFile.replaceWithText(sourceText))
         {
             refreshContentLibrary();
-            transportBar.setStatusText("Saved Patina artifact to your library: " + artifactFile.getFileName());
+            transportBar.setStatusText("Saved to your library: " + celFile.getFileName());
         }
-        else if (errorMessage.isNotEmpty())
+        else
         {
-            transportBar.setStatusText(errorMessage);
+            transportBar.setStatusText("Could not save " + celFile.getFileName());
         }
     };
 
-    dslPanel.onArtifactLoadRequested = [this]
+    dslPanel.onSourceLoadRequested = [this]
     {
         auto startDirectory = suiteSettings.suiteVfsRoot.isNotEmpty()
-            ? juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("Patina")
+            ? juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("CEL")
             : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
 
-        patinaArtifactChooser = std::make_unique<juce::FileChooser>("Load a Patina artifact",
+        celSourceChooser = std::make_unique<juce::FileChooser>("Load a CEL source file",
                                                                     startDirectory,
-                                                                    "*.patina.json");
+                                                                    "*.cel");
 
-        patinaArtifactChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        celSourceChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                            [this](const juce::FileChooser& chooser)
                                            {
                                                auto file = chooser.getResult();
-                                               patinaArtifactChooser.reset();
+                                               celSourceChooser.reset();
 
                                                if (! file.existsAsFile())
                                                    return;
 
-                                               cw::patina::ArtifactLoader loader;
-                                               cw::patina::ir::Document document;
-                                               juce::String errorMessage;
-                                               if (! loader.loadJson(file.loadFileAsString(), document, errorMessage))
-                                               {
-                                                   transportBar.setStatusText(errorMessage);
-                                                   return;
-                                               }
-
-                                               dslPanel.showLoadedArtifactSummary(document, file);
-                                               transportBar.setStatusText("Loaded Patina artifact: " + file.getFileName());
+                                               dslPanel.loadSourceFromFile(file);
+                                               transportBar.setStatusText("Loaded CEL source: " + file.getFileName());
                                                setWorkspaceMode(WorkspaceMode::code);
                                            });
     };

@@ -25,17 +25,14 @@ components:
 
   signal_graph_language:
     file_hints:
-      - Source/Language/SignalGraph.cpp
-      - Source/Language/PatinaLexer.cpp
-      - Source/Language/PatinaParser.cpp
-      - Source/Language/PatinaLowering.cpp
-      - Source/Language/DslCompiler.cpp
+      - Source/Views/DslPanel.cpp
+      - shared/CEL/include/lang/compiler.h
+      - shared/CEL/include/lang/sema.h
     role: language and compilation pipeline
     responsibilities:
-      - parse Patina surface syntax
-      - lower to internal IR
-      - compile to runnable artifacts
-      - support signal-lab and future DSL workflows
+      - parse and analyze CEL source (shared/CEL, suite-wide language)
+      - support signal-lab and future scripting workflows
+    note: the bespoke Patina DSL (lexer/parser/lowering/artifact format) was removed; Station now consumes the shared CEL frontend directly, no app-local language implementation.
 
   patch_system:
     file_hints:

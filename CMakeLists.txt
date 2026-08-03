@@ -69,6 +69,18 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Interop/CMakeLists.txt")
     set(CS_INTEROP_TARGET creation_suite_interop)
 endif()
 
+# Station's own scripting surface (the "Code" workspace tab) is CEL, the
+# one suite-wide language -- not a bespoke per-app DSL. ce_lang_frontend
+# (lexer/parser/sema/diagnostics) and node_system build with no LLVM
+# dependency at all; only the JIT half of shared/CEL needs LLVM, and this
+# panel only parses/validates source, it doesn't execute it.
+if(NOT TARGET node_system)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeSystem" CreationSuiteSharedNodeSystem)
+endif()
+if(NOT TARGET ce_lang_frontend)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/CEL" CreationSuiteSharedCel)
+endif()
+
 juce_add_gui_app(CreativeWorkstation
     PRODUCT_NAME "Creative Workstation"
     COMPANY_NAME "LagDaemon Software"
@@ -173,29 +185,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
-    Source/Language/DslCompiler.cpp
-    Source/Language/DslCompiler.h
-    Source/Language/PatinaLexer.cpp
-    Source/Language/PatinaLexer.h
-    Source/Language/PatinaParser.cpp
-    Source/Language/PatinaParser.h
-    Source/Language/PatinaSurfaceAst.h
-    Source/Language/PatinaTypes.cpp
-    Source/Language/PatinaTypes.h
-    Source/Language/PatinaArtifactLoader.cpp
-    Source/Language/PatinaArtifactLoader.h
-    Source/Language/PatinaBuiltins.cpp
-    Source/Language/PatinaBuiltins.h
-    Source/Language/PatinaBinder.cpp
-    Source/Language/PatinaBinder.h
-    Source/Language/PatinaArtifactWriter.cpp
-    Source/Language/PatinaArtifactWriter.h
-    Source/Language/PatinaIr.cpp
-    Source/Language/PatinaIr.h
-    Source/Language/PatinaLowering.cpp
-    Source/Language/PatinaLowering.h
-    Source/Language/SignalGraph.cpp
-    Source/Language/SignalGraph.h
     Source/Views/AuthGateView.cpp
     Source/Views/AuthGateView.h
     Source/Views/ArrangeView.cpp
@@ -275,6 +264,8 @@ target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_UI_TARGET}
     ${CS_INTEROP_TARGET}
     creation_station_language_host
+    ce_lang_frontend
+    node_system
     juce::juce_audio_devices
     juce::juce_audio_processors
     juce::juce_audio_formats

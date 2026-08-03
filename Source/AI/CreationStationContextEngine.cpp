@@ -166,7 +166,7 @@ CreationStationContextEngine::ContextPacket CreationStationContextEngine::buildP
 
         // Freshness/mode boosts are tie-breakers, not a substitute for relevance: without this
         // guard, session-scoped documents that get re-stamped to "now" on every prompt (the
-        // workspace-mode and Patina-source-buffer documents) win the ranking on every request
+        // workspace-mode and CEL-source-buffer documents) win the ranking on every request
         // regardless of what was actually asked, crowding out genuinely relevant snippets.
         constexpr float minimumTokenScoreForBoost = 0.05f;
         auto score = tokenScore;
