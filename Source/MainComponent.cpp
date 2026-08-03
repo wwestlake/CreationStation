@@ -7031,6 +7031,9 @@ void MainComponent::stopRecordingSession()
             takeFile.deleteFile();
     }
 
+    if (! takeFiles.isEmpty())
+        refreshProjectAssets();
+
     timelineModel.finishRecordingClip(timelineModel.getTransportSeconds());
     activeRecordingTrack = -1;
     trackerPanel.refreshTimelineView();
