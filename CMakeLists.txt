@@ -77,6 +77,16 @@ juce_add_gui_app(CreativeWorkstation
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconSmall.png"
 )
 
+# Mirrors the built executable into the workspace-level shared bin
+# directory (D:\CreationSuite-Workspaces\claude-<config>-bin) so it's
+# reachable at a stable path without needing OS symlink privileges.
+# Every suite agent does this for its own repo -- see AGENTS.md.
+add_custom_command(TARGET CreativeWorkstation POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
+    COMMENT "Copying CreativeWorkstation to the shared claude bin directory"
+)
+
 juce_add_plugin(CreationStationInstrument
     COMPANY_NAME "LagDaemon Software"
     PRODUCT_NAME "Creation Station Instrument"
