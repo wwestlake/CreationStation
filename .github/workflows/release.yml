@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - "creation-station-v*"
-      - "djehuti-router-v*"
-      - "djehuti-drivers-v*"
 
 permissions:
   contents: write
@@ -17,6 +15,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Checkout shared Creation Suite code
+        # Station's CMakeLists.txt resolves CREATION_SUITE_SHARED_DIR as
+        # ../../shared relative to itself, matching its layout as an
+        # apps/CreationStation submodule inside the Creation-Suite umbrella
+        # repo. A standalone checkout of this repo alone has no such sibling,
+        # so shared/ is fetched separately here and pointed at explicitly
+        # below instead of relying on that relative-path default.
+        uses: actions/checkout@v4
+        with:
+          repository: wwestlake/Creation-Suite
+          path: creation-suite-shared
 
       - name: Fetch JUCE
         shell: pwsh
@@ -102,7 +112,7 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common"
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common" "-DCREATION_SUITE_SHARED_DIR=$env:GITHUB_WORKSPACE\creation-suite-shared\shared"
 
       - name: Build app
         shell: pwsh
