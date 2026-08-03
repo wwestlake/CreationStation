@@ -314,7 +314,6 @@ private:
     cs::TimelineModel timelineModel;
     double transportStartWallSeconds = 0.0;
     double transportStartTimelineSeconds = 0.0;
-    bool metronomeEnabled = false;
     bool midiScrubModeEnabled = false;
     bool midiEditorPreviewPlaying = false;
     bool midiEditorPreviewLoopEnabled = false;
