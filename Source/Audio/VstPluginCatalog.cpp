@@ -97,8 +97,13 @@ void VstPluginCatalog::rescan()
     auto appExe = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
     // Path is like: D:/000 Creation Station/build/CreativeWorkstation_artefacts/Release/Creative Workstation.exe
     // We want: D:/000 Creation Station/build/
-    auto buildFolder = appExe.getParentDirectory().getParentDirectory().getParentDirectory();
-    if (buildFolder.isDirectory())
+    // Only trust this climb when the exe actually sits in that layout (checked via the
+    // "_artefacts" folder name one level up) - when running from the shared
+    // claude-<config>-bin copy (see AGENTS.md) the same three-hop climb lands on a drive
+    // root instead, and a recursive *.vst3 scan from there walks the entire drive.
+    auto artefactsFolder = appExe.getParentDirectory().getParentDirectory();
+    auto buildFolder = artefactsFolder.getParentDirectory();
+    if (artefactsFolder.getFileName().endsWithIgnoreCase("_artefacts") && buildFolder.isDirectory())
     {
         juce::Array<juce::File> foundFiles;
         buildFolder.findChildFiles(foundFiles, juce::File::findFilesAndDirectories, true, "*.vst3");
