@@ -185,6 +185,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
+    Source/Language/SignalGraph.cpp
+    Source/Language/SignalGraph.h
     Source/Views/AuthGateView.cpp
     Source/Views/AuthGateView.h
     Source/Views/ArrangeView.cpp
