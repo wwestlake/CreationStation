@@ -1161,7 +1161,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     };
     suiteShellController.configure({ "Creation Station",
                                      creation::assets::SuiteAppDomain::station,
-                                     juce::Colour(0xff15181d) },
+                                     juce::Colour(0xff15181d),
+                                     creation::ui::SuiteAssetManagerCapability{ "Creation Station", { ".cel" }, {} } },
                                    [this](const juce::String& status)
                                    {
                                        transportBar.setStatusText(status);
@@ -1186,6 +1187,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     transportBar.onAudioRequested = [this]
     {
         showAudioSettings();
+    };
+    transportBar.onAssetManagerRequested = [this]
+    {
+        suiteShellController.showAssetManager();
     };
     transportBar.onSuiteRequested = [this]
     {
