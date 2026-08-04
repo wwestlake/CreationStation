@@ -28,7 +28,7 @@ Adopt Creation Engine's current pattern as the baseline for all apps:
 2. same JUCE checkout: `D:\JUCE2\JUCE`
 3. additive `CMAKE_PREFIX_PATH` discovery, not first-configure-only toolchain-file dependency
 4. local `vcpkg_installed/x64-windows` first
-5. shared fallback to `D:\000 Creation Engine\vcpkg_installed\x64-windows` while the suite converges
+5. explicit override via `-DCE_LLVM_VCPKG_DIR=<path>` when no local/relative vcpkg install is found (no hardcoded developer-machine path)
 
 This avoids repeated multi-hour LLVM rebuilds while still letting each repo move to its own manifest-local install later.
 
@@ -45,7 +45,7 @@ That policy should be data-driven eventually, but a small hard gate per app is e
 
 ## Creation Station Integration Plan
 
-Creation Station already has multiple language-adjacent systems (`Patina`, DSL/compiler work, patch/runtime concepts). The next steps should be:
+Resolved: the bespoke `Patina` DSL (lexer/parser/lowering/artifact format) has been removed outright. Station consumes the shared CEL frontend directly — no app-local language implementation, no host-dialect decision to make. Remaining steps:
 
 1. add the same shared LLVM discovery helper used by Creation Engine/Movie/Live
 2. introduce a `Creation Station` language host policy layer beside the current language code
@@ -54,9 +54,6 @@ Creation Station already has multiple language-adjacent systems (`Patina`, DSL/c
 4. explicitly reject non-Station domains:
    `world`, `physics`, `broadcast`, `scene`, `render`
 5. separate frontend/runtime-neutral language pieces from Station-only audio host intrinsics
-6. decide whether `Patina` becomes:
-   - the Station host dialect on top of the shared language core, or
-   - a neighboring IR/tooling layer that lowers into the shared language/runtime
 
 ## Recommended Sequencing
 

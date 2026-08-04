@@ -12,7 +12,7 @@ purpose:
   focus:
     - sound design and signal construction
     - content library and guided workflows
-    - Patina DSL authoring and compilation
+    - CEL authoring and compilation (shared/CEL, suite-wide language)
     - VST hosting and patch graph routing
     - X-Touch control surface support
     - AI-assisted task planning and context management
