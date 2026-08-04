@@ -61,7 +61,7 @@ juce::String defaultExtensionForAsset(const AssetDescriptor& asset)
         return ".wav";
     if (lowerPath.endsWith(".cspatch") || lowerMedia.contains("cspatch"))
         return ".cspatch";
-    if (lowerPath.endsWith(".patina.json") || lowerMedia.contains("json"))
+    if (lowerMedia.contains("json"))
         return ".json";
     if (lowerPath.endsWith(".mid") || lowerMedia.contains("midi"))
         return ".mid";
@@ -94,7 +94,7 @@ juce::String inferMediaType(const juce::File& file, AssetKind kind)
 {
     auto ext = file.getFileExtension().toLowerCase();
     if (ext == ".wav") return "audio/wav";
-    if (ext == ".json" || ext == ".patina.json") return "application/json";
+    if (ext == ".json") return "application/json";
     if (ext == ".cspatch") return "application/x-creation-station-patch";
     if (ext == ".mid") return "audio/midi";
 

@@ -223,7 +223,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
                                     "Create the patch in CEL or the node system and bind the main controls for level, tone, and articulation.",
                                     "A playable instrument patch exists.",
                                     "If the first build is unstable, reduce the graph to a single voice and add modules back one at a time.",
-                                    { "patina", "instrument" },
+                                    { "instrument" },
                                     { makeAction(ActionTarget::workspace, "switch-mode", "Open Script workspace", "code") }));
             plan.steps.add(makeStep("verify-playability", StepType::verify,
                                     "Test with notes and dynamics",

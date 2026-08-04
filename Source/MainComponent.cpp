@@ -5528,7 +5528,7 @@ void MainComponent::refreshAiModelCatalog()
     transportBar.setStatusText(statusText);
 }
 
-bool MainComponent::loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded)
+bool MainComponent::loadSuiteAiProviderSettings()
 {
     creation::services::SuiteAiSettingsStore store;
     juce::String errorMessage;
@@ -5536,31 +5536,10 @@ bool MainComponent::loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded)
 
     const auto runtimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
         suiteAiSettings, creation::assets::SuiteAppDomain::station);
-    if (runtimeSettings.isValid())
-    {
-        aiProviderSettings = makeAiProviderSettings(runtimeSettings);
-        settingsPanel.setAiProviderSettings(aiProviderSettings);
-        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
-        aiPanel.setSelectedModel(aiProviderSettings.modelName);
-        return true;
-    }
-
-    if (! migrateLegacyIfNeeded)
+    if (! runtimeSettings.isValid())
         return false;
 
-    auto legacyProviderName = aiProviderSettings.providerDisplayName.trim();
-    auto legacyBaseUrl = aiProviderSettings.baseUrl.trim();
-    auto legacyModelName = aiProviderSettings.modelName.trim();
-    auto hasLegacySettings = legacyProviderName.isNotEmpty()
-                             || legacyBaseUrl.isNotEmpty()
-                             || legacyModelName.isNotEmpty()
-                             || aiProviderSettings.apiKey.trim().isNotEmpty();
-    if (! hasLegacySettings)
-        return false;
-
-    if (! saveSuiteAiProviderSettings(aiProviderSettings, errorMessage))
-        return false;
-
+    aiProviderSettings = makeAiProviderSettings(runtimeSettings);
     settingsPanel.setAiProviderSettings(aiProviderSettings);
     aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
     aiPanel.setSelectedModel(aiProviderSettings.modelName);
@@ -7206,13 +7185,6 @@ void MainComponent::loadAppSettings()
     selectedStudioInputDevice = state.getProperty("audioInputDevice").toString();
     selectedStudioOutputDevice = state.getProperty("audioOutputDevice").toString();
     autoloadLastProject = true;
-    auto legacyAiProviderSettings = aiProviderSettings;
-    legacyAiProviderSettings.providerDisplayName = state.getProperty("aiProviderName", aiProviderSettings.providerDisplayName).toString();
-    legacyAiProviderSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
-        legacyAiProviderSettings.providerDisplayName);
-    legacyAiProviderSettings.baseUrl = state.getProperty("aiBaseUrl", aiProviderSettings.baseUrl).toString();
-    legacyAiProviderSettings.modelName = state.getProperty("aiModelName", aiProviderSettings.modelName).toString();
-    legacyAiProviderSettings.apiKey = state.getProperty("aiApiKey", aiProviderSettings.apiKey).toString();
 
     if (auto studioState = state.getChildWithName("StudioIO"); studioState.isValid())
         studioIOModel.restoreState(studioState);
@@ -7233,8 +7205,7 @@ void MainComponent::loadAppSettings()
         for (const auto child : disabledMidiState)
             disabledMidiInputDeviceIds.add(child.getProperty("id").toString());
 
-    aiProviderSettings = legacyAiProviderSettings;
-    loadSuiteAiProviderSettings(true);
+    loadSuiteAiProviderSettings();
     settingsPanel.setAiProviderSettings(aiProviderSettings);
     engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
 }

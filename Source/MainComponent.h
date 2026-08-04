@@ -494,7 +494,7 @@ private:
     void showAiSidebar();
     void setAiSidebarCollapsed(bool shouldCollapse);
     void syncSemanticAppContext();
-    bool loadSuiteAiProviderSettings(bool migrateLegacyIfNeeded = false);
+    bool loadSuiteAiProviderSettings();
     bool saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage);
     void refreshAiModelCatalog();
     WorkspaceMode workspaceModeFromString(const juce::String& modeName) const;
