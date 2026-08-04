@@ -10,7 +10,7 @@
 #include <creation/services/SuiteAiChatClient.h>
 #include "AI/LiteSemRagApiClient.h"
 #include "AI/OpenAiModelCatalogClient.h"
-#include "Auth/DesktopAuthSession.h"
+#include <creation/ui/SuiteDesktopAuthSession.h>
 #include "Audio/StudioIOModel.h"
 #include "Audio/VstPluginCatalog.h"
 #include "Audio/WorkstationAudioEngine.h"
@@ -210,7 +210,7 @@ private:
     };
 
     juce::AudioDeviceManager deviceManager;
-    DesktopAuthSession authSession { "creative-workstation" };
+    creation::ui::SuiteDesktopAuthSession authSession { "creative-workstation" };
     creation::ui::SuiteShellController suiteShellController;
     CreationStationContextEngine contextEngine;
     CreationStationContextStore contextStore;

@@ -160,7 +160,7 @@ AiProviderSettings makeAiProviderSettings(const creation::services::SuiteAiResol
     return settings;
 }
 
-CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const DesktopAuthSession::SessionData& session)
+CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const creation::ui::SuiteDesktopAuthSession::SessionData& session)
 {
     CreationSuiteHeaderBar::ProfileData profile;
     profile.displayName = session.user.displayName.isNotEmpty() ? session.user.displayName : session.user.email;
@@ -1140,7 +1140,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         authGateView.setBusy(shouldBeBusy);
         transportBar.signInButton.setEnabled(! shouldBeBusy);
     };
-    authSession.onAuthenticated = [this](const DesktopAuthSession::SessionData& session)
+    authSession.onAuthenticated = [this](const creation::ui::SuiteDesktopAuthSession::SessionData& session)
     {
         authenticated = true;
         transportBar.setProfile(makeHeaderProfile(session));

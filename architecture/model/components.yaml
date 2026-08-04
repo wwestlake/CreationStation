@@ -71,7 +71,7 @@ components:
 
   authentication:
     file_hints:
-      - Source/Auth/DesktopAuthSession.cpp
+      - shared/UI/src/SuiteDesktopAuthSession.cpp
       - Source/Views/AuthGateView.cpp
     role: desktop sign-in and entitlement gate
     responsibilities:

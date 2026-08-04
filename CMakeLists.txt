@@ -159,8 +159,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Audio/SamplePackBuilder/SamplePackBuilderEngine.h
     Source/Audio/SamplePackCatalog.cpp
     Source/Audio/SamplePackCatalog.h
-    Source/Auth/DesktopAuthSession.cpp
-    Source/Auth/DesktopAuthSession.h
     Source/Branding.cpp
     Source/Branding.h
     Source/ControlSurface/XTouchControlSurface.cpp
