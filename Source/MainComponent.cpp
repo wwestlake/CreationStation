@@ -8307,11 +8307,22 @@ void MainComponent::showAutomationTargetPicker(int trackIndex)
         auto pluginNames = engine.getTrackPluginNames(otherIndex);
         for (int slotIndex = 0; slotIndex < pluginNames.size(); ++slotIndex)
         {
-            auto paramCount = engine.getTrackPluginParameterCount(otherIndex, slotIndex);
-            if (paramCount <= 0)
-                continue;
-
             juce::PopupMenu pluginMenu;
+            {
+                cs::AutomationTarget target;
+                target.kind = cs::AutomationTargetKind::pluginBypass;
+                target.targetTrackIndex = otherIndex;
+                target.pluginSlotIndex = slotIndex;
+                target.displayName = trackName + " → " + pluginNames[slotIndex] + " → Bypass";
+                target.valueMode = cs::AutomationValueMode::toggle;
+                target.stepCount = 2;
+
+                pluginMenu.addItem(nextItemId, "Bypass");
+                actions->push_back({ target });
+                ++nextItemId;
+            }
+
+            auto paramCount = engine.getTrackPluginParameterCount(otherIndex, slotIndex);
             for (int paramIndex = 0; paramIndex < paramCount; ++paramIndex)
             {
                 auto paramName = engine.getTrackPluginParameterName(otherIndex, slotIndex, paramIndex);

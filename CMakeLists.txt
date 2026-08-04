@@ -90,13 +90,13 @@ juce_add_gui_app(CreativeWorkstation
 )
 
 # Mirrors the built executable into the workspace-level shared bin
-# directory (D:\CreationSuite-Workspaces\claude-<config>-bin) so it's
+# directory (D:\CreationSuite-Workspaces\codex-<config>-bin) so it's
 # reachable at a stable path without needing OS symlink privileges.
 # Every suite agent does this for its own repo -- see AGENTS.md.
 add_custom_command(TARGET CreativeWorkstation POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
-    COMMENT "Copying CreativeWorkstation to the shared claude bin directory"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/codex-$<LOWER_CASE:$<CONFIG>>-bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/codex-$<LOWER_CASE:$<CONFIG>>-bin/"
+    COMMENT "Copying CreativeWorkstation to the shared codex bin directory"
 )
 
 juce_add_plugin(CreationStationInstrument

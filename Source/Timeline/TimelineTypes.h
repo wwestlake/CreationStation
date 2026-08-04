@@ -58,7 +58,15 @@ enum class AutomationTargetKind
     none,
     trackVolume,
     trackPan,
-    pluginParameter
+    pluginParameter,
+    pluginBypass
+};
+
+enum class AutomationValueMode
+{
+    continuous,
+    toggle,
+    stepped
 };
 
 struct AutomationTarget
@@ -73,6 +81,8 @@ struct AutomationTarget
     juce::String parameterId;
     int pluginParameterIndex = -1;
     juce::String displayName;
+    AutomationValueMode valueMode = AutomationValueMode::continuous;
+    int stepCount = 0; // 0/1 = not stepped, 2 = on/off, N = N discrete choices
 };
 
 // How arming an automation track for recording behaves once you manually move its target's
@@ -278,6 +288,7 @@ inline juce::String toStorageToken(AutomationTargetKind kind)
         case AutomationTargetKind::trackVolume: return "trackVolume";
         case AutomationTargetKind::trackPan: return "trackPan";
         case AutomationTargetKind::pluginParameter: return "pluginParameter";
+        case AutomationTargetKind::pluginBypass: return "pluginBypass";
     }
 
     return "none";
@@ -289,7 +300,51 @@ inline AutomationTargetKind automationTargetKindFromStorageToken(const juce::Str
     if (normalized.equalsIgnoreCase("trackVolume")) return AutomationTargetKind::trackVolume;
     if (normalized.equalsIgnoreCase("trackPan")) return AutomationTargetKind::trackPan;
     if (normalized.equalsIgnoreCase("pluginParameter")) return AutomationTargetKind::pluginParameter;
+    if (normalized.equalsIgnoreCase("pluginBypass")) return AutomationTargetKind::pluginBypass;
     return AutomationTargetKind::none;
+}
+
+inline juce::String toStorageToken(AutomationValueMode mode)
+{
+    switch (mode)
+    {
+        case AutomationValueMode::continuous: return "continuous";
+        case AutomationValueMode::toggle: return "toggle";
+        case AutomationValueMode::stepped: return "stepped";
+    }
+
+    return "continuous";
+}
+
+inline AutomationValueMode automationValueModeFromStorageToken(const juce::String& token)
+{
+    auto normalized = token.trim();
+    if (normalized.equalsIgnoreCase("toggle")) return AutomationValueMode::toggle;
+    if (normalized.equalsIgnoreCase("stepped")) return AutomationValueMode::stepped;
+    return AutomationValueMode::continuous;
+}
+
+inline float quantizeAutomationValueForTarget(const AutomationTarget& target, float value)
+{
+    auto clampedValue = juce::jlimit(0.0f, 1.0f, value);
+
+    switch (target.valueMode)
+    {
+        case AutomationValueMode::toggle:
+            return clampedValue >= 0.5f ? 1.0f : 0.0f;
+
+        case AutomationValueMode::stepped:
+        {
+            const auto steps = juce::jmax(2, target.stepCount);
+            const auto maxIndex = steps - 1;
+            const auto index = juce::jlimit(0, maxIndex, juce::roundToInt(clampedValue * (float) maxIndex));
+            return maxIndex > 0 ? (float) index / (float) maxIndex : 0.0f;
+        }
+
+        case AutomationValueMode::continuous:
+        default:
+            return clampedValue;
+    }
 }
 
 inline juce::String toStorageToken(AutomationRecordMode mode)

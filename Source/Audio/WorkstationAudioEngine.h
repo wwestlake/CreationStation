@@ -300,6 +300,7 @@ public:
     juce::String getTrackPluginParameterName(int trackIndex, int slotIndex, int paramIndex) const;
     float getTrackPluginParameterValue(int trackIndex, int slotIndex, int paramIndex) const;
     void setTrackPluginParameterValueRealtime(int trackIndex, int slotIndex, int paramIndex, float normalizedValue);
+    void setTrackPluginBypassedRealtime(int trackIndex, int slotIndex, bool shouldBypass);
 
     // Offline-renders a MIDI clip's notes/CC through the given instrument plugin into a
     // temporary WAV file, so it can be scheduled for playback the same way as a recorded
