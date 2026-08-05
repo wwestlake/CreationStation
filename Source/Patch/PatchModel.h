@@ -20,6 +20,7 @@ struct PatchAutomationPoint
 {
     double time = 0.0;
     double value = 0.0;
+    juce::String curve { "linear" };
 };
 
 struct PatchAutomationLane
@@ -27,6 +28,7 @@ struct PatchAutomationLane
     juce::String id;
     juce::String name;
     juce::String targetParameter;
+    juce::String interpolation { "linear" };
     double rangeMin = 0.0;
     double rangeMax = 1.0;
     juce::Array<PatchAutomationPoint> points;

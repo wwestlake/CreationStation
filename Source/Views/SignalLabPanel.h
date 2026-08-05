@@ -27,6 +27,8 @@ public:
         float macroAir = 0.50f;
         float macroGrit = 0.25f;
         float macroSize = 0.50f;
+        juce::String envelopeCurveMode { "smooth" };
+        juce::String automationCurveMode { "smooth" };
         float pitchSweepSemitones = 0.0f;
         float attackPosition = 0.12f;
         float sustainPosition = 0.42f;
@@ -164,6 +166,10 @@ private:
     juce::Slider filterResonanceSlider;
     juce::Label filterEnvelopeLabel;
     juce::Slider filterEnvelopeSlider;
+    juce::Label envelopeCurveLabel;
+    juce::ComboBox envelopeCurveSelector;
+    juce::Label automationCurveLabel;
+    juce::ComboBox automationCurveSelector;
     juce::Label macroHardnessLabel;
     juce::Slider macroHardnessSlider;
     juce::Label macroWeightLabel;

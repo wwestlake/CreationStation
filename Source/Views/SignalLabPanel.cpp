@@ -29,6 +29,16 @@ float normalizedToCutoff(float normalized)
     return std::exp(logMin + (logMax - logMin) * clamped);
 }
 
+float applyCurveMode(float localT, const juce::String& curveMode)
+{
+    auto t = clamp01(localT);
+    if (curveMode == "stepped")
+        return t < 1.0f ? 0.0f : 1.0f;
+    if (curveMode == "smooth")
+        return t * t * (3.0f - 2.0f * t);
+    return t;
+}
+
 float sampleAutomation(const std::array<float, 4>& values, float t)
 {
     auto clampedT = clamp01(t);
@@ -37,6 +47,30 @@ float sampleAutomation(const std::array<float, 4>& values, float t)
     auto rightIndex = juce::jlimit(1, 3, leftIndex + 1);
     auto localT = scaled - (float) leftIndex;
     return juce::jmap(localT, values[(size_t) leftIndex], values[(size_t) rightIndex]);
+}
+
+float sampleAutomation(const cw::PatchAutomationLane& lane, float t, float fallbackValue)
+{
+    if (lane.points.isEmpty())
+        return fallbackValue;
+    if (lane.points.size() == 1)
+        return (float) lane.points.getFirst().value;
+
+    auto clampedT = clamp01(t);
+    for (int index = 0; index < lane.points.size() - 1; ++index)
+    {
+        const auto& left = lane.points.getReference(index);
+        const auto& right = lane.points.getReference(index + 1);
+        if (clampedT >= (float) left.time && clampedT <= (float) right.time)
+        {
+            auto localRange = juce::jmax(0.0001f, (float) right.time - (float) left.time);
+            auto localT = (clampedT - (float) left.time) / localRange;
+            auto curve = right.curve.isNotEmpty() ? right.curve : lane.interpolation;
+            return juce::jmap(applyCurveMode(localT, curve), (float) left.value, (float) right.value);
+        }
+    }
+
+    return (float) lane.points.getLast().value;
 }
 
 float applyBrightnessFilter(float input, float& state, float brightness, double sampleRate)
@@ -491,6 +525,8 @@ SignalLabPanel::SignalLabPanel()
     setupLabel(filterCutoffLabel, "Filter Cutoff");
     setupLabel(filterResonanceLabel, "Filter Resonance");
     setupLabel(filterEnvelopeLabel, "Filter Envelope");
+    setupLabel(envelopeCurveLabel, "Envelope Curve");
+    setupLabel(automationCurveLabel, "Automation Curve");
     setupLabel(macroHardnessLabel, "Hardness");
     setupLabel(macroWeightLabel, "Weight");
     setupLabel(macroAirLabel, "Air");
@@ -509,6 +545,14 @@ SignalLabPanel::SignalLabPanel()
     filterModeSelector.addItem("Band-pass", 2);
     filterModeSelector.addItem("High-pass", 3);
     addAndMakeVisible(filterModeSelector);
+    envelopeCurveSelector.addItem("Linear", 1);
+    envelopeCurveSelector.addItem("Smooth", 2);
+    envelopeCurveSelector.addItem("Stepped", 3);
+    addAndMakeVisible(envelopeCurveSelector);
+    automationCurveSelector.addItem("Linear", 1);
+    automationCurveSelector.addItem("Smooth", 2);
+    automationCurveSelector.addItem("Stepped", 3);
+    addAndMakeVisible(automationCurveSelector);
     configureSlider(filterCutoffSlider, kMinFilterCutoffHz, kMaxFilterCutoffHz, 1.0);
     configureSlider(filterResonanceSlider, 0.30, 8.0, 0.01);
     configureSlider(filterEnvelopeSlider, -1.0, 1.0, 0.01);
@@ -537,6 +581,24 @@ SignalLabPanel::SignalLabPanel()
             case 3: recipe.filterMode = "highpass"; break;
             default: recipe.filterMode = "lowpass"; break;
         }
+        regenerateSignal();
+    };
+    envelopeCurveSelector.onChange = [this]
+    {
+        if (suppressCallbacks)
+            return;
+        recipe.envelopeCurveMode = envelopeCurveSelector.getSelectedId() == 3 ? "stepped"
+                                  : envelopeCurveSelector.getSelectedId() == 1 ? "linear"
+                                                                               : "smooth";
+        regenerateSignal();
+    };
+    automationCurveSelector.onChange = [this]
+    {
+        if (suppressCallbacks)
+            return;
+        recipe.automationCurveMode = automationCurveSelector.getSelectedId() == 3 ? "stepped"
+                                    : automationCurveSelector.getSelectedId() == 1 ? "linear"
+                                                                                   : "smooth";
         regenerateSignal();
     };
     filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
@@ -648,6 +710,8 @@ juce::ValueTree SignalLabPanel::createState() const
     state.setProperty("filterCutoffHz", recipe.filterCutoffHz, nullptr);
     state.setProperty("filterResonance", recipe.filterResonance, nullptr);
     state.setProperty("filterEnvelopeAmount", recipe.filterEnvelopeAmount, nullptr);
+    state.setProperty("envelopeCurveMode", recipe.envelopeCurveMode, nullptr);
+    state.setProperty("automationCurveMode", recipe.automationCurveMode, nullptr);
     state.setProperty("macroHardness", recipe.macroHardness, nullptr);
     state.setProperty("macroWeight", recipe.macroWeight, nullptr);
     state.setProperty("macroAir", recipe.macroAir, nullptr);
@@ -685,6 +749,8 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     recipe.filterCutoffHz = (float) state.getProperty("filterCutoffHz", recipe.filterCutoffHz);
     recipe.filterResonance = (float) state.getProperty("filterResonance", recipe.filterResonance);
     recipe.filterEnvelopeAmount = (float) state.getProperty("filterEnvelopeAmount", recipe.filterEnvelopeAmount);
+    recipe.envelopeCurveMode = state.getProperty("envelopeCurveMode", recipe.envelopeCurveMode).toString();
+    recipe.automationCurveMode = state.getProperty("automationCurveMode", recipe.automationCurveMode).toString();
     recipe.macroHardness = (float) state.getProperty("macroHardness", recipe.macroHardness);
     recipe.macroWeight = (float) state.getProperty("macroWeight", recipe.macroWeight);
     recipe.macroAir = (float) state.getProperty("macroAir", recipe.macroAir);
@@ -734,6 +800,10 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             recipe.filterResonance = (float) parameter.defaultValue;
         else if (parameter.id == "filterEnvelopeAmount")
             recipe.filterEnvelopeAmount = (float) parameter.defaultValue;
+        else if (parameter.id == "envelopeCurveMode")
+            recipe.envelopeCurveMode = parameter.defaultValue >= 2.5 ? "stepped"
+                                     : parameter.defaultValue <= 1.5 ? "linear"
+                                                                     : "smooth";
         else if (parameter.id == "macroHardness")
             recipe.macroHardness = (float) parameter.defaultValue;
         else if (parameter.id == "macroWeight")
@@ -780,6 +850,7 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             recipe.sustainPosition = (float) node.properties.getWithDefault("sustainPosition", recipe.sustainPosition);
             recipe.releasePosition = (float) node.properties.getWithDefault("releasePosition", recipe.releasePosition);
             recipe.sustainLevel = (float) node.properties.getWithDefault("sustainLevel", recipe.sustainLevel);
+            recipe.envelopeCurveMode = node.properties.getWithDefault("curveMode", recipe.envelopeCurveMode).toString();
         }
         else if (node.kind == "filter")
         {
@@ -808,6 +879,9 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             fillAutomation(recipe.gainAutomation, lane);
         else if (lane.id == "filterMotion" || lane.targetParameter == "filterCutoff")
             fillAutomation(recipe.filterAutomation, lane);
+
+        if (lane.interpolation.isNotEmpty())
+            recipe.automationCurveMode = lane.interpolation;
     }
 
     refreshControlsFromRecipe();
@@ -886,6 +960,8 @@ void SignalLabPanel::resized()
     addRow(durationLabel, durationSlider);
     addRow(pitchLabel, pitchSlider);
     addComboRow(filterModeLabel, filterModeSelector);
+    addComboRow(envelopeCurveLabel, envelopeCurveSelector);
+    addComboRow(automationCurveLabel, automationCurveSelector);
     addRow(filterCutoffLabel, filterCutoffSlider);
     addRow(filterResonanceLabel, filterResonanceSlider);
     addRow(filterEnvelopeLabel, filterEnvelopeSlider);
@@ -934,6 +1010,7 @@ void SignalLabPanel::regenerateSignal()
     envelopeEditor.setRecipe(recipe);
     pitchAutomationEditor.setValues(recipe.pitchAutomation);
     gainAutomationEditor.setValues(recipe.gainAutomation);
+    filterAutomationEditor.setValues(recipe.filterAutomation);
     scopePanel.setBuffer(generatedBuffer);
     spectrumPanel.setBuffer(generatedBuffer, recipe.sampleRate);
     updateStatusText();
@@ -979,13 +1056,19 @@ juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& a
 
         float envelope = 0.0f;
         if (t <= effectiveAttack)
-            envelope = juce::jmap(t, 0.0f, juce::jmax(0.001f, effectiveAttack), 0.0f, 1.0f);
+            envelope = juce::jmap(applyCurveMode(juce::jmap(t, 0.0f, juce::jmax(0.001f, effectiveAttack), 0.0f, 1.0f),
+                                                 activeRecipe.envelopeCurveMode),
+                                  0.0f, 1.0f, 0.0f, 1.0f);
         else if (t <= effectiveSustain)
-            envelope = juce::jmap(t, effectiveAttack, juce::jmax(effectiveAttack + 0.001f, effectiveSustain), 1.0f, effectiveSustainLevel);
+            envelope = juce::jmap(applyCurveMode(juce::jmap(t, effectiveAttack, juce::jmax(effectiveAttack + 0.001f, effectiveSustain), 0.0f, 1.0f),
+                                                 activeRecipe.envelopeCurveMode),
+                                  0.0f, 1.0f, 1.0f, effectiveSustainLevel);
         else if (t <= releaseStart)
             envelope = effectiveSustainLevel;
         else
-            envelope = juce::jmap(t, releaseStart, 1.0f, effectiveSustainLevel, 0.0f);
+            envelope = juce::jmap(applyCurveMode(juce::jmap(t, releaseStart, 1.0f, 0.0f, 1.0f),
+                                                 activeRecipe.envelopeCurveMode),
+                                  0.0f, 1.0f, effectiveSustainLevel, 0.0f);
 
         auto sampleValue = normalizer * envelope * gainAutomationValue
                          * ((activeRecipe.sineLevel + activeRecipe.macroWeight * 0.10f) * sine
@@ -1022,6 +1105,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.updatedAt = document.createdAt;
 
     document.parameters.add({ "baseFrequency", "Base Frequency", "float", activeRecipe.baseFrequencyHz, 30.0, 2400.0, "hz" });
+    document.parameters.add({ "envelopeCurveMode", "Envelope Curve", "float", activeRecipe.envelopeCurveMode == "stepped" ? 3.0 : activeRecipe.envelopeCurveMode == "linear" ? 1.0 : 2.0, 1.0, 3.0, "mode" });
     document.parameters.add({ "filterCutoff", "Filter Cutoff", "float", activeRecipe.filterCutoffHz, kMinFilterCutoffHz, kMaxFilterCutoffHz, "hz" });
     document.parameters.add({ "filterResonance", "Filter Resonance", "float", activeRecipe.filterResonance, 0.30, 8.0, "q" });
     document.parameters.add({ "filterEnvelopeAmount", "Filter Envelope", "float", activeRecipe.filterEnvelopeAmount, -1.0, 1.0, "normalized" });
@@ -1034,21 +1118,28 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.parameters.add({ "outputGain", "Output Gain", "float", 1.0, 0.0, 1.0, "normalized" });
     document.parameters.add({ "noiseLevel", "Noise Level", "float", activeRecipe.noiseLevel, 0.0, 1.0, "normalized" });
 
-    auto makeLane = [](const juce::String& id,
-                       const juce::String& name,
-                       const juce::String& target,
-                       double rangeMin,
-                       double rangeMax,
-                       const std::array<float, 4>& values)
+    auto makeLane = [&activeRecipe](const juce::String& id,
+                                    const juce::String& name,
+                                    const juce::String& target,
+                                    double rangeMin,
+                                    double rangeMax,
+                                    const std::array<float, 4>& values)
     {
         cw::PatchAutomationLane lane;
         lane.id = id;
         lane.name = name;
         lane.targetParameter = target;
+        lane.interpolation = activeRecipe.automationCurveMode;
         lane.rangeMin = rangeMin;
         lane.rangeMax = rangeMax;
         for (int index = 0; index < 4; ++index)
-            lane.points.add({ index / 3.0, values[(size_t) index] });
+        {
+            cw::PatchAutomationPoint point;
+            point.time = index / 3.0;
+            point.value = values[(size_t) index];
+            point.curve = activeRecipe.automationCurveMode;
+            lane.points.add(point);
+        }
         return lane;
     };
 
@@ -1088,6 +1179,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     envelopeNode.properties.set("sustainPosition", activeRecipe.sustainPosition);
     envelopeNode.properties.set("releasePosition", activeRecipe.releasePosition);
     envelopeNode.properties.set("sustainLevel", activeRecipe.sustainLevel);
+    envelopeNode.properties.set("curveMode", activeRecipe.envelopeCurveMode);
     document.nodes.add(envelopeNode);
 
     for (const auto& source : document.sources)
@@ -1260,6 +1352,10 @@ void SignalLabPanel::refreshControlsFromRecipe()
     pitchSlider.setValue(recipe.pitchSweepSemitones, juce::dontSendNotification);
     filterModeSelector.setSelectedId(recipe.filterMode == "bandpass" ? 2 : recipe.filterMode == "highpass" ? 3 : 1,
                                      juce::dontSendNotification);
+    envelopeCurveSelector.setSelectedId(recipe.envelopeCurveMode == "stepped" ? 3 : recipe.envelopeCurveMode == "linear" ? 1 : 2,
+                                        juce::dontSendNotification);
+    automationCurveSelector.setSelectedId(recipe.automationCurveMode == "stepped" ? 3 : recipe.automationCurveMode == "linear" ? 1 : 2,
+                                          juce::dontSendNotification);
     filterCutoffSlider.setValue(recipe.filterCutoffHz, juce::dontSendNotification);
     filterResonanceSlider.setValue(recipe.filterResonance, juce::dontSendNotification);
     filterEnvelopeSlider.setValue(recipe.filterEnvelopeAmount, juce::dontSendNotification);
@@ -1287,6 +1383,7 @@ void SignalLabPanel::updateStatusText()
               + "  |  " + juce::String(recipe.durationSeconds, 2) + " s"
               + "  |  " + juce::String((int) recipe.baseFrequencyHz) + " Hz"
               + "  |  " + recipe.filterMode + " " + juce::String((int) recipe.filterCutoffHz) + " Hz"
+              + "  |  curves E:" + recipe.envelopeCurveMode + " A:" + recipe.automationCurveMode
               + "  |  macros H:" + juce::String(recipe.macroHardness, 2)
               + " W:" + juce::String(recipe.macroWeight, 2)
               + " A:" + juce::String(recipe.macroAir, 2)
