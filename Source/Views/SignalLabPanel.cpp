@@ -42,6 +42,58 @@ const AutomationTargetSpec& getTargetSpec(const juce::String& parameterId)
     return getAutomationTargetSpecs()[0];
 }
 
+bool usesLogScale(const juce::String& parameterId)
+{
+    return parameterId == "filterCutoff" || parameterId == "baseFrequency";
+}
+
+double normalizeLaneValue(const cw::PatchAutomationLane& lane, double value)
+{
+    auto clampedValue = juce::jlimit(lane.rangeMin, lane.rangeMax, value);
+    if (usesLogScale(lane.targetParameter))
+    {
+        auto safeMin = juce::jmax(0.0001, lane.rangeMin);
+        auto safeMax = juce::jmax(safeMin + 0.0001, lane.rangeMax);
+        auto logMin = std::log(safeMin);
+        auto logMax = std::log(safeMax);
+        return juce::jlimit(0.0, 1.0, (std::log(clampedValue) - logMin) / juce::jmax(0.0001, logMax - logMin));
+    }
+
+    return juce::jmap(clampedValue, lane.rangeMin, lane.rangeMax, 0.0, 1.0);
+}
+
+double denormalizeLaneValue(const cw::PatchAutomationLane& lane, double normalizedValue)
+{
+    auto clampedValue = juce::jlimit(0.0, 1.0, normalizedValue);
+    if (usesLogScale(lane.targetParameter))
+    {
+        auto safeMin = juce::jmax(0.0001, lane.rangeMin);
+        auto safeMax = juce::jmax(safeMin + 0.0001, lane.rangeMax);
+        auto logMin = std::log(safeMin);
+        auto logMax = std::log(safeMax);
+        return std::exp(logMin + (logMax - logMin) * clampedValue);
+    }
+
+    return juce::jmap(clampedValue, 0.0, 1.0, lane.rangeMin, lane.rangeMax);
+}
+
+juce::String formatLaneValue(const cw::PatchAutomationLane& lane, double value)
+{
+    if (lane.targetParameter == "pitchOffsetSemitones")
+        return juce::String(value, 1) + " st";
+    if (lane.targetParameter == "filterCutoff" || lane.targetParameter == "baseFrequency")
+        return juce::String(juce::roundToInt(value)) + " Hz";
+    if (lane.targetParameter == "filterResonance")
+        return "Q " + juce::String(value, 2);
+
+    return juce::String(value, 2);
+}
+
+juce::String formatLaneRange(const cw::PatchAutomationLane& lane)
+{
+    return formatLaneValue(lane, lane.rangeMin) + " -> " + formatLaneValue(lane, lane.rangeMax);
+}
+
 float clamp01(float value)
 {
     return juce::jlimit(0.0f, 1.0f, value);
@@ -668,7 +720,7 @@ juce::Point<float> SignalLabPanel::AutomationLaneEditor::getPoint(int index) con
 {
     auto plot = getPlotArea();
     const auto& point = lane.points.getReference(index);
-    auto normalizedValue = juce::jmap((float) point.value, (float) lane.rangeMin, (float) lane.rangeMax, 0.0f, 1.0f);
+    auto normalizedValue = (float) normalizeLaneValue(lane, point.value);
     auto x = juce::jmap((float) point.time, plot.getX(), plot.getRight());
     auto y = juce::jmap(normalizedValue, 0.0f, 1.0f, plot.getBottom(), plot.getY());
     return { x, y };
@@ -695,7 +747,7 @@ double SignalLabPanel::AutomationLaneEditor::pointValueFromY(float y) const
 {
     auto plot = getPlotArea();
     auto normalizedY = clamp01((plot.getBottom() - y) / plot.getHeight());
-    return juce::jmap((double) normalizedY, lane.rangeMin, lane.rangeMax);
+    return denormalizeLaneValue(lane, normalizedY);
 }
 
 void SignalLabPanel::AutomationLaneEditor::paint(juce::Graphics& g)
@@ -750,9 +802,33 @@ void SignalLabPanel::AutomationLaneEditor::paint(juce::Graphics& g)
         g.drawEllipse(point.x - 5.0f, point.y - 5.0f, 10.0f, 10.0f, 1.0f);
     }
 
+    auto header = getLocalBounds().reduced(12, 6).removeFromTop(18);
     g.setColour(juce::Colour(0xffcbd5e1));
     g.setFont(juce::Font(13.0f).boldened());
-    g.drawText(lane.name, getLocalBounds().reduced(12, 6).removeFromTop(18), juce::Justification::centredLeft, false);
+    g.drawText(lane.name, header.removeFromLeft(190), juce::Justification::centredLeft, false);
+    g.setFont(juce::Font(11.0f));
+    g.setColour(juce::Colour(0xff8ea0b7));
+    g.drawText(formatLaneRange(lane), header, juce::Justification::centredRight, false);
+
+    auto footer = getLocalBounds().reduced(12, 10).removeFromBottom(16);
+    g.setColour(juce::Colour(0xff708198));
+    g.drawText("Start", footer.removeFromLeft(40), juce::Justification::centredLeft, false);
+    g.drawText("End", footer.removeFromRight(32), juce::Justification::centredRight, false);
+
+    if (dragIndex >= 0 && dragIndex < lane.points.size())
+    {
+        auto point = getPoint(dragIndex);
+        auto bubble = juce::Rectangle<float>(0.0f, 0.0f, 88.0f, 20.0f).withCentre({ point.x, point.y - 16.0f });
+        bubble.setPosition(juce::jlimit(8.0f, (float) getWidth() - bubble.getWidth() - 8.0f, bubble.getX()),
+                           juce::jlimit(24.0f, (float) getHeight() - bubble.getHeight() - 8.0f, bubble.getY()));
+        g.setColour(juce::Colour(0xdd0f1724));
+        g.fillRoundedRectangle(bubble, 6.0f);
+        g.setColour(laneAccent.withAlpha(0.8f));
+        g.drawRoundedRectangle(bubble, 6.0f, 1.0f);
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::Font(11.0f).boldened());
+        g.drawText(formatLaneValue(lane, lane.points.getReference(dragIndex).value), bubble.toNearestInt(), juce::Justification::centred, false);
+    }
 }
 
 void SignalLabPanel::AutomationLaneEditor::mouseDown(const juce::MouseEvent& event)
