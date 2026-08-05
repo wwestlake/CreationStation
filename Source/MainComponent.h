@@ -274,7 +274,6 @@ private:
     std::unique_ptr<juce::FileChooser> assetChooser;
     std::unique_ptr<juce::FileChooser> renderExportChooser;
     std::unique_ptr<juce::FileChooser> rawAssetExportChooser;
-    std::unique_ptr<juce::FileChooser> patchChooser;
     std::unique_ptr<juce::FileChooser> celSourceChooser;
     std::unique_ptr<juce::FileChooser> contentUploadChooser;
     std::unique_ptr<juce::FileChooser> suiteDirectoryChooser;

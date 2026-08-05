@@ -2239,40 +2239,53 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     signalLabPanel.onPatchLoadRequested = [this]
     {
-        auto startDirectory = suiteSettings.suiteVfsRoot.isNotEmpty()
-            ? creation::suite::getContentDirectory(suiteSettings).getChildFile("User").getChildFile("Patches")
-            : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+        if (! projectSession.isValid())
+        {
+            transportBar.setStatusText("Open or create a project first so Signal Lab can load saved sounds from the project.");
+            return;
+        }
 
-        patchChooser = std::make_unique<juce::FileChooser>("Load a Creation Station sound",
-                                                           startDirectory,
-                                                           "*.cspatch");
+        juce::Array<creation::assets::AssetDescriptor> patchAssets;
+        for (const auto& asset : projectSession.getManifest().assetCatalog.query({}))
+        {
+            if (asset.kind == creation::assets::AssetKind::patch)
+                patchAssets.add(asset);
+        }
 
-        patchChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                                  [this](const juce::FileChooser& chooser)
-                                  {
-                                      auto file = chooser.getResult();
-                                      patchChooser.reset();
+        if (patchAssets.isEmpty())
+        {
+            transportBar.setStatusText("This project does not have any saved Signal Lab sounds yet.");
+            return;
+        }
 
-                                      if (! file.existsAsFile())
-                                          return;
+        std::sort(patchAssets.begin(), patchAssets.end(), [](const auto& left, const auto& right)
+        {
+            if (left.modifiedAt != right.modifiedAt)
+                return left.modifiedAt > right.modifiedAt;
 
-                                      juce::String errorMessage;
-                                      cw::PatchDocument document;
-                                      if (! cw::parsePatchDocumentJson(file.loadFileAsString(), document, errorMessage))
-                                      {
-                                          transportBar.setStatusText(errorMessage);
-                                          return;
-                                      }
+            return left.displayName.compareIgnoreCase(right.displayName) < 0;
+        });
 
-                                      if (! signalLabPanel.loadPatchDocument(document, errorMessage))
-                                      {
-                                          transportBar.setStatusText(errorMessage);
-                                          return;
-                                      }
+        juce::PopupMenu menu;
+        menu.addSectionHeader("Load Sound From Project");
+        for (int index = 0; index < patchAssets.size(); ++index)
+        {
+            const auto& asset = patchAssets.getReference(index);
+            auto label = asset.displayName.isNotEmpty() ? asset.displayName : asset.logicalPath;
+            auto detail = asset.modifiedAt != juce::Time()
+                ? "  •  " + asset.modifiedAt.toString(true, true)
+                : juce::String{};
+            menu.addItem(index + 1, label + detail);
+        }
 
-                                      transportBar.setStatusText("Loaded patch: " + file.getFileName());
-                                      setWorkspaceMode(WorkspaceMode::signal);
-                                  });
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&signalLabPanel),
+                           [this, patchAssets](int result)
+                           {
+                               if (result <= 0 || result > patchAssets.size())
+                                   return;
+
+                               openProjectAsset(patchAssets.getReference(result - 1));
+                           });
     };
 
     dslPanel.onSourceExportRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
@@ -5931,6 +5944,8 @@ void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& as
             contentPanel.setStatusText(errorMessage);
             return;
         }
+
+        pushSignalUndoState(signalLabPanel.createState(), "Load sound");
 
         if (! signalLabPanel.loadPatchDocument(document, errorMessage))
         {
