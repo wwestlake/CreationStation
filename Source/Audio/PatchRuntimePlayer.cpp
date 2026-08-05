@@ -113,22 +113,34 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     destination.clear();
 
     double baseFrequency = 180.0;
-    float brightness = 0.72f;
     float filterCutoffHz = 3600.0f;
     float filterResonance = 0.90f;
     float filterEnvelopeAmount = 0.35f;
+    float macroHardness = 0.50f;
+    float macroWeight = 0.50f;
+    float macroAir = 0.50f;
+    float macroGrit = 0.25f;
+    float macroSize = 0.50f;
     for (const auto& parameter : patch.parameters)
     {
         if (parameter.id == "baseFrequency")
             baseFrequency = parameter.defaultValue;
-        else if (parameter.id == "brightness")
-            brightness = (float) parameter.defaultValue;
         else if (parameter.id == "filterCutoff")
             filterCutoffHz = (float) parameter.defaultValue;
         else if (parameter.id == "filterResonance")
             filterResonance = (float) parameter.defaultValue;
         else if (parameter.id == "filterEnvelopeAmount")
             filterEnvelopeAmount = (float) parameter.defaultValue;
+        else if (parameter.id == "macroHardness")
+            macroHardness = (float) parameter.defaultValue;
+        else if (parameter.id == "macroWeight")
+            macroWeight = (float) parameter.defaultValue;
+        else if (parameter.id == "macroAir")
+            macroAir = (float) parameter.defaultValue;
+        else if (parameter.id == "macroGrit")
+            macroGrit = (float) parameter.defaultValue;
+        else if (parameter.id == "macroSize")
+            macroSize = (float) parameter.defaultValue;
     }
 
     float outputGain = (float) patch.output.gain;
@@ -151,11 +163,14 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         filterResonance = getNumericProperty(filterNode->properties, "resonance", filterResonance);
         filterEnvelopeAmount = getNumericProperty(filterNode->properties, "envelopeAmount", filterEnvelopeAmount);
     }
-    else
-    {
-        filterCutoffHz = juce::jmap(brightness, 0.02f, 1.0f, 180.0f, 12000.0f);
-    }
-    auto releaseStart = juce::jmax(sustainPosition + 0.01f, releasePosition);
+    auto effectiveAttack = juce::jlimit(0.005f, 0.95f, attackPosition * juce::jmap(macroHardness, 0.0f, 1.0f, 1.35f, 0.55f));
+    auto effectiveSustain = juce::jlimit(effectiveAttack + 0.02f, 0.97f,
+                                         sustainPosition + juce::jmap(macroSize, 0.0f, 1.0f, -0.03f, 0.10f));
+    auto effectiveRelease = juce::jlimit(effectiveSustain + 0.03f, 0.995f,
+                                         releasePosition + juce::jmap(macroSize, 0.0f, 1.0f, -0.08f, 0.14f));
+    auto effectiveSustainLevel = juce::jlimit(0.05f, 1.0f,
+                                              sustainLevel + juce::jmap(macroWeight, 0.0f, 1.0f, -0.10f, 0.16f));
+    auto releaseStart = juce::jmax(effectiveSustain + 0.01f, effectiveRelease);
 
     double totalSourceLevel = 0.0;
     for (const auto& source : patch.sources)
@@ -179,8 +194,10 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         auto pitchMotion = sampleAutomation(pitchLane, t);
         auto gainMotion = sampleAutomation(gainLane, t);
         auto filterMotion = sampleAutomation(filterLane, t);
-        auto pitchSemitones = juce::jmap(pitchMotion, 0.0f, 1.0f, -12.0f, 12.0f);
-        auto frequency = baseFrequency * std::pow(2.0, pitchSemitones / 12.0);
+        auto pitchSemitones = juce::jmap(pitchMotion, 0.0f, 1.0f, -12.0f, 12.0f)
+                            + juce::jmap(macroWeight, 0.0f, 1.0f, 2.0f, -2.0f) * (t - 0.5f) * 2.0f;
+        auto weightedBaseFrequency = baseFrequency * (double) juce::jmap(macroWeight, 0.0f, 1.0f, 1.16f, 0.86f);
+        auto frequency = weightedBaseFrequency * std::pow(2.0, pitchSemitones / 12.0);
         auto phase = juce::MathConstants<double>::twoPi * frequency * ((double) sample / sampleRate);
 
         float mixed = 0.0f;
@@ -211,19 +228,23 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         if (t <= attackPosition)
             envelope = juce::jmap(t, 0.0f, juce::jmax(0.001f, attackPosition), 0.0f, 1.0f);
         else if (t <= sustainPosition)
-            envelope = juce::jmap(t, attackPosition, juce::jmax(attackPosition + 0.001f, sustainPosition), 1.0f, sustainLevel);
+            envelope = juce::jmap(t, effectiveAttack, juce::jmax(effectiveAttack + 0.001f, effectiveSustain), 1.0f, effectiveSustainLevel);
         else if (t <= releaseStart)
-            envelope = sustainLevel;
+            envelope = effectiveSustainLevel;
         else
-            envelope = juce::jmap(t, releaseStart, 1.0f, sustainLevel, 0.0f);
+            envelope = juce::jmap(t, releaseStart, 1.0f, effectiveSustainLevel, 0.0f);
 
+        auto gritDrive = 1.0f + macroGrit * 5.5f;
         auto value = normalizer * envelope * gainMotion * outputGain * mixed;
+        value = std::tanh(value * gritDrive) / std::tanh(gritDrive);
         auto filterNormalized = clamp01Runtime(cutoffToNormalized(filterCutoffHz)
                                                + (filterMotion - 0.5f) * 0.75f
-                                               + (envelope - 0.5f) * filterEnvelopeAmount);
+                                               + (envelope - 0.5f) * (filterEnvelopeAmount + macroHardness * 0.30f)
+                                               + macroAir * 0.18f
+                                               - macroWeight * 0.10f);
         auto cutoffHz = normalizedToCutoff(filterNormalized);
         filter.setCutoffFrequency(juce::jlimit(kMinFilterCutoffHz, (float) (sampleRate * 0.45), cutoffHz));
-        filter.setResonance(juce::jlimit(0.30f, 8.0f, filterResonance));
+        filter.setResonance(juce::jlimit(0.30f, 8.0f, filterResonance + macroHardness * 0.9f - macroWeight * 0.15f));
         value = filter.processSample(0, value);
         destination.setSample(0, sample, value);
         destination.setSample(1, sample, value);

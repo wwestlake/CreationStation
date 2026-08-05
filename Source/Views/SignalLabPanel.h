@@ -22,6 +22,11 @@ public:
         float filterCutoffHz = 3600.0f;
         float filterResonance = 0.90f;
         float filterEnvelopeAmount = 0.35f;
+        float macroHardness = 0.50f;
+        float macroWeight = 0.50f;
+        float macroAir = 0.50f;
+        float macroGrit = 0.25f;
+        float macroSize = 0.50f;
         float pitchSweepSemitones = 0.0f;
         float attackPosition = 0.12f;
         float sustainPosition = 0.42f;
@@ -159,6 +164,16 @@ private:
     juce::Slider filterResonanceSlider;
     juce::Label filterEnvelopeLabel;
     juce::Slider filterEnvelopeSlider;
+    juce::Label macroHardnessLabel;
+    juce::Slider macroHardnessSlider;
+    juce::Label macroWeightLabel;
+    juce::Slider macroWeightSlider;
+    juce::Label macroAirLabel;
+    juce::Slider macroAirSlider;
+    juce::Label macroGritLabel;
+    juce::Slider macroGritSlider;
+    juce::Label macroSizeLabel;
+    juce::Slider macroSizeSlider;
     juce::Label sineLabel;
     juce::Slider sineSlider;
     juce::Label sawLabel;

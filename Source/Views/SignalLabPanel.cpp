@@ -491,6 +491,11 @@ SignalLabPanel::SignalLabPanel()
     setupLabel(filterCutoffLabel, "Filter Cutoff");
     setupLabel(filterResonanceLabel, "Filter Resonance");
     setupLabel(filterEnvelopeLabel, "Filter Envelope");
+    setupLabel(macroHardnessLabel, "Hardness");
+    setupLabel(macroWeightLabel, "Weight");
+    setupLabel(macroAirLabel, "Air");
+    setupLabel(macroGritLabel, "Grit");
+    setupLabel(macroSizeLabel, "Size");
     setupLabel(sineLabel, "Sine");
     setupLabel(sawLabel, "Saw");
     setupLabel(squareLabel, "Square");
@@ -507,6 +512,11 @@ SignalLabPanel::SignalLabPanel()
     configureSlider(filterCutoffSlider, kMinFilterCutoffHz, kMaxFilterCutoffHz, 1.0);
     configureSlider(filterResonanceSlider, 0.30, 8.0, 0.01);
     configureSlider(filterEnvelopeSlider, -1.0, 1.0, 0.01);
+    configureSlider(macroHardnessSlider, 0.0, 1.0, 0.01);
+    configureSlider(macroWeightSlider, 0.0, 1.0, 0.01);
+    configureSlider(macroAirSlider, 0.0, 1.0, 0.01);
+    configureSlider(macroGritSlider, 0.0, 1.0, 0.01);
+    configureSlider(macroSizeSlider, 0.0, 1.0, 0.01);
     configureSlider(sineSlider, 0.0, 1.0, 0.001);
     configureSlider(sawSlider, 0.0, 1.0, 0.001);
     configureSlider(squareSlider, 0.0, 1.0, 0.001);
@@ -532,6 +542,11 @@ SignalLabPanel::SignalLabPanel()
     filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
     filterResonanceSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterResonance = (float) filterResonanceSlider.getValue(); regenerateSignal(); } };
     filterEnvelopeSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue(); regenerateSignal(); } };
+    macroHardnessSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroHardness = (float) macroHardnessSlider.getValue(); regenerateSignal(); } };
+    macroWeightSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroWeight = (float) macroWeightSlider.getValue(); regenerateSignal(); } };
+    macroAirSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroAir = (float) macroAirSlider.getValue(); regenerateSignal(); } };
+    macroGritSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroGrit = (float) macroGritSlider.getValue(); regenerateSignal(); } };
+    macroSizeSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroSize = (float) macroSizeSlider.getValue(); regenerateSignal(); } };
     sineSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.sineLevel = (float) sineSlider.getValue(); regenerateSignal(); } };
     sawSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.sawLevel = (float) sawSlider.getValue(); regenerateSignal(); } };
     squareSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.squareLevel = (float) squareSlider.getValue(); regenerateSignal(); } };
@@ -633,6 +648,11 @@ juce::ValueTree SignalLabPanel::createState() const
     state.setProperty("filterCutoffHz", recipe.filterCutoffHz, nullptr);
     state.setProperty("filterResonance", recipe.filterResonance, nullptr);
     state.setProperty("filterEnvelopeAmount", recipe.filterEnvelopeAmount, nullptr);
+    state.setProperty("macroHardness", recipe.macroHardness, nullptr);
+    state.setProperty("macroWeight", recipe.macroWeight, nullptr);
+    state.setProperty("macroAir", recipe.macroAir, nullptr);
+    state.setProperty("macroGrit", recipe.macroGrit, nullptr);
+    state.setProperty("macroSize", recipe.macroSize, nullptr);
     state.setProperty("sineLevel", recipe.sineLevel, nullptr);
     state.setProperty("sawLevel", recipe.sawLevel, nullptr);
     state.setProperty("squareLevel", recipe.squareLevel, nullptr);
@@ -665,6 +685,11 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     recipe.filterCutoffHz = (float) state.getProperty("filterCutoffHz", recipe.filterCutoffHz);
     recipe.filterResonance = (float) state.getProperty("filterResonance", recipe.filterResonance);
     recipe.filterEnvelopeAmount = (float) state.getProperty("filterEnvelopeAmount", recipe.filterEnvelopeAmount);
+    recipe.macroHardness = (float) state.getProperty("macroHardness", recipe.macroHardness);
+    recipe.macroWeight = (float) state.getProperty("macroWeight", recipe.macroWeight);
+    recipe.macroAir = (float) state.getProperty("macroAir", recipe.macroAir);
+    recipe.macroGrit = (float) state.getProperty("macroGrit", recipe.macroGrit);
+    recipe.macroSize = (float) state.getProperty("macroSize", recipe.macroSize);
     recipe.sineLevel = (float) state.getProperty("sineLevel", recipe.sineLevel);
     recipe.sawLevel = (float) state.getProperty("sawLevel", recipe.sawLevel);
     recipe.squareLevel = (float) state.getProperty("squareLevel", recipe.squareLevel);
@@ -709,6 +734,16 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             recipe.filterResonance = (float) parameter.defaultValue;
         else if (parameter.id == "filterEnvelopeAmount")
             recipe.filterEnvelopeAmount = (float) parameter.defaultValue;
+        else if (parameter.id == "macroHardness")
+            recipe.macroHardness = (float) parameter.defaultValue;
+        else if (parameter.id == "macroWeight")
+            recipe.macroWeight = (float) parameter.defaultValue;
+        else if (parameter.id == "macroAir")
+            recipe.macroAir = (float) parameter.defaultValue;
+        else if (parameter.id == "macroGrit")
+            recipe.macroGrit = (float) parameter.defaultValue;
+        else if (parameter.id == "macroSize")
+            recipe.macroSize = (float) parameter.defaultValue;
         else if (parameter.id == "noiseLevel")
             recipe.noiseLevel = (float) parameter.defaultValue;
     }
@@ -854,6 +889,11 @@ void SignalLabPanel::resized()
     addRow(filterCutoffLabel, filterCutoffSlider);
     addRow(filterResonanceLabel, filterResonanceSlider);
     addRow(filterEnvelopeLabel, filterEnvelopeSlider);
+    addRow(macroHardnessLabel, macroHardnessSlider);
+    addRow(macroWeightLabel, macroWeightSlider);
+    addRow(macroAirLabel, macroAirSlider);
+    addRow(macroGritLabel, macroGritSlider);
+    addRow(macroSizeLabel, macroSizeSlider);
     addRow(sineLabel, sineSlider);
     addRow(sawLabel, sawSlider);
     addRow(squareLabel, squareSlider);
@@ -908,7 +948,14 @@ juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& a
     juce::Random random(0x5349474E);
     auto totalLevel = activeRecipe.sineLevel + activeRecipe.sawLevel + activeRecipe.squareLevel + activeRecipe.triangleLevel + activeRecipe.noiseLevel;
     auto normalizer = totalLevel > 0.0f ? (0.9f / totalLevel) : 0.0f;
-    auto releaseStart = juce::jmax(activeRecipe.sustainPosition + 0.01f, activeRecipe.releasePosition);
+    auto effectiveAttack = juce::jlimit(0.005f, 0.95f, activeRecipe.attackPosition * juce::jmap(activeRecipe.macroHardness, 0.0f, 1.0f, 1.35f, 0.55f));
+    auto effectiveSustain = juce::jlimit(effectiveAttack + 0.02f, 0.97f,
+                                         activeRecipe.sustainPosition + juce::jmap(activeRecipe.macroSize, 0.0f, 1.0f, -0.03f, 0.10f));
+    auto effectiveRelease = juce::jlimit(effectiveSustain + 0.03f, 0.995f,
+                                         activeRecipe.releasePosition + juce::jmap(activeRecipe.macroSize, 0.0f, 1.0f, -0.08f, 0.14f));
+    auto effectiveSustainLevel = juce::jlimit(0.05f, 1.0f,
+                                              activeRecipe.sustainLevel + juce::jmap(activeRecipe.macroWeight, 0.0f, 1.0f, -0.10f, 0.16f));
+    auto releaseStart = juce::jmax(effectiveSustain + 0.01f, effectiveRelease);
     float filterState = 0.0f;
     for (int sample = 0; sample < numSamples; ++sample)
     {
@@ -916,9 +963,10 @@ juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& a
         auto pitchAutomationValue = sampleAutomation(activeRecipe.pitchAutomation, t);
         auto gainAutomationValue = sampleAutomation(activeRecipe.gainAutomation, t);
         auto filterAutomationValue = sampleAutomation(activeRecipe.filterAutomation, t);
-        auto pitchSemitones = activeRecipe.pitchSweepSemitones * (t - 0.5f) * 2.0f
+        auto pitchSemitones = (activeRecipe.pitchSweepSemitones + juce::jmap(activeRecipe.macroWeight, 0.0f, 1.0f, 2.0f, -2.0f)) * (t - 0.5f) * 2.0f
                             + juce::jmap(pitchAutomationValue, 0.0f, 1.0f, -12.0f, 12.0f);
-        auto frequency = activeRecipe.baseFrequencyHz * std::pow(2.0f, pitchSemitones / 12.0f);
+        auto baseFrequency = activeRecipe.baseFrequencyHz * juce::jmap(activeRecipe.macroWeight, 0.0f, 1.0f, 1.16f, 0.86f);
+        auto frequency = baseFrequency * std::pow(2.0f, pitchSemitones / 12.0f);
         auto phase = juce::MathConstants<float>::twoPi * frequency * ((float) sample / (float) activeRecipe.sampleRate);
 
         auto sine = std::sin(phase);
@@ -926,27 +974,33 @@ juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& a
         auto square = std::sin(phase) >= 0.0f ? 1.0f : -1.0f;
         auto triangle = std::asin(std::sin(phase)) * (2.0f / juce::MathConstants<float>::pi);
         auto noise = random.nextFloat() * 2.0f - 1.0f;
+        auto macroNoise = juce::jlimit(0.0f, 1.0f, activeRecipe.noiseLevel + activeRecipe.macroAir * 0.18f + activeRecipe.macroGrit * 0.12f);
+        auto gritDrive = 1.0f + activeRecipe.macroGrit * 5.5f;
 
         float envelope = 0.0f;
-        if (t <= activeRecipe.attackPosition)
-            envelope = juce::jmap(t, 0.0f, juce::jmax(0.001f, activeRecipe.attackPosition), 0.0f, 1.0f);
-        else if (t <= activeRecipe.sustainPosition)
-            envelope = juce::jmap(t, activeRecipe.attackPosition, juce::jmax(activeRecipe.attackPosition + 0.001f, activeRecipe.sustainPosition), 1.0f, activeRecipe.sustainLevel);
+        if (t <= effectiveAttack)
+            envelope = juce::jmap(t, 0.0f, juce::jmax(0.001f, effectiveAttack), 0.0f, 1.0f);
+        else if (t <= effectiveSustain)
+            envelope = juce::jmap(t, effectiveAttack, juce::jmax(effectiveAttack + 0.001f, effectiveSustain), 1.0f, effectiveSustainLevel);
         else if (t <= releaseStart)
-            envelope = activeRecipe.sustainLevel;
+            envelope = effectiveSustainLevel;
         else
-            envelope = juce::jmap(t, releaseStart, 1.0f, activeRecipe.sustainLevel, 0.0f);
+            envelope = juce::jmap(t, releaseStart, 1.0f, effectiveSustainLevel, 0.0f);
 
         auto sampleValue = normalizer * envelope * gainAutomationValue
-                         * (activeRecipe.sineLevel * sine
-                            + activeRecipe.sawLevel * saw
-                            + activeRecipe.squareLevel * square
-                            + activeRecipe.triangleLevel * triangle
-                            + activeRecipe.noiseLevel * noise);
+                         * ((activeRecipe.sineLevel + activeRecipe.macroWeight * 0.10f) * sine
+                            + (activeRecipe.sawLevel + activeRecipe.macroGrit * 0.14f) * saw
+                            + (activeRecipe.squareLevel + activeRecipe.macroHardness * 0.12f) * square
+                            + (activeRecipe.triangleLevel + activeRecipe.macroWeight * 0.08f) * triangle
+                            + macroNoise * noise);
+
+        sampleValue = std::tanh(sampleValue * gritDrive) / std::tanh(gritDrive);
 
         auto filterNormalized = clamp01(cutoffToNormalized(activeRecipe.filterCutoffHz)
                                         + (filterAutomationValue - 0.5f) * 0.75f
-                                        + (envelope - 0.5f) * activeRecipe.filterEnvelopeAmount);
+                                        + (envelope - 0.5f) * (activeRecipe.filterEnvelopeAmount + activeRecipe.macroHardness * 0.30f)
+                                        + activeRecipe.macroAir * 0.18f
+                                        - activeRecipe.macroWeight * 0.10f);
         auto brightnessEquivalent = juce::jmap(filterNormalized, 0.0f, 1.0f, 0.02f, 1.0f);
         sampleValue = applyBrightnessFilter(sampleValue, filterState, brightnessEquivalent, activeRecipe.sampleRate);
 
@@ -971,6 +1025,11 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.parameters.add({ "filterCutoff", "Filter Cutoff", "float", activeRecipe.filterCutoffHz, kMinFilterCutoffHz, kMaxFilterCutoffHz, "hz" });
     document.parameters.add({ "filterResonance", "Filter Resonance", "float", activeRecipe.filterResonance, 0.30, 8.0, "q" });
     document.parameters.add({ "filterEnvelopeAmount", "Filter Envelope", "float", activeRecipe.filterEnvelopeAmount, -1.0, 1.0, "normalized" });
+    document.parameters.add({ "macroHardness", "Hardness", "float", activeRecipe.macroHardness, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroWeight", "Weight", "float", activeRecipe.macroWeight, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroAir", "Air", "float", activeRecipe.macroAir, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroGrit", "Grit", "float", activeRecipe.macroGrit, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroSize", "Size", "float", activeRecipe.macroSize, 0.0, 1.0, "normalized" });
     document.parameters.add({ "pitchOffsetSemitones", "Pitch Offset", "float", 0.0, -12.0, 12.0, "semitones" });
     document.parameters.add({ "outputGain", "Output Gain", "float", 1.0, 0.0, 1.0, "normalized" });
     document.parameters.add({ "noiseLevel", "Noise Level", "float", activeRecipe.noiseLevel, 0.0, 1.0, "normalized" });
@@ -1054,6 +1113,11 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.filterCutoffHz = 980.0f;
         recipe.filterResonance = 0.55f;
         recipe.filterEnvelopeAmount = 0.18f;
+        recipe.macroHardness = 0.24f;
+        recipe.macroWeight = 0.56f;
+        recipe.macroAir = 0.18f;
+        recipe.macroGrit = 0.08f;
+        recipe.macroSize = 0.46f;
         recipe.sineLevel = 0.72f;
         recipe.sawLevel = 0.0f;
         recipe.squareLevel = 0.0f;
@@ -1077,6 +1141,11 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.filterCutoffHz = 2600.0f;
         recipe.filterResonance = 1.85f;
         recipe.filterEnvelopeAmount = 0.42f;
+        recipe.macroHardness = 0.62f;
+        recipe.macroWeight = 0.42f;
+        recipe.macroAir = 0.36f;
+        recipe.macroGrit = 0.18f;
+        recipe.macroSize = 0.30f;
         recipe.sineLevel = 0.20f;
         recipe.sawLevel = 0.12f;
         recipe.squareLevel = 0.0f;
@@ -1100,6 +1169,11 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.filterCutoffHz = 3100.0f;
         recipe.filterResonance = 1.20f;
         recipe.filterEnvelopeAmount = 0.66f;
+        recipe.macroHardness = 0.78f;
+        recipe.macroWeight = 0.34f;
+        recipe.macroAir = 0.44f;
+        recipe.macroGrit = 0.42f;
+        recipe.macroSize = 0.22f;
         recipe.sineLevel = 0.25f;
         recipe.sawLevel = 0.25f;
         recipe.squareLevel = 0.10f;
@@ -1123,6 +1197,11 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.filterCutoffHz = 740.0f;
         recipe.filterResonance = 0.72f;
         recipe.filterEnvelopeAmount = 0.24f;
+        recipe.macroHardness = 0.20f;
+        recipe.macroWeight = 0.68f;
+        recipe.macroAir = 0.28f;
+        recipe.macroGrit = 0.10f;
+        recipe.macroSize = 0.86f;
         recipe.sineLevel = 0.44f;
         recipe.sawLevel = 0.18f;
         recipe.squareLevel = 0.06f;
@@ -1146,6 +1225,11 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.filterCutoffHz = 1800.0f;
         recipe.filterResonance = 2.80f;
         recipe.filterEnvelopeAmount = 0.82f;
+        recipe.macroHardness = 0.92f;
+        recipe.macroWeight = 0.72f;
+        recipe.macroAir = 0.30f;
+        recipe.macroGrit = 0.48f;
+        recipe.macroSize = 0.58f;
         recipe.sineLevel = 0.36f;
         recipe.sawLevel = 0.18f;
         recipe.squareLevel = 0.14f;
@@ -1179,6 +1263,11 @@ void SignalLabPanel::refreshControlsFromRecipe()
     filterCutoffSlider.setValue(recipe.filterCutoffHz, juce::dontSendNotification);
     filterResonanceSlider.setValue(recipe.filterResonance, juce::dontSendNotification);
     filterEnvelopeSlider.setValue(recipe.filterEnvelopeAmount, juce::dontSendNotification);
+    macroHardnessSlider.setValue(recipe.macroHardness, juce::dontSendNotification);
+    macroWeightSlider.setValue(recipe.macroWeight, juce::dontSendNotification);
+    macroAirSlider.setValue(recipe.macroAir, juce::dontSendNotification);
+    macroGritSlider.setValue(recipe.macroGrit, juce::dontSendNotification);
+    macroSizeSlider.setValue(recipe.macroSize, juce::dontSendNotification);
     sineSlider.setValue(recipe.sineLevel, juce::dontSendNotification);
     sawSlider.setValue(recipe.sawLevel, juce::dontSendNotification);
     squareSlider.setValue(recipe.squareLevel, juce::dontSendNotification);
@@ -1198,6 +1287,9 @@ void SignalLabPanel::updateStatusText()
               + "  |  " + juce::String(recipe.durationSeconds, 2) + " s"
               + "  |  " + juce::String((int) recipe.baseFrequencyHz) + " Hz"
               + "  |  " + recipe.filterMode + " " + juce::String((int) recipe.filterCutoffHz) + " Hz"
+              + "  |  macros H:" + juce::String(recipe.macroHardness, 2)
+              + " W:" + juce::String(recipe.macroWeight, 2)
+              + " A:" + juce::String(recipe.macroAir, 2)
               + "  |  " + juce::String(sampleCount) + " samples"
               + "  |  automation: pitch + gain + filter";
     statusLabel.setText(text, juce::dontSendNotification);
