@@ -39,6 +39,18 @@ juce::String trimProjectLabelPrefix(const juce::String& label)
     return trimmed;
 }
 
+juce::String slugForProjectAssetName(const juce::String& name)
+{
+    auto slug = name.trim().toLowerCase();
+    slug = slug.retainCharacters("abcdefghijklmnopqrstuvwxyz0123456789-_ ");
+    slug = slug.replace(" ", "-");
+    while (slug.contains("--"))
+        slug = slug.replace("--", "-");
+    slug = slug.trimCharactersAtStart("-");
+    slug = slug.trimCharactersAtEnd("-");
+    return slug.isNotEmpty() ? slug : "signal-asset";
+}
+
 juce::String makeDisplayProjectLabel(const juce::String& rawName)
 {
     auto trimmed = trimProjectLabelPrefix(rawName);
@@ -2059,40 +2071,56 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
 
         juce::String errorMessage;
-        auto renderedFile = juce::File();
-        if (renderedFile.existsAsFile())
-        {
-            if (engine.getTrackCount() == 0)
-                addTrack();
+        auto assetSlug = slugForProjectAssetName(suggestedName);
+        auto logicalPath = creation::assets::ProjectContainerPaths::derivedAssetRoot
+                         + assetSlug + "-" + makeRecordingTimestamp() + ".wav";
 
-            auto targetTrack = trackerPanel.getSelectedTrack();
-            if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
-                targetTrack = 0;
+        auto tempRenderFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                  .getChildFile(assetSlug + "-" + juce::Uuid().toString() + ".wav");
+
+        if (writeWavFile(tempRenderFile, buffer, sampleRate, errorMessage))
+        {
+            juce::MemoryBlock fileData;
+            if (! tempRenderFile.loadFileAsData(fileData))
+            {
+                transportBar.setStatusText("Rendered WAV was created, but could not be read back into the project.");
+                tempRenderFile.deleteFile();
+                return;
+            }
+
+            if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
+            {
+                transportBar.setStatusText("Could not write the rendered WAV into the project.");
+                tempRenderFile.deleteFile();
+                return;
+            }
 
             creation::assets::AssetDescriptor renderedAsset;
-            juce::String clipError;
-            auto clipIndex = placeAudioAssetOnTracker(renderedAsset,
-                                                      targetTrack,
-                                                      timelineModel.getTransportSeconds(),
-                                                      "signal",
-                                                      clipError);
-            if (clipIndex < 0)
+            renderedAsset.id = "asset:" + juce::Uuid().toString();
+            renderedAsset.version = "1";
+            renderedAsset.versionId = renderedAsset.id + "@1";
+            renderedAsset.displayName = suggestedName.isNotEmpty() ? suggestedName + " Render" : "Signal Render";
+            renderedAsset.logicalPath = logicalPath;
+            renderedAsset.kind = creation::assets::AssetKind::render;
+            renderedAsset.mediaType = "audio/wav";
+            renderedAsset.fileSizeBytes = (int64) fileData.getSize();
+            renderedAsset.createdAt = renderedAsset.modifiedAt = juce::Time::getCurrentTime();
+            renderedAsset.sourceApp = "Creation Station";
+            renderedAsset.description = "Rendered from Signal Lab on command.";
+            projectSession.upsertAssetDescriptor(renderedAsset);
+
+            if (! projectSession.commit(errorMessage))
             {
-                transportBar.setStatusText(clipError.isNotEmpty() ? clipError
-                                                                  : "Rendered sound, but could not place it on the Tracker.");
-                refreshProjectAssets();
-                refreshContentLibrary();
-                saveSessionToDisk();
+                transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the rendered WAV asset.");
+                tempRenderFile.deleteFile();
                 return;
             }
 
             refreshProjectAssets();
             refreshContentLibrary();
-            trackerPanel.setSelectedTrack(targetTrack);
-            trackerPanel.refreshTimelineView();
-            setWorkspaceMode(WorkspaceMode::tracker);
             saveSessionToDisk(true);
-            transportBar.setStatusText("Rendered signal to Tracker: " + renderedFile.getFileName());
+            transportBar.setStatusText("Rendered Signal Lab WAV asset: " + renderedAsset.displayName);
+            tempRenderFile.deleteFile();
         }
         else if (errorMessage.isNotEmpty())
         {
@@ -2102,30 +2130,34 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     signalLabPanel.onPatchExportRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
     {
-        if (! projectSession.isValid())
-        {
-            juce::String projectError;
-            if (! creation::assets::ProjectWorkspaceService::createProject(suiteSettings, creation::assets::SuiteAppDomain::station, "New Project", "1.0.0", "1.0.0", projectSession, projectError))
-            {
-                transportBar.setStatusText("Could not create a project for patch export.");
-                return;
-            }
+        auto defaultName = slugForProjectAssetName(suggestedName) + ".cspatch";
+        rawAssetExportChooser = std::make_unique<juce::FileChooser>("Export Signal Lab sound",
+                                                                    juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                                                        .getChildFile(defaultName),
+                                                                    "*.cspatch",
+                                                                    true);
+        auto chooser = rawAssetExportChooser.get();
+        chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                             [this, chooser, patchJson](const juce::FileChooser& result)
+                             {
+                                 auto destination = result.getResult();
+                                 if (chooser == rawAssetExportChooser.get())
+                                     rawAssetExportChooser.reset();
 
-            transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
-        }
+                                 if (destination.getFullPathName().isEmpty())
+                                     return;
 
-        juce::String errorMessage;
-        auto patchFile = juce::File();
-        if (patchFile.existsAsFile())
-        {
-            refreshContentLibrary();
-            saveSessionToDisk();
-            transportBar.setStatusText("Exported project sound file: " + patchFile.getFileName());
-        }
-        else if (errorMessage.isNotEmpty())
-        {
-            transportBar.setStatusText(errorMessage);
-        }
+                                 if (destination.getFileExtension().isEmpty())
+                                     destination = destination.withFileExtension(".cspatch");
+
+                                 if (! destination.replaceWithText(patchJson))
+                                 {
+                                     transportBar.setStatusText("Could not export the Signal Lab sound file.");
+                                     return;
+                                 }
+
+                                 transportBar.setStatusText("Exported Signal Lab sound file: " + destination.getFileName());
+                             });
     };
 
     signalLabPanel.onPatchSaveToLibraryRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
@@ -2143,18 +2175,56 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
 
         juce::String errorMessage;
-        auto patchFile = juce::File();
-        if (patchFile.existsAsFile())
+        juce::MemoryBlock patchData(patchJson.toRawUTF8(), (size_t) patchJson.getNumBytesAsUTF8());
+        auto assetSlug = slugForProjectAssetName(suggestedName);
+        auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + assetSlug + ".cspatch";
+
+        if (! projectSession.writeEntry(logicalPath, patchData, juce::Time::getCurrentTime()))
         {
-            refreshProjectAssets();
-            refreshContentLibrary();
-            saveSessionToDisk(true);
-            transportBar.setStatusText("Saved project sound: " + patchFile.getFileName());
+            transportBar.setStatusText("Could not write the Signal Lab design into the project.");
+            return;
         }
-        else if (errorMessage.isNotEmpty())
+
+        creation::assets::AssetDescriptor patchAsset;
+        auto existingAssets = projectSession.getManifest().assetCatalog.query({});
+        for (const auto& asset : existingAssets)
         {
-            transportBar.setStatusText(errorMessage);
+            if (asset.logicalPath == logicalPath)
+            {
+                patchAsset = asset;
+                break;
+            }
         }
+
+        if (patchAsset.id.isEmpty())
+        {
+            patchAsset.id = "asset:" + juce::Uuid().toString();
+            patchAsset.version = "1";
+        }
+        patchAsset.versionId = patchAsset.id + "@" + patchAsset.version;
+        patchAsset.displayName = suggestedName.isNotEmpty() ? suggestedName : "Signal Design";
+        patchAsset.logicalPath = logicalPath;
+        patchAsset.kind = creation::assets::AssetKind::patch;
+        patchAsset.mediaType = "application/x-creation-station-patch";
+        patchAsset.fileSizeBytes = (int64) patchData.getSize();
+        patchAsset.modifiedAt = juce::Time::getCurrentTime();
+        if (patchAsset.createdAt == juce::Time())
+            patchAsset.createdAt = patchAsset.modifiedAt;
+        patchAsset.sourceApp = "Creation Station";
+        patchAsset.description = "Editable Signal Lab sound design object.";
+        patchAsset.revision = juce::jmax(1, patchAsset.revision + 1);
+        projectSession.upsertAssetDescriptor(patchAsset);
+
+        if (! projectSession.commit(errorMessage))
+        {
+            transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the Signal Lab design asset.");
+            return;
+        }
+
+        refreshProjectAssets();
+        refreshContentLibrary();
+        saveSessionToDisk(true);
+        transportBar.setStatusText("Saved Signal Lab design asset: " + patchAsset.displayName);
     };
 
     signalLabPanel.onPatchLoadRequested = [this]
