@@ -44,6 +44,8 @@ public:
     void applyAiTemplate(const juce::String& templateName);
     bool previewCurrentSignal();
 
+    std::function<void(const juce::ValueTree& stateBeforeEdit, const juce::String& label)> onUndoCheckpointRequested;
+    std::function<void()> onInteractionStarted;
     std::function<void(const juce::AudioBuffer<float>&, double sampleRate, const juce::String& suggestedName)> onPreviewRequested;
     std::function<void(const juce::AudioBuffer<float>&, double sampleRate, const juce::String& suggestedName)> onRenderRequested;
     std::function<void(const juce::String& patchJson, const juce::String& suggestedName)> onPatchExportRequested;
@@ -63,8 +65,12 @@ private:
         void paint(juce::Graphics& g) override;
         void mouseDown(const juce::MouseEvent& event) override;
         void mouseDrag(const juce::MouseEvent& event) override;
+        void mouseUp(const juce::MouseEvent& event) override;
         void mouseDoubleClick(const juce::MouseEvent& event) override;
 
+        std::function<void()> onGestureBegin;
+        std::function<void()> onGestureEnd;
+        std::function<void(const juce::String& label)> onDiscreteEditRequested;
         std::function<void(const juce::Array<cw::PatchAutomationPoint>&)> onEnvelopeChanged;
 
     private:
@@ -107,8 +113,12 @@ private:
         void paint(juce::Graphics& g) override;
         void mouseDown(const juce::MouseEvent& event) override;
         void mouseDrag(const juce::MouseEvent& event) override;
+        void mouseUp(const juce::MouseEvent& event) override;
         void mouseDoubleClick(const juce::MouseEvent& event) override;
 
+        std::function<void()> onGestureBegin;
+        std::function<void()> onGestureEnd;
+        std::function<void(const juce::String& label)> onDiscreteEditRequested;
         std::function<void(const cw::PatchAutomationLane&)> onLaneChanged;
 
     private:
@@ -131,10 +141,16 @@ private:
     void updateStatusText();
     void syncAutomationEditors();
     void rebuildAutomationChrome();
+    void captureUndoCheckpoint(const juce::String& label);
+    void beginUndoGesture(const juce::String& label);
+    void endUndoGesture();
+    void noteInteraction();
 
     SignalRecipe recipe;
     juce::AudioBuffer<float> generatedBuffer;
     bool suppressCallbacks = false;
+    bool undoGestureActive = false;
+    bool nameEditUndoCaptured = false;
     PatchRuntimePlayer runtimePlayer;
 
     juce::Label titleLabel;

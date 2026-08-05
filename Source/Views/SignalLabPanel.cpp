@@ -536,8 +536,13 @@ void SignalLabPanel::EnvelopeEditor::mouseDown(const juce::MouseEvent& event)
 {
     dragIndex = findPointAt(event.position);
 
+    if (dragIndex >= 0 && onGestureBegin)
+        onGestureBegin();
+
     if (event.mods.isPopupMenu() && dragIndex > 0 && dragIndex < recipe.envelopePoints.size() - 1)
     {
+        if (onDiscreteEditRequested)
+            onDiscreteEditRequested("Remove envelope point");
         recipe.envelopePoints.remove(dragIndex);
         dragIndex = -1;
         ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
@@ -576,6 +581,12 @@ void SignalLabPanel::EnvelopeEditor::mouseDrag(const juce::MouseEvent& event)
     repaint();
 }
 
+void SignalLabPanel::EnvelopeEditor::mouseUp(const juce::MouseEvent&)
+{
+    if (onGestureEnd)
+        onGestureEnd();
+}
+
 void SignalLabPanel::EnvelopeEditor::mouseDoubleClick(const juce::MouseEvent& event)
 {
     if (event.mods.isPopupMenu())
@@ -585,6 +596,8 @@ void SignalLabPanel::EnvelopeEditor::mouseDoubleClick(const juce::MouseEvent& ev
     auto normalizedX = clamp01((event.position.x - plot.getX()) / plot.getWidth());
     auto normalizedY = clamp01((plot.getBottom() - event.position.y) / plot.getHeight());
 
+    if (onDiscreteEditRequested)
+        onDiscreteEditRequested("Add envelope point");
     recipe.envelopePoints.add(makePoint(normalizedX, normalizedY, recipe.envelopeCurveMode));
     ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
     if (onEnvelopeChanged)
@@ -835,8 +848,13 @@ void SignalLabPanel::AutomationLaneEditor::mouseDown(const juce::MouseEvent& eve
 {
     dragIndex = findPointAt(event.position);
 
+    if (dragIndex >= 0 && onGestureBegin)
+        onGestureBegin();
+
     if (event.mods.isPopupMenu() && dragIndex > 0 && dragIndex < lane.points.size() - 1)
     {
+        if (onDiscreteEditRequested)
+            onDiscreteEditRequested("Remove motion point");
         lane.points.remove(dragIndex);
         dragIndex = -1;
         ensureLane(lane, lane.interpolation);
@@ -871,6 +889,12 @@ void SignalLabPanel::AutomationLaneEditor::mouseDrag(const juce::MouseEvent& eve
     repaint();
 }
 
+void SignalLabPanel::AutomationLaneEditor::mouseUp(const juce::MouseEvent&)
+{
+    if (onGestureEnd)
+        onGestureEnd();
+}
+
 void SignalLabPanel::AutomationLaneEditor::mouseDoubleClick(const juce::MouseEvent& event)
 {
     if (event.mods.isPopupMenu())
@@ -878,6 +902,8 @@ void SignalLabPanel::AutomationLaneEditor::mouseDoubleClick(const juce::MouseEve
 
     auto plot = getPlotArea();
     auto normalizedX = clamp01((event.position.x - plot.getX()) / plot.getWidth());
+    if (onDiscreteEditRequested)
+        onDiscreteEditRequested("Add motion point");
     lane.points.add(makePoint(normalizedX, pointValueFromY(event.position.y), lane.interpolation));
     ensureLane(lane, lane.interpolation);
     if (onLaneChanged)
@@ -913,8 +939,17 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks)
             return;
 
+        if (! nameEditUndoCaptured)
+        {
+            captureUndoCheckpoint("Rename sound");
+            nameEditUndoCaptured = true;
+        }
         recipe.name = nameEditor.getText().trim();
         updateStatusText();
+    };
+    nameEditor.onFocusLost = [this]
+    {
+        nameEditUndoCaptured = false;
     };
     addAndMakeVisible(nameEditor);
 
@@ -938,6 +973,7 @@ SignalLabPanel::SignalLabPanel()
         if (selected == "Custom" || selected.isEmpty())
             return;
 
+        captureUndoCheckpoint("Apply sound template");
         applyTemplate(selected);
     };
     addAndMakeVisible(templateSelector);
@@ -998,14 +1034,44 @@ SignalLabPanel::SignalLabPanel()
     configureSlider(triangleSlider, 0.0, 1.0, 0.001);
     configureSlider(noiseSlider, 0.0, 1.0, 0.001);
 
-    frequencySlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.baseFrequencyHz = (float) frequencySlider.getValue(); regenerateSignal(); } };
-    durationSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.durationSeconds = durationSlider.getValue(); regenerateSignal(); } };
-    pitchSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.pitchSweepSemitones = (float) pitchSlider.getValue(); regenerateSignal(); } };
+    auto wireSliderUndo = [this](juce::Slider& slider, const juce::String& label)
+    {
+        slider.onDragStart = [this, label]
+        {
+            beginUndoGesture(label);
+        };
+        slider.onDragEnd = [this]
+        {
+            endUndoGesture();
+        };
+    };
+
+    wireSliderUndo(frequencySlider, "Adjust base frequency");
+    wireSliderUndo(durationSlider, "Adjust duration");
+    wireSliderUndo(pitchSlider, "Adjust pitch sweep");
+    wireSliderUndo(filterCutoffSlider, "Adjust filter cutoff");
+    wireSliderUndo(filterResonanceSlider, "Adjust filter resonance");
+    wireSliderUndo(filterEnvelopeSlider, "Adjust filter envelope");
+    wireSliderUndo(macroHardnessSlider, "Adjust hardness");
+    wireSliderUndo(macroWeightSlider, "Adjust weight");
+    wireSliderUndo(macroAirSlider, "Adjust air");
+    wireSliderUndo(macroGritSlider, "Adjust grit");
+    wireSliderUndo(macroSizeSlider, "Adjust size");
+    wireSliderUndo(sineSlider, "Adjust sine level");
+    wireSliderUndo(sawSlider, "Adjust saw level");
+    wireSliderUndo(squareSlider, "Adjust square level");
+    wireSliderUndo(triangleSlider, "Adjust triangle level");
+    wireSliderUndo(noiseSlider, "Adjust noise level");
+
+    frequencySlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.baseFrequencyHz = (float) frequencySlider.getValue(); regenerateSignal(); } };
+    durationSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.durationSeconds = durationSlider.getValue(); regenerateSignal(); } };
+    pitchSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.pitchSweepSemitones = (float) pitchSlider.getValue(); regenerateSignal(); } };
     filterModeSelector.onChange = [this]
     {
         if (suppressCallbacks)
             return;
 
+        captureUndoCheckpoint("Change filter type");
         recipe.filterMode = filterModeSelector.getSelectedId() == 2 ? "bandpass"
                           : filterModeSelector.getSelectedId() == 3 ? "highpass"
                                                                     : "lowpass";
@@ -1016,6 +1082,7 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks)
             return;
 
+        captureUndoCheckpoint("Change envelope curve");
         recipe.envelopeCurveMode = envelopeCurveSelector.getSelectedId() == 3 ? "stepped"
                                   : envelopeCurveSelector.getSelectedId() == 1 ? "linear"
                                                                                : "smooth";
@@ -1029,6 +1096,7 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks)
             return;
 
+        captureUndoCheckpoint("Change motion curve");
         recipe.automationCurveMode = automationCurveSelector.getSelectedId() == 3 ? "stepped"
                                     : automationCurveSelector.getSelectedId() == 1 ? "linear"
                                                                                    : "smooth";
@@ -1040,22 +1108,27 @@ SignalLabPanel::SignalLabPanel()
         }
         regenerateSignal();
     };
-    filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
-    filterResonanceSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterResonance = (float) filterResonanceSlider.getValue(); regenerateSignal(); } };
-    filterEnvelopeSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue(); regenerateSignal(); } };
-    macroHardnessSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroHardness = (float) macroHardnessSlider.getValue(); regenerateSignal(); } };
-    macroWeightSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroWeight = (float) macroWeightSlider.getValue(); regenerateSignal(); } };
-    macroAirSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroAir = (float) macroAirSlider.getValue(); regenerateSignal(); } };
-    macroGritSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroGrit = (float) macroGritSlider.getValue(); regenerateSignal(); } };
-    macroSizeSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.macroSize = (float) macroSizeSlider.getValue(); regenerateSignal(); } };
-    sineSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.sineLevel = (float) sineSlider.getValue(); regenerateSignal(); } };
-    sawSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.sawLevel = (float) sawSlider.getValue(); regenerateSignal(); } };
-    squareSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.squareLevel = (float) squareSlider.getValue(); regenerateSignal(); } };
-    triangleSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.triangleLevel = (float) triangleSlider.getValue(); regenerateSignal(); } };
-    noiseSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.noiseLevel = (float) noiseSlider.getValue(); regenerateSignal(); } };
+    filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
+    filterResonanceSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterResonance = (float) filterResonanceSlider.getValue(); regenerateSignal(); } };
+    filterEnvelopeSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue(); regenerateSignal(); } };
+    macroHardnessSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroHardness = (float) macroHardnessSlider.getValue(); regenerateSignal(); } };
+    macroWeightSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroWeight = (float) macroWeightSlider.getValue(); regenerateSignal(); } };
+    macroAirSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroAir = (float) macroAirSlider.getValue(); regenerateSignal(); } };
+    macroGritSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroGrit = (float) macroGritSlider.getValue(); regenerateSignal(); } };
+    macroSizeSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroSize = (float) macroSizeSlider.getValue(); regenerateSignal(); } };
+    sineSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.sineLevel = (float) sineSlider.getValue(); regenerateSignal(); } };
+    sawSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.sawLevel = (float) sawSlider.getValue(); regenerateSignal(); } };
+    squareSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.squareLevel = (float) squareSlider.getValue(); regenerateSignal(); } };
+    triangleSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.triangleLevel = (float) triangleSlider.getValue(); regenerateSignal(); } };
+    noiseSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.noiseLevel = (float) noiseSlider.getValue(); regenerateSignal(); } };
+
+    envelopeEditor.onGestureBegin = [this] { beginUndoGesture("Move envelope point"); };
+    envelopeEditor.onGestureEnd = [this] { endUndoGesture(); };
+    envelopeEditor.onDiscreteEditRequested = [this](const juce::String& label) { captureUndoCheckpoint(label); };
 
     envelopeEditor.onEnvelopeChanged = [this](const juce::Array<cw::PatchAutomationPoint>& points)
     {
+        noteInteraction();
         recipe.envelopePoints = points;
         ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
         regenerateSignal();
@@ -1109,6 +1182,7 @@ SignalLabPanel::SignalLabPanel()
 
     addAutomationLaneButton.onClick = [this]
     {
+        captureUndoCheckpoint("Add motion lane");
         auto spec = getAutomationTargetSpecs()[(size_t) (recipe.automationLanes.size() % (int) getAutomationTargetSpecs().size())];
         recipe.automationLanes.add(makeLaneForSpec(spec, recipe.automationCurveMode));
         rebuildAutomationChrome();
@@ -1837,6 +1911,9 @@ void SignalLabPanel::syncAutomationEditors()
         auto spec = getTargetSpec(lane.targetParameter);
         lane.name = spec.title;
         automationLaneEditors[index]->setLane(lane, spec.accent);
+        automationLaneEditors[index]->onGestureBegin = [this] { beginUndoGesture("Move motion point"); };
+        automationLaneEditors[index]->onGestureEnd = [this] { endUndoGesture(); };
+        automationLaneEditors[index]->onDiscreteEditRequested = [this](const juce::String& label) { captureUndoCheckpoint(label); };
         for (int itemIndex = 0; itemIndex < (int) getAutomationTargetSpecs().size(); ++itemIndex)
         {
             if (lane.targetParameter == juce::String(getAutomationTargetSpecs()[(size_t) itemIndex].parameterId))
@@ -1858,6 +1935,7 @@ void SignalLabPanel::rebuildAutomationChrome()
             auto index = automationLaneEditors.indexOf(editor);
             if (index >= 0 && index < recipe.automationLanes.size())
             {
+                noteInteraction();
                 recipe.automationLanes.getReference(index) = updatedLane;
                 ensureLane(recipe.automationLanes.getReference(index), recipe.automationCurveMode);
                 regenerateSignal();
@@ -1876,6 +1954,7 @@ void SignalLabPanel::rebuildAutomationChrome()
             auto index = automationTargetSelectors.indexOf(selector);
             if (index >= 0 && index < recipe.automationLanes.size())
             {
+                captureUndoCheckpoint("Retarget motion lane");
                 auto selectedSpec = getAutomationTargetSpecs()[(size_t) juce::jmax(0, selector->getSelectedItemIndex())];
                 auto existingPoints = recipe.automationLanes.getReference(index).points;
                 recipe.automationLanes.getReference(index) = makeLaneForSpec(selectedSpec, recipe.automationCurveMode);
@@ -1895,6 +1974,7 @@ void SignalLabPanel::rebuildAutomationChrome()
             auto index = removeAutomationLaneButtons.indexOf(removeButton);
             if (index >= 0 && index < recipe.automationLanes.size() && recipe.automationLanes.size() > 1)
             {
+                captureUndoCheckpoint("Remove motion lane");
                 recipe.automationLanes.remove(index);
                 rebuildAutomationChrome();
                 regenerateSignal();
@@ -1936,4 +2016,36 @@ void SignalLabPanel::rebuildAutomationChrome()
     suppressCallbacks = false;
 
     resized();
+}
+
+void SignalLabPanel::captureUndoCheckpoint(const juce::String& label)
+{
+    noteInteraction();
+    if (undoGestureActive)
+        return;
+
+    if (onUndoCheckpointRequested)
+        onUndoCheckpointRequested(createState(), label);
+}
+
+void SignalLabPanel::beginUndoGesture(const juce::String& label)
+{
+    noteInteraction();
+    if (undoGestureActive)
+        return;
+
+    undoGestureActive = true;
+    if (onUndoCheckpointRequested)
+        onUndoCheckpointRequested(createState(), label);
+}
+
+void SignalLabPanel::endUndoGesture()
+{
+    undoGestureActive = false;
+}
+
+void SignalLabPanel::noteInteraction()
+{
+    if (onInteractionStarted)
+        onInteractionStarted();
 }

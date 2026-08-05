@@ -329,6 +329,7 @@ private:
     bool clipDragUndoCaptured = false;
     creation::services::SuiteUndoService undoService;
     static constexpr const char* timelineUndoContextId = "creation-station.timeline";
+    static constexpr const char* signalUndoContextId = "creation-station.signal-lab";
 
     void timerCallback() override;
     bool keyPressed(const juce::KeyPress& key) override;
@@ -354,6 +355,10 @@ private:
     void undoTimelineEdit();
     void redoTimelineEdit();
     void restoreTimelineEditState(const juce::ValueTree& state, const juce::String& statusText);
+    void pushSignalUndoState(const juce::ValueTree& stateBeforeEdit, const juce::String& label);
+    void undoSignalEdit();
+    void redoSignalEdit();
+    void restoreSignalEditState(const juce::ValueTree& state, const juce::String& statusText);
     void splitClipAt(int clipIndex, double splitSeconds);
     void duplicateClip(int clipIndex);
     void deleteClip(int clipIndex);

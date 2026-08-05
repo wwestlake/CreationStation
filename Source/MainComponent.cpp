@@ -2061,6 +2061,16 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             transportBar.setStatusText(errorMessage);
     };
 
+    signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
+    {
+        pushSignalUndoState(stateBeforeEdit, label);
+    };
+
+    signalLabPanel.onInteractionStarted = [this]
+    {
+        undoService.setActiveContext(signalUndoContextId);
+    };
+
     signalLabPanel.onRenderRequested = [this](const juce::AudioBuffer<float>& buffer, double sampleRate, const juce::String& suggestedName)
     {
         juce::String projectError;
@@ -7421,6 +7431,8 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     state.addChild(timelineModel.createState(), -1, nullptr);
     auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
     state.addChild(timelineUndoContext.serialise("TimelineUndoContext"), -1, nullptr);
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    state.addChild(signalUndoContext.serialise("SignalUndoContext"), -1, nullptr);
 
     return state;
 }
@@ -7727,6 +7739,46 @@ void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const
     transportBar.setStatusText(statusText);
 }
 
+void MainComponent::pushSignalUndoState(const juce::ValueTree& stateBeforeEdit, const juce::String& label)
+{
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    signalUndoContext.pushUndoState(stateBeforeEdit, label);
+    undoService.setActiveContext(signalUndoContextId);
+}
+
+void MainComponent::restoreSignalEditState(const juce::ValueTree& state, const juce::String& statusText)
+{
+    signalLabPanel.restoreState(state);
+    setWorkspaceMode(WorkspaceMode::signal);
+    projectDirty = true;
+    saveSessionToDisk();
+    transportBar.setStatusText(statusText);
+}
+
+void MainComponent::undoSignalEdit()
+{
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! signalUndoContext.undoTo(signalLabPanel.createState(), stateToRestore, label))
+        return;
+
+    undoService.setActiveContext(signalUndoContextId);
+    restoreSignalEditState(stateToRestore, label.isNotEmpty() ? (label + " undone.") : "Signal Lab edit undone.");
+}
+
+void MainComponent::redoSignalEdit()
+{
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! signalUndoContext.redoTo(signalLabPanel.createState(), stateToRestore, label))
+        return;
+
+    undoService.setActiveContext(signalUndoContextId);
+    restoreSignalEditState(stateToRestore, label.isNotEmpty() ? (label + " redone.") : "Signal Lab edit redone.");
+}
+
 void MainComponent::undoTimelineEdit()
 {
     auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
@@ -7904,14 +7956,20 @@ bool MainComponent::handleGlobalKeyPress(const juce::KeyPress& key)
 
     if (mods.isCommandDown() && ! mods.isShiftDown() && letter == 'Z')
     {
-        undoTimelineEdit();
+        if (activeMode == WorkspaceMode::signal)
+            undoSignalEdit();
+        else
+            undoTimelineEdit();
         return true;
     }
 
     if ((mods.isCommandDown() && ! mods.isShiftDown() && letter == 'Y')
         || (mods.isCommandDown() && mods.isShiftDown() && letter == 'Z'))
     {
-        redoTimelineEdit();
+        if (activeMode == WorkspaceMode::signal)
+            redoSignalEdit();
+        else
+            redoTimelineEdit();
         return true;
     }
 
@@ -8003,6 +8061,11 @@ void MainComponent::loadSessionFromDisk()
         timelineUndoContext.restore(legacyUndoState);
     }
     undoService.setActiveContext(timelineUndoContextId);
+
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    signalUndoContext.clear();
+    if (auto signalUndoState = state.getChildWithName("SignalUndoContext"); signalUndoState.isValid())
+        signalUndoContext.restore(signalUndoState);
 
     auto bankOffset = (int) state.getProperty("bankOffset", 0);
     mixerPanel.setBankOffset(bankOffset);
