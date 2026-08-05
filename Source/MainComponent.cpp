@@ -1201,6 +1201,23 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                                                                     juce::String releaseError;
                                                                                     creation::assets::AssetMaterializer::releaseLease(lease, releaseError);
                                                                                     return details;
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                {
+                                                                                    openProjectAsset(asset);
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor&)
+                                                                                {
+                                                                                    engine.stopAssetPreview();
+                                                                                    transportBar.setStatusText("Stopped project asset preview.");
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                {
+                                                                                    placeProjectAssetOnTracker(asset);
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                {
+                                                                                    exportProjectAssetRaw(asset);
                                                                                 } } },
                                    [this](const juce::String& status)
                                    {
