@@ -4,6 +4,9 @@
 
 namespace
 {
+constexpr float kMinFilterCutoffHz = 40.0f;
+constexpr float kMaxFilterCutoffHz = 16000.0f;
+
 float clamp01Runtime(float value)
 {
     return juce::jlimit(0.0f, 1.0f, value);
@@ -20,6 +23,22 @@ float applyBrightnessFilterRuntime(float input, float& state, float brightness, 
 float getNumericProperty(const juce::NamedValueSet& properties, const juce::Identifier& key, float fallback)
 {
     return (float) properties.getWithDefault(key, fallback);
+}
+
+float cutoffToNormalized(float cutoffHz)
+{
+    auto safeCutoff = juce::jlimit(kMinFilterCutoffHz, kMaxFilterCutoffHz, cutoffHz);
+    auto logMin = std::log(kMinFilterCutoffHz);
+    auto logMax = std::log(kMaxFilterCutoffHz);
+    return clamp01Runtime((std::log(safeCutoff) - logMin) / juce::jmax(0.0001f, logMax - logMin));
+}
+
+float normalizedToCutoff(float normalized)
+{
+    auto clamped = clamp01Runtime(normalized);
+    auto logMin = std::log(kMinFilterCutoffHz);
+    auto logMax = std::log(kMaxFilterCutoffHz);
+    return std::exp(logMin + (logMax - logMin) * clamped);
 }
 }
 
@@ -95,24 +114,47 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
 
     double baseFrequency = 180.0;
     float brightness = 0.72f;
+    float filterCutoffHz = 3600.0f;
+    float filterResonance = 0.90f;
+    float filterEnvelopeAmount = 0.35f;
     for (const auto& parameter : patch.parameters)
     {
         if (parameter.id == "baseFrequency")
             baseFrequency = parameter.defaultValue;
         else if (parameter.id == "brightness")
             brightness = (float) parameter.defaultValue;
+        else if (parameter.id == "filterCutoff")
+            filterCutoffHz = (float) parameter.defaultValue;
+        else if (parameter.id == "filterResonance")
+            filterResonance = (float) parameter.defaultValue;
+        else if (parameter.id == "filterEnvelopeAmount")
+            filterEnvelopeAmount = (float) parameter.defaultValue;
     }
 
     float outputGain = (float) patch.output.gain;
 
     auto* pitchLane = findLane(patch, "pitchOffsetSemitones");
     auto* gainLane = findLane(patch, "outputGain");
+    auto* filterLane = findLane(patch, "filterCutoff");
     auto* envelopeNode = findNode(patch, "envelope");
+    auto* filterNode = findNode(patch, "filter");
 
     auto attackPosition = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "attackPosition", 0.12f) : 0.12f;
     auto sustainPosition = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "sustainPosition", 0.42f) : 0.42f;
     auto releasePosition = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "releasePosition", 0.82f) : 0.82f;
     auto sustainLevel = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "sustainLevel", 0.48f) : 0.48f;
+    auto filterMode = filterNode != nullptr ? filterNode->properties.getWithDefault("mode", juce::String("lowpass")).toString()
+                                            : juce::String("lowpass");
+    if (filterNode != nullptr)
+    {
+        filterCutoffHz = getNumericProperty(filterNode->properties, "cutoffHz", filterCutoffHz);
+        filterResonance = getNumericProperty(filterNode->properties, "resonance", filterResonance);
+        filterEnvelopeAmount = getNumericProperty(filterNode->properties, "envelopeAmount", filterEnvelopeAmount);
+    }
+    else
+    {
+        filterCutoffHz = juce::jmap(brightness, 0.02f, 1.0f, 180.0f, 12000.0f);
+    }
     auto releaseStart = juce::jmax(sustainPosition + 0.01f, releasePosition);
 
     double totalSourceLevel = 0.0;
@@ -120,13 +162,23 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         totalSourceLevel += source.level;
 
     auto normalizer = totalSourceLevel > 0.0 ? (0.9f / (float) totalSourceLevel) : 0.0f;
-    float filterState = 0.0f;
+    juce::dsp::StateVariableTPTFilter<float> filter;
+    juce::dsp::ProcessSpec spec;
+    spec.sampleRate = sampleRate;
+    spec.maximumBlockSize = (uint32) juce::jmax(1, maximumBlockSize);
+    spec.numChannels = 1;
+    filter.prepare(spec);
+    filter.reset();
+    filter.setType(filterMode == "highpass" ? juce::dsp::StateVariableTPTFilterType::highpass
+                                            : filterMode == "bandpass" ? juce::dsp::StateVariableTPTFilterType::bandpass
+                                                                       : juce::dsp::StateVariableTPTFilterType::lowpass);
 
     for (int sample = 0; sample < numSamples; ++sample)
     {
         auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
         auto pitchMotion = sampleAutomation(pitchLane, t);
         auto gainMotion = sampleAutomation(gainLane, t);
+        auto filterMotion = sampleAutomation(filterLane, t);
         auto pitchSemitones = juce::jmap(pitchMotion, 0.0f, 1.0f, -12.0f, 12.0f);
         auto frequency = baseFrequency * std::pow(2.0, pitchSemitones / 12.0);
         auto phase = juce::MathConstants<double>::twoPi * frequency * ((double) sample / sampleRate);
@@ -166,7 +218,13 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
             envelope = juce::jmap(t, releaseStart, 1.0f, sustainLevel, 0.0f);
 
         auto value = normalizer * envelope * gainMotion * outputGain * mixed;
-        value = applyBrightnessFilterRuntime(value, filterState, brightness, sampleRate);
+        auto filterNormalized = clamp01Runtime(cutoffToNormalized(filterCutoffHz)
+                                               + (filterMotion - 0.5f) * 0.75f
+                                               + (envelope - 0.5f) * filterEnvelopeAmount);
+        auto cutoffHz = normalizedToCutoff(filterNormalized);
+        filter.setCutoffFrequency(juce::jlimit(kMinFilterCutoffHz, (float) (sampleRate * 0.45), cutoffHz));
+        filter.setResonance(juce::jlimit(0.30f, 8.0f, filterResonance));
+        value = filter.processSample(0, value);
         destination.setSample(0, sample, value);
         destination.setSample(1, sample, value);
     }

@@ -5,10 +5,28 @@ namespace
 juce::Colour signalPanelColour() { return juce::Colour(0xff11151c); }
 juce::Colour signalCardColour() { return juce::Colour(0xff1a2030); }
 juce::Colour signalAccentColour() { return juce::Colour(0xff6fa8ff); }
+constexpr float kMinFilterCutoffHz = 40.0f;
+constexpr float kMaxFilterCutoffHz = 16000.0f;
 
 float clamp01(float value)
 {
     return juce::jlimit(0.0f, 1.0f, value);
+}
+
+float cutoffToNormalized(float cutoffHz)
+{
+    auto safeCutoff = juce::jlimit(kMinFilterCutoffHz, kMaxFilterCutoffHz, cutoffHz);
+    auto logMin = std::log(kMinFilterCutoffHz);
+    auto logMax = std::log(kMaxFilterCutoffHz);
+    return clamp01((std::log(safeCutoff) - logMin) / juce::jmax(0.0001f, logMax - logMin));
+}
+
+float normalizedToCutoff(float normalized)
+{
+    auto clamped = clamp01(normalized);
+    auto logMin = std::log(kMinFilterCutoffHz);
+    auto logMax = std::log(kMaxFilterCutoffHz);
+    return std::exp(logMin + (logMax - logMin) * clamped);
 }
 
 float sampleAutomation(const std::array<float, 4>& values, float t)
@@ -413,7 +431,7 @@ SignalLabPanel::SignalLabPanel()
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
-    subtitleLabel.setText("Forge tones from oscillators, noise, and envelope motion, then inspect the waveform and spectrum.", juce::dontSendNotification);
+    subtitleLabel.setText("Forge tones from oscillators, filters, motion, and envelope shaping, then inspect the waveform and spectrum.", juce::dontSendNotification);
     subtitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
     addAndMakeVisible(subtitleLabel);
 
@@ -469,7 +487,10 @@ SignalLabPanel::SignalLabPanel()
     setupLabel(frequencyLabel, "Base Frequency");
     setupLabel(durationLabel, "Duration");
     setupLabel(pitchLabel, "Pitch Sweep");
-    setupLabel(brightnessLabel, "Brightness");
+    setupLabel(filterModeLabel, "Filter Type");
+    setupLabel(filterCutoffLabel, "Filter Cutoff");
+    setupLabel(filterResonanceLabel, "Filter Resonance");
+    setupLabel(filterEnvelopeLabel, "Filter Envelope");
     setupLabel(sineLabel, "Sine");
     setupLabel(sawLabel, "Saw");
     setupLabel(squareLabel, "Square");
@@ -479,7 +500,13 @@ SignalLabPanel::SignalLabPanel()
     configureSlider(frequencySlider, 30.0, 2400.0, 1.0);
     configureSlider(durationSlider, 0.1, 6.0, 0.01);
     configureSlider(pitchSlider, -24.0, 24.0, 0.1);
-    configureSlider(brightnessSlider, 0.0, 1.0, 0.001);
+    filterModeSelector.addItem("Low-pass", 1);
+    filterModeSelector.addItem("Band-pass", 2);
+    filterModeSelector.addItem("High-pass", 3);
+    addAndMakeVisible(filterModeSelector);
+    configureSlider(filterCutoffSlider, kMinFilterCutoffHz, kMaxFilterCutoffHz, 1.0);
+    configureSlider(filterResonanceSlider, 0.30, 8.0, 0.01);
+    configureSlider(filterEnvelopeSlider, -1.0, 1.0, 0.01);
     configureSlider(sineSlider, 0.0, 1.0, 0.001);
     configureSlider(sawSlider, 0.0, 1.0, 0.001);
     configureSlider(squareSlider, 0.0, 1.0, 0.001);
@@ -489,7 +516,22 @@ SignalLabPanel::SignalLabPanel()
     frequencySlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.baseFrequencyHz = (float) frequencySlider.getValue(); regenerateSignal(); } };
     durationSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.durationSeconds = durationSlider.getValue(); regenerateSignal(); } };
     pitchSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.pitchSweepSemitones = (float) pitchSlider.getValue(); regenerateSignal(); } };
-    brightnessSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.brightness = (float) brightnessSlider.getValue(); regenerateSignal(); } };
+    filterModeSelector.onChange = [this]
+    {
+        if (suppressCallbacks)
+            return;
+
+        switch (filterModeSelector.getSelectedId())
+        {
+            case 2: recipe.filterMode = "bandpass"; break;
+            case 3: recipe.filterMode = "highpass"; break;
+            default: recipe.filterMode = "lowpass"; break;
+        }
+        regenerateSignal();
+    };
+    filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
+    filterResonanceSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterResonance = (float) filterResonanceSlider.getValue(); regenerateSignal(); } };
+    filterEnvelopeSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue(); regenerateSignal(); } };
     sineSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.sineLevel = (float) sineSlider.getValue(); regenerateSignal(); } };
     sawSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.sawLevel = (float) sawSlider.getValue(); regenerateSignal(); } };
     squareSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.squareLevel = (float) squareSlider.getValue(); regenerateSignal(); } };
@@ -514,6 +556,12 @@ SignalLabPanel::SignalLabPanel()
     gainAutomationEditor.onValuesChanged = [this](const std::array<float, 4>& values)
     {
         recipe.gainAutomation = values;
+        regenerateSignal();
+    };
+
+    filterAutomationEditor.onValuesChanged = [this](const std::array<float, 4>& values)
+    {
+        recipe.filterAutomation = values;
         regenerateSignal();
     };
 
@@ -566,6 +614,7 @@ SignalLabPanel::SignalLabPanel()
     addAndMakeVisible(envelopeEditor);
     addAndMakeVisible(pitchAutomationEditor);
     addAndMakeVisible(gainAutomationEditor);
+    addAndMakeVisible(filterAutomationEditor);
     addAndMakeVisible(scopePanel);
     addAndMakeVisible(spectrumPanel);
 
@@ -580,7 +629,10 @@ juce::ValueTree SignalLabPanel::createState() const
     state.setProperty("sampleRate", recipe.sampleRate, nullptr);
     state.setProperty("durationSeconds", recipe.durationSeconds, nullptr);
     state.setProperty("baseFrequencyHz", recipe.baseFrequencyHz, nullptr);
-    state.setProperty("brightness", recipe.brightness, nullptr);
+    state.setProperty("filterMode", recipe.filterMode, nullptr);
+    state.setProperty("filterCutoffHz", recipe.filterCutoffHz, nullptr);
+    state.setProperty("filterResonance", recipe.filterResonance, nullptr);
+    state.setProperty("filterEnvelopeAmount", recipe.filterEnvelopeAmount, nullptr);
     state.setProperty("sineLevel", recipe.sineLevel, nullptr);
     state.setProperty("sawLevel", recipe.sawLevel, nullptr);
     state.setProperty("squareLevel", recipe.squareLevel, nullptr);
@@ -595,6 +647,7 @@ juce::ValueTree SignalLabPanel::createState() const
     {
         state.setProperty("pitchAutomation" + juce::String(index), recipe.pitchAutomation[(size_t) index], nullptr);
         state.setProperty("gainAutomation" + juce::String(index), recipe.gainAutomation[(size_t) index], nullptr);
+        state.setProperty("filterAutomation" + juce::String(index), recipe.filterAutomation[(size_t) index], nullptr);
     }
     return state;
 }
@@ -608,7 +661,10 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     recipe.sampleRate = (double) state.getProperty("sampleRate", recipe.sampleRate);
     recipe.durationSeconds = (double) state.getProperty("durationSeconds", recipe.durationSeconds);
     recipe.baseFrequencyHz = (float) state.getProperty("baseFrequencyHz", recipe.baseFrequencyHz);
-    recipe.brightness = (float) state.getProperty("brightness", recipe.brightness);
+    recipe.filterMode = state.getProperty("filterMode", recipe.filterMode).toString();
+    recipe.filterCutoffHz = (float) state.getProperty("filterCutoffHz", recipe.filterCutoffHz);
+    recipe.filterResonance = (float) state.getProperty("filterResonance", recipe.filterResonance);
+    recipe.filterEnvelopeAmount = (float) state.getProperty("filterEnvelopeAmount", recipe.filterEnvelopeAmount);
     recipe.sineLevel = (float) state.getProperty("sineLevel", recipe.sineLevel);
     recipe.sawLevel = (float) state.getProperty("sawLevel", recipe.sawLevel);
     recipe.squareLevel = (float) state.getProperty("squareLevel", recipe.squareLevel);
@@ -623,6 +679,7 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     {
         recipe.pitchAutomation[(size_t) index] = (float) state.getProperty("pitchAutomation" + juce::String(index), recipe.pitchAutomation[(size_t) index]);
         recipe.gainAutomation[(size_t) index] = (float) state.getProperty("gainAutomation" + juce::String(index), recipe.gainAutomation[(size_t) index]);
+        recipe.filterAutomation[(size_t) index] = (float) state.getProperty("filterAutomation" + juce::String(index), recipe.filterAutomation[(size_t) index]);
     }
 
     refreshControlsFromRecipe();
@@ -645,7 +702,13 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
         if (parameter.id == "baseFrequency")
             recipe.baseFrequencyHz = (float) parameter.defaultValue;
         else if (parameter.id == "brightness")
-            recipe.brightness = (float) parameter.defaultValue;
+            recipe.filterCutoffHz = juce::jmap((float) parameter.defaultValue, 0.0f, 1.0f, 180.0f, 12000.0f);
+        else if (parameter.id == "filterCutoff")
+            recipe.filterCutoffHz = (float) parameter.defaultValue;
+        else if (parameter.id == "filterResonance")
+            recipe.filterResonance = (float) parameter.defaultValue;
+        else if (parameter.id == "filterEnvelopeAmount")
+            recipe.filterEnvelopeAmount = (float) parameter.defaultValue;
         else if (parameter.id == "noiseLevel")
             recipe.noiseLevel = (float) parameter.defaultValue;
     }
@@ -683,6 +746,13 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             recipe.releasePosition = (float) node.properties.getWithDefault("releasePosition", recipe.releasePosition);
             recipe.sustainLevel = (float) node.properties.getWithDefault("sustainLevel", recipe.sustainLevel);
         }
+        else if (node.kind == "filter")
+        {
+            recipe.filterMode = node.properties.getWithDefault("mode", recipe.filterMode).toString();
+            recipe.filterCutoffHz = (float) node.properties.getWithDefault("cutoffHz", recipe.filterCutoffHz);
+            recipe.filterResonance = (float) node.properties.getWithDefault("resonance", recipe.filterResonance);
+            recipe.filterEnvelopeAmount = (float) node.properties.getWithDefault("envelopeAmount", recipe.filterEnvelopeAmount);
+        }
     }
 
     auto fillAutomation = [](std::array<float, 4>& target, const cw::PatchAutomationLane& lane)
@@ -701,6 +771,8 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             fillAutomation(recipe.pitchAutomation, lane);
         else if (lane.id == "gainMotion" || lane.targetParameter == "outputGain")
             fillAutomation(recipe.gainAutomation, lane);
+        else if (lane.id == "filterMotion" || lane.targetParameter == "filterCutoff")
+            fillAutomation(recipe.filterAutomation, lane);
     }
 
     refreshControlsFromRecipe();
@@ -768,11 +840,20 @@ void SignalLabPanel::resized()
         slider.setBounds(controlArea.removeFromTop(38));
         controlArea.removeFromTop(6);
     };
+    auto addComboRow = [&](juce::Label& label, juce::ComboBox& combo)
+    {
+        label.setBounds(controlArea.removeFromTop(20));
+        combo.setBounds(controlArea.removeFromTop(30));
+        controlArea.removeFromTop(14);
+    };
 
     addRow(frequencyLabel, frequencySlider);
     addRow(durationLabel, durationSlider);
     addRow(pitchLabel, pitchSlider);
-    addRow(brightnessLabel, brightnessSlider);
+    addComboRow(filterModeLabel, filterModeSelector);
+    addRow(filterCutoffLabel, filterCutoffSlider);
+    addRow(filterResonanceLabel, filterResonanceSlider);
+    addRow(filterEnvelopeLabel, filterEnvelopeSlider);
     addRow(sineLabel, sineSlider);
     addRow(sawLabel, sawSlider);
     addRow(squareLabel, squareSlider);
@@ -785,10 +866,12 @@ void SignalLabPanel::resized()
     upperVisuals.removeFromLeft(12);
     scopePanel.setBounds(upperVisuals);
     area.removeFromTop(12);
-    auto automationArea = area.removeFromTop(220);
-    pitchAutomationEditor.setBounds(automationArea.removeFromTop(104));
+    auto automationArea = area.removeFromTop(336);
+    pitchAutomationEditor.setBounds(automationArea.removeFromTop(100));
     automationArea.removeFromTop(12);
-    gainAutomationEditor.setBounds(automationArea.removeFromTop(104));
+    gainAutomationEditor.setBounds(automationArea.removeFromTop(100));
+    automationArea.removeFromTop(12);
+    filterAutomationEditor.setBounds(automationArea.removeFromTop(100));
     area.removeFromTop(12);
     spectrumPanel.setBounds(area);
 }
@@ -827,12 +910,12 @@ juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& a
     auto normalizer = totalLevel > 0.0f ? (0.9f / totalLevel) : 0.0f;
     auto releaseStart = juce::jmax(activeRecipe.sustainPosition + 0.01f, activeRecipe.releasePosition);
     float filterState = 0.0f;
-
     for (int sample = 0; sample < numSamples; ++sample)
     {
         auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
         auto pitchAutomationValue = sampleAutomation(activeRecipe.pitchAutomation, t);
         auto gainAutomationValue = sampleAutomation(activeRecipe.gainAutomation, t);
+        auto filterAutomationValue = sampleAutomation(activeRecipe.filterAutomation, t);
         auto pitchSemitones = activeRecipe.pitchSweepSemitones * (t - 0.5f) * 2.0f
                             + juce::jmap(pitchAutomationValue, 0.0f, 1.0f, -12.0f, 12.0f);
         auto frequency = activeRecipe.baseFrequencyHz * std::pow(2.0f, pitchSemitones / 12.0f);
@@ -861,7 +944,11 @@ juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& a
                             + activeRecipe.triangleLevel * triangle
                             + activeRecipe.noiseLevel * noise);
 
-        sampleValue = applyBrightnessFilter(sampleValue, filterState, activeRecipe.brightness, activeRecipe.sampleRate);
+        auto filterNormalized = clamp01(cutoffToNormalized(activeRecipe.filterCutoffHz)
+                                        + (filterAutomationValue - 0.5f) * 0.75f
+                                        + (envelope - 0.5f) * activeRecipe.filterEnvelopeAmount);
+        auto brightnessEquivalent = juce::jmap(filterNormalized, 0.0f, 1.0f, 0.02f, 1.0f);
+        sampleValue = applyBrightnessFilter(sampleValue, filterState, brightnessEquivalent, activeRecipe.sampleRate);
 
         buffer.setSample(0, sample, sampleValue);
         buffer.setSample(1, sample, sampleValue);
@@ -881,7 +968,9 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.updatedAt = document.createdAt;
 
     document.parameters.add({ "baseFrequency", "Base Frequency", "float", activeRecipe.baseFrequencyHz, 30.0, 2400.0, "hz" });
-    document.parameters.add({ "brightness", "Brightness", "float", activeRecipe.brightness, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "filterCutoff", "Filter Cutoff", "float", activeRecipe.filterCutoffHz, kMinFilterCutoffHz, kMaxFilterCutoffHz, "hz" });
+    document.parameters.add({ "filterResonance", "Filter Resonance", "float", activeRecipe.filterResonance, 0.30, 8.0, "q" });
+    document.parameters.add({ "filterEnvelopeAmount", "Filter Envelope", "float", activeRecipe.filterEnvelopeAmount, -1.0, 1.0, "normalized" });
     document.parameters.add({ "pitchOffsetSemitones", "Pitch Offset", "float", 0.0, -12.0, 12.0, "semitones" });
     document.parameters.add({ "outputGain", "Output Gain", "float", 1.0, 0.0, 1.0, "normalized" });
     document.parameters.add({ "noiseLevel", "Noise Level", "float", activeRecipe.noiseLevel, 0.0, 1.0, "normalized" });
@@ -906,6 +995,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
 
     document.automationLanes.add(makeLane("pitchMotion", "Pitch Motion", "pitchOffsetSemitones", -12.0, 12.0, activeRecipe.pitchAutomation));
     document.automationLanes.add(makeLane("gainMotion", "Gain Motion", "outputGain", 0.0, 1.0, activeRecipe.gainAutomation));
+    document.automationLanes.add(makeLane("filterMotion", "Filter Motion", "filterCutoff", 0.0, 1.0, activeRecipe.filterAutomation));
 
     if (activeRecipe.sineLevel > 0.0f)
         document.sources.add({ "osc1", "oscillator", "sine", {}, activeRecipe.sineLevel, "baseFrequency" });
@@ -923,6 +1013,15 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     mixNode.kind = "mix";
     document.nodes.add(mixNode);
 
+    cw::PatchNode filterNode;
+    filterNode.id = "filter1";
+    filterNode.kind = "filter";
+    filterNode.properties.set("mode", activeRecipe.filterMode);
+    filterNode.properties.set("cutoffHz", activeRecipe.filterCutoffHz);
+    filterNode.properties.set("resonance", activeRecipe.filterResonance);
+    filterNode.properties.set("envelopeAmount", activeRecipe.filterEnvelopeAmount);
+    document.nodes.add(filterNode);
+
     cw::PatchNode envelopeNode;
     envelopeNode.id = "env1";
     envelopeNode.kind = "envelope";
@@ -934,7 +1033,8 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
 
     for (const auto& source : document.sources)
         document.connections.add({ source.id, "mix1" });
-    document.connections.add({ "mix1", "env1" });
+    document.connections.add({ "mix1", "filter1" });
+    document.connections.add({ "filter1", "env1" });
 
     document.output.channelMode = "stereo";
     document.output.gain = 0.9;
@@ -950,7 +1050,10 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.name = "Soft Keys";
         recipe.durationSeconds = 1.8;
         recipe.baseFrequencyHz = 220.0f;
-        recipe.brightness = 0.34f;
+        recipe.filterMode = "lowpass";
+        recipe.filterCutoffHz = 980.0f;
+        recipe.filterResonance = 0.55f;
+        recipe.filterEnvelopeAmount = 0.18f;
         recipe.sineLevel = 0.72f;
         recipe.sawLevel = 0.0f;
         recipe.squareLevel = 0.0f;
@@ -963,13 +1066,17 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.sustainLevel = 0.70f;
         recipe.pitchAutomation = { 0.5f, 0.5f, 0.5f, 0.5f };
         recipe.gainAutomation = { 1.0f, 0.88f, 0.72f, 0.0f };
+        recipe.filterAutomation = { 0.44f, 0.46f, 0.42f, 0.36f };
     }
     else if (templateName == "Triangle Lead")
     {
         recipe.name = "Triangle Lead";
         recipe.durationSeconds = 1.2;
         recipe.baseFrequencyHz = 330.0f;
-        recipe.brightness = 0.72f;
+        recipe.filterMode = "bandpass";
+        recipe.filterCutoffHz = 2600.0f;
+        recipe.filterResonance = 1.85f;
+        recipe.filterEnvelopeAmount = 0.42f;
         recipe.sineLevel = 0.20f;
         recipe.sawLevel = 0.12f;
         recipe.squareLevel = 0.0f;
@@ -982,13 +1089,17 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.sustainLevel = 0.62f;
         recipe.pitchAutomation = { 0.55f, 0.50f, 0.48f, 0.50f };
         recipe.gainAutomation = { 1.0f, 0.92f, 0.76f, 0.0f };
+        recipe.filterAutomation = { 0.60f, 0.68f, 0.54f, 0.48f };
     }
     else if (templateName == "Noisy Pluck")
     {
         recipe.name = "Noisy Pluck";
         recipe.durationSeconds = 0.9;
         recipe.baseFrequencyHz = 196.0f;
-        recipe.brightness = 0.88f;
+        recipe.filterMode = "highpass";
+        recipe.filterCutoffHz = 3100.0f;
+        recipe.filterResonance = 1.20f;
+        recipe.filterEnvelopeAmount = 0.66f;
         recipe.sineLevel = 0.25f;
         recipe.sawLevel = 0.25f;
         recipe.squareLevel = 0.10f;
@@ -1001,13 +1112,17 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.sustainLevel = 0.20f;
         recipe.pitchAutomation = { 0.78f, 0.58f, 0.46f, 0.50f };
         recipe.gainAutomation = { 1.0f, 0.58f, 0.22f, 0.0f };
+        recipe.filterAutomation = { 0.82f, 0.58f, 0.38f, 0.30f };
     }
     else if (templateName == "Drone Pad")
     {
         recipe.name = "Drone Pad";
         recipe.durationSeconds = 3.2;
         recipe.baseFrequencyHz = 110.0f;
-        recipe.brightness = 0.42f;
+        recipe.filterMode = "lowpass";
+        recipe.filterCutoffHz = 740.0f;
+        recipe.filterResonance = 0.72f;
+        recipe.filterEnvelopeAmount = 0.24f;
         recipe.sineLevel = 0.44f;
         recipe.sawLevel = 0.18f;
         recipe.squareLevel = 0.06f;
@@ -1020,13 +1135,17 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.sustainLevel = 0.78f;
         recipe.pitchAutomation = { 0.48f, 0.52f, 0.46f, 0.50f };
         recipe.gainAutomation = { 0.84f, 1.0f, 0.92f, 0.0f };
+        recipe.filterAutomation = { 0.34f, 0.42f, 0.40f, 0.36f };
     }
     else if (templateName == "Impact Tone")
     {
         recipe.name = "Impact Tone";
         recipe.durationSeconds = 1.1;
         recipe.baseFrequencyHz = 90.0f;
-        recipe.brightness = 0.93f;
+        recipe.filterMode = "bandpass";
+        recipe.filterCutoffHz = 1800.0f;
+        recipe.filterResonance = 2.80f;
+        recipe.filterEnvelopeAmount = 0.82f;
         recipe.sineLevel = 0.36f;
         recipe.sawLevel = 0.18f;
         recipe.squareLevel = 0.14f;
@@ -1039,6 +1158,7 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.sustainLevel = 0.18f;
         recipe.pitchAutomation = { 0.92f, 0.64f, 0.42f, 0.50f };
         recipe.gainAutomation = { 1.0f, 0.52f, 0.18f, 0.0f };
+        recipe.filterAutomation = { 0.88f, 0.62f, 0.34f, 0.22f };
     }
 
     refreshControlsFromRecipe();
@@ -1054,7 +1174,11 @@ void SignalLabPanel::refreshControlsFromRecipe()
     frequencySlider.setValue(recipe.baseFrequencyHz, juce::dontSendNotification);
     durationSlider.setValue(recipe.durationSeconds, juce::dontSendNotification);
     pitchSlider.setValue(recipe.pitchSweepSemitones, juce::dontSendNotification);
-    brightnessSlider.setValue(recipe.brightness, juce::dontSendNotification);
+    filterModeSelector.setSelectedId(recipe.filterMode == "bandpass" ? 2 : recipe.filterMode == "highpass" ? 3 : 1,
+                                     juce::dontSendNotification);
+    filterCutoffSlider.setValue(recipe.filterCutoffHz, juce::dontSendNotification);
+    filterResonanceSlider.setValue(recipe.filterResonance, juce::dontSendNotification);
+    filterEnvelopeSlider.setValue(recipe.filterEnvelopeAmount, juce::dontSendNotification);
     sineSlider.setValue(recipe.sineLevel, juce::dontSendNotification);
     sawSlider.setValue(recipe.sawLevel, juce::dontSendNotification);
     squareSlider.setValue(recipe.squareLevel, juce::dontSendNotification);
@@ -1064,6 +1188,7 @@ void SignalLabPanel::refreshControlsFromRecipe()
     envelopeEditor.setRecipe(recipe);
     pitchAutomationEditor.setValues(recipe.pitchAutomation);
     gainAutomationEditor.setValues(recipe.gainAutomation);
+    filterAutomationEditor.setValues(recipe.filterAutomation);
 }
 
 void SignalLabPanel::updateStatusText()
@@ -1072,7 +1197,8 @@ void SignalLabPanel::updateStatusText()
     auto text = "Ready: " + recipe.name
               + "  |  " + juce::String(recipe.durationSeconds, 2) + " s"
               + "  |  " + juce::String((int) recipe.baseFrequencyHz) + " Hz"
+              + "  |  " + recipe.filterMode + " " + juce::String((int) recipe.filterCutoffHz) + " Hz"
               + "  |  " + juce::String(sampleCount) + " samples"
-              + "  |  automation: pitch + gain";
+              + "  |  automation: pitch + gain + filter";
     statusLabel.setText(text, juce::dontSendNotification);
 }

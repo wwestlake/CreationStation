@@ -18,7 +18,10 @@ public:
         float squareLevel = 0.08f;
         float triangleLevel = 0.12f;
         float noiseLevel = 0.10f;
-        float brightness = 0.72f;
+        juce::String filterMode { "lowpass" };
+        float filterCutoffHz = 3600.0f;
+        float filterResonance = 0.90f;
+        float filterEnvelopeAmount = 0.35f;
         float pitchSweepSemitones = 0.0f;
         float attackPosition = 0.12f;
         float sustainPosition = 0.42f;
@@ -26,6 +29,7 @@ public:
         float sustainLevel = 0.48f;
         std::array<float, 4> pitchAutomation { 0.5f, 0.5f, 0.5f, 0.5f };
         std::array<float, 4> gainAutomation { 1.0f, 0.85f, 0.7f, 0.0f };
+        std::array<float, 4> filterAutomation { 0.5f, 0.5f, 0.5f, 0.5f };
     };
 
     SignalLabPanel();
@@ -147,8 +151,14 @@ private:
     juce::Slider durationSlider;
     juce::Label pitchLabel;
     juce::Slider pitchSlider;
-    juce::Label brightnessLabel;
-    juce::Slider brightnessSlider;
+    juce::Label filterModeLabel;
+    juce::ComboBox filterModeSelector;
+    juce::Label filterCutoffLabel;
+    juce::Slider filterCutoffSlider;
+    juce::Label filterResonanceLabel;
+    juce::Slider filterResonanceSlider;
+    juce::Label filterEnvelopeLabel;
+    juce::Slider filterEnvelopeSlider;
     juce::Label sineLabel;
     juce::Slider sineSlider;
     juce::Label sawLabel;
@@ -167,6 +177,7 @@ private:
     EnvelopeEditor envelopeEditor;
     AutomationLaneEditor pitchAutomationEditor { "Pitch Motion", juce::Colour(0xffb37df0), 0.5f };
     AutomationLaneEditor gainAutomationEditor { "Gain Motion", juce::Colour(0xff7dd36f), 1.0f };
+    AutomationLaneEditor filterAutomationEditor { "Filter Motion", juce::Colour(0xffffad5a), 0.5f };
     ScopePanel scopePanel;
     SpectrumPanel spectrumPanel;
 };
