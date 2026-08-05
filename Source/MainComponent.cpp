@@ -7419,14 +7419,8 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     state.addChild(graphPanel.createState(), -1, nullptr);
     state.addChild(scorePanel.createState(), -1, nullptr);
     state.addChild(timelineModel.createState(), -1, nullptr);
-    juce::ValueTree undoState("TimelineUndoStack");
-    for (const auto& undoTimelineState : timelineUndoStack)
-        undoState.addChild(undoTimelineState.createCopy(), -1, nullptr);
-    state.addChild(undoState, -1, nullptr);
-    juce::ValueTree redoState("TimelineRedoStack");
-    for (const auto& redoTimelineState : timelineRedoStack)
-        redoState.addChild(redoTimelineState.createCopy(), -1, nullptr);
-    state.addChild(redoState, -1, nullptr);
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    state.addChild(timelineUndoContext.serialise("TimelineUndoContext"), -1, nullptr);
 
     return state;
 }
@@ -7696,11 +7690,9 @@ void MainComponent::pushTimelineUndoState()
 
 void MainComponent::pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit)
 {
-    timelineUndoStack.push_back(stateBeforeEdit.createCopy());
-    if (timelineUndoStack.size() > 100)
-        timelineUndoStack.erase(timelineUndoStack.begin());
-
-    timelineRedoStack.clear();
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    timelineUndoContext.pushUndoState(stateBeforeEdit, "Timeline edit");
+    undoService.setActiveContext(timelineUndoContextId);
 }
 
 void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const juce::String& statusText)
@@ -7737,30 +7729,26 @@ void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const
 
 void MainComponent::undoTimelineEdit()
 {
-    if (timelineUndoStack.empty())
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! timelineUndoContext.undoTo(timelineModel.createState(), stateToRestore, label))
         return;
 
-    timelineRedoStack.push_back(timelineModel.createState());
-    if (timelineRedoStack.size() > 100)
-        timelineRedoStack.erase(timelineRedoStack.begin());
-
-    auto stateToRestore = timelineUndoStack.back().createCopy();
-    timelineUndoStack.pop_back();
-    restoreTimelineEditState(stateToRestore, "Tracker edit undone.");
+    undoService.setActiveContext(timelineUndoContextId);
+    restoreTimelineEditState(stateToRestore, label.isNotEmpty() ? (label + " undone.") : "Tracker edit undone.");
 }
 
 void MainComponent::redoTimelineEdit()
 {
-    if (timelineRedoStack.empty())
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! timelineUndoContext.redoTo(timelineModel.createState(), stateToRestore, label))
         return;
 
-    timelineUndoStack.push_back(timelineModel.createState());
-    if (timelineUndoStack.size() > 100)
-        timelineUndoStack.erase(timelineUndoStack.begin());
-
-    auto stateToRestore = timelineRedoStack.back().createCopy();
-    timelineRedoStack.pop_back();
-    restoreTimelineEditState(stateToRestore, "Tracker edit redone.");
+    undoService.setActiveContext(timelineUndoContextId);
+    restoreTimelineEditState(stateToRestore, label.isNotEmpty() ? (label + " redone.") : "Tracker edit redone.");
 }
 
 void MainComponent::splitClipAt(int clipIndex, double splitSeconds)
@@ -7981,27 +7969,40 @@ void MainComponent::loadSessionFromDisk()
 
     transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);
 
-    timelineUndoStack.clear();
-    if (auto undoState = state.getChildWithName("TimelineUndoStack"); undoState.isValid())
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    timelineUndoContext.clear();
+    if (auto undoState = state.getChildWithName("TimelineUndoContext"); undoState.isValid())
+        timelineUndoContext.restore(undoState);
+    else
     {
-        for (const auto child : undoState)
-            if (child.hasType("Timeline"))
-                timelineUndoStack.push_back(child.createCopy());
-
-        while (timelineUndoStack.size() > 100)
-            timelineUndoStack.erase(timelineUndoStack.begin());
+        juce::ValueTree legacyUndoState("TimelineUndoContext");
+        legacyUndoState.setProperty("contextId", timelineUndoContextId, nullptr);
+        legacyUndoState.setProperty("maxEntries", 100, nullptr);
+        juce::ValueTree undoStackState("UndoStack");
+        if (auto oldUndoState = state.getChildWithName("TimelineUndoStack"); oldUndoState.isValid())
+        {
+            for (const auto child : oldUndoState)
+            {
+                auto entry = child.createCopy();
+                entry.setProperty("__undoLabel", "Timeline edit", nullptr);
+                undoStackState.addChild(entry, -1, nullptr);
+            }
+        }
+        legacyUndoState.addChild(undoStackState, -1, nullptr);
+        juce::ValueTree redoStackState("RedoStack");
+        if (auto oldRedoState = state.getChildWithName("TimelineRedoStack"); oldRedoState.isValid())
+        {
+            for (const auto child : oldRedoState)
+            {
+                auto entry = child.createCopy();
+                entry.setProperty("__undoLabel", "Timeline edit", nullptr);
+                redoStackState.addChild(entry, -1, nullptr);
+            }
+        }
+        legacyUndoState.addChild(redoStackState, -1, nullptr);
+        timelineUndoContext.restore(legacyUndoState);
     }
-
-    timelineRedoStack.clear();
-    if (auto redoState = state.getChildWithName("TimelineRedoStack"); redoState.isValid())
-    {
-        for (const auto child : redoState)
-            if (child.hasType("Timeline"))
-                timelineRedoStack.push_back(child.createCopy());
-
-        while (timelineRedoStack.size() > 100)
-            timelineRedoStack.erase(timelineRedoStack.begin());
-    }
+    undoService.setActiveContext(timelineUndoContextId);
 
     auto bankOffset = (int) state.getProperty("bankOffset", 0);
     mixerPanel.setBankOffset(bankOffset);

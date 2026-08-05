@@ -8,6 +8,7 @@
 #include "AI/CreationStationContextStore.h"
 #include "AI/CreationStationTaskPlanner.h"
 #include <creation/services/SuiteAiChatClient.h>
+#include <creation/services/SuiteUndoService.h>
 #include "AI/LiteSemRagApiClient.h"
 #include "AI/OpenAiModelCatalogClient.h"
 #include <creation/ui/SuiteDesktopAuthSession.h>
@@ -326,8 +327,8 @@ private:
     int activeRecordingTrack = -1;
     int selectedClipIndex = -1;
     bool clipDragUndoCaptured = false;
-    std::vector<juce::ValueTree> timelineUndoStack;
-    std::vector<juce::ValueTree> timelineRedoStack;
+    creation::services::SuiteUndoService undoService;
+    static constexpr const char* timelineUndoContextId = "creation-station.timeline";
 
     void timerCallback() override;
     bool keyPressed(const juce::KeyPress& key) override;
