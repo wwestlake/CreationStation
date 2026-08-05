@@ -9,6 +9,8 @@ class SignalLabPanel final : public juce::Component
 public:
     struct SignalRecipe
     {
+        SignalRecipe();
+
         juce::String name { "Signal-Lab-Render" };
         double sampleRate = 48000.0;
         double durationSeconds = 1.5;
@@ -30,13 +32,8 @@ public:
         juce::String envelopeCurveMode { "smooth" };
         juce::String automationCurveMode { "smooth" };
         float pitchSweepSemitones = 0.0f;
-        float attackPosition = 0.12f;
-        float sustainPosition = 0.42f;
-        float releasePosition = 0.82f;
-        float sustainLevel = 0.48f;
-        std::array<float, 4> pitchAutomation { 0.5f, 0.5f, 0.5f, 0.5f };
-        std::array<float, 4> gainAutomation { 1.0f, 0.85f, 0.7f, 0.0f };
-        std::array<float, 4> filterAutomation { 0.5f, 0.5f, 0.5f, 0.5f };
+        juce::Array<cw::PatchAutomationPoint> envelopePoints;
+        juce::Array<cw::PatchAutomationLane> automationLanes;
     };
 
     SignalLabPanel();
@@ -66,26 +63,18 @@ private:
         void paint(juce::Graphics& g) override;
         void mouseDown(const juce::MouseEvent& event) override;
         void mouseDrag(const juce::MouseEvent& event) override;
+        void mouseDoubleClick(const juce::MouseEvent& event) override;
 
-        std::function<void(float attackPosition, float sustainPosition, float releasePosition, float sustainLevel)> onEnvelopeChanged;
+        std::function<void(const juce::Array<cw::PatchAutomationPoint>&)> onEnvelopeChanged;
 
     private:
-        enum class DragTarget
-        {
-            none,
-            attack,
-            sustain,
-            release
-        };
-
         SignalRecipe recipe;
-        DragTarget dragTarget = DragTarget::none;
+        int dragIndex = -1;
 
-        juce::Point<float> getAttackPoint() const;
-        juce::Point<float> getSustainPoint() const;
-        juce::Point<float> getReleasePoint() const;
         juce::Rectangle<float> getPlotArea() const;
         juce::Point<float> toScreen(float normalizedX, float normalizedY) const;
+        juce::Point<float> getPoint(int index) const;
+        int findPointAt(juce::Point<float> position) const;
     };
 
     class ScopePanel final : public juce::Component
@@ -111,25 +100,26 @@ private:
     class AutomationLaneEditor final : public juce::Component
     {
     public:
-        AutomationLaneEditor(const juce::String& title, juce::Colour accent, float defaultMidline);
+        AutomationLaneEditor() = default;
 
-        void setValues(const std::array<float, 4>& newValues);
-        std::array<float, 4> getValues() const noexcept { return values; }
+        void setLane(const cw::PatchAutomationLane& newLane, juce::Colour accentColour);
+        const cw::PatchAutomationLane& getLane() const noexcept { return lane; }
         void paint(juce::Graphics& g) override;
         void mouseDown(const juce::MouseEvent& event) override;
         void mouseDrag(const juce::MouseEvent& event) override;
+        void mouseDoubleClick(const juce::MouseEvent& event) override;
 
-        std::function<void(const std::array<float, 4>&)> onValuesChanged;
+        std::function<void(const cw::PatchAutomationLane&)> onLaneChanged;
 
     private:
         juce::Rectangle<float> getPlotArea() const;
         juce::Point<float> getPoint(int index) const;
+        int findPointAt(juce::Point<float> position) const;
+        double pointValueFromY(float y) const;
 
-        juce::String laneTitle;
+        cw::PatchAutomationLane lane;
         juce::Colour laneAccent;
-        std::array<float, 4> values;
         int dragIndex = -1;
-        float defaultMidline = 0.5f;
     };
 
     void configureSlider(juce::Slider& slider, double min, double max, double step);
@@ -139,6 +129,8 @@ private:
     void applyTemplate(const juce::String& templateName);
     void refreshControlsFromRecipe();
     void updateStatusText();
+    void syncAutomationEditors();
+    void rebuildAutomationChrome();
 
     SignalRecipe recipe;
     juce::AudioBuffer<float> generatedBuffer;
@@ -195,10 +187,11 @@ private:
     juce::TextButton exportPatchButton { "Export File" };
     juce::TextButton savePatchButton { "Save Sound" };
     juce::TextButton loadPatchButton { "Load Sound" };
+    juce::TextButton addAutomationLaneButton { "Add Motion Lane" };
     EnvelopeEditor envelopeEditor;
-    AutomationLaneEditor pitchAutomationEditor { "Pitch Motion", juce::Colour(0xffb37df0), 0.5f };
-    AutomationLaneEditor gainAutomationEditor { "Gain Motion", juce::Colour(0xff7dd36f), 1.0f };
-    AutomationLaneEditor filterAutomationEditor { "Filter Motion", juce::Colour(0xffffad5a), 0.5f };
+    juce::OwnedArray<AutomationLaneEditor> automationLaneEditors;
+    juce::OwnedArray<juce::ComboBox> automationTargetSelectors;
+    juce::OwnedArray<juce::TextButton> removeAutomationLaneButtons;
     ScopePanel scopePanel;
     SpectrumPanel spectrumPanel;
 };

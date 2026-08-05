@@ -2,15 +2,54 @@
 
 namespace
 {
+struct AutomationTargetSpec
+{
+    const char* parameterId;
+    const char* title;
+    double rangeMin;
+    double rangeMax;
+    double defaultValue;
+    juce::Colour accent;
+};
+
 juce::Colour signalPanelColour() { return juce::Colour(0xff11151c); }
 juce::Colour signalCardColour() { return juce::Colour(0xff1a2030); }
 juce::Colour signalAccentColour() { return juce::Colour(0xff6fa8ff); }
 constexpr float kMinFilterCutoffHz = 40.0f;
 constexpr float kMaxFilterCutoffHz = 16000.0f;
 
+const std::array<AutomationTargetSpec, 6>& getAutomationTargetSpecs()
+{
+    static const std::array<AutomationTargetSpec, 6> specs
+    {{
+        { "pitchOffsetSemitones", "Pitch Motion", -12.0, 12.0, 0.0, juce::Colour(0xffb37df0) },
+        { "outputGain", "Gain Motion", 0.0, 1.0, 1.0, juce::Colour(0xff7dd36f) },
+        { "filterCutoff", "Filter Motion", 0.0, 1.0, 0.5, juce::Colour(0xffffad5a) },
+        { "filterResonance", "Resonance Motion", 0.30, 8.0, 0.90, juce::Colour(0xff5ad1ff) },
+        { "noiseLevel", "Noise Motion", 0.0, 1.0, 0.10, juce::Colour(0xffff7aa2) },
+        { "baseFrequency", "Base Frequency", 30.0, 2400.0, 180.0, juce::Colour(0xff8ee58f) }
+    }};
+
+    return specs;
+}
+
+const AutomationTargetSpec& getTargetSpec(const juce::String& parameterId)
+{
+    for (const auto& spec : getAutomationTargetSpecs())
+        if (parameterId == spec.parameterId)
+            return spec;
+
+    return getAutomationTargetSpecs()[0];
+}
+
 float clamp01(float value)
 {
     return juce::jlimit(0.0f, 1.0f, value);
+}
+
+double clampPointValue(double value)
+{
+    return juce::jlimit(0.0, 1.0, value);
 }
 
 float cutoffToNormalized(float cutoffHz)
@@ -29,6 +68,14 @@ float normalizedToCutoff(float normalized)
     return std::exp(logMin + (logMax - logMin) * clamped);
 }
 
+float applyBrightnessFilter(float input, float& state, float brightness, double sampleRate)
+{
+    auto cutoffHz = juce::jmap(juce::jlimit(0.02f, 1.0f, brightness), 180.0f, 12000.0f);
+    auto alpha = juce::jlimit(0.001f, 0.99f, (float) (juce::MathConstants<double>::twoPi * cutoffHz / sampleRate));
+    state += alpha * (input - state);
+    return state;
+}
+
 float applyCurveMode(float localT, const juce::String& curveMode)
 {
     auto t = clamp01(localT);
@@ -39,47 +86,291 @@ float applyCurveMode(float localT, const juce::String& curveMode)
     return t;
 }
 
-float sampleAutomation(const std::array<float, 4>& values, float t)
+cw::PatchAutomationPoint makePoint(double time, double value, const juce::String& curve)
 {
-    auto clampedT = clamp01(t);
-    auto scaled = clampedT * 3.0f;
-    auto leftIndex = juce::jlimit(0, 2, (int) std::floor(scaled));
-    auto rightIndex = juce::jlimit(1, 3, leftIndex + 1);
-    auto localT = scaled - (float) leftIndex;
-    return juce::jmap(localT, values[(size_t) leftIndex], values[(size_t) rightIndex]);
+    cw::PatchAutomationPoint point;
+    point.time = time;
+    point.value = value;
+    point.curve = curve;
+    return point;
 }
 
-float sampleAutomation(const cw::PatchAutomationLane& lane, float t, float fallbackValue)
+juce::Array<cw::PatchAutomationPoint> makeDefaultEnvelopePoints(const juce::String& curveMode)
 {
-    if (lane.points.isEmpty())
-        return fallbackValue;
-    if (lane.points.size() == 1)
-        return (float) lane.points.getFirst().value;
+    juce::Array<cw::PatchAutomationPoint> points;
+    points.add(makePoint(0.0, 0.0, curveMode));
+    points.add(makePoint(0.12, 1.0, curveMode));
+    points.add(makePoint(0.42, 0.48, curveMode));
+    points.add(makePoint(0.82, 0.48, curveMode));
+    points.add(makePoint(1.0, 0.0, curveMode));
+    return points;
+}
 
-    auto clampedT = clamp01(t);
-    for (int index = 0; index < lane.points.size() - 1; ++index)
+cw::PatchAutomationLane makeLaneForSpec(const AutomationTargetSpec& spec, const juce::String& curveMode)
+{
+    cw::PatchAutomationLane lane;
+    lane.id = juce::String(spec.parameterId) + "Lane";
+    lane.name = spec.title;
+    lane.targetParameter = spec.parameterId;
+    lane.interpolation = curveMode;
+    lane.rangeMin = spec.rangeMin;
+    lane.rangeMax = spec.rangeMax;
+    lane.points.add(makePoint(0.0, spec.defaultValue, curveMode));
+    lane.points.add(makePoint(0.33, spec.defaultValue, curveMode));
+    lane.points.add(makePoint(0.66, spec.defaultValue, curveMode));
+    lane.points.add(makePoint(1.0, spec.defaultValue, curveMode));
+    return lane;
+}
+
+juce::Array<cw::PatchAutomationLane> makeDefaultAutomationLanes(const juce::String& curveMode)
+{
+    juce::Array<cw::PatchAutomationLane> lanes;
+    lanes.add(makeLaneForSpec(getTargetSpec("pitchOffsetSemitones"), curveMode));
+    lanes.add(makeLaneForSpec(getTargetSpec("outputGain"), curveMode));
+    lanes.add(makeLaneForSpec(getTargetSpec("filterCutoff"), curveMode));
+    return lanes;
+}
+
+void sortPoints(juce::Array<cw::PatchAutomationPoint>& points)
+{
+    std::sort(points.begin(), points.end(), [](const auto& left, const auto& right) { return left.time < right.time; });
+}
+
+void ensureEnvelopePoints(juce::Array<cw::PatchAutomationPoint>& points, const juce::String& curveMode)
+{
+    if (points.isEmpty())
+        points = makeDefaultEnvelopePoints(curveMode);
+
+    sortPoints(points);
+    if (points.getFirst().time > 0.0)
+        points.insert(0, makePoint(0.0, 0.0, curveMode));
+    points.getReference(0).time = 0.0;
+    points.getReference(0).value = 0.0;
+    points.getReference(0).curve = curveMode;
+
+    if (points.getLast().time < 1.0)
+        points.add(makePoint(1.0, 0.0, curveMode));
+    points.getReference(points.size() - 1).time = 1.0;
+    points.getReference(points.size() - 1).value = 0.0;
+    points.getReference(points.size() - 1).curve = curveMode;
+
+    for (int index = 1; index < points.size() - 1; ++index)
     {
-        const auto& left = lane.points.getReference(index);
-        const auto& right = lane.points.getReference(index + 1);
-        if (clampedT >= (float) left.time && clampedT <= (float) right.time)
+        auto minTime = points.getReference(index - 1).time + 0.02;
+        auto maxTime = points.getReference(index + 1).time - 0.02;
+        points.getReference(index).time = juce::jlimit(minTime, maxTime, points.getReference(index).time);
+        points.getReference(index).value = clampPointValue(points.getReference(index).value);
+        if (points.getReference(index).curve.isEmpty())
+            points.getReference(index).curve = curveMode;
+    }
+}
+
+void ensureLane(cw::PatchAutomationLane& lane, const juce::String& curveMode)
+{
+    auto spec = getTargetSpec(lane.targetParameter);
+    if (lane.id.isEmpty())
+        lane.id = juce::String(spec.parameterId) + "Lane";
+    if (lane.name.isEmpty())
+        lane.name = spec.title;
+    if (lane.targetParameter.isEmpty())
+        lane.targetParameter = spec.parameterId;
+    if (lane.interpolation.isEmpty())
+        lane.interpolation = curveMode;
+    if (lane.rangeMax <= lane.rangeMin)
+    {
+        lane.rangeMin = spec.rangeMin;
+        lane.rangeMax = spec.rangeMax;
+    }
+    if (lane.points.isEmpty())
+        lane = makeLaneForSpec(spec, curveMode);
+
+    sortPoints(lane.points);
+    lane.points.getReference(0).time = 0.0;
+    lane.points.getReference(lane.points.size() - 1).time = 1.0;
+    for (int index = 0; index < lane.points.size(); ++index)
+    {
+        if (lane.points.getReference(index).curve.isEmpty())
+            lane.points.getReference(index).curve = lane.interpolation;
+
+        lane.points.getReference(index).value = juce::jlimit(lane.rangeMin, lane.rangeMax, lane.points.getReference(index).value);
+
+        if (index > 0 && index < lane.points.size() - 1)
         {
-            auto localRange = juce::jmax(0.0001f, (float) right.time - (float) left.time);
-            auto localT = (clampedT - (float) left.time) / localRange;
-            auto curve = right.curve.isNotEmpty() ? right.curve : lane.interpolation;
-            return juce::jmap(applyCurveMode(localT, curve), (float) left.value, (float) right.value);
+            auto minTime = lane.points.getReference(index - 1).time + 0.02;
+            auto maxTime = lane.points.getReference(index + 1).time - 0.02;
+            lane.points.getReference(index).time = juce::jlimit(minTime, maxTime, lane.points.getReference(index).time);
+        }
+    }
+}
+
+void ensureRecipe(SignalLabPanel::SignalRecipe& recipe)
+{
+    ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
+    if (recipe.automationLanes.isEmpty())
+        recipe.automationLanes = makeDefaultAutomationLanes(recipe.automationCurveMode);
+
+    for (auto& lane : recipe.automationLanes)
+    {
+        if (lane.interpolation.isEmpty())
+            lane.interpolation = recipe.automationCurveMode;
+        ensureLane(lane, recipe.automationCurveMode);
+    }
+}
+
+double sampleLane(const juce::Array<cw::PatchAutomationPoint>& points, const juce::String& interpolation, double t, double fallbackValue)
+{
+    if (points.isEmpty())
+        return fallbackValue;
+    if (points.size() == 1)
+        return points.getFirst().value;
+
+    auto clampedT = juce::jlimit(0.0, 1.0, t);
+    for (int index = 0; index < points.size() - 1; ++index)
+    {
+        const auto& left = points.getReference(index);
+        const auto& right = points.getReference(index + 1);
+        if (clampedT >= left.time && clampedT <= right.time)
+        {
+            auto localRange = juce::jmax(0.0001, right.time - left.time);
+            auto localT = (clampedT - left.time) / localRange;
+            auto curve = right.curve.isNotEmpty() ? right.curve : interpolation;
+            return juce::jmap((double) applyCurveMode((float) localT, curve), left.value, right.value);
         }
     }
 
-    return (float) lane.points.getLast().value;
+    return points.getLast().value;
 }
 
-float applyBrightnessFilter(float input, float& state, float brightness, double sampleRate)
+double sampleTargetLanes(const juce::Array<cw::PatchAutomationLane>& lanes,
+                         const juce::String& targetParameter,
+                         double t,
+                         double fallbackValue)
 {
-    auto cutoffHz = juce::jmap(juce::jlimit(0.02f, 1.0f, brightness), 180.0f, 12000.0f);
-    auto alpha = juce::jlimit(0.001f, 0.99f, (float) (juce::MathConstants<double>::twoPi * cutoffHz / sampleRate));
-    state += alpha * (input - state);
-    return state;
+    double sum = 0.0;
+    int count = 0;
+    for (const auto& lane : lanes)
+    {
+        if (lane.targetParameter == targetParameter)
+        {
+            sum += sampleLane(lane.points, lane.interpolation, t, fallbackValue);
+            ++count;
+        }
+    }
+
+    return count > 0 ? (sum / (double) count) : fallbackValue;
 }
+
+juce::String serialisePointsJson(const juce::Array<cw::PatchAutomationPoint>& points)
+{
+    juce::Array<juce::var> values;
+    for (const auto& point : points)
+    {
+        auto* object = new juce::DynamicObject();
+        object->setProperty("time", point.time);
+        object->setProperty("value", point.value);
+        object->setProperty("curve", point.curve);
+        values.add(juce::var(object));
+    }
+
+    return juce::JSON::toString(juce::var(values), true);
+}
+
+juce::Array<cw::PatchAutomationPoint> parsePointsJson(const juce::String& jsonText, const juce::String& curveMode)
+{
+    juce::Array<cw::PatchAutomationPoint> points;
+    auto parsed = juce::JSON::parse(jsonText);
+    auto* values = parsed.getArray();
+    if (values == nullptr)
+        return points;
+
+    for (const auto& value : *values)
+    {
+        if (auto* object = value.getDynamicObject())
+        {
+            cw::PatchAutomationPoint point;
+            point.time = (double) object->getProperty("time");
+            point.value = (double) object->getProperty("value");
+            point.curve = object->getProperty("curve").toString();
+            if (point.curve.isEmpty())
+                point.curve = curveMode;
+            points.add(point);
+        }
+    }
+
+    return points;
+}
+
+void setEnvelopeFromLegacy(SignalLabPanel::SignalRecipe& recipe,
+                           float attackPosition,
+                           float sustainPosition,
+                           float releasePosition,
+                           float sustainLevel)
+{
+    recipe.envelopePoints.clear();
+    recipe.envelopePoints.add(makePoint(0.0, 0.0, recipe.envelopeCurveMode));
+    recipe.envelopePoints.add(makePoint(attackPosition, 1.0, recipe.envelopeCurveMode));
+    recipe.envelopePoints.add(makePoint(sustainPosition, sustainLevel, recipe.envelopeCurveMode));
+    recipe.envelopePoints.add(makePoint(releasePosition, sustainLevel, recipe.envelopeCurveMode));
+    recipe.envelopePoints.add(makePoint(1.0, 0.0, recipe.envelopeCurveMode));
+    ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
+}
+
+void setLaneValues(SignalLabPanel::SignalRecipe& recipe, const juce::String& parameterId, const std::array<float, 4>& values)
+{
+    for (auto& lane : recipe.automationLanes)
+    {
+        if (lane.targetParameter == parameterId)
+        {
+            auto spec = getTargetSpec(parameterId);
+            lane.rangeMin = spec.rangeMin;
+            lane.rangeMax = spec.rangeMax;
+            lane.interpolation = recipe.automationCurveMode;
+            lane.points.clear();
+            lane.points.add(makePoint(0.0, values[0], recipe.automationCurveMode));
+            lane.points.add(makePoint(0.33, values[1], recipe.automationCurveMode));
+            lane.points.add(makePoint(0.66, values[2], recipe.automationCurveMode));
+            lane.points.add(makePoint(1.0, values[3], recipe.automationCurveMode));
+            ensureLane(lane, recipe.automationCurveMode);
+            return;
+        }
+    }
+
+    auto lane = makeLaneForSpec(getTargetSpec(parameterId), recipe.automationCurveMode);
+    lane.targetParameter = parameterId;
+    lane.points.clear();
+    lane.points.add(makePoint(0.0, values[0], recipe.automationCurveMode));
+    lane.points.add(makePoint(0.33, values[1], recipe.automationCurveMode));
+    lane.points.add(makePoint(0.66, values[2], recipe.automationCurveMode));
+    lane.points.add(makePoint(1.0, values[3], recipe.automationCurveMode));
+    ensureLane(lane, recipe.automationCurveMode);
+    recipe.automationLanes.add(lane);
+}
+
+double getLegacyAttackPosition(const juce::Array<cw::PatchAutomationPoint>& points)
+{
+    return points.size() > 1 ? points.getReference(1).time : 0.12;
+}
+
+double getLegacySustainPosition(const juce::Array<cw::PatchAutomationPoint>& points)
+{
+    return points.size() > 2 ? points.getReference(2).time : 0.42;
+}
+
+double getLegacyReleasePosition(const juce::Array<cw::PatchAutomationPoint>& points)
+{
+    return points.size() > 3 ? points.getReference(points.size() - 2).time : 0.82;
+}
+
+double getLegacySustainLevel(const juce::Array<cw::PatchAutomationPoint>& points)
+{
+    return points.size() > 2 ? points.getReference(2).value : 0.48;
+}
+}
+
+SignalLabPanel::SignalRecipe::SignalRecipe()
+{
+    envelopePoints = makeDefaultEnvelopePoints(envelopeCurveMode);
+    automationLanes = makeDefaultAutomationLanes(automationCurveMode);
 }
 
 SignalLabPanel::EnvelopeEditor::EnvelopeEditor()
@@ -90,6 +381,7 @@ SignalLabPanel::EnvelopeEditor::EnvelopeEditor()
 void SignalLabPanel::EnvelopeEditor::setRecipe(const SignalRecipe& newRecipe)
 {
     recipe = newRecipe;
+    ensureRecipe(recipe);
     repaint();
 }
 
@@ -105,19 +397,27 @@ juce::Point<float> SignalLabPanel::EnvelopeEditor::toScreen(float normalizedX, f
              plot.getBottom() - normalizedY * plot.getHeight() };
 }
 
-juce::Point<float> SignalLabPanel::EnvelopeEditor::getAttackPoint() const
+juce::Point<float> SignalLabPanel::EnvelopeEditor::getPoint(int index) const
 {
-    return toScreen(recipe.attackPosition, 1.0f);
+    const auto& point = recipe.envelopePoints.getReference(index);
+    return toScreen((float) point.time, (float) point.value);
 }
 
-juce::Point<float> SignalLabPanel::EnvelopeEditor::getSustainPoint() const
+int SignalLabPanel::EnvelopeEditor::findPointAt(juce::Point<float> position) const
 {
-    return toScreen(recipe.sustainPosition, recipe.sustainLevel);
-}
+    auto bestDistance = 18.0f;
+    auto bestIndex = -1;
+    for (int index = 0; index < recipe.envelopePoints.size(); ++index)
+    {
+        auto distance = position.getDistanceFrom(getPoint(index));
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestIndex = index;
+        }
+    }
 
-juce::Point<float> SignalLabPanel::EnvelopeEditor::getReleasePoint() const
-{
-    return toScreen(recipe.releasePosition, recipe.sustainLevel);
+    return bestIndex;
 }
 
 void SignalLabPanel::EnvelopeEditor::paint(juce::Graphics& g)
@@ -144,18 +444,16 @@ void SignalLabPanel::EnvelopeEditor::paint(juce::Graphics& g)
     }
 
     juce::Path envelopePath;
-    auto start = toScreen(0.0f, 0.0f);
-    auto attack = getAttackPoint();
-    auto sustain = getSustainPoint();
-    auto release = getReleasePoint();
+    for (int index = 0; index < recipe.envelopePoints.size(); ++index)
+    {
+        auto point = getPoint(index);
+        if (index == 0)
+            envelopePath.startNewSubPath(point);
+        else
+            envelopePath.lineTo(point);
+    }
+
     auto end = toScreen(1.0f, 0.0f);
-
-    envelopePath.startNewSubPath(start);
-    envelopePath.lineTo(attack);
-    envelopePath.lineTo(sustain);
-    envelopePath.lineTo(release);
-    envelopePath.lineTo(end);
-
     g.setColour(signalAccentColour().withAlpha(0.15f));
     juce::Path fillPath(envelopePath);
     fillPath.lineTo(end.x, plot.getBottom());
@@ -166,68 +464,79 @@ void SignalLabPanel::EnvelopeEditor::paint(juce::Graphics& g)
     g.setColour(signalAccentColour());
     g.strokePath(envelopePath, juce::PathStrokeType(2.5f));
 
-    auto drawHandle = [&g](juce::Point<float> point, juce::Colour colour)
+    for (int index = 0; index < recipe.envelopePoints.size(); ++index)
     {
+        auto point = getPoint(index);
+        auto colour = index == 0 || index == recipe.envelopePoints.size() - 1 ? juce::Colour(0xff7dd36f)
+                                                                               : juce::Colour(0xfff2cc60);
         g.setColour(colour);
         g.fillEllipse(point.x - 5.5f, point.y - 5.5f, 11.0f, 11.0f);
         g.setColour(juce::Colours::white.withAlpha(0.8f));
         g.drawEllipse(point.x - 5.5f, point.y - 5.5f, 11.0f, 11.0f, 1.0f);
-    };
-
-    drawHandle(attack, juce::Colour(0xff7dd36f));
-    drawHandle(sustain, juce::Colour(0xfff2cc60));
-    drawHandle(release, juce::Colour(0xffd48a5f));
+    }
 
     g.setColour(juce::Colour(0xffcbd5e1));
     g.setFont(juce::Font(13.0f).boldened());
-    g.drawText("Envelope", getLocalBounds().reduced(12, 6).removeFromTop(18), juce::Justification::centredLeft, false);
+    g.drawText("Envelope (double-click to add, right-click to remove)", getLocalBounds().reduced(12, 6).removeFromTop(18), juce::Justification::centredLeft, false);
 }
 
 void SignalLabPanel::EnvelopeEditor::mouseDown(const juce::MouseEvent& event)
 {
-    auto position = event.position;
-    auto attack = getAttackPoint();
-    auto sustain = getSustainPoint();
-    auto release = getReleasePoint();
+    dragIndex = findPointAt(event.position);
 
-    if (position.getDistanceFrom(attack) < 16.0f)
-        dragTarget = DragTarget::attack;
-    else if (position.getDistanceFrom(sustain) < 16.0f)
-        dragTarget = DragTarget::sustain;
-    else if (position.getDistanceFrom(release) < 16.0f)
-        dragTarget = DragTarget::release;
-    else
-        dragTarget = DragTarget::none;
+    if (event.mods.isPopupMenu() && dragIndex > 0 && dragIndex < recipe.envelopePoints.size() - 1)
+    {
+        recipe.envelopePoints.remove(dragIndex);
+        dragIndex = -1;
+        ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
+        if (onEnvelopeChanged)
+            onEnvelopeChanged(recipe.envelopePoints);
+        repaint();
+    }
 }
 
 void SignalLabPanel::EnvelopeEditor::mouseDrag(const juce::MouseEvent& event)
 {
-    if (dragTarget == DragTarget::none)
+    if (dragIndex < 0)
         return;
 
     auto plot = getPlotArea();
     auto normalizedX = clamp01((event.position.x - plot.getX()) / plot.getWidth());
     auto normalizedY = clamp01((plot.getBottom() - event.position.y) / plot.getHeight());
 
-    switch (dragTarget)
+    auto& point = recipe.envelopePoints.getReference(dragIndex);
+    if (dragIndex == 0 || dragIndex == recipe.envelopePoints.size() - 1)
     {
-        case DragTarget::attack:
-            recipe.attackPosition = juce::jlimit(0.02f, recipe.sustainPosition - 0.05f, normalizedX);
-            break;
-        case DragTarget::sustain:
-            recipe.sustainPosition = juce::jlimit(recipe.attackPosition + 0.05f, recipe.releasePosition - 0.05f, normalizedX);
-            recipe.sustainLevel = juce::jlimit(0.05f, 1.0f, normalizedY);
-            break;
-        case DragTarget::release:
-            recipe.releasePosition = juce::jlimit(recipe.sustainPosition + 0.05f, 0.98f, normalizedX);
-            break;
-        case DragTarget::none:
-            break;
+        point.value = 0.0;
+        point.time = dragIndex == 0 ? 0.0 : 1.0;
+    }
+    else
+    {
+        auto minTime = recipe.envelopePoints.getReference(dragIndex - 1).time + 0.02;
+        auto maxTime = recipe.envelopePoints.getReference(dragIndex + 1).time - 0.02;
+        point.time = juce::jlimit((double) minTime, (double) maxTime, (double) normalizedX);
+        point.value = juce::jlimit(0.0, 1.0, (double) normalizedY);
     }
 
     if (onEnvelopeChanged)
-        onEnvelopeChanged(recipe.attackPosition, recipe.sustainPosition, recipe.releasePosition, recipe.sustainLevel);
+        onEnvelopeChanged(recipe.envelopePoints);
 
+    repaint();
+}
+
+void SignalLabPanel::EnvelopeEditor::mouseDoubleClick(const juce::MouseEvent& event)
+{
+    if (event.mods.isPopupMenu())
+        return;
+
+    auto plot = getPlotArea();
+    auto normalizedX = clamp01((event.position.x - plot.getX()) / plot.getWidth());
+    auto normalizedY = clamp01((plot.getBottom() - event.position.y) / plot.getHeight());
+
+    recipe.envelopePoints.add(makePoint(normalizedX, normalizedY, recipe.envelopeCurveMode));
+    ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
+    if (onEnvelopeChanged)
+        onEnvelopeChanged(recipe.envelopePoints);
     repaint();
 }
 
@@ -342,16 +651,11 @@ void SignalLabPanel::SpectrumPanel::paint(juce::Graphics& g)
     g.strokePath(path, juce::PathStrokeType(1.75f));
 }
 
-SignalLabPanel::AutomationLaneEditor::AutomationLaneEditor(const juce::String& title, juce::Colour accent, float midline)
-    : laneTitle(title), laneAccent(accent), defaultMidline(midline)
+void SignalLabPanel::AutomationLaneEditor::setLane(const cw::PatchAutomationLane& newLane, juce::Colour accentColour)
 {
-    values.fill(defaultMidline);
-    setRepaintsOnMouseActivity(true);
-}
-
-void SignalLabPanel::AutomationLaneEditor::setValues(const std::array<float, 4>& newValues)
-{
-    values = newValues;
+    lane = newLane;
+    ensureLane(lane, lane.interpolation);
+    laneAccent = accentColour;
     repaint();
 }
 
@@ -363,9 +667,35 @@ juce::Rectangle<float> SignalLabPanel::AutomationLaneEditor::getPlotArea() const
 juce::Point<float> SignalLabPanel::AutomationLaneEditor::getPoint(int index) const
 {
     auto plot = getPlotArea();
-    auto x = juce::jmap((float) index / 3.0f, plot.getX(), plot.getRight());
-    auto y = juce::jmap(values[(size_t) index], 0.0f, 1.0f, plot.getBottom(), plot.getY());
+    const auto& point = lane.points.getReference(index);
+    auto normalizedValue = juce::jmap((float) point.value, (float) lane.rangeMin, (float) lane.rangeMax, 0.0f, 1.0f);
+    auto x = juce::jmap((float) point.time, plot.getX(), plot.getRight());
+    auto y = juce::jmap(normalizedValue, 0.0f, 1.0f, plot.getBottom(), plot.getY());
     return { x, y };
+}
+
+int SignalLabPanel::AutomationLaneEditor::findPointAt(juce::Point<float> position) const
+{
+    auto bestDistance = 18.0f;
+    auto bestIndex = -1;
+    for (int index = 0; index < lane.points.size(); ++index)
+    {
+        auto distance = position.getDistanceFrom(getPoint(index));
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestIndex = index;
+        }
+    }
+
+    return bestIndex;
+}
+
+double SignalLabPanel::AutomationLaneEditor::pointValueFromY(float y) const
+{
+    auto plot = getPlotArea();
+    auto normalizedY = clamp01((plot.getBottom() - y) / plot.getHeight());
+    return juce::jmap((double) normalizedY, lane.rangeMin, lane.rangeMax);
 }
 
 void SignalLabPanel::AutomationLaneEditor::paint(juce::Graphics& g)
@@ -385,14 +715,14 @@ void SignalLabPanel::AutomationLaneEditor::paint(juce::Graphics& g)
         g.drawHorizontalLine((int) y, plot.getX(), plot.getRight());
     }
 
-    for (int index = 0; index <= 3; ++index)
+    for (int index = 0; index <= 8; ++index)
     {
-        auto x = juce::jmap((float) index / 3.0f, plot.getX(), plot.getRight());
+        auto x = juce::jmap((float) index / 8.0f, plot.getX(), plot.getRight());
         g.drawVerticalLine((int) x, plot.getY(), plot.getBottom());
     }
 
     juce::Path path;
-    for (int index = 0; index < 4; ++index)
+    for (int index = 0; index < lane.points.size(); ++index)
     {
         auto point = getPoint(index);
         if (index == 0)
@@ -411,7 +741,7 @@ void SignalLabPanel::AutomationLaneEditor::paint(juce::Graphics& g)
     g.setColour(laneAccent);
     g.strokePath(path, juce::PathStrokeType(2.0f));
 
-    for (int index = 0; index < 4; ++index)
+    for (int index = 0; index < lane.points.size(); ++index)
     {
         auto point = getPoint(index);
         g.setColour(laneAccent);
@@ -422,21 +752,21 @@ void SignalLabPanel::AutomationLaneEditor::paint(juce::Graphics& g)
 
     g.setColour(juce::Colour(0xffcbd5e1));
     g.setFont(juce::Font(13.0f).boldened());
-    g.drawText(laneTitle, getLocalBounds().reduced(12, 6).removeFromTop(18), juce::Justification::centredLeft, false);
+    g.drawText(lane.name, getLocalBounds().reduced(12, 6).removeFromTop(18), juce::Justification::centredLeft, false);
 }
 
 void SignalLabPanel::AutomationLaneEditor::mouseDown(const juce::MouseEvent& event)
 {
-    dragIndex = -1;
-    auto bestDistance = 18.0f;
-    for (int index = 0; index < 4; ++index)
+    dragIndex = findPointAt(event.position);
+
+    if (event.mods.isPopupMenu() && dragIndex > 0 && dragIndex < lane.points.size() - 1)
     {
-        auto distance = event.position.getDistanceFrom(getPoint(index));
-        if (distance < bestDistance)
-        {
-            bestDistance = distance;
-            dragIndex = index;
-        }
+        lane.points.remove(dragIndex);
+        dragIndex = -1;
+        ensureLane(lane, lane.interpolation);
+        if (onLaneChanged)
+            onLaneChanged(lane);
+        repaint();
     }
 }
 
@@ -446,12 +776,36 @@ void SignalLabPanel::AutomationLaneEditor::mouseDrag(const juce::MouseEvent& eve
         return;
 
     auto plot = getPlotArea();
-    auto normalizedY = clamp01((plot.getBottom() - event.position.y) / plot.getHeight());
-    values[(size_t) dragIndex] = normalizedY;
+    auto normalizedX = clamp01((event.position.x - plot.getX()) / plot.getWidth());
+    auto& point = lane.points.getReference(dragIndex);
+    point.value = pointValueFromY(event.position.y);
+    point.curve = lane.interpolation;
+    if (dragIndex == 0 || dragIndex == lane.points.size() - 1)
+        point.time = dragIndex == 0 ? 0.0 : 1.0;
+    else
+    {
+        auto minTime = lane.points.getReference(dragIndex - 1).time + 0.02;
+        auto maxTime = lane.points.getReference(dragIndex + 1).time - 0.02;
+        point.time = juce::jlimit((double) minTime, (double) maxTime, (double) normalizedX);
+    }
 
-    if (onValuesChanged)
-        onValuesChanged(values);
+    if (onLaneChanged)
+        onLaneChanged(lane);
 
+    repaint();
+}
+
+void SignalLabPanel::AutomationLaneEditor::mouseDoubleClick(const juce::MouseEvent& event)
+{
+    if (event.mods.isPopupMenu())
+        return;
+
+    auto plot = getPlotArea();
+    auto normalizedX = clamp01((event.position.x - plot.getX()) / plot.getWidth());
+    lane.points.add(makePoint(normalizedX, pointValueFromY(event.position.y), lane.interpolation));
+    ensureLane(lane, lane.interpolation);
+    if (onLaneChanged)
+        onLaneChanged(lane);
     repaint();
 }
 
@@ -459,6 +813,7 @@ SignalLabPanel::SignalLabPanel()
 {
     setName("Signal Lab");
     runtimePlayer.prepare(recipe.sampleRate, 512);
+    ensureRecipe(recipe);
 
     titleLabel.setText("Signal Lab", juce::dontSendNotification);
     titleLabel.setFont(juce::Font(24.0f).boldened());
@@ -575,30 +930,38 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks)
             return;
 
-        switch (filterModeSelector.getSelectedId())
-        {
-            case 2: recipe.filterMode = "bandpass"; break;
-            case 3: recipe.filterMode = "highpass"; break;
-            default: recipe.filterMode = "lowpass"; break;
-        }
+        recipe.filterMode = filterModeSelector.getSelectedId() == 2 ? "bandpass"
+                          : filterModeSelector.getSelectedId() == 3 ? "highpass"
+                                                                    : "lowpass";
         regenerateSignal();
     };
     envelopeCurveSelector.onChange = [this]
     {
         if (suppressCallbacks)
             return;
+
         recipe.envelopeCurveMode = envelopeCurveSelector.getSelectedId() == 3 ? "stepped"
                                   : envelopeCurveSelector.getSelectedId() == 1 ? "linear"
                                                                                : "smooth";
+        ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
+        for (auto& point : recipe.envelopePoints)
+            point.curve = recipe.envelopeCurveMode;
         regenerateSignal();
     };
     automationCurveSelector.onChange = [this]
     {
         if (suppressCallbacks)
             return;
+
         recipe.automationCurveMode = automationCurveSelector.getSelectedId() == 3 ? "stepped"
                                     : automationCurveSelector.getSelectedId() == 1 ? "linear"
                                                                                    : "smooth";
+        for (auto& lane : recipe.automationLanes)
+        {
+            lane.interpolation = recipe.automationCurveMode;
+            for (auto& point : lane.points)
+                point.curve = recipe.automationCurveMode;
+        }
         regenerateSignal();
     };
     filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
@@ -615,30 +978,10 @@ SignalLabPanel::SignalLabPanel()
     triangleSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.triangleLevel = (float) triangleSlider.getValue(); regenerateSignal(); } };
     noiseSlider.onValueChange = [this] { if (! suppressCallbacks) { recipe.noiseLevel = (float) noiseSlider.getValue(); regenerateSignal(); } };
 
-    envelopeEditor.onEnvelopeChanged = [this](float attackPosition, float sustainPosition, float releasePosition, float sustainLevel)
+    envelopeEditor.onEnvelopeChanged = [this](const juce::Array<cw::PatchAutomationPoint>& points)
     {
-        recipe.attackPosition = attackPosition;
-        recipe.sustainPosition = sustainPosition;
-        recipe.releasePosition = releasePosition;
-        recipe.sustainLevel = sustainLevel;
-        regenerateSignal();
-    };
-
-    pitchAutomationEditor.onValuesChanged = [this](const std::array<float, 4>& values)
-    {
-        recipe.pitchAutomation = values;
-        regenerateSignal();
-    };
-
-    gainAutomationEditor.onValuesChanged = [this](const std::array<float, 4>& values)
-    {
-        recipe.gainAutomation = values;
-        regenerateSignal();
-    };
-
-    filterAutomationEditor.onValuesChanged = [this](const std::array<float, 4>& values)
-    {
-        recipe.filterAutomation = values;
+        recipe.envelopePoints = points;
+        ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
         regenerateSignal();
     };
 
@@ -688,13 +1031,21 @@ SignalLabPanel::SignalLabPanel()
     loadPatchButton.setTooltip("Load a saved patch from your sound library");
     addAndMakeVisible(loadPatchButton);
 
+    addAutomationLaneButton.onClick = [this]
+    {
+        auto spec = getAutomationTargetSpecs()[(size_t) (recipe.automationLanes.size() % (int) getAutomationTargetSpecs().size())];
+        recipe.automationLanes.add(makeLaneForSpec(spec, recipe.automationCurveMode));
+        rebuildAutomationChrome();
+        regenerateSignal();
+    };
+    addAutomationLaneButton.setTooltip("Add another automation lane");
+    addAndMakeVisible(addAutomationLaneButton);
+
     addAndMakeVisible(envelopeEditor);
-    addAndMakeVisible(pitchAutomationEditor);
-    addAndMakeVisible(gainAutomationEditor);
-    addAndMakeVisible(filterAutomationEditor);
     addAndMakeVisible(scopePanel);
     addAndMakeVisible(spectrumPanel);
 
+    rebuildAutomationChrome();
     refreshControlsFromRecipe();
     regenerateSignal();
 }
@@ -723,16 +1074,36 @@ juce::ValueTree SignalLabPanel::createState() const
     state.setProperty("triangleLevel", recipe.triangleLevel, nullptr);
     state.setProperty("noiseLevel", recipe.noiseLevel, nullptr);
     state.setProperty("pitchSweepSemitones", recipe.pitchSweepSemitones, nullptr);
-    state.setProperty("attackPosition", recipe.attackPosition, nullptr);
-    state.setProperty("sustainPosition", recipe.sustainPosition, nullptr);
-    state.setProperty("releasePosition", recipe.releasePosition, nullptr);
-    state.setProperty("sustainLevel", recipe.sustainLevel, nullptr);
-    for (int index = 0; index < 4; ++index)
+
+    for (const auto& point : recipe.envelopePoints)
     {
-        state.setProperty("pitchAutomation" + juce::String(index), recipe.pitchAutomation[(size_t) index], nullptr);
-        state.setProperty("gainAutomation" + juce::String(index), recipe.gainAutomation[(size_t) index], nullptr);
-        state.setProperty("filterAutomation" + juce::String(index), recipe.filterAutomation[(size_t) index], nullptr);
+        juce::ValueTree pointState("EnvelopePoint");
+        pointState.setProperty("time", point.time, nullptr);
+        pointState.setProperty("value", point.value, nullptr);
+        pointState.setProperty("curve", point.curve, nullptr);
+        state.addChild(pointState, -1, nullptr);
     }
+
+    for (const auto& lane : recipe.automationLanes)
+    {
+        juce::ValueTree laneState("AutomationLane");
+        laneState.setProperty("id", lane.id, nullptr);
+        laneState.setProperty("name", lane.name, nullptr);
+        laneState.setProperty("targetParameter", lane.targetParameter, nullptr);
+        laneState.setProperty("interpolation", lane.interpolation, nullptr);
+        laneState.setProperty("rangeMin", lane.rangeMin, nullptr);
+        laneState.setProperty("rangeMax", lane.rangeMax, nullptr);
+        for (const auto& point : lane.points)
+        {
+            juce::ValueTree pointState("Point");
+            pointState.setProperty("time", point.time, nullptr);
+            pointState.setProperty("value", point.value, nullptr);
+            pointState.setProperty("curve", point.curve, nullptr);
+            laneState.addChild(pointState, -1, nullptr);
+        }
+        state.addChild(laneState, -1, nullptr);
+    }
+
     return state;
 }
 
@@ -741,6 +1112,7 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     if (! state.isValid())
         return;
 
+    recipe = {};
     recipe.name = state.getProperty("name", recipe.name).toString();
     recipe.sampleRate = (double) state.getProperty("sampleRate", recipe.sampleRate);
     recipe.durationSeconds = (double) state.getProperty("durationSeconds", recipe.durationSeconds);
@@ -762,17 +1134,41 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     recipe.triangleLevel = (float) state.getProperty("triangleLevel", recipe.triangleLevel);
     recipe.noiseLevel = (float) state.getProperty("noiseLevel", recipe.noiseLevel);
     recipe.pitchSweepSemitones = (float) state.getProperty("pitchSweepSemitones", recipe.pitchSweepSemitones);
-    recipe.attackPosition = (float) state.getProperty("attackPosition", recipe.attackPosition);
-    recipe.sustainPosition = (float) state.getProperty("sustainPosition", recipe.sustainPosition);
-    recipe.releasePosition = (float) state.getProperty("releasePosition", recipe.releasePosition);
-    recipe.sustainLevel = (float) state.getProperty("sustainLevel", recipe.sustainLevel);
-    for (int index = 0; index < 4; ++index)
+
+    recipe.envelopePoints.clear();
+    recipe.automationLanes.clear();
+
+    for (int index = 0; index < state.getNumChildren(); ++index)
     {
-        recipe.pitchAutomation[(size_t) index] = (float) state.getProperty("pitchAutomation" + juce::String(index), recipe.pitchAutomation[(size_t) index]);
-        recipe.gainAutomation[(size_t) index] = (float) state.getProperty("gainAutomation" + juce::String(index), recipe.gainAutomation[(size_t) index]);
-        recipe.filterAutomation[(size_t) index] = (float) state.getProperty("filterAutomation" + juce::String(index), recipe.filterAutomation[(size_t) index]);
+        auto child = state.getChild(index);
+        if (child.hasType("EnvelopePoint"))
+        {
+            recipe.envelopePoints.add(makePoint((double) child.getProperty("time"),
+                                                (double) child.getProperty("value"),
+                                                child.getProperty("curve", recipe.envelopeCurveMode).toString()));
+        }
+        else if (child.hasType("AutomationLane"))
+        {
+            cw::PatchAutomationLane lane;
+            lane.id = child.getProperty("id").toString();
+            lane.name = child.getProperty("name").toString();
+            lane.targetParameter = child.getProperty("targetParameter").toString();
+            lane.interpolation = child.getProperty("interpolation", recipe.automationCurveMode).toString();
+            lane.rangeMin = (double) child.getProperty("rangeMin", getTargetSpec(lane.targetParameter).rangeMin);
+            lane.rangeMax = (double) child.getProperty("rangeMax", getTargetSpec(lane.targetParameter).rangeMax);
+            for (int pointIndex = 0; pointIndex < child.getNumChildren(); ++pointIndex)
+            {
+                auto pointChild = child.getChild(pointIndex);
+                lane.points.add(makePoint((double) pointChild.getProperty("time"),
+                                          (double) pointChild.getProperty("value"),
+                                          pointChild.getProperty("curve", lane.interpolation).toString()));
+            }
+            recipe.automationLanes.add(lane);
+        }
     }
 
+    ensureRecipe(recipe);
+    rebuildAutomationChrome();
     refreshControlsFromRecipe();
     regenerateSignal();
 }
@@ -792,8 +1188,6 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
     {
         if (parameter.id == "baseFrequency")
             recipe.baseFrequencyHz = (float) parameter.defaultValue;
-        else if (parameter.id == "brightness")
-            recipe.filterCutoffHz = juce::jmap((float) parameter.defaultValue, 0.0f, 1.0f, 180.0f, 12000.0f);
         else if (parameter.id == "filterCutoff")
             recipe.filterCutoffHz = (float) parameter.defaultValue;
         else if (parameter.id == "filterResonance")
@@ -842,15 +1236,24 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
         }
     }
 
+    recipe.envelopePoints.clear();
     for (const auto& node : document.nodes)
     {
         if (node.kind == "envelope")
         {
-            recipe.attackPosition = (float) node.properties.getWithDefault("attackPosition", recipe.attackPosition);
-            recipe.sustainPosition = (float) node.properties.getWithDefault("sustainPosition", recipe.sustainPosition);
-            recipe.releasePosition = (float) node.properties.getWithDefault("releasePosition", recipe.releasePosition);
-            recipe.sustainLevel = (float) node.properties.getWithDefault("sustainLevel", recipe.sustainLevel);
             recipe.envelopeCurveMode = node.properties.getWithDefault("curveMode", recipe.envelopeCurveMode).toString();
+            auto pointsJson = node.properties.getWithDefault("pointsJson", {}).toString();
+            if (pointsJson.isNotEmpty())
+                recipe.envelopePoints = parsePointsJson(pointsJson, recipe.envelopeCurveMode);
+
+            if (recipe.envelopePoints.isEmpty())
+            {
+                setEnvelopeFromLegacy(recipe,
+                                      (float) node.properties.getWithDefault("attackPosition", 0.12f),
+                                      (float) node.properties.getWithDefault("sustainPosition", 0.42f),
+                                      (float) node.properties.getWithDefault("releasePosition", 0.82f),
+                                      (float) node.properties.getWithDefault("sustainLevel", 0.48f));
+            }
         }
         else if (node.kind == "filter")
         {
@@ -861,29 +1264,15 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
         }
     }
 
-    auto fillAutomation = [](std::array<float, 4>& target, const cw::PatchAutomationLane& lane)
+    recipe.automationLanes = document.automationLanes;
+    for (auto& lane : recipe.automationLanes)
     {
-        target.fill(0.5f);
-        for (int index = 0; index < juce::jmin(4, lane.points.size()); ++index)
-            target[(size_t) index] = (float) lane.points.getReference(index).value;
-    };
-
-    recipe.pitchAutomation = { 0.5f, 0.5f, 0.5f, 0.5f };
-    recipe.gainAutomation = { 1.0f, 0.85f, 0.7f, 0.0f };
-
-    for (const auto& lane : document.automationLanes)
-    {
-        if (lane.id == "pitchMotion" || lane.targetParameter == "pitchOffsetSemitones")
-            fillAutomation(recipe.pitchAutomation, lane);
-        else if (lane.id == "gainMotion" || lane.targetParameter == "outputGain")
-            fillAutomation(recipe.gainAutomation, lane);
-        else if (lane.id == "filterMotion" || lane.targetParameter == "filterCutoff")
-            fillAutomation(recipe.filterAutomation, lane);
-
         if (lane.interpolation.isNotEmpty())
             recipe.automationCurveMode = lane.interpolation;
     }
 
+    ensureRecipe(recipe);
+    rebuildAutomationChrome();
     refreshControlsFromRecipe();
     regenerateSignal();
     return true;
@@ -892,10 +1281,7 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
 void SignalLabPanel::applyAiTemplate(const juce::String& templateName)
 {
     auto selected = templateName.trim();
-    if (selected.isEmpty())
-        return;
-
-    if (selected == "Custom")
+    if (selected.isEmpty() || selected == "Custom")
         return;
 
     applyTemplate(selected);
@@ -982,13 +1368,22 @@ void SignalLabPanel::resized()
     upperVisuals.removeFromLeft(12);
     scopePanel.setBounds(upperVisuals);
     area.removeFromTop(12);
-    auto automationArea = area.removeFromTop(336);
-    pitchAutomationEditor.setBounds(automationArea.removeFromTop(100));
-    automationArea.removeFromTop(12);
-    gainAutomationEditor.setBounds(automationArea.removeFromTop(100));
-    automationArea.removeFromTop(12);
-    filterAutomationEditor.setBounds(automationArea.removeFromTop(100));
-    area.removeFromTop(12);
+
+    auto automationArea = area.removeFromTop(420);
+    addAutomationLaneButton.setBounds(automationArea.removeFromTop(28).removeFromLeft(160));
+    automationArea.removeFromTop(8);
+    for (int index = 0; index < automationLaneEditors.size(); ++index)
+    {
+        auto row = automationArea.removeFromTop(130);
+        auto header = row.removeFromTop(26);
+        automationTargetSelectors[index]->setBounds(header.removeFromLeft(220));
+        header.removeFromLeft(8);
+        removeAutomationLaneButtons[index]->setBounds(header.removeFromLeft(80));
+        row.removeFromTop(6);
+        automationLaneEditors[index]->setBounds(row);
+        automationArea.removeFromTop(10);
+    }
+
     spectrumPanel.setBounds(area);
 }
 
@@ -1002,15 +1397,14 @@ void SignalLabPanel::configureSlider(juce::Slider& slider, double min, double ma
 
 void SignalLabPanel::regenerateSignal()
 {
+    ensureRecipe(recipe);
     auto patchDocument = buildPatchDocument(recipe);
     juce::String errorMessage;
     if (! runtimePlayer.renderPatchToBuffer(patchDocument, recipe.durationSeconds, generatedBuffer, errorMessage))
         generatedBuffer = buildSignalBuffer(recipe);
 
     envelopeEditor.setRecipe(recipe);
-    pitchAutomationEditor.setValues(recipe.pitchAutomation);
-    gainAutomationEditor.setValues(recipe.gainAutomation);
-    filterAutomationEditor.setValues(recipe.filterAutomation);
+    syncAutomationEditors();
     scopePanel.setBuffer(generatedBuffer);
     spectrumPanel.setBuffer(generatedBuffer, recipe.sampleRate);
     updateStatusText();
@@ -1018,74 +1412,75 @@ void SignalLabPanel::regenerateSignal()
 
 juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& activeRecipe) const
 {
-    auto numSamples = juce::jmax(1, juce::roundToInt(activeRecipe.durationSeconds * activeRecipe.sampleRate));
+    auto recipeCopy = activeRecipe;
+    ensureRecipe(recipeCopy);
+
+    auto numSamples = juce::jmax(1, juce::roundToInt(recipeCopy.durationSeconds * recipeCopy.sampleRate));
     juce::AudioBuffer<float> buffer(2, numSamples);
     buffer.clear();
 
     juce::Random random(0x5349474E);
-    auto totalLevel = activeRecipe.sineLevel + activeRecipe.sawLevel + activeRecipe.squareLevel + activeRecipe.triangleLevel + activeRecipe.noiseLevel;
+    auto totalLevel = recipeCopy.sineLevel + recipeCopy.sawLevel + recipeCopy.squareLevel + recipeCopy.triangleLevel + recipeCopy.noiseLevel;
     auto normalizer = totalLevel > 0.0f ? (0.9f / totalLevel) : 0.0f;
-    auto effectiveAttack = juce::jlimit(0.005f, 0.95f, activeRecipe.attackPosition * juce::jmap(activeRecipe.macroHardness, 0.0f, 1.0f, 1.35f, 0.55f));
-    auto effectiveSustain = juce::jlimit(effectiveAttack + 0.02f, 0.97f,
-                                         activeRecipe.sustainPosition + juce::jmap(activeRecipe.macroSize, 0.0f, 1.0f, -0.03f, 0.10f));
-    auto effectiveRelease = juce::jlimit(effectiveSustain + 0.03f, 0.995f,
-                                         activeRecipe.releasePosition + juce::jmap(activeRecipe.macroSize, 0.0f, 1.0f, -0.08f, 0.14f));
-    auto effectiveSustainLevel = juce::jlimit(0.05f, 1.0f,
-                                              activeRecipe.sustainLevel + juce::jmap(activeRecipe.macroWeight, 0.0f, 1.0f, -0.10f, 0.16f));
-    auto releaseStart = juce::jmax(effectiveSustain + 0.01f, effectiveRelease);
+
+    auto envelopePoints = recipeCopy.envelopePoints;
+    ensureEnvelopePoints(envelopePoints, recipeCopy.envelopeCurveMode);
+    for (int index = 1; index < envelopePoints.size() - 1; ++index)
+    {
+        double timeShift = index == 1
+                         ? juce::jmap((double) recipeCopy.macroHardness, 0.0, 1.0, 0.05, -0.05)
+                         : juce::jmap((double) recipeCopy.macroSize, 0.0, 1.0, -0.04, 0.08);
+        envelopePoints.getReference(index).time += timeShift;
+        envelopePoints.getReference(index).value = juce::jlimit(0.0,
+                                                                1.0,
+                                                                envelopePoints.getReference(index).value
+                                                                    + juce::jmap((double) recipeCopy.macroWeight, 0.0, 1.0, -0.08, 0.12));
+    }
+    ensureEnvelopePoints(envelopePoints, recipeCopy.envelopeCurveMode);
+
     float filterState = 0.0f;
     for (int sample = 0; sample < numSamples; ++sample)
     {
-        auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
-        auto pitchAutomationValue = sampleAutomation(activeRecipe.pitchAutomation, t);
-        auto gainAutomationValue = sampleAutomation(activeRecipe.gainAutomation, t);
-        auto filterAutomationValue = sampleAutomation(activeRecipe.filterAutomation, t);
-        auto pitchSemitones = (activeRecipe.pitchSweepSemitones + juce::jmap(activeRecipe.macroWeight, 0.0f, 1.0f, 2.0f, -2.0f)) * (t - 0.5f) * 2.0f
-                            + juce::jmap(pitchAutomationValue, 0.0f, 1.0f, -12.0f, 12.0f);
-        auto baseFrequency = activeRecipe.baseFrequencyHz * juce::jmap(activeRecipe.macroWeight, 0.0f, 1.0f, 1.16f, 0.86f);
+        auto t = (double) sample / (double) juce::jmax(1, numSamples - 1);
+        auto pitchMotion = sampleTargetLanes(recipeCopy.automationLanes, "pitchOffsetSemitones", t, 0.0);
+        auto gainMotion = sampleTargetLanes(recipeCopy.automationLanes, "outputGain", t, 1.0);
+        auto filterMotion = sampleTargetLanes(recipeCopy.automationLanes, "filterCutoff", t, 0.5);
+        auto resonanceMotion = sampleTargetLanes(recipeCopy.automationLanes, "filterResonance", t, recipeCopy.filterResonance);
+        auto noiseMotion = sampleTargetLanes(recipeCopy.automationLanes, "noiseLevel", t, recipeCopy.noiseLevel);
+        auto baseFrequencyMotion = sampleTargetLanes(recipeCopy.automationLanes, "baseFrequency", t, recipeCopy.baseFrequencyHz);
+        auto pitchSemitones = recipeCopy.pitchSweepSemitones
+                            + (float) pitchMotion
+                            + juce::jmap(recipeCopy.macroWeight, 0.0f, 1.0f, 2.0f, -2.0f) * ((float) t - 0.5f) * 2.0f;
+        auto baseFrequency = (float) baseFrequencyMotion * juce::jmap(recipeCopy.macroWeight, 0.0f, 1.0f, 1.16f, 0.86f);
         auto frequency = baseFrequency * std::pow(2.0f, pitchSemitones / 12.0f);
-        auto phase = juce::MathConstants<float>::twoPi * frequency * ((float) sample / (float) activeRecipe.sampleRate);
+        auto phase = juce::MathConstants<float>::twoPi * frequency * ((float) sample / (float) recipeCopy.sampleRate);
 
         auto sine = std::sin(phase);
         auto saw = 2.0f * (phase / juce::MathConstants<float>::twoPi - std::floor(0.5f + phase / juce::MathConstants<float>::twoPi));
         auto square = std::sin(phase) >= 0.0f ? 1.0f : -1.0f;
         auto triangle = std::asin(std::sin(phase)) * (2.0f / juce::MathConstants<float>::pi);
         auto noise = random.nextFloat() * 2.0f - 1.0f;
-        auto macroNoise = juce::jlimit(0.0f, 1.0f, activeRecipe.noiseLevel + activeRecipe.macroAir * 0.18f + activeRecipe.macroGrit * 0.12f);
-        auto gritDrive = 1.0f + activeRecipe.macroGrit * 5.5f;
+        auto macroNoise = juce::jlimit(0.0f, 1.0f, (float) noiseMotion + recipeCopy.macroAir * 0.18f + recipeCopy.macroGrit * 0.12f);
+        auto gritDrive = 1.0f + recipeCopy.macroGrit * 5.5f;
+        auto envelope = (float) sampleLane(envelopePoints, recipeCopy.envelopeCurveMode, t, 0.0);
 
-        float envelope = 0.0f;
-        if (t <= effectiveAttack)
-            envelope = juce::jmap(applyCurveMode(juce::jmap(t, 0.0f, juce::jmax(0.001f, effectiveAttack), 0.0f, 1.0f),
-                                                 activeRecipe.envelopeCurveMode),
-                                  0.0f, 1.0f, 0.0f, 1.0f);
-        else if (t <= effectiveSustain)
-            envelope = juce::jmap(applyCurveMode(juce::jmap(t, effectiveAttack, juce::jmax(effectiveAttack + 0.001f, effectiveSustain), 0.0f, 1.0f),
-                                                 activeRecipe.envelopeCurveMode),
-                                  0.0f, 1.0f, 1.0f, effectiveSustainLevel);
-        else if (t <= releaseStart)
-            envelope = effectiveSustainLevel;
-        else
-            envelope = juce::jmap(applyCurveMode(juce::jmap(t, releaseStart, 1.0f, 0.0f, 1.0f),
-                                                 activeRecipe.envelopeCurveMode),
-                                  0.0f, 1.0f, effectiveSustainLevel, 0.0f);
-
-        auto sampleValue = normalizer * envelope * gainAutomationValue
-                         * ((activeRecipe.sineLevel + activeRecipe.macroWeight * 0.10f) * sine
-                            + (activeRecipe.sawLevel + activeRecipe.macroGrit * 0.14f) * saw
-                            + (activeRecipe.squareLevel + activeRecipe.macroHardness * 0.12f) * square
-                            + (activeRecipe.triangleLevel + activeRecipe.macroWeight * 0.08f) * triangle
+        auto sampleValue = normalizer * envelope * (float) gainMotion
+                         * ((recipeCopy.sineLevel + recipeCopy.macroWeight * 0.10f) * sine
+                            + (recipeCopy.sawLevel + recipeCopy.macroGrit * 0.14f) * saw
+                            + (recipeCopy.squareLevel + recipeCopy.macroHardness * 0.12f) * square
+                            + (recipeCopy.triangleLevel + recipeCopy.macroWeight * 0.08f) * triangle
                             + macroNoise * noise);
 
         sampleValue = std::tanh(sampleValue * gritDrive) / std::tanh(gritDrive);
 
-        auto filterNormalized = clamp01(cutoffToNormalized(activeRecipe.filterCutoffHz)
-                                        + (filterAutomationValue - 0.5f) * 0.75f
-                                        + (envelope - 0.5f) * (activeRecipe.filterEnvelopeAmount + activeRecipe.macroHardness * 0.30f)
-                                        + activeRecipe.macroAir * 0.18f
-                                        - activeRecipe.macroWeight * 0.10f);
+        auto filterNormalized = clamp01(cutoffToNormalized(recipeCopy.filterCutoffHz)
+                                        + ((float) filterMotion - 0.5f) * 0.75f
+                                        + (envelope - 0.5f) * (recipeCopy.filterEnvelopeAmount + recipeCopy.macroHardness * 0.30f)
+                                        + recipeCopy.macroAir * 0.18f
+                                        - recipeCopy.macroWeight * 0.10f);
         auto brightnessEquivalent = juce::jmap(filterNormalized, 0.0f, 1.0f, 0.02f, 1.0f);
-        sampleValue = applyBrightnessFilter(sampleValue, filterState, brightnessEquivalent, activeRecipe.sampleRate);
+        sampleValue = applyBrightnessFilter(sampleValue, filterState, brightnessEquivalent, recipeCopy.sampleRate);
+        sampleValue *= juce::jlimit(0.6f, 1.4f, (float) resonanceMotion / juce::jmax(0.30f, recipeCopy.filterResonance));
 
         buffer.setSample(0, sample, sampleValue);
         buffer.setSample(1, sample, sampleValue);
@@ -1096,67 +1491,45 @@ juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& a
 
 cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeRecipe) const
 {
+    auto recipeCopy = activeRecipe;
+    ensureRecipe(recipeCopy);
+
     cw::PatchDocument document;
-    document.patchId = cw::makePatchId(activeRecipe.name);
-    document.name = activeRecipe.name;
+    document.patchId = cw::makePatchId(recipeCopy.name);
+    document.name = recipeCopy.name;
     document.type = "instrument";
     document.description = "Signal Lab exported instrument patch.";
     document.createdAt = juce::Time::getCurrentTime().toISO8601(true);
     document.updatedAt = document.createdAt;
 
-    document.parameters.add({ "baseFrequency", "Base Frequency", "float", activeRecipe.baseFrequencyHz, 30.0, 2400.0, "hz" });
-    document.parameters.add({ "envelopeCurveMode", "Envelope Curve", "float", activeRecipe.envelopeCurveMode == "stepped" ? 3.0 : activeRecipe.envelopeCurveMode == "linear" ? 1.0 : 2.0, 1.0, 3.0, "mode" });
-    document.parameters.add({ "filterCutoff", "Filter Cutoff", "float", activeRecipe.filterCutoffHz, kMinFilterCutoffHz, kMaxFilterCutoffHz, "hz" });
-    document.parameters.add({ "filterResonance", "Filter Resonance", "float", activeRecipe.filterResonance, 0.30, 8.0, "q" });
-    document.parameters.add({ "filterEnvelopeAmount", "Filter Envelope", "float", activeRecipe.filterEnvelopeAmount, -1.0, 1.0, "normalized" });
-    document.parameters.add({ "macroHardness", "Hardness", "float", activeRecipe.macroHardness, 0.0, 1.0, "normalized" });
-    document.parameters.add({ "macroWeight", "Weight", "float", activeRecipe.macroWeight, 0.0, 1.0, "normalized" });
-    document.parameters.add({ "macroAir", "Air", "float", activeRecipe.macroAir, 0.0, 1.0, "normalized" });
-    document.parameters.add({ "macroGrit", "Grit", "float", activeRecipe.macroGrit, 0.0, 1.0, "normalized" });
-    document.parameters.add({ "macroSize", "Size", "float", activeRecipe.macroSize, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "baseFrequency", "Base Frequency", "float", recipeCopy.baseFrequencyHz, 30.0, 2400.0, "hz" });
+    document.parameters.add({ "envelopeCurveMode", "Envelope Curve", "float", recipeCopy.envelopeCurveMode == "stepped" ? 3.0 : recipeCopy.envelopeCurveMode == "linear" ? 1.0 : 2.0, 1.0, 3.0, "mode" });
+    document.parameters.add({ "filterCutoff", "Filter Cutoff", "float", recipeCopy.filterCutoffHz, kMinFilterCutoffHz, kMaxFilterCutoffHz, "hz" });
+    document.parameters.add({ "filterResonance", "Filter Resonance", "float", recipeCopy.filterResonance, 0.30, 8.0, "q" });
+    document.parameters.add({ "filterEnvelopeAmount", "Filter Envelope", "float", recipeCopy.filterEnvelopeAmount, -1.0, 1.0, "normalized" });
+    document.parameters.add({ "macroHardness", "Hardness", "float", recipeCopy.macroHardness, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroWeight", "Weight", "float", recipeCopy.macroWeight, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroAir", "Air", "float", recipeCopy.macroAir, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroGrit", "Grit", "float", recipeCopy.macroGrit, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "macroSize", "Size", "float", recipeCopy.macroSize, 0.0, 1.0, "normalized" });
     document.parameters.add({ "pitchOffsetSemitones", "Pitch Offset", "float", 0.0, -12.0, 12.0, "semitones" });
     document.parameters.add({ "outputGain", "Output Gain", "float", 1.0, 0.0, 1.0, "normalized" });
-    document.parameters.add({ "noiseLevel", "Noise Level", "float", activeRecipe.noiseLevel, 0.0, 1.0, "normalized" });
+    document.parameters.add({ "noiseLevel", "Noise Level", "float", recipeCopy.noiseLevel, 0.0, 1.0, "normalized" });
 
-    auto makeLane = [&activeRecipe](const juce::String& id,
-                                    const juce::String& name,
-                                    const juce::String& target,
-                                    double rangeMin,
-                                    double rangeMax,
-                                    const std::array<float, 4>& values)
-    {
-        cw::PatchAutomationLane lane;
-        lane.id = id;
-        lane.name = name;
-        lane.targetParameter = target;
-        lane.interpolation = activeRecipe.automationCurveMode;
-        lane.rangeMin = rangeMin;
-        lane.rangeMax = rangeMax;
-        for (int index = 0; index < 4; ++index)
-        {
-            cw::PatchAutomationPoint point;
-            point.time = index / 3.0;
-            point.value = values[(size_t) index];
-            point.curve = activeRecipe.automationCurveMode;
-            lane.points.add(point);
-        }
-        return lane;
-    };
+    document.automationLanes = recipeCopy.automationLanes;
+    for (auto& lane : document.automationLanes)
+        ensureLane(lane, recipeCopy.automationCurveMode);
 
-    document.automationLanes.add(makeLane("pitchMotion", "Pitch Motion", "pitchOffsetSemitones", -12.0, 12.0, activeRecipe.pitchAutomation));
-    document.automationLanes.add(makeLane("gainMotion", "Gain Motion", "outputGain", 0.0, 1.0, activeRecipe.gainAutomation));
-    document.automationLanes.add(makeLane("filterMotion", "Filter Motion", "filterCutoff", 0.0, 1.0, activeRecipe.filterAutomation));
-
-    if (activeRecipe.sineLevel > 0.0f)
-        document.sources.add({ "osc1", "oscillator", "sine", {}, activeRecipe.sineLevel, "baseFrequency" });
-    if (activeRecipe.sawLevel > 0.0f)
-        document.sources.add({ "osc2", "oscillator", "saw", {}, activeRecipe.sawLevel, "baseFrequency" });
-    if (activeRecipe.squareLevel > 0.0f)
-        document.sources.add({ "osc3", "oscillator", "square", {}, activeRecipe.squareLevel, "baseFrequency" });
-    if (activeRecipe.triangleLevel > 0.0f)
-        document.sources.add({ "osc4", "oscillator", "triangle", {}, activeRecipe.triangleLevel, "baseFrequency" });
-    if (activeRecipe.noiseLevel > 0.0f)
-        document.sources.add({ "noise1", "noise", {}, "white", activeRecipe.noiseLevel, {} });
+    if (recipeCopy.sineLevel > 0.0f)
+        document.sources.add({ "osc1", "oscillator", "sine", {}, recipeCopy.sineLevel, "baseFrequency" });
+    if (recipeCopy.sawLevel > 0.0f)
+        document.sources.add({ "osc2", "oscillator", "saw", {}, recipeCopy.sawLevel, "baseFrequency" });
+    if (recipeCopy.squareLevel > 0.0f)
+        document.sources.add({ "osc3", "oscillator", "square", {}, recipeCopy.squareLevel, "baseFrequency" });
+    if (recipeCopy.triangleLevel > 0.0f)
+        document.sources.add({ "osc4", "oscillator", "triangle", {}, recipeCopy.triangleLevel, "baseFrequency" });
+    if (recipeCopy.noiseLevel > 0.0f)
+        document.sources.add({ "noise1", "noise", {}, "white", recipeCopy.noiseLevel, {} });
 
     cw::PatchNode mixNode;
     mixNode.id = "mix1";
@@ -1166,20 +1539,21 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     cw::PatchNode filterNode;
     filterNode.id = "filter1";
     filterNode.kind = "filter";
-    filterNode.properties.set("mode", activeRecipe.filterMode);
-    filterNode.properties.set("cutoffHz", activeRecipe.filterCutoffHz);
-    filterNode.properties.set("resonance", activeRecipe.filterResonance);
-    filterNode.properties.set("envelopeAmount", activeRecipe.filterEnvelopeAmount);
+    filterNode.properties.set("mode", recipeCopy.filterMode);
+    filterNode.properties.set("cutoffHz", recipeCopy.filterCutoffHz);
+    filterNode.properties.set("resonance", recipeCopy.filterResonance);
+    filterNode.properties.set("envelopeAmount", recipeCopy.filterEnvelopeAmount);
     document.nodes.add(filterNode);
 
     cw::PatchNode envelopeNode;
     envelopeNode.id = "env1";
     envelopeNode.kind = "envelope";
-    envelopeNode.properties.set("attackPosition", activeRecipe.attackPosition);
-    envelopeNode.properties.set("sustainPosition", activeRecipe.sustainPosition);
-    envelopeNode.properties.set("releasePosition", activeRecipe.releasePosition);
-    envelopeNode.properties.set("sustainLevel", activeRecipe.sustainLevel);
-    envelopeNode.properties.set("curveMode", activeRecipe.envelopeCurveMode);
+    envelopeNode.properties.set("attackPosition", getLegacyAttackPosition(recipeCopy.envelopePoints));
+    envelopeNode.properties.set("sustainPosition", getLegacySustainPosition(recipeCopy.envelopePoints));
+    envelopeNode.properties.set("releasePosition", getLegacyReleasePosition(recipeCopy.envelopePoints));
+    envelopeNode.properties.set("sustainLevel", getLegacySustainLevel(recipeCopy.envelopePoints));
+    envelopeNode.properties.set("curveMode", recipeCopy.envelopeCurveMode);
+    envelopeNode.properties.set("pointsJson", serialisePointsJson(recipeCopy.envelopePoints));
     document.nodes.add(envelopeNode);
 
     for (const auto& source : document.sources)
@@ -1196,6 +1570,8 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
 
 void SignalLabPanel::applyTemplate(const juce::String& templateName)
 {
+    recipe = {};
+
     if (templateName == "Soft Keys")
     {
         recipe.name = "Soft Keys";
@@ -1216,13 +1592,10 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.triangleLevel = 0.28f;
         recipe.noiseLevel = 0.02f;
         recipe.pitchSweepSemitones = 0.0f;
-        recipe.attackPosition = 0.10f;
-        recipe.sustainPosition = 0.38f;
-        recipe.releasePosition = 0.86f;
-        recipe.sustainLevel = 0.70f;
-        recipe.pitchAutomation = { 0.5f, 0.5f, 0.5f, 0.5f };
-        recipe.gainAutomation = { 1.0f, 0.88f, 0.72f, 0.0f };
-        recipe.filterAutomation = { 0.44f, 0.46f, 0.42f, 0.36f };
+        setEnvelopeFromLegacy(recipe, 0.10f, 0.38f, 0.86f, 0.70f);
+        setLaneValues(recipe, "pitchOffsetSemitones", { 0.0f, 0.0f, 0.0f, 0.0f });
+        setLaneValues(recipe, "outputGain", { 1.0f, 0.88f, 0.72f, 0.0f });
+        setLaneValues(recipe, "filterCutoff", { 0.44f, 0.46f, 0.42f, 0.36f });
     }
     else if (templateName == "Triangle Lead")
     {
@@ -1244,13 +1617,10 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.triangleLevel = 0.68f;
         recipe.noiseLevel = 0.0f;
         recipe.pitchSweepSemitones = 1.5f;
-        recipe.attackPosition = 0.04f;
-        recipe.sustainPosition = 0.22f;
-        recipe.releasePosition = 0.78f;
-        recipe.sustainLevel = 0.62f;
-        recipe.pitchAutomation = { 0.55f, 0.50f, 0.48f, 0.50f };
-        recipe.gainAutomation = { 1.0f, 0.92f, 0.76f, 0.0f };
-        recipe.filterAutomation = { 0.60f, 0.68f, 0.54f, 0.48f };
+        setEnvelopeFromLegacy(recipe, 0.04f, 0.22f, 0.78f, 0.62f);
+        setLaneValues(recipe, "pitchOffsetSemitones", { 0.55f, 0.50f, 0.48f, 0.50f });
+        setLaneValues(recipe, "outputGain", { 1.0f, 0.92f, 0.76f, 0.0f });
+        setLaneValues(recipe, "filterCutoff", { 0.60f, 0.68f, 0.54f, 0.48f });
     }
     else if (templateName == "Noisy Pluck")
     {
@@ -1272,13 +1642,10 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.triangleLevel = 0.20f;
         recipe.noiseLevel = 0.20f;
         recipe.pitchSweepSemitones = -4.0f;
-        recipe.attackPosition = 0.02f;
-        recipe.sustainPosition = 0.12f;
-        recipe.releasePosition = 0.52f;
-        recipe.sustainLevel = 0.20f;
-        recipe.pitchAutomation = { 0.78f, 0.58f, 0.46f, 0.50f };
-        recipe.gainAutomation = { 1.0f, 0.58f, 0.22f, 0.0f };
-        recipe.filterAutomation = { 0.82f, 0.58f, 0.38f, 0.30f };
+        setEnvelopeFromLegacy(recipe, 0.02f, 0.12f, 0.52f, 0.20f);
+        setLaneValues(recipe, "pitchOffsetSemitones", { 0.78f, 0.58f, 0.46f, 0.50f });
+        setLaneValues(recipe, "outputGain", { 1.0f, 0.58f, 0.22f, 0.0f });
+        setLaneValues(recipe, "filterCutoff", { 0.82f, 0.58f, 0.38f, 0.30f });
     }
     else if (templateName == "Drone Pad")
     {
@@ -1300,13 +1667,10 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.triangleLevel = 0.26f;
         recipe.noiseLevel = 0.06f;
         recipe.pitchSweepSemitones = 2.0f;
-        recipe.attackPosition = 0.18f;
-        recipe.sustainPosition = 0.46f;
-        recipe.releasePosition = 0.92f;
-        recipe.sustainLevel = 0.78f;
-        recipe.pitchAutomation = { 0.48f, 0.52f, 0.46f, 0.50f };
-        recipe.gainAutomation = { 0.84f, 1.0f, 0.92f, 0.0f };
-        recipe.filterAutomation = { 0.34f, 0.42f, 0.40f, 0.36f };
+        setEnvelopeFromLegacy(recipe, 0.18f, 0.46f, 0.92f, 0.78f);
+        setLaneValues(recipe, "pitchOffsetSemitones", { 0.48f, 0.52f, 0.46f, 0.50f });
+        setLaneValues(recipe, "outputGain", { 0.84f, 1.0f, 0.92f, 0.0f });
+        setLaneValues(recipe, "filterCutoff", { 0.34f, 0.42f, 0.40f, 0.36f });
     }
     else if (templateName == "Impact Tone")
     {
@@ -1328,25 +1692,24 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
         recipe.triangleLevel = 0.12f;
         recipe.noiseLevel = 0.20f;
         recipe.pitchSweepSemitones = -8.0f;
-        recipe.attackPosition = 0.01f;
-        recipe.sustainPosition = 0.10f;
-        recipe.releasePosition = 0.48f;
-        recipe.sustainLevel = 0.18f;
-        recipe.pitchAutomation = { 0.92f, 0.64f, 0.42f, 0.50f };
-        recipe.gainAutomation = { 1.0f, 0.52f, 0.18f, 0.0f };
-        recipe.filterAutomation = { 0.88f, 0.62f, 0.34f, 0.22f };
+        setEnvelopeFromLegacy(recipe, 0.01f, 0.10f, 0.48f, 0.18f);
+        setLaneValues(recipe, "pitchOffsetSemitones", { 0.92f, 0.64f, 0.42f, 0.50f });
+        setLaneValues(recipe, "outputGain", { 1.0f, 0.52f, 0.18f, 0.0f });
+        setLaneValues(recipe, "filterCutoff", { 0.88f, 0.62f, 0.34f, 0.22f });
     }
 
+    ensureRecipe(recipe);
+    rebuildAutomationChrome();
     refreshControlsFromRecipe();
     regenerateSignal();
 }
 
 void SignalLabPanel::refreshControlsFromRecipe()
 {
+    ensureRecipe(recipe);
     suppressCallbacks = true;
     nameEditor.setText(recipe.name, juce::dontSendNotification);
-    if (templateSelector.getText() != recipe.name)
-        templateSelector.setSelectedId(1, juce::dontSendNotification);
+    templateSelector.setSelectedId(1, juce::dontSendNotification);
     frequencySlider.setValue(recipe.baseFrequencyHz, juce::dontSendNotification);
     durationSlider.setValue(recipe.durationSeconds, juce::dontSendNotification);
     pitchSlider.setValue(recipe.pitchSweepSemitones, juce::dontSendNotification);
@@ -1370,10 +1733,9 @@ void SignalLabPanel::refreshControlsFromRecipe()
     triangleSlider.setValue(recipe.triangleLevel, juce::dontSendNotification);
     noiseSlider.setValue(recipe.noiseLevel, juce::dontSendNotification);
     suppressCallbacks = false;
+
     envelopeEditor.setRecipe(recipe);
-    pitchAutomationEditor.setValues(recipe.pitchAutomation);
-    gainAutomationEditor.setValues(recipe.gainAutomation);
-    filterAutomationEditor.setValues(recipe.filterAutomation);
+    syncAutomationEditors();
 }
 
 void SignalLabPanel::updateStatusText()
@@ -1383,11 +1745,119 @@ void SignalLabPanel::updateStatusText()
               + "  |  " + juce::String(recipe.durationSeconds, 2) + " s"
               + "  |  " + juce::String((int) recipe.baseFrequencyHz) + " Hz"
               + "  |  " + recipe.filterMode + " " + juce::String((int) recipe.filterCutoffHz) + " Hz"
+              + "  |  envelope points: " + juce::String(recipe.envelopePoints.size())
+              + "  |  motion lanes: " + juce::String(recipe.automationLanes.size())
               + "  |  curves E:" + recipe.envelopeCurveMode + " A:" + recipe.automationCurveMode
-              + "  |  macros H:" + juce::String(recipe.macroHardness, 2)
-              + " W:" + juce::String(recipe.macroWeight, 2)
-              + " A:" + juce::String(recipe.macroAir, 2)
-              + "  |  " + juce::String(sampleCount) + " samples"
-              + "  |  automation: pitch + gain + filter";
+              + "  |  " + juce::String(sampleCount) + " samples";
     statusLabel.setText(text, juce::dontSendNotification);
+}
+
+void SignalLabPanel::syncAutomationEditors()
+{
+    ensureRecipe(recipe);
+    for (int index = 0; index < automationLaneEditors.size() && index < recipe.automationLanes.size(); ++index)
+    {
+        auto& lane = recipe.automationLanes.getReference(index);
+        auto spec = getTargetSpec(lane.targetParameter);
+        lane.name = spec.title;
+        automationLaneEditors[index]->setLane(lane, spec.accent);
+        for (int itemIndex = 0; itemIndex < (int) getAutomationTargetSpecs().size(); ++itemIndex)
+        {
+            if (lane.targetParameter == juce::String(getAutomationTargetSpecs()[(size_t) itemIndex].parameterId))
+            {
+                automationTargetSelectors[index]->setSelectedItemIndex(itemIndex, juce::dontSendNotification);
+                break;
+            }
+        }
+    }
+}
+
+void SignalLabPanel::rebuildAutomationChrome()
+{
+    while (automationLaneEditors.size() < recipe.automationLanes.size())
+    {
+        auto* editor = automationLaneEditors.add(new AutomationLaneEditor());
+        editor->onLaneChanged = [this, editor](const cw::PatchAutomationLane& updatedLane)
+        {
+            auto index = automationLaneEditors.indexOf(editor);
+            if (index >= 0 && index < recipe.automationLanes.size())
+            {
+                recipe.automationLanes.getReference(index) = updatedLane;
+                ensureLane(recipe.automationLanes.getReference(index), recipe.automationCurveMode);
+                regenerateSignal();
+            }
+        };
+        addAndMakeVisible(editor);
+
+        auto* selector = automationTargetSelectors.add(new juce::ComboBox());
+        for (const auto& spec : getAutomationTargetSpecs())
+            selector->addItem(spec.title, selector->getNumItems() + 1);
+        selector->onChange = [this, selector]
+        {
+            if (suppressCallbacks)
+                return;
+
+            auto index = automationTargetSelectors.indexOf(selector);
+            if (index >= 0 && index < recipe.automationLanes.size())
+            {
+                auto selectedSpec = getAutomationTargetSpecs()[(size_t) juce::jmax(0, selector->getSelectedItemIndex())];
+                auto existingPoints = recipe.automationLanes.getReference(index).points;
+                recipe.automationLanes.getReference(index) = makeLaneForSpec(selectedSpec, recipe.automationCurveMode);
+                if (existingPoints.size() >= 2)
+                {
+                    recipe.automationLanes.getReference(index).points = existingPoints;
+                    ensureLane(recipe.automationLanes.getReference(index), recipe.automationCurveMode);
+                }
+                regenerateSignal();
+            }
+        };
+        addAndMakeVisible(selector);
+
+        auto* removeButton = removeAutomationLaneButtons.add(new juce::TextButton("Remove"));
+        removeButton->onClick = [this, removeButton]
+        {
+            auto index = removeAutomationLaneButtons.indexOf(removeButton);
+            if (index >= 0 && index < recipe.automationLanes.size() && recipe.automationLanes.size() > 1)
+            {
+                recipe.automationLanes.remove(index);
+                rebuildAutomationChrome();
+                regenerateSignal();
+            }
+        };
+        addAndMakeVisible(removeButton);
+    }
+
+    while (automationLaneEditors.size() > recipe.automationLanes.size())
+    {
+        removeChildComponent(automationLaneEditors.getLast());
+        automationLaneEditors.removeLast();
+        removeChildComponent(automationTargetSelectors.getLast());
+        automationTargetSelectors.removeLast();
+        removeChildComponent(removeAutomationLaneButtons.getLast());
+        removeAutomationLaneButtons.removeLast();
+    }
+
+    suppressCallbacks = true;
+    for (int index = 0; index < recipe.automationLanes.size(); ++index)
+    {
+        auto& lane = recipe.automationLanes.getReference(index);
+        auto spec = getTargetSpec(lane.targetParameter);
+        lane.name = spec.title;
+        lane.rangeMin = spec.rangeMin;
+        lane.rangeMax = spec.rangeMax;
+        automationLaneEditors[index]->setLane(lane, spec.accent);
+
+        auto* selector = automationTargetSelectors[index];
+        for (int itemIndex = 0; itemIndex < (int) getAutomationTargetSpecs().size(); ++itemIndex)
+        {
+            if (lane.targetParameter == juce::String(getAutomationTargetSpecs()[(size_t) itemIndex].parameterId))
+            {
+                selector->setSelectedItemIndex(itemIndex, juce::dontSendNotification);
+                break;
+            }
+        }
+    }
+    suppressCallbacks = false;
+
+    resized();
 }

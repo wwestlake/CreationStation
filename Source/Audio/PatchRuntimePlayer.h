@@ -15,8 +15,6 @@ public:
                              juce::String& errorMessage) const;
 
 private:
-    static float sampleAutomation(const cw::PatchAutomationLane* lane, float t);
-    static const cw::PatchAutomationLane* findLane(const cw::PatchDocument& patch, const juce::String& targetParameter);
     static const cw::PatchNode* findNode(const cw::PatchDocument& patch, const juce::String& kind);
 
     double sampleRate = 48000.0;

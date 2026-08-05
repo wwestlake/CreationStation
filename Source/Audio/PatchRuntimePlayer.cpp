@@ -40,6 +40,88 @@ float normalizedToCutoff(float normalized)
     auto logMax = std::log(kMaxFilterCutoffHz);
     return std::exp(logMin + (logMax - logMin) * clamped);
 }
+
+float applyCurveModeRuntime(float localT, const juce::String& curveMode)
+{
+    auto t = clamp01Runtime(localT);
+    if (curveMode == "stepped")
+        return t < 1.0f ? 0.0f : 1.0f;
+    if (curveMode == "smooth")
+        return t * t * (3.0f - 2.0f * t);
+    return t;
+}
+
+double sampleAutomationPoints(const juce::Array<cw::PatchAutomationPoint>& points,
+                              const juce::String& interpolation,
+                              double t,
+                              double fallbackValue)
+{
+    if (points.isEmpty())
+        return fallbackValue;
+    if (points.size() == 1)
+        return points.getFirst().value;
+
+    auto clampedT = juce::jlimit(0.0, 1.0, t);
+    for (int index = 0; index < points.size() - 1; ++index)
+    {
+        const auto& left = points.getReference(index);
+        const auto& right = points.getReference(index + 1);
+        if (clampedT >= left.time && clampedT <= right.time)
+        {
+            auto localRange = juce::jmax(0.0001, right.time - left.time);
+            auto localT = (clampedT - left.time) / localRange;
+            auto curve = right.curve.isNotEmpty() ? right.curve : interpolation;
+            return juce::jmap((double) applyCurveModeRuntime((float) localT, curve), left.value, right.value);
+        }
+    }
+
+    return points.getLast().value;
+}
+
+double sampleTargetLanesRuntime(const juce::Array<cw::PatchAutomationLane>& lanes,
+                                const juce::String& targetParameter,
+                                double t,
+                                double fallbackValue)
+{
+    double sum = 0.0;
+    int count = 0;
+    for (const auto& lane : lanes)
+    {
+        if (lane.targetParameter == targetParameter)
+        {
+            auto interpolation = lane.interpolation.isNotEmpty() ? lane.interpolation : juce::String("linear");
+            sum += sampleAutomationPoints(lane.points, interpolation, t, fallbackValue);
+            ++count;
+        }
+    }
+
+    return count > 0 ? (sum / (double) count) : fallbackValue;
+}
+
+juce::Array<cw::PatchAutomationPoint> parseEnvelopePointsJson(const juce::String& jsonText, const juce::String& curveMode)
+{
+    juce::Array<cw::PatchAutomationPoint> points;
+    auto parsed = juce::JSON::parse(jsonText);
+    auto* values = parsed.getArray();
+    if (values == nullptr)
+        return points;
+
+    for (const auto& value : *values)
+    {
+        if (auto* object = value.getDynamicObject())
+        {
+            cw::PatchAutomationPoint point;
+            point.time = (double) object->getProperty("time");
+            point.value = (double) object->getProperty("value");
+            point.curve = object->getProperty("curve").toString();
+            if (point.curve.isEmpty())
+                point.curve = curveMode;
+            points.add(point);
+        }
+    }
+
+    return points;
+}
 }
 
 void PatchRuntimePlayer::prepare(double newSampleRate, int newMaximumBlockSize)
@@ -52,15 +134,6 @@ void PatchRuntimePlayer::reset()
 {
 }
 
-const cw::PatchAutomationLane* PatchRuntimePlayer::findLane(const cw::PatchDocument& patch, const juce::String& targetParameter)
-{
-    for (const auto& lane : patch.automationLanes)
-        if (lane.targetParameter == targetParameter || lane.id == targetParameter)
-            return &lane;
-
-    return nullptr;
-}
-
 const cw::PatchNode* PatchRuntimePlayer::findNode(const cw::PatchDocument& patch, const juce::String& kind)
 {
     for (const auto& node : patch.nodes)
@@ -68,32 +141,6 @@ const cw::PatchNode* PatchRuntimePlayer::findNode(const cw::PatchDocument& patch
             return &node;
 
     return nullptr;
-}
-
-float PatchRuntimePlayer::sampleAutomation(const cw::PatchAutomationLane* lane, float t)
-{
-    if (lane == nullptr || lane->points.isEmpty())
-        return 0.5f;
-
-    if (lane->points.size() == 1)
-        return (float) lane->points.getFirst().value;
-
-    auto clampedT = clamp01Runtime(t);
-
-    for (int index = 0; index < lane->points.size() - 1; ++index)
-    {
-        const auto& left = lane->points.getReference(index);
-        const auto& right = lane->points.getReference(index + 1);
-
-        if (clampedT >= (float) left.time && clampedT <= (float) right.time)
-        {
-            auto localRange = juce::jmax(0.0001f, (float) right.time - (float) left.time);
-            auto localT = (clampedT - (float) left.time) / localRange;
-            return juce::jmap(localT, (float) left.value, (float) right.value);
-        }
-    }
-
-    return (float) lane->points.getLast().value;
 }
 
 bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
@@ -145,16 +192,8 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
 
     float outputGain = (float) patch.output.gain;
 
-    auto* pitchLane = findLane(patch, "pitchOffsetSemitones");
-    auto* gainLane = findLane(patch, "outputGain");
-    auto* filterLane = findLane(patch, "filterCutoff");
     auto* envelopeNode = findNode(patch, "envelope");
     auto* filterNode = findNode(patch, "filter");
-
-    auto attackPosition = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "attackPosition", 0.12f) : 0.12f;
-    auto sustainPosition = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "sustainPosition", 0.42f) : 0.42f;
-    auto releasePosition = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "releasePosition", 0.82f) : 0.82f;
-    auto sustainLevel = envelopeNode != nullptr ? getNumericProperty(envelopeNode->properties, "sustainLevel", 0.48f) : 0.48f;
     auto filterMode = filterNode != nullptr ? filterNode->properties.getWithDefault("mode", juce::String("lowpass")).toString()
                                             : juce::String("lowpass");
     if (filterNode != nullptr)
@@ -163,14 +202,49 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         filterResonance = getNumericProperty(filterNode->properties, "resonance", filterResonance);
         filterEnvelopeAmount = getNumericProperty(filterNode->properties, "envelopeAmount", filterEnvelopeAmount);
     }
-    auto effectiveAttack = juce::jlimit(0.005f, 0.95f, attackPosition * juce::jmap(macroHardness, 0.0f, 1.0f, 1.35f, 0.55f));
-    auto effectiveSustain = juce::jlimit(effectiveAttack + 0.02f, 0.97f,
-                                         sustainPosition + juce::jmap(macroSize, 0.0f, 1.0f, -0.03f, 0.10f));
-    auto effectiveRelease = juce::jlimit(effectiveSustain + 0.03f, 0.995f,
-                                         releasePosition + juce::jmap(macroSize, 0.0f, 1.0f, -0.08f, 0.14f));
-    auto effectiveSustainLevel = juce::jlimit(0.05f, 1.0f,
-                                              sustainLevel + juce::jmap(macroWeight, 0.0f, 1.0f, -0.10f, 0.16f));
-    auto releaseStart = juce::jmax(effectiveSustain + 0.01f, effectiveRelease);
+    juce::Array<cw::PatchAutomationPoint> envelopePoints;
+    juce::String envelopeCurveMode { "linear" };
+    if (envelopeNode != nullptr)
+    {
+        envelopeCurveMode = envelopeNode->properties.getWithDefault("curveMode", juce::String("linear")).toString();
+        auto pointsJson = envelopeNode->properties.getWithDefault("pointsJson", {}).toString();
+        if (pointsJson.isNotEmpty())
+            envelopePoints = parseEnvelopePointsJson(pointsJson, envelopeCurveMode);
+
+        if (envelopePoints.isEmpty())
+        {
+            auto attackPosition = getNumericProperty(envelopeNode->properties, "attackPosition", 0.12f);
+            auto sustainPosition = getNumericProperty(envelopeNode->properties, "sustainPosition", 0.42f);
+            auto releasePosition = getNumericProperty(envelopeNode->properties, "releasePosition", 0.82f);
+            auto sustainLevel = getNumericProperty(envelopeNode->properties, "sustainLevel", 0.48f);
+            envelopePoints.add({ 0.0, 0.0, envelopeCurveMode });
+            envelopePoints.add({ attackPosition, 1.0, envelopeCurveMode });
+            envelopePoints.add({ sustainPosition, sustainLevel, envelopeCurveMode });
+            envelopePoints.add({ releasePosition, sustainLevel, envelopeCurveMode });
+            envelopePoints.add({ 1.0, 0.0, envelopeCurveMode });
+        }
+    }
+
+    if (envelopePoints.isEmpty())
+    {
+        envelopePoints.add({ 0.0, 0.0, envelopeCurveMode });
+        envelopePoints.add({ 0.12, 1.0, envelopeCurveMode });
+        envelopePoints.add({ 0.42, 0.48, envelopeCurveMode });
+        envelopePoints.add({ 0.82, 0.48, envelopeCurveMode });
+        envelopePoints.add({ 1.0, 0.0, envelopeCurveMode });
+    }
+
+    for (int index = 1; index < envelopePoints.size() - 1; ++index)
+    {
+        double timeShift = index == 1
+                         ? juce::jmap((double) macroHardness, 0.0, 1.0, 0.05, -0.05)
+                         : juce::jmap((double) macroSize, 0.0, 1.0, -0.04, 0.08);
+        envelopePoints.getReference(index).time += timeShift;
+        envelopePoints.getReference(index).value = juce::jlimit(0.0,
+                                                                1.0,
+                                                                envelopePoints.getReference(index).value
+                                                                    + juce::jmap((double) macroWeight, 0.0, 1.0, -0.08, 0.12));
+    }
 
     double totalSourceLevel = 0.0;
     for (const auto& source : patch.sources)
@@ -191,12 +265,15 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     for (int sample = 0; sample < numSamples; ++sample)
     {
         auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
-        auto pitchMotion = sampleAutomation(pitchLane, t);
-        auto gainMotion = sampleAutomation(gainLane, t);
-        auto filterMotion = sampleAutomation(filterLane, t);
-        auto pitchSemitones = juce::jmap(pitchMotion, 0.0f, 1.0f, -12.0f, 12.0f)
+        auto pitchMotion = sampleTargetLanesRuntime(patch.automationLanes, "pitchOffsetSemitones", t, 0.0);
+        auto gainMotion = sampleTargetLanesRuntime(patch.automationLanes, "outputGain", t, 1.0);
+        auto filterMotion = sampleTargetLanesRuntime(patch.automationLanes, "filterCutoff", t, 0.5);
+        auto resonanceMotion = sampleTargetLanesRuntime(patch.automationLanes, "filterResonance", t, filterResonance);
+        auto noiseMotion = sampleTargetLanesRuntime(patch.automationLanes, "noiseLevel", t, 0.0);
+        auto baseFrequencyMotion = sampleTargetLanesRuntime(patch.automationLanes, "baseFrequency", t, baseFrequency);
+        auto pitchSemitones = (float) pitchMotion
                             + juce::jmap(macroWeight, 0.0f, 1.0f, 2.0f, -2.0f) * (t - 0.5f) * 2.0f;
-        auto weightedBaseFrequency = baseFrequency * (double) juce::jmap(macroWeight, 0.0f, 1.0f, 1.16f, 0.86f);
+        auto weightedBaseFrequency = baseFrequencyMotion * (double) juce::jmap(macroWeight, 0.0f, 1.0f, 1.16f, 0.86f);
         auto frequency = weightedBaseFrequency * std::pow(2.0, pitchSemitones / 12.0);
         auto phase = juce::MathConstants<double>::twoPi * frequency * ((double) sample / sampleRate);
 
@@ -224,27 +301,21 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
             mixed += sourceSample * (float) source.level;
         }
 
-        float envelope = 0.0f;
-        if (t <= attackPosition)
-            envelope = juce::jmap(t, 0.0f, juce::jmax(0.001f, attackPosition), 0.0f, 1.0f);
-        else if (t <= sustainPosition)
-            envelope = juce::jmap(t, effectiveAttack, juce::jmax(effectiveAttack + 0.001f, effectiveSustain), 1.0f, effectiveSustainLevel);
-        else if (t <= releaseStart)
-            envelope = effectiveSustainLevel;
-        else
-            envelope = juce::jmap(t, releaseStart, 1.0f, effectiveSustainLevel, 0.0f);
+        auto envelope = (float) sampleAutomationPoints(envelopePoints, envelopeCurveMode, t, 0.0);
 
         auto gritDrive = 1.0f + macroGrit * 5.5f;
-        auto value = normalizer * envelope * gainMotion * outputGain * mixed;
+        auto macroNoise = juce::jlimit(0.0f, 1.0f, (float) noiseMotion + macroAir * 0.18f + macroGrit * 0.12f);
+        mixed += macroNoise * ((std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f) - std::floor(std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f));
+        auto value = normalizer * envelope * (float) gainMotion * outputGain * mixed;
         value = std::tanh(value * gritDrive) / std::tanh(gritDrive);
         auto filterNormalized = clamp01Runtime(cutoffToNormalized(filterCutoffHz)
-                                               + (filterMotion - 0.5f) * 0.75f
+                                               + ((float) filterMotion - 0.5f) * 0.75f
                                                + (envelope - 0.5f) * (filterEnvelopeAmount + macroHardness * 0.30f)
                                                + macroAir * 0.18f
                                                - macroWeight * 0.10f);
         auto cutoffHz = normalizedToCutoff(filterNormalized);
         filter.setCutoffFrequency(juce::jlimit(kMinFilterCutoffHz, (float) (sampleRate * 0.45), cutoffHz));
-        filter.setResonance(juce::jlimit(0.30f, 8.0f, filterResonance + macroHardness * 0.9f - macroWeight * 0.15f));
+        filter.setResonance(juce::jlimit(0.30f, 8.0f, (float) resonanceMotion + macroHardness * 0.9f - macroWeight * 0.15f));
         value = filter.processSample(0, value);
         destination.setSample(0, sample, value);
         destination.setSample(1, sample, value);
