@@ -98,7 +98,6 @@ private:
         juce::TextButton samplerButton { "Sampler" };
         juce::TextButton arrangeButton { "Foley" };
         juce::TextButton signalButton { "Signal" };
-        juce::TextButton libraryButton { "Library" };
         juce::TextButton mixButton { "Layers" };
         juce::TextButton pluginsButton { "Plugins" };
         juce::TextButton nodeButton { "Patch" };
