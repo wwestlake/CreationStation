@@ -1303,6 +1303,7 @@ void WorkstationAudioEngine::applyAutomationForBlock(double blockStartSeconds)
         }
 
         const auto& target = data->target;
+        value = cs::quantizeAutomationValueForTarget(target, value);
         if (! juce::isPositiveAndBelow(target.targetTrackIndex, tracks.size()))
             continue;
 
@@ -1322,6 +1323,10 @@ void WorkstationAudioEngine::applyAutomationForBlock(double blockStartSeconds)
 
             case cs::AutomationTargetKind::pluginParameter:
                 tracks[(size_t) target.targetTrackIndex]->insertChain.setParameterValueRealtime(target.pluginSlotIndex, target.pluginParameterIndex, value);
+                break;
+
+            case cs::AutomationTargetKind::pluginBypass:
+                setTrackPluginBypassedRealtime(target.targetTrackIndex, target.pluginSlotIndex, value >= 0.5f);
                 break;
 
             case cs::AutomationTargetKind::none:
@@ -2986,6 +2991,12 @@ void WorkstationAudioEngine::setTrackPluginParameterValueRealtime(int trackIndex
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
         tracks[(size_t) trackIndex]->insertChain.setParameterValueRealtime(slotIndex, paramIndex, normalizedValue);
+}
+
+void WorkstationAudioEngine::setTrackPluginBypassedRealtime(int trackIndex, int slotIndex, bool shouldBypass)
+{
+    if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
+        tracks[(size_t) trackIndex]->insertChain.setBypassed(slotIndex, shouldBypass);
 }
 
 bool WorkstationAudioEngine::renderMidiClipToFile(const juce::File& instrumentPluginFile,

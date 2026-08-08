@@ -8,6 +8,7 @@
 #include "AI/CreationStationContextStore.h"
 #include "AI/CreationStationTaskPlanner.h"
 #include <creation/services/SuiteAiChatClient.h>
+#include <creation/services/SuiteUndoService.h>
 #include "AI/LiteSemRagApiClient.h"
 #include "AI/OpenAiModelCatalogClient.h"
 #include <creation/ui/SuiteDesktopAuthSession.h>
@@ -98,7 +99,6 @@ private:
         juce::TextButton samplerButton { "Sampler" };
         juce::TextButton arrangeButton { "Foley" };
         juce::TextButton signalButton { "Signal" };
-        juce::TextButton libraryButton { "Library" };
         juce::TextButton mixButton { "Layers" };
         juce::TextButton pluginsButton { "Plugins" };
         juce::TextButton nodeButton { "Patch" };
@@ -274,7 +274,6 @@ private:
     std::unique_ptr<juce::FileChooser> assetChooser;
     std::unique_ptr<juce::FileChooser> renderExportChooser;
     std::unique_ptr<juce::FileChooser> rawAssetExportChooser;
-    std::unique_ptr<juce::FileChooser> patchChooser;
     std::unique_ptr<juce::FileChooser> celSourceChooser;
     std::unique_ptr<juce::FileChooser> contentUploadChooser;
     std::unique_ptr<juce::FileChooser> suiteDirectoryChooser;
@@ -327,8 +326,9 @@ private:
     int activeRecordingTrack = -1;
     int selectedClipIndex = -1;
     bool clipDragUndoCaptured = false;
-    std::vector<juce::ValueTree> timelineUndoStack;
-    std::vector<juce::ValueTree> timelineRedoStack;
+    creation::services::SuiteUndoService undoService;
+    static constexpr const char* timelineUndoContextId = "creation-station.timeline";
+    static constexpr const char* signalUndoContextId = "creation-station.signal-lab";
 
     void timerCallback() override;
     bool keyPressed(const juce::KeyPress& key) override;
@@ -354,6 +354,10 @@ private:
     void undoTimelineEdit();
     void redoTimelineEdit();
     void restoreTimelineEditState(const juce::ValueTree& state, const juce::String& statusText);
+    void pushSignalUndoState(const juce::ValueTree& stateBeforeEdit, const juce::String& label);
+    void undoSignalEdit();
+    void redoSignalEdit();
+    void restoreSignalEditState(const juce::ValueTree& state, const juce::String& statusText);
     void splitClipAt(int clipIndex, double splitSeconds);
     void duplicateClip(int clipIndex);
     void deleteClip(int clipIndex);

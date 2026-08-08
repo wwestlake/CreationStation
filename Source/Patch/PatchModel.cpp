@@ -12,6 +12,7 @@ juce::var pointToVar(const cw::PatchAutomationPoint& point)
     auto* object = new juce::DynamicObject();
     object->setProperty("time", point.time);
     object->setProperty("value", point.value);
+    object->setProperty("curve", point.curve);
     return juce::var(object);
 }
 
@@ -34,6 +35,9 @@ juce::var laneToVar(const cw::PatchAutomationLane& lane)
     object->setProperty("id", lane.id);
     object->setProperty("name", lane.name);
     object->setProperty("targetParameter", lane.targetParameter);
+    object->setProperty("interpolation", lane.interpolation);
+    object->setProperty("startTime", lane.startTime);
+    object->setProperty("endTime", lane.endTime);
 
     auto* range = new juce::DynamicObject();
     range->setProperty("min", lane.rangeMin);
@@ -222,6 +226,11 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                 lane.id = object->getProperty("id").toString();
                 lane.name = object->getProperty("name").toString();
                 lane.targetParameter = object->getProperty("targetParameter").toString();
+                lane.interpolation = object->getProperty("interpolation").toString();
+                lane.startTime = object->hasProperty("startTime") ? (double) object->getProperty("startTime") : 0.0;
+                lane.endTime = object->hasProperty("endTime") ? (double) object->getProperty("endTime") : 1.0;
+                if (lane.interpolation.isEmpty())
+                    lane.interpolation = "linear";
 
                 if (auto* range = object->getProperty("range").getDynamicObject())
                 {
@@ -238,6 +247,9 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                             PatchAutomationPoint point;
                             point.time = (double) pointObject->getProperty("time");
                             point.value = (double) pointObject->getProperty("value");
+                            point.curve = pointObject->getProperty("curve").toString();
+                            if (point.curve.isEmpty())
+                                point.curve = lane.interpolation;
                             lane.points.add(point);
                         }
                     }

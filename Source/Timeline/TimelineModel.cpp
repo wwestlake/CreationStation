@@ -1123,7 +1123,8 @@ juce::String TimelineModel::addOrUpdateAutomationPoint(int trackIndex, double se
     if (clipIndex < 0)
         return {};
 
-    auto clampedValue = juce::jlimit(0.0f, 1.0f, value);
+    auto clampedValue = quantizeAutomationValueForTarget(tracks[(size_t) trackIndex].automationTarget,
+                                                         juce::jlimit(0.0f, 1.0f, value));
     auto clampedSeconds = juce::jmax(0.0, seconds);
 
     auto& points = clips[(size_t) clipIndex].automationPoints;
@@ -1162,7 +1163,8 @@ bool TimelineModel::moveAutomationPoint(int trackIndex, const juce::String& poin
         return false;
 
     it->seconds = juce::jmax(0.0, newSeconds);
-    it->value = juce::jlimit(0.0f, 1.0f, newValue);
+    it->value = quantizeAutomationValueForTarget(tracks[(size_t) trackIndex].automationTarget,
+                                                 juce::jlimit(0.0f, 1.0f, newValue));
 
     std::sort(points.begin(), points.end(), [](const AutomationPoint& a, const AutomationPoint& b)
     {
@@ -1223,16 +1225,17 @@ float TimelineModel::evaluateAutomationValue(int trackIndex, double seconds) con
         return 0.5f;
 
     if (seconds <= points.front().seconds)
-        return points.front().value;
+        return quantizeAutomationValueForTarget(tracks[(size_t) trackIndex].automationTarget, points.front().value);
 
     if (seconds >= points.back().seconds)
-        return points.back().value;
+        return quantizeAutomationValueForTarget(tracks[(size_t) trackIndex].automationTarget, points.back().value);
 
     for (size_t i = 0; i + 1 < points.size(); ++i)
         if (seconds >= points[i].seconds && seconds <= points[i + 1].seconds)
-            return evaluateAutomationSegment(points[i], points[i + 1], seconds);
+            return quantizeAutomationValueForTarget(tracks[(size_t) trackIndex].automationTarget,
+                                                    evaluateAutomationSegment(points[i], points[i + 1], seconds));
 
-    return points.back().value;
+    return quantizeAutomationValueForTarget(tracks[(size_t) trackIndex].automationTarget, points.back().value);
 }
 
 void TimelineModel::setAutomationTarget(int trackIndex, const AutomationTarget& target)
@@ -1241,6 +1244,18 @@ void TimelineModel::setAutomationTarget(int trackIndex, const AutomationTarget& 
         return;
 
     tracks[(size_t) trackIndex].automationTarget = target;
+
+    auto clipIndex = getAutomationClipIndex(trackIndex);
+    if (clipIndex < 0)
+        return;
+
+    auto& points = clips[(size_t) clipIndex].automationPoints;
+    for (auto& point : points)
+    {
+        point.value = quantizeAutomationValueForTarget(target, point.value);
+        if (target.valueMode != AutomationValueMode::continuous)
+            point.shape = AutomationCurveShape::step;
+    }
 }
 
 const AutomationTarget& TimelineModel::getAutomationTarget(int trackIndex) const
@@ -1326,6 +1341,8 @@ juce::ValueTree TimelineModel::createState() const
         trackState.setProperty("automationTargetParameterId", track.automationTarget.parameterId, nullptr);
         trackState.setProperty("automationTargetParameterIndex", track.automationTarget.pluginParameterIndex, nullptr);
         trackState.setProperty("automationTargetDisplayName", track.automationTarget.displayName, nullptr);
+        trackState.setProperty("automationTargetValueMode", toStorageToken(track.automationTarget.valueMode), nullptr);
+        trackState.setProperty("automationTargetStepCount", track.automationTarget.stepCount, nullptr);
         trackState.setProperty("automationRecordMode", toStorageToken(track.automationRecordMode), nullptr);
         trackState.setProperty("automationRecordingPointsPerSecond", track.automationRecordingPointsPerSecond, nullptr);
         tracksState.addChild(trackState, -1, nullptr);
@@ -1467,6 +1484,8 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
             track.automationTarget.parameterId = child.getProperty("automationTargetParameterId").toString();
             track.automationTarget.pluginParameterIndex = (int) child.getProperty("automationTargetParameterIndex", -1);
             track.automationTarget.displayName = child.getProperty("automationTargetDisplayName").toString();
+            track.automationTarget.valueMode = automationValueModeFromStorageToken(child.getProperty("automationTargetValueMode", "continuous").toString());
+            track.automationTarget.stepCount = juce::jmax(0, (int) child.getProperty("automationTargetStepCount", 0));
             track.automationRecordMode = automationRecordModeFromStorageToken(child.getProperty("automationRecordMode", "touch").toString());
             track.automationRecordingPointsPerSecond = juce::jlimit(1, 120, (int) child.getProperty("automationRecordingPointsPerSecond", 10));
             if (track.name.trim().isEmpty())

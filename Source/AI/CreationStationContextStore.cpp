@@ -1,6 +1,7 @@
 #include "CreationStationContextStore.h"
 #include "CreationStationContextEngine.h"
 #include "../Patch/PatchModel.h"
+#include <creation/suite/SuiteStoragePaths.h>
 
 namespace
 {
@@ -57,7 +58,7 @@ bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession
         return false;
     }
 
-    snapshotFile = juce::File(suiteSettings.cacheRoot).getChildFile("ai-context-store.json");
+    snapshotFile = creation::suite::getCacheDirectory(suiteSettings).getChildFile("ai-context-store.json");
 
     CreationStationContextEngine::SourceDocument modeDocument;
     modeDocument.id = "workspace-mode";

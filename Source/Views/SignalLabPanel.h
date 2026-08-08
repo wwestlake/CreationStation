@@ -3,49 +3,97 @@
 #include <JuceHeader.h>
 #include "../Audio/PatchRuntimePlayer.h"
 #include "../Patch/PatchModel.h"
-
-class SignalLabPanel final : public juce::Component
+class SignalLabPanel final : public juce::Component,
+                             private juce::Timer
 {
 public:
     struct SignalRecipe
     {
+        SignalRecipe();
+
         juce::String name { "Signal-Lab-Render" };
         double sampleRate = 48000.0;
         double durationSeconds = 1.5;
         float baseFrequencyHz = 180.0f;
-        float sineLevel = 0.65f;
-        float sawLevel = 0.15f;
-        float squareLevel = 0.08f;
-        float triangleLevel = 0.12f;
-        float noiseLevel = 0.10f;
-        float brightness = 0.72f;
+        float sineLevel = 0.0f;
+        float sawLevel = 0.0f;
+        float squareLevel = 0.0f;
+        float triangleLevel = 0.0f;
+        float noiseLevel = 0.0f;
+        juce::String filterMode { "lowpass" };
+        float filterCutoffHz = 3600.0f;
+        float filterResonance = 0.90f;
+        float filterEnvelopeAmount = 0.35f;
+        float macroHardness = 0.50f;
+        float macroWeight = 0.50f;
+        float macroAir = 0.50f;
+        float macroGrit = 0.25f;
+        float macroSize = 0.50f;
+        juce::String envelopeCurveMode { "smooth" };
+        juce::String automationCurveMode { "smooth" };
         float pitchSweepSemitones = 0.0f;
-        float attackPosition = 0.12f;
-        float sustainPosition = 0.42f;
-        float releasePosition = 0.82f;
-        float sustainLevel = 0.48f;
-        std::array<float, 4> pitchAutomation { 0.5f, 0.5f, 0.5f, 0.5f };
-        std::array<float, 4> gainAutomation { 1.0f, 0.85f, 0.7f, 0.0f };
+        juce::Array<cw::PatchAutomationPoint> envelopePoints;
+        juce::Array<cw::PatchAutomationLane> automationLanes;
     };
 
     SignalLabPanel();
 
     juce::ValueTree createState() const;
     void restoreState(const juce::ValueTree& state);
+    void resetToBlankSignal();
     bool loadPatchDocument(const cw::PatchDocument& document, juce::String& errorMessage);
     void applyAiTemplate(const juce::String& templateName);
     bool previewCurrentSignal();
 
+    std::function<void(const juce::ValueTree& stateBeforeEdit, const juce::String& label)> onUndoCheckpointRequested;
+    std::function<void()> onInteractionStarted;
     std::function<void(const juce::AudioBuffer<float>&, double sampleRate, const juce::String& suggestedName)> onPreviewRequested;
     std::function<void(const juce::AudioBuffer<float>&, double sampleRate, const juce::String& suggestedName)> onRenderRequested;
     std::function<void(const juce::String& patchJson, const juce::String& suggestedName)> onPatchExportRequested;
     std::function<void(const juce::String& patchJson, const juce::String& suggestedName)> onPatchSaveToLibraryRequested;
     std::function<void()> onPatchLoadRequested;
+    std::function<void()> onStopRequested;
 
     void paint(juce::Graphics&) override;
     void resized() override;
 
 private:
+    struct GraphNodeModel
+    {
+        juce::String id;
+        juce::String type;
+        juce::String title;
+        juce::String targetParameter;
+        juce::Point<int> position;
+        juce::Colour accent;
+        bool locked = false;
+        bool required = false;
+    };
+
+    struct LocalControlVariable
+    {
+        juce::String id;
+        juce::String name;
+        juce::String valueType { "Float" };
+        juce::String accessScope { "Private" };
+        juce::String targetParameter;
+        float value = 0.5f;
+        bool exposedToAutomation = true;
+    };
+
+    struct ProbeSettings
+    {
+        bool scopeEnabled = false;
+        bool analyzerEnabled = false;
+        double scopeTimebaseMs = 20.0;
+        double scopeGainA = 1.0;
+        double scopeGainB = 1.0;
+        double analyzerMinHz = 20.0;
+        double analyzerMaxHz = 20000.0;
+        double analyzerDbFloor = -96.0;
+        double analyzerSmoothing = 0.55;
+    };
+
     class EnvelopeEditor final : public juce::Component
     {
     public:
@@ -55,26 +103,22 @@ private:
         void paint(juce::Graphics& g) override;
         void mouseDown(const juce::MouseEvent& event) override;
         void mouseDrag(const juce::MouseEvent& event) override;
+        void mouseUp(const juce::MouseEvent& event) override;
+        void mouseDoubleClick(const juce::MouseEvent& event) override;
 
-        std::function<void(float attackPosition, float sustainPosition, float releasePosition, float sustainLevel)> onEnvelopeChanged;
+        std::function<void()> onGestureBegin;
+        std::function<void()> onGestureEnd;
+        std::function<void(const juce::String& label)> onDiscreteEditRequested;
+        std::function<void(const juce::Array<cw::PatchAutomationPoint>&)> onEnvelopeChanged;
 
     private:
-        enum class DragTarget
-        {
-            none,
-            attack,
-            sustain,
-            release
-        };
-
         SignalRecipe recipe;
-        DragTarget dragTarget = DragTarget::none;
+        int dragIndex = -1;
 
-        juce::Point<float> getAttackPoint() const;
-        juce::Point<float> getSustainPoint() const;
-        juce::Point<float> getReleasePoint() const;
         juce::Rectangle<float> getPlotArea() const;
         juce::Point<float> toScreen(float normalizedX, float normalizedY) const;
+        juce::Point<float> getPoint(int index) const;
+        int findPointAt(juce::Point<float> position) const;
     };
 
     class ScopePanel final : public juce::Component
@@ -100,25 +144,150 @@ private:
     class AutomationLaneEditor final : public juce::Component
     {
     public:
-        AutomationLaneEditor(const juce::String& title, juce::Colour accent, float defaultMidline);
+        AutomationLaneEditor() = default;
 
-        void setValues(const std::array<float, 4>& newValues);
-        std::array<float, 4> getValues() const noexcept { return values; }
+        void setLane(const cw::PatchAutomationLane& newLane, juce::Colour accentColour);
+        const cw::PatchAutomationLane& getLane() const noexcept { return lane; }
         void paint(juce::Graphics& g) override;
         void mouseDown(const juce::MouseEvent& event) override;
         void mouseDrag(const juce::MouseEvent& event) override;
+        void mouseUp(const juce::MouseEvent& event) override;
+        void mouseDoubleClick(const juce::MouseEvent& event) override;
 
-        std::function<void(const std::array<float, 4>&)> onValuesChanged;
+        std::function<void()> onGestureBegin;
+        std::function<void()> onGestureEnd;
+        std::function<void(const juce::String& label)> onDiscreteEditRequested;
+        std::function<void(const cw::PatchAutomationLane&)> onLaneChanged;
 
     private:
         juce::Rectangle<float> getPlotArea() const;
         juce::Point<float> getPoint(int index) const;
+        int findPointAt(juce::Point<float> position) const;
+        double pointValueFromY(float y) const;
 
-        juce::String laneTitle;
+        cw::PatchAutomationLane lane;
         juce::Colour laneAccent;
-        std::array<float, 4> values;
         int dragIndex = -1;
-        float defaultMidline = 0.5f;
+    };
+
+    class NodeGraphCanvas final : public juce::Component
+    {
+    public:
+        explicit NodeGraphCanvas(SignalLabPanel& ownerRef) : owner(ownerRef) {}
+
+        void paint(juce::Graphics& g) override;
+        void mouseDown(const juce::MouseEvent& event) override;
+        void mouseDrag(const juce::MouseEvent& event) override;
+        void mouseUp(const juce::MouseEvent& event) override;
+        void mouseDoubleClick(const juce::MouseEvent& event) override;
+        void mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override;
+        bool keyPressed(const juce::KeyPress& key) override;
+
+    private:
+        SignalLabPanel& owner;
+        int dragNodeIndex = -1;
+        juce::Point<int> dragOffset;
+        bool dragMoved = false;
+        bool panning = false;
+        juce::Point<int> panAnchor;
+        juce::Point<int> viewportAnchor;
+    };
+
+    class NodeToolboxPane final : public juce::Component
+    {
+    public:
+        class VariableButton final : public juce::TextButton
+        {
+        public:
+            explicit VariableButton(const juce::String& variableIdToUse) : variableId(variableIdToUse) {}
+
+            void mouseDown(const juce::MouseEvent& event) override;
+            void mouseDrag(const juce::MouseEvent& event) override;
+            void mouseUp(const juce::MouseEvent& event) override;
+
+            std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onDragStarted;
+            std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onDragMoved;
+            std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onDragEnded;
+
+            juce::String variableId;
+
+        private:
+            bool dragStarted = false;
+            juce::Point<int> mouseDownScreenPosition;
+        };
+
+        NodeToolboxPane();
+        void resized() override;
+        void paint(juce::Graphics& g) override;
+
+        void setVariables(const juce::Array<LocalControlVariable>& variables);
+
+        std::function<void()> onAddVariableRequested;
+        std::function<void(const juce::String& variableId)> onPlaceVariableRequested;
+        std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragStarted;
+        std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragMoved;
+        std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragEnded;
+        std::function<void(const juce::String& variableId)> onVariableSelected;
+
+    private:
+        juce::Label titleLabel;
+        juce::TextButton addVariableButton { "+ Variable" };
+        juce::OwnedArray<VariableButton> variableButtons;
+        juce::Array<LocalControlVariable> localVariables;
+    };
+
+    class NodeSearchPanel final : public juce::Component
+    {
+    public:
+        struct Entry
+        {
+            juce::String label;
+            juce::String type;
+            juce::String payload;
+        };
+
+        NodeSearchPanel();
+        void setEntries(juce::Array<Entry> entries);
+        void resized() override;
+        void paint(juce::Graphics& g) override;
+
+        std::function<void(const juce::String& type, const juce::String& payload)> onEntryChosen;
+
+    private:
+        void refreshResults();
+
+        juce::TextEditor searchEditor;
+        juce::OwnedArray<juce::TextButton> resultButtons;
+        juce::Array<Entry> allEntries;
+        juce::Array<Entry> visibleEntries;
+    };
+
+    class FloatingWindow final : public juce::Component
+    {
+    public:
+        enum class Kind
+        {
+            NodeEditor,
+            ControlPad
+        };
+
+        FloatingWindow(SignalLabPanel& ownerRef, Kind kindToUse);
+
+        void paint(juce::Graphics& g) override;
+        void mouseDown(const juce::MouseEvent& event) override;
+        void mouseDrag(const juce::MouseEvent& event) override;
+
+    private:
+        SignalLabPanel& owner;
+        Kind kind;
+        juce::Point<int> dragAnchor;
+        juce::Rectangle<int> startBounds;
+    };
+
+    class SectionPanel final : public juce::Component
+    {
+    public:
+        void paint(juce::Graphics& g) override;
     };
 
     void configureSlider(juce::Slider& slider, double min, double max, double step);
@@ -126,19 +295,120 @@ private:
     juce::AudioBuffer<float> buildSignalBuffer(const SignalRecipe& recipe) const;
     cw::PatchDocument buildPatchDocument(const SignalRecipe& recipe) const;
     void applyTemplate(const juce::String& templateName);
+    void showSignalMenu();
+    void createNewSignal();
     void refreshControlsFromRecipe();
     void updateStatusText();
+    void syncAutomationEditors();
+    void rebuildAutomationChrome();
+    void captureUndoCheckpoint(const juce::String& label);
+    void beginUndoGesture(const juce::String& label);
+    void endUndoGesture();
+    void noteInteraction();
+    void rebuildNodeGraphFromRecipe();
+    void updateInspectorForSelection();
+    void layoutFloatingWindows();
+    void showCanvasActionMenu(juce::Point<int> canvasPosition, bool anchorToButton = false);
+    void showNodeContextMenu(int nodeIndex, juce::Point<int> canvasPosition);
+    void addGraphNode(const juce::String& type, juce::Point<int> canvasPosition = {}, const juce::String& payload = {});
+    void removeSelectedGraphNode();
+    int findGraphNodeAt(juce::Point<int> position) const;
+    juce::Rectangle<int> getGraphNodeBounds(int index) const;
+    void setSelectedGraphNodeIndex(int index);
+    bool hasGraphNodeType(const juce::String& type) const;
+    void openNodeEditorForSelection();
+    void closeNodeEditor();
+    void toggleControlPad();
+    void ensureDefaultLocalControls();
+    void rebuildLocalControlChrome();
+    void applyLocalControlToRecipe(const LocalControlVariable& control);
+    void refreshVariablePanel();
+    void refreshSelectedVariableEditor();
+    void timerCallback() override;
+    void triggerTransportPlay();
+    void stopTransport();
+    void updateCanvasWorkspace();
+    juce::Point<int> graphToCanvas(juce::Point<int> position) const;
+    juce::Point<float> graphToCanvas(juce::Point<float> position) const;
+    juce::Rectangle<int> graphToCanvas(juce::Rectangle<int> bounds) const;
+    juce::Point<int> canvasToGraph(juce::Point<int> position) const;
+    juce::Point<float> canvasToGraph(juce::Point<float> position) const;
+    juce::Point<float> getNodeAudioInputPort(int index) const;
+    juce::Point<float> getNodeAudioOutputPort(int index) const;
+    juce::Point<float> getNodeControlInputPort(int index) const;
+    juce::Point<float> getControlPadOutputPort(int index) const;
 
     SignalRecipe recipe;
+    ProbeSettings probeSettings;
+    juce::Array<GraphNodeModel> graphNodes;
+    juce::Array<LocalControlVariable> localControls;
     juce::AudioBuffer<float> generatedBuffer;
+    bool variableDragActive = false;
+    juce::String draggedVariableId;
+    juce::Point<int> draggedVariableScreenPoint;
+    float canvasZoom = 1.0f;
+    juce::Point<int> canvasWorkspaceSize { 2600, 1800 };
+    juce::Point<int> graphOrigin;
+    juce::Point<int> canvasPixelOffset;
+    bool mixNodeEnabled = false;
+    bool filterNodeEnabled = false;
+    bool envelopeNodeEnabled = false;
+    bool graphViewportInitialized = false;
+    bool repeatEnabled = false;
+    double repeatDelaySeconds = 0.0;
     bool suppressCallbacks = false;
+    bool undoGestureActive = false;
+    bool nameEditUndoCaptured = false;
     PatchRuntimePlayer runtimePlayer;
+    int selectedGraphNodeIndex = -1;
+    int editingNodeIndex = -1;
+    bool nodeEditorVisible = false;
+    bool controlPadVisible = false;
+    juce::Rectangle<int> nodeEditorBounds { 760, 120, 360, 520 };
+    juce::Rectangle<int> controlPadBounds { 72, 420, 340, 240 };
+    struct OpenNodeWindow
+    {
+        juce::String nodeId;
+        std::unique_ptr<juce::DocumentWindow> window;
+    };
+    juce::OwnedArray<OpenNodeWindow> openNodeWindows;
 
     juce::Label titleLabel;
     juce::Label subtitleLabel;
     juce::Label statusLabel;
+    juce::TextButton signalMenuButton { "Signal" };
+    juce::TextButton playButton { "Play" };
+    juce::TextButton stopButton { "Stop" };
+    juce::Label propertiesHeaderLabel;
+    juce::Label signalSectionLabel;
+    juce::Label variablesSectionLabel;
+    juce::Label selectedVariableSectionLabel;
+    juce::Label signalMetaLabel;
+    SectionPanel signalPropertiesPanel;
+    SectionPanel variablesPanel;
+    SectionPanel variableDetailsPanel;
+    NodeToolboxPane toolboxPane;
+    juce::Viewport variablesViewport;
+    juce::Viewport graphViewport;
+    NodeGraphCanvas nodeGraphCanvas { *this };
+    FloatingWindow nodeEditorWindow { *this, FloatingWindow::Kind::NodeEditor };
+    FloatingWindow controlPadWindow { *this, FloatingWindow::Kind::ControlPad };
+    juce::TextButton nodeEditorCloseButton { "×" };
+    juce::TextButton controlPadCloseButton { "×" };
+    juce::TextButton addLocalControlButton { "+ Variable" };
+    juce::Label inspectorTitleLabel;
+    juce::Label inspectorBodyLabel;
     juce::Label nameLabel;
     juce::TextEditor nameEditor;
+    juce::Label variableNameLabel;
+    juce::TextEditor variableNameEditor;
+    juce::Label variableTypeLabel;
+    juce::ComboBox variableTypeSelector;
+    juce::Label variableAccessLabel;
+    juce::ComboBox variableAccessSelector;
+    juce::Label variableValueLabel;
+    juce::TextEditor variableValueEditor;
+    juce::ToggleButton variableAutomationToggle { "Expose to automation" };
     juce::Label templateLabel;
     juce::ComboBox templateSelector;
     juce::Label frequencyLabel;
@@ -147,8 +417,28 @@ private:
     juce::Slider durationSlider;
     juce::Label pitchLabel;
     juce::Slider pitchSlider;
-    juce::Label brightnessLabel;
-    juce::Slider brightnessSlider;
+    juce::Label filterModeLabel;
+    juce::ComboBox filterModeSelector;
+    juce::Label filterCutoffLabel;
+    juce::Slider filterCutoffSlider;
+    juce::Label filterResonanceLabel;
+    juce::Slider filterResonanceSlider;
+    juce::Label filterEnvelopeLabel;
+    juce::Slider filterEnvelopeSlider;
+    juce::Label envelopeCurveLabel;
+    juce::ComboBox envelopeCurveSelector;
+    juce::Label automationCurveLabel;
+    juce::ComboBox automationCurveSelector;
+    juce::Label macroHardnessLabel;
+    juce::Slider macroHardnessSlider;
+    juce::Label macroWeightLabel;
+    juce::Slider macroWeightSlider;
+    juce::Label macroAirLabel;
+    juce::Slider macroAirSlider;
+    juce::Label macroGritLabel;
+    juce::Slider macroGritSlider;
+    juce::Label macroSizeLabel;
+    juce::Slider macroSizeSlider;
     juce::Label sineLabel;
     juce::Slider sineSlider;
     juce::Label sawLabel;
@@ -159,14 +449,32 @@ private:
     juce::Slider triangleSlider;
     juce::Label noiseLabel;
     juce::Slider noiseSlider;
+    juce::Label probeControlALabel;
+    juce::Slider probeControlASlider;
+    juce::Label probeControlBLabel;
+    juce::Slider probeControlBSlider;
+    juce::Label probeControlCLabel;
+    juce::Slider probeControlCSlider;
+    juce::Label probeControlDLabel;
+    juce::Slider probeControlDSlider;
     juce::TextButton previewButton { "Preview Signal" };
     juce::TextButton renderButton { "Render To Project" };
     juce::TextButton exportPatchButton { "Export File" };
     juce::TextButton savePatchButton { "Save Sound" };
     juce::TextButton loadPatchButton { "Load Sound" };
+    juce::TextButton addAutomationLaneButton { "Add Motion Lane" };
     EnvelopeEditor envelopeEditor;
-    AutomationLaneEditor pitchAutomationEditor { "Pitch Motion", juce::Colour(0xffb37df0), 0.5f };
-    AutomationLaneEditor gainAutomationEditor { "Gain Motion", juce::Colour(0xff7dd36f), 1.0f };
+    juce::Component automationHost;
+    juce::Viewport automationViewport;
+    juce::OwnedArray<AutomationLaneEditor> automationLaneEditors;
+    juce::OwnedArray<juce::ComboBox> automationTargetSelectors;
+    juce::OwnedArray<juce::ComboBox> automationCurveSelectors;
+    juce::OwnedArray<juce::TextButton> removeAutomationLaneButtons;
+    juce::OwnedArray<juce::TextEditor> localControlNameEditors;
+    juce::OwnedArray<juce::ComboBox> localControlTargetSelectors;
+    juce::OwnedArray<juce::Slider> localControlValueSliders;
+    juce::OwnedArray<juce::TextButton> removeLocalControlButtons;
     ScopePanel scopePanel;
     SpectrumPanel spectrumPanel;
+    int selectedLocalControlIndex = -1;
 };

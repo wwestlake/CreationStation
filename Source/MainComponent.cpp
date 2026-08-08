@@ -1,10 +1,12 @@
 #include <creation/assets/ProjectManifest.h>
+#include <creation/assets/AssetMaterializer.h>
 #include <creation/assets/AssetTypes.h>
 #include "MainComponent.h"
 #include "Branding.h"
 #include "Patch/PatchModel.h"
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectWorkspaceService.h>
+#include <creation/suite/SuiteStoragePaths.h>
 #include <creation/ui/CreationSuiteLogos.h>
 #include <creation/services/SuiteAiProviderRuntime.h>
 #include "Tutorial/TutorialScriptCompiler.h"
@@ -35,6 +37,18 @@ juce::String trimProjectLabelPrefix(const juce::String& label)
     if (trimmed.startsWithIgnoreCase(prefix))
         trimmed = trimmed.fromFirstOccurrenceOf(prefix, false, false).trim();
     return trimmed;
+}
+
+juce::String slugForProjectAssetName(const juce::String& name)
+{
+    auto slug = name.trim().toLowerCase();
+    slug = slug.retainCharacters("abcdefghijklmnopqrstuvwxyz0123456789-_ ");
+    slug = slug.replace(" ", "-");
+    while (slug.contains("--"))
+        slug = slug.replace("--", "-");
+    slug = slug.trimCharactersAtStart("-");
+    slug = slug.trimCharactersAtEnd("-");
+    return slug.isNotEmpty() ? slug : "signal-asset";
 }
 
 juce::String makeDisplayProjectLabel(const juce::String& rawName)
@@ -628,7 +642,6 @@ MainComponent::ViewModeBar::ViewModeBar()
     setupButton(samplerButton, WorkspaceMode::sampler);
     setupButton(arrangeButton, WorkspaceMode::arrange);
     setupButton(signalButton, WorkspaceMode::signal);
-    setupButton(libraryButton, WorkspaceMode::library);
     setupButton(mixButton, WorkspaceMode::mix);
     setupButton(pluginsButton, WorkspaceMode::plugins);
     setupButton(nodeButton, WorkspaceMode::node);
@@ -641,7 +654,6 @@ MainComponent::ViewModeBar::ViewModeBar()
     samplerButton.setTooltip("Sampler - build and manage pitch-mapped sample packs");
     arrangeButton.setTooltip("Foley - arrange sound effects and foley clips");
     signalButton.setTooltip("Signal Lab - sound design and synthesis");
-    libraryButton.setTooltip("Content library - browse and manage assets");
     mixButton.setTooltip("Mixer - adjust levels, pan, and sends");
     pluginsButton.setTooltip("Plugin browser - find and load VST plugins");
     nodeButton.setTooltip("Node graph - patch signal routing visually");
@@ -668,7 +680,6 @@ void MainComponent::ViewModeBar::setActiveMode(WorkspaceMode newMode)
     samplerButton.setToggleState(activeMode == WorkspaceMode::sampler, juce::dontSendNotification);
     arrangeButton.setToggleState(activeMode == WorkspaceMode::arrange, juce::dontSendNotification);
     signalButton.setToggleState(activeMode == WorkspaceMode::signal, juce::dontSendNotification);
-    libraryButton.setToggleState(activeMode == WorkspaceMode::library, juce::dontSendNotification);
     mixButton.setToggleState(activeMode == WorkspaceMode::mix, juce::dontSendNotification);
     pluginsButton.setToggleState(activeMode == WorkspaceMode::plugins, juce::dontSendNotification);
     nodeButton.setToggleState(activeMode == WorkspaceMode::node, juce::dontSendNotification);
@@ -706,7 +717,6 @@ void MainComponent::ViewModeBar::resized()
     samplerButton.setBounds(area.removeFromLeft(buttonWidth));
     arrangeButton.setBounds(area.removeFromLeft(buttonWidth));
     signalButton.setBounds(area.removeFromLeft(buttonWidth));
-    libraryButton.setBounds(area.removeFromLeft(buttonWidth));
     mixButton.setBounds(area.removeFromLeft(buttonWidth));
     pluginsButton.setBounds(area.removeFromLeft(buttonWidth));
     nodeButton.setBounds(area.removeFromLeft(buttonWidth));
@@ -1162,7 +1172,65 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     suiteShellController.configure({ "Creation Station",
                                      creation::assets::SuiteAppDomain::station,
                                      juce::Colour(0xff15181d),
-                                     creation::ui::SuiteAssetManagerCapability{ "Creation Station", { ".cel" }, {} } },
+                                     creation::ui::SuiteAssetManagerCapability{ "Creation Station",
+                                                                                creation::assets::SuiteAppDomain::station,
+                                                                                { ".cel" },
+                                                                                {},
+                                                                                [this]()
+                                                                                {
+                                                                                    return projectSession.getManifest().assetCatalog.assets;
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                {
+                                                                                    juce::String details;
+                                                                                    if (! projectSession.isValid())
+                                                                                        return details;
+
+                                                                                    juce::String errorMessage;
+                                                                                    creation::assets::MaterializedAssetLease lease;
+                                                                                    if (! projectSession.materializeEntry(suiteSettings,
+                                                                                                                          asset.logicalPath,
+                                                                                                                          creation::assets::MaterializationAccess::readOnly,
+                                                                                                                          lease,
+                                                                                                                          errorMessage))
+                                                                                        return details;
+
+                                                                                    juce::AudioFormatManager formatManager;
+                                                                                    formatManager.registerBasicFormats();
+
+                                                                                    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(lease.materializedFile));
+                                                                                    if (reader != nullptr)
+                                                                                    {
+                                                                                        details << "\nFormat: " << reader->getFormatName();
+                                                                                        details << "\nSample Rate: " << juce::String(reader->sampleRate, 0) << " Hz";
+                                                                                        details << "\nChannels: " << reader->numChannels;
+                                                                                        details << "\nBit Depth: " << reader->bitsPerSample;
+                                                                                        details << "\nLength: " << juce::String(reader->lengthInSamples) << " samples";
+                                                                                        if (reader->sampleRate > 0.0)
+                                                                                            details << " (" << juce::String(reader->lengthInSamples / reader->sampleRate, 2) << " sec)";
+                                                                                    }
+
+                                                                                    juce::String releaseError;
+                                                                                    creation::assets::AssetMaterializer::releaseLease(lease, releaseError);
+                                                                                    return details;
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                {
+                                                                                    openProjectAsset(asset);
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor&)
+                                                                                {
+                                                                                    engine.stopAssetPreview();
+                                                                                    transportBar.setStatusText("Stopped project asset preview.");
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                {
+                                                                                    placeProjectAssetOnTracker(asset);
+                                                                                },
+                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                {
+                                                                                    exportProjectAssetRaw(asset);
+                                                                                } } },
                                    [this](const juce::String& status)
                                    {
                                        transportBar.setStatusText(status);
@@ -1993,6 +2061,22 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             transportBar.setStatusText(errorMessage);
     };
 
+    signalLabPanel.onStopRequested = [this]
+    {
+        engine.stopAssetPreview();
+        transportBar.setStatusText("Stopped signal preview.");
+    };
+
+    signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
+    {
+        pushSignalUndoState(stateBeforeEdit, label);
+    };
+
+    signalLabPanel.onInteractionStarted = [this]
+    {
+        undoService.setActiveContext(signalUndoContextId);
+    };
+
     signalLabPanel.onRenderRequested = [this](const juce::AudioBuffer<float>& buffer, double sampleRate, const juce::String& suggestedName)
     {
         juce::String projectError;
@@ -2003,40 +2087,56 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
 
         juce::String errorMessage;
-        auto renderedFile = juce::File();
-        if (renderedFile.existsAsFile())
-        {
-            if (engine.getTrackCount() == 0)
-                addTrack();
+        auto assetSlug = slugForProjectAssetName(suggestedName);
+        auto logicalPath = creation::assets::ProjectContainerPaths::derivedAssetRoot
+                         + assetSlug + "-" + makeRecordingTimestamp() + ".wav";
 
-            auto targetTrack = trackerPanel.getSelectedTrack();
-            if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
-                targetTrack = 0;
+        auto tempRenderFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                  .getChildFile(assetSlug + "-" + juce::Uuid().toString() + ".wav");
+
+        if (writeWavFile(tempRenderFile, buffer, sampleRate, errorMessage))
+        {
+            juce::MemoryBlock fileData;
+            if (! tempRenderFile.loadFileAsData(fileData))
+            {
+                transportBar.setStatusText("Rendered WAV was created, but could not be read back into the project.");
+                tempRenderFile.deleteFile();
+                return;
+            }
+
+            if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
+            {
+                transportBar.setStatusText("Could not write the rendered WAV into the project.");
+                tempRenderFile.deleteFile();
+                return;
+            }
 
             creation::assets::AssetDescriptor renderedAsset;
-            juce::String clipError;
-            auto clipIndex = placeAudioAssetOnTracker(renderedAsset,
-                                                      targetTrack,
-                                                      timelineModel.getTransportSeconds(),
-                                                      "signal",
-                                                      clipError);
-            if (clipIndex < 0)
+            renderedAsset.id = "asset:" + juce::Uuid().toString();
+            renderedAsset.version = "1";
+            renderedAsset.versionId = renderedAsset.id + "@1";
+            renderedAsset.displayName = suggestedName.isNotEmpty() ? suggestedName + " Render" : "Signal Render";
+            renderedAsset.logicalPath = logicalPath;
+            renderedAsset.kind = creation::assets::AssetKind::render;
+            renderedAsset.mediaType = "audio/wav";
+            renderedAsset.fileSizeBytes = (int64) fileData.getSize();
+            renderedAsset.createdAt = renderedAsset.modifiedAt = juce::Time::getCurrentTime();
+            renderedAsset.sourceApp = "Creation Station";
+            renderedAsset.description = "Rendered from Signal Lab on command.";
+            projectSession.upsertAssetDescriptor(renderedAsset);
+
+            if (! projectSession.commit(errorMessage))
             {
-                transportBar.setStatusText(clipError.isNotEmpty() ? clipError
-                                                                  : "Rendered sound, but could not place it on the Tracker.");
-                refreshProjectAssets();
-                refreshContentLibrary();
-                saveSessionToDisk();
+                transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the rendered WAV asset.");
+                tempRenderFile.deleteFile();
                 return;
             }
 
             refreshProjectAssets();
             refreshContentLibrary();
-            trackerPanel.setSelectedTrack(targetTrack);
-            trackerPanel.refreshTimelineView();
-            setWorkspaceMode(WorkspaceMode::tracker);
             saveSessionToDisk(true);
-            transportBar.setStatusText("Rendered signal to Tracker: " + renderedFile.getFileName());
+            transportBar.setStatusText("Rendered Signal Lab WAV asset: " + renderedAsset.displayName);
+            tempRenderFile.deleteFile();
         }
         else if (errorMessage.isNotEmpty())
         {
@@ -2046,30 +2146,34 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     signalLabPanel.onPatchExportRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
     {
-        if (! projectSession.isValid())
-        {
-            juce::String projectError;
-            if (! creation::assets::ProjectWorkspaceService::createProject(suiteSettings, creation::assets::SuiteAppDomain::station, "New Project", "1.0.0", "1.0.0", projectSession, projectError))
-            {
-                transportBar.setStatusText("Could not create a project for patch export.");
-                return;
-            }
+        auto defaultName = slugForProjectAssetName(suggestedName) + ".cspatch";
+        rawAssetExportChooser = std::make_unique<juce::FileChooser>("Export Signal Lab sound",
+                                                                    juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                                                        .getChildFile(defaultName),
+                                                                    "*.cspatch",
+                                                                    true);
+        auto chooser = rawAssetExportChooser.get();
+        chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                             [this, chooser, patchJson](const juce::FileChooser& result)
+                             {
+                                 auto destination = result.getResult();
+                                 if (chooser == rawAssetExportChooser.get())
+                                     rawAssetExportChooser.reset();
 
-            transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
-        }
+                                 if (destination.getFullPathName().isEmpty())
+                                     return;
 
-        juce::String errorMessage;
-        auto patchFile = juce::File();
-        if (patchFile.existsAsFile())
-        {
-            refreshContentLibrary();
-            saveSessionToDisk();
-            transportBar.setStatusText("Exported project sound file: " + patchFile.getFileName());
-        }
-        else if (errorMessage.isNotEmpty())
-        {
-            transportBar.setStatusText(errorMessage);
-        }
+                                 if (destination.getFileExtension().isEmpty())
+                                     destination = destination.withFileExtension(".cspatch");
+
+                                 if (! destination.replaceWithText(patchJson))
+                                 {
+                                     transportBar.setStatusText("Could not export the Signal Lab sound file.");
+                                     return;
+                                 }
+
+                                 transportBar.setStatusText("Exported Signal Lab sound file: " + destination.getFileName());
+                             });
     };
 
     signalLabPanel.onPatchSaveToLibraryRequested = [this](const juce::String& patchJson, const juce::String& suggestedName)
@@ -2087,56 +2191,108 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
 
         juce::String errorMessage;
-        auto patchFile = juce::File();
-        if (patchFile.existsAsFile())
+        juce::MemoryBlock patchData(patchJson.toRawUTF8(), (size_t) patchJson.getNumBytesAsUTF8());
+        auto assetSlug = slugForProjectAssetName(suggestedName);
+        auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + assetSlug + ".cspatch";
+
+        if (! projectSession.writeEntry(logicalPath, patchData, juce::Time::getCurrentTime()))
         {
-            refreshProjectAssets();
-            refreshContentLibrary();
-            saveSessionToDisk(true);
-            transportBar.setStatusText("Saved project sound: " + patchFile.getFileName());
+            transportBar.setStatusText("Could not write the Signal Lab design into the project.");
+            return;
         }
-        else if (errorMessage.isNotEmpty())
+
+        creation::assets::AssetDescriptor patchAsset;
+        auto existingAssets = projectSession.getManifest().assetCatalog.query({});
+        for (const auto& asset : existingAssets)
         {
-            transportBar.setStatusText(errorMessage);
+            if (asset.logicalPath == logicalPath)
+            {
+                patchAsset = asset;
+                break;
+            }
         }
+
+        if (patchAsset.id.isEmpty())
+        {
+            patchAsset.id = "asset:" + juce::Uuid().toString();
+            patchAsset.version = "1";
+        }
+        patchAsset.versionId = patchAsset.id + "@" + patchAsset.version;
+        patchAsset.displayName = suggestedName.isNotEmpty() ? suggestedName : "Signal Design";
+        patchAsset.logicalPath = logicalPath;
+        patchAsset.kind = creation::assets::AssetKind::patch;
+        patchAsset.mediaType = "application/x-creation-station-patch";
+        patchAsset.fileSizeBytes = (int64) patchData.getSize();
+        patchAsset.modifiedAt = juce::Time::getCurrentTime();
+        if (patchAsset.createdAt == juce::Time())
+            patchAsset.createdAt = patchAsset.modifiedAt;
+        patchAsset.sourceApp = "Creation Station";
+        patchAsset.description = "Editable Signal Lab sound design object.";
+        patchAsset.revision = juce::jmax(1, patchAsset.revision + 1);
+        projectSession.upsertAssetDescriptor(patchAsset);
+
+        if (! projectSession.commit(errorMessage))
+        {
+            transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the Signal Lab design asset.");
+            return;
+        }
+
+        refreshProjectAssets();
+        refreshContentLibrary();
+        saveSessionToDisk(true);
+        transportBar.setStatusText("Saved Signal Lab design asset: " + patchAsset.displayName);
     };
 
     signalLabPanel.onPatchLoadRequested = [this]
     {
-        auto startDirectory = suiteSettings.suiteVfsRoot.isNotEmpty()
-            ? juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("Patches")
-            : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+        if (! projectSession.isValid())
+        {
+            transportBar.setStatusText("Open or create a project first so Signal Lab can load saved sounds from the project.");
+            return;
+        }
 
-        patchChooser = std::make_unique<juce::FileChooser>("Load a Creation Station sound",
-                                                           startDirectory,
-                                                           "*.cspatch");
+        juce::Array<creation::assets::AssetDescriptor> patchAssets;
+        for (const auto& asset : projectSession.getManifest().assetCatalog.query({}))
+        {
+            if (asset.kind == creation::assets::AssetKind::patch)
+                patchAssets.add(asset);
+        }
 
-        patchChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                                  [this](const juce::FileChooser& chooser)
-                                  {
-                                      auto file = chooser.getResult();
-                                      patchChooser.reset();
+        if (patchAssets.isEmpty())
+        {
+            transportBar.setStatusText("This project does not have any saved Signal Lab sounds yet.");
+            return;
+        }
 
-                                      if (! file.existsAsFile())
-                                          return;
+        std::sort(patchAssets.begin(), patchAssets.end(), [](const auto& left, const auto& right)
+        {
+            if (left.modifiedAt != right.modifiedAt)
+                return left.modifiedAt > right.modifiedAt;
 
-                                      juce::String errorMessage;
-                                      cw::PatchDocument document;
-                                      if (! cw::parsePatchDocumentJson(file.loadFileAsString(), document, errorMessage))
-                                      {
-                                          transportBar.setStatusText(errorMessage);
-                                          return;
-                                      }
+            return left.displayName.compareIgnoreCase(right.displayName) < 0;
+        });
 
-                                      if (! signalLabPanel.loadPatchDocument(document, errorMessage))
-                                      {
-                                          transportBar.setStatusText(errorMessage);
-                                          return;
-                                      }
+        juce::PopupMenu menu;
+        menu.addSectionHeader("Load Sound From Project");
+        for (int index = 0; index < patchAssets.size(); ++index)
+        {
+            const auto& asset = patchAssets.getReference(index);
+            auto label = asset.displayName.isNotEmpty() ? asset.displayName : asset.logicalPath;
+            auto detail = asset.modifiedAt != juce::Time()
+                ? "  •  " + asset.modifiedAt.toString(true, true)
+                : juce::String{};
+            menu.addItem(index + 1, label + detail);
+        }
 
-                                      transportBar.setStatusText("Loaded patch: " + file.getFileName());
-                                      setWorkspaceMode(WorkspaceMode::signal);
-                                  });
+        auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }),
+                           [this, patchAssets](int result)
+                           {
+                               if (result <= 0 || result > patchAssets.size())
+                                   return;
+
+                               openProjectAsset(patchAssets.getReference(result - 1));
+                           });
     };
 
     dslPanel.onSourceExportRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
@@ -2167,7 +2323,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         if (! ensureStorageRootConfigured())
             return;
 
-        auto celDirectory = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("CEL");
+        auto celDirectory = creation::suite::getContentDirectory(suiteSettings).getChildFile("User").getChildFile("CEL");
         celDirectory.createDirectory();
         auto celFile = celDirectory.getChildFile(suggestedName + ".cel").getNonexistentSibling();
 
@@ -2185,7 +2341,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     dslPanel.onSourceLoadRequested = [this]
     {
         auto startDirectory = suiteSettings.suiteVfsRoot.isNotEmpty()
-            ? juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User").getChildFile("CEL")
+            ? creation::suite::getContentDirectory(suiteSettings).getChildFile("User").getChildFile("CEL")
             : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
 
         celSourceChooser = std::make_unique<juce::FileChooser>("Load a CEL source file",
@@ -2440,7 +2596,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         if (! ensureStorageRootConfigured())
             return;
 
-        juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content").revealToUser();
+        creation::suite::getContentDirectory(suiteSettings).revealToUser();
     };
 
     contentPanel.onAdminPublishRequested = [this]
@@ -2455,7 +2611,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
 
         contentUploadChooser = std::make_unique<juce::FileChooser>("Choose a content package to publish",
-                                                                   juce::File(suiteSettings.suiteVfsRoot),
+                                                                   creation::suite::getContentDirectory(suiteSettings),
                                                                    "*.cspatch;*.cspack;*.zip;*.wav");
 
         contentUploadChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
@@ -3657,7 +3813,6 @@ void MainComponent::resized()
     if (! isWorkspacePoppedOut(WorkspaceMode::sampler)) samplePackBuilderPanel.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::arrange)) arrangeView.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::signal)) signalLabPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::library)) contentPanel.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::mix)) mixerPanel.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::plugins)) pluginsPanel.setBounds(contentArea);
     if (! isWorkspacePoppedOut(WorkspaceMode::node)) graphPanel.setBounds(contentArea);
@@ -3674,6 +3829,9 @@ void MainComponent::resized()
 
 void MainComponent::setWorkspaceMode(WorkspaceMode mode)
 {
+    if (mode == WorkspaceMode::library)
+        mode = WorkspaceMode::tracker;
+
     if (activeMode == WorkspaceMode::settings && mode != WorkspaceMode::settings)
         saveAppSettings();
 
@@ -3695,7 +3853,7 @@ void MainComponent::refreshModeVisibility()
     samplePackBuilderPanel.setVisible(activeMode == WorkspaceMode::sampler || isWorkspacePoppedOut(WorkspaceMode::sampler));
     arrangeView.setVisible(activeMode == WorkspaceMode::arrange || isWorkspacePoppedOut(WorkspaceMode::arrange));
     signalLabPanel.setVisible(activeMode == WorkspaceMode::signal || isWorkspacePoppedOut(WorkspaceMode::signal));
-    contentPanel.setVisible(activeMode == WorkspaceMode::library || isWorkspacePoppedOut(WorkspaceMode::library));
+    contentPanel.setVisible(false);
     mixerPanel.setVisible(activeMode == WorkspaceMode::mix || isWorkspacePoppedOut(WorkspaceMode::mix));
     pluginsPanel.setVisible(activeMode == WorkspaceMode::plugins || isWorkspacePoppedOut(WorkspaceMode::plugins));
     graphPanel.setVisible(activeMode == WorkspaceMode::node || isWorkspacePoppedOut(WorkspaceMode::node));
@@ -3754,6 +3912,8 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
     auto savedActiveMode = static_cast<WorkspaceMode>(juce::jlimit(0,
                                                                     static_cast<int>(WorkspaceMode::sampler),
                                                                     (int) state.getProperty("activeMode", static_cast<int>(WorkspaceMode::tracker))));
+    if (savedActiveMode == WorkspaceMode::library)
+        savedActiveMode = WorkspaceMode::tracker;
     activeMode = savedActiveMode;
     viewModeBar.setActiveMode(savedActiveMode);
 
@@ -3780,6 +3940,9 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
 
         auto mode = static_cast<WorkspaceMode>(index);
         auto popX = (int) child.getProperty("x", -1);
+        if (mode == WorkspaceMode::library)
+            continue;
+
         auto popY = (int) child.getProperty("y", -1);
         auto popW = (int) child.getProperty("w", -1);
         auto popH = (int) child.getProperty("h", -1);
@@ -3877,7 +4040,7 @@ juce::Component* MainComponent::getWorkspaceComponent(WorkspaceMode mode)
         case WorkspaceMode::sampler: return &samplePackBuilderPanel;
         case WorkspaceMode::arrange: return &arrangeView;
         case WorkspaceMode::signal: return &signalLabPanel;
-        case WorkspaceMode::library: return &contentPanel;
+        case WorkspaceMode::library: return nullptr;
         case WorkspaceMode::mix: return &mixerPanel;
         case WorkspaceMode::plugins: return &pluginsPanel;
         case WorkspaceMode::node: return &graphPanel;
@@ -5040,13 +5203,13 @@ void MainComponent::refreshContentLibrary()
         return;
     }
 
-    contentPanel.setStoragePath(juce::File(suiteSettings.suiteVfsRoot).getFullPathName());
+    contentPanel.setStoragePath(creation::suite::getContentDirectory(suiteSettings).getFullPathName());
 
     juce::String errorMessage;
-    if (! contentLibrary.loadFromStorage(juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/BuiltIn"),
-                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/Downloaded"),
-                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/User"),
-                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/manifest.json"),
+    if (! contentLibrary.loadFromStorage(creation::suite::getContentDirectory(suiteSettings).getChildFile("BuiltIn"),
+                                         creation::suite::getContentDirectory(suiteSettings).getChildFile("Downloaded"),
+                                         creation::suite::getContentDirectory(suiteSettings).getChildFile("User"),
+                                         creation::suite::getContentDirectory(suiteSettings).getChildFile("manifest.json"),
                                          errorMessage))
     {
         contentPanel.setItems({});
@@ -5155,8 +5318,8 @@ void MainComponent::refreshTutorialLibrary()
         }
     };
 
-    collect(juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/BuiltIn"), true);
-    collect(juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/User"), false);
+    collect(creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("BuiltIn"), true);
+    collect(creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("User"), false);
     contentPanel.setTutorialItems(tutorials);
 }
 
@@ -5217,8 +5380,8 @@ MainComponent::WorkspaceMode MainComponent::workspaceModeFromString(const juce::
         return WorkspaceMode::arrange;
     if (normalized == "signal")
         return WorkspaceMode::signal;
-    if (normalized == "library")
-        return WorkspaceMode::library;
+    if (normalized == "library" || normalized == "assets")
+        return WorkspaceMode::tracker;
     if (normalized == "mix" || normalized == "layers")
         return WorkspaceMode::mix;
     if (normalized == "plugins" || normalized == "plugin")
@@ -5253,7 +5416,7 @@ void MainComponent::configureTutorialOverlay()
     juce::String errorMessage;
     if (suiteSettings.suiteVfsRoot.isNotEmpty())
     {
-        auto builtInDirectory = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/BuiltIn");
+        auto builtInDirectory = creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("BuiltIn");
         auto sampleFile = builtInDirectory.getChildFile("getting-started-demo.nalm");
         auto builtInSource = cw::tutorial::getBuiltInGettingStartedTutorialSource();
         auto vstDemoFile = builtInDirectory.getChildFile("vst-node-demo.nalm");
@@ -5265,7 +5428,7 @@ void MainComponent::configureTutorialOverlay()
         if (! vstDemoFile.existsAsFile() || vstDemoFile.loadFileAsString() != vstDemoSource)
             vstDemoFile.replaceWithText(vstDemoSource);
 
-        auto userFile = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Tutorials/User").getChildFile("getting-started-demo.nalm");
+        auto userFile = creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("User").getChildFile("getting-started-demo.nalm");
 
         if (! loadFromFile(userFile, script, errorMessage))
         {
@@ -5656,7 +5819,7 @@ void MainComponent::downloadContentItem(const ContentLibrary::Item& item)
     else
         extension = ".bin";
 
-    auto destination = juce::File(suiteSettings.suiteVfsRoot).getChildFile("Content/Downloaded")
+    auto destination = creation::suite::getContentDirectory(suiteSettings).getChildFile("Downloaded")
                            .getChildFile(item.id + "__" + slug + extension);
     auto token = authSession.getSession().token;
 
@@ -5788,6 +5951,8 @@ void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& as
             contentPanel.setStatusText(errorMessage);
             return;
         }
+
+        pushSignalUndoState(signalLabPanel.createState(), "Load sound");
 
         if (! signalLabPanel.loadPatchDocument(document, errorMessage))
         {
@@ -6389,16 +6554,6 @@ void MainComponent::closeSuiteSettingsWindow()
 void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
 {
     juce::String currentPath = suiteSettings.suiteVfsRoot;
-    if (fieldId == "shared_resources_root")
-        currentPath = suiteSettings.sharedResourcesRoot;
-    else if (fieldId == "creation_station_projects_root")
-        currentPath = suiteSettings.creationStationProjectsRoot;
-    else if (fieldId == "creation_engine_projects_root")
-        currentPath = suiteSettings.creationEngineProjectsRoot;
-    else if (fieldId == "creation_movie_projects_root")
-        currentPath = suiteSettings.creationMovieProjectsRoot;
-    else if (fieldId == "creation_live_projects_root")
-        currentPath = suiteSettings.creationLiveProjectsRoot;
 
     suiteDirectoryChooser = std::make_unique<juce::FileChooser>("Choose a folder for the Creation Suite",
                                                                 currentPath.isNotEmpty()
@@ -6420,16 +6575,6 @@ void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
                              auto selectedPath = selected.getFullPathName();
                              if (fieldId == "suite_vfs_root")
                                  suiteSettings.suiteVfsRoot = selectedPath;
-                             else if (fieldId == "shared_resources_root")
-                                 suiteSettings.sharedResourcesRoot = selectedPath;
-                             else if (fieldId == "creation_station_projects_root")
-                                 suiteSettings.creationStationProjectsRoot = selectedPath;
-                             else if (fieldId == "creation_engine_projects_root")
-                                 suiteSettings.creationEngineProjectsRoot = selectedPath;
-                             else if (fieldId == "creation_movie_projects_root")
-                                 suiteSettings.creationMovieProjectsRoot = selectedPath;
-                             else if (fieldId == "creation_live_projects_root")
-                                 suiteSettings.creationLiveProjectsRoot = selectedPath;
 
                              if (suiteSettingsPanel != nullptr)
                                  suiteSettingsPanel->setSettings(suiteSettings);
@@ -6611,7 +6756,7 @@ void MainComponent::beginCreateProjectFromTemplate()
         return;
 
     projectChooser = std::make_unique<juce::FileChooser>("Create a project from a Creation Station template",
-                                                         juce::File(suiteSettings.suiteVfsRoot).getChildFile("Templates"),
+                                                         creation::suite::getTemplatesDirectory(suiteSettings),
                                                          "*.csproj",
                                                          true);
 
@@ -6695,7 +6840,7 @@ void MainComponent::saveProjectAsTemplate()
             return;
 
         auto templateName = dialog->getTextEditorContents("templateName").trim();
-        juce::File templatesDir = juce::File(options->suiteSettings.suiteVfsRoot).getChildFile("Templates");
+        juce::File templatesDir = creation::suite::getTemplatesDirectory(options->suiteSettings);
         templatesDir.createDirectory();
         juce::File templateFile = templatesDir.getChildFile(templateName + ".csproj");
 
@@ -7306,14 +7451,10 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     state.addChild(graphPanel.createState(), -1, nullptr);
     state.addChild(scorePanel.createState(), -1, nullptr);
     state.addChild(timelineModel.createState(), -1, nullptr);
-    juce::ValueTree undoState("TimelineUndoStack");
-    for (const auto& undoTimelineState : timelineUndoStack)
-        undoState.addChild(undoTimelineState.createCopy(), -1, nullptr);
-    state.addChild(undoState, -1, nullptr);
-    juce::ValueTree redoState("TimelineRedoStack");
-    for (const auto& redoTimelineState : timelineRedoStack)
-        redoState.addChild(redoTimelineState.createCopy(), -1, nullptr);
-    state.addChild(redoState, -1, nullptr);
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    state.addChild(timelineUndoContext.serialise("TimelineUndoContext"), -1, nullptr);
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    state.addChild(signalUndoContext.serialise("SignalUndoContext"), -1, nullptr);
 
     return state;
 }
@@ -7583,11 +7724,9 @@ void MainComponent::pushTimelineUndoState()
 
 void MainComponent::pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit)
 {
-    timelineUndoStack.push_back(stateBeforeEdit.createCopy());
-    if (timelineUndoStack.size() > 100)
-        timelineUndoStack.erase(timelineUndoStack.begin());
-
-    timelineRedoStack.clear();
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    timelineUndoContext.pushUndoState(stateBeforeEdit, "Timeline edit");
+    undoService.setActiveContext(timelineUndoContextId);
 }
 
 void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const juce::String& statusText)
@@ -7622,32 +7761,68 @@ void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const
     transportBar.setStatusText(statusText);
 }
 
-void MainComponent::undoTimelineEdit()
+void MainComponent::pushSignalUndoState(const juce::ValueTree& stateBeforeEdit, const juce::String& label)
 {
-    if (timelineUndoStack.empty())
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    signalUndoContext.pushUndoState(stateBeforeEdit, label);
+    undoService.setActiveContext(signalUndoContextId);
+}
+
+void MainComponent::restoreSignalEditState(const juce::ValueTree& state, const juce::String& statusText)
+{
+    signalLabPanel.restoreState(state);
+    setWorkspaceMode(WorkspaceMode::signal);
+    projectDirty = true;
+    saveSessionToDisk();
+    transportBar.setStatusText(statusText);
+}
+
+void MainComponent::undoSignalEdit()
+{
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! signalUndoContext.undoTo(signalLabPanel.createState(), stateToRestore, label))
         return;
 
-    timelineRedoStack.push_back(timelineModel.createState());
-    if (timelineRedoStack.size() > 100)
-        timelineRedoStack.erase(timelineRedoStack.begin());
+    undoService.setActiveContext(signalUndoContextId);
+    restoreSignalEditState(stateToRestore, label.isNotEmpty() ? (label + " undone.") : "Signal Lab edit undone.");
+}
 
-    auto stateToRestore = timelineUndoStack.back().createCopy();
-    timelineUndoStack.pop_back();
-    restoreTimelineEditState(stateToRestore, "Tracker edit undone.");
+void MainComponent::redoSignalEdit()
+{
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! signalUndoContext.redoTo(signalLabPanel.createState(), stateToRestore, label))
+        return;
+
+    undoService.setActiveContext(signalUndoContextId);
+    restoreSignalEditState(stateToRestore, label.isNotEmpty() ? (label + " redone.") : "Signal Lab edit redone.");
+}
+
+void MainComponent::undoTimelineEdit()
+{
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! timelineUndoContext.undoTo(timelineModel.createState(), stateToRestore, label))
+        return;
+
+    undoService.setActiveContext(timelineUndoContextId);
+    restoreTimelineEditState(stateToRestore, label.isNotEmpty() ? (label + " undone.") : "Tracker edit undone.");
 }
 
 void MainComponent::redoTimelineEdit()
 {
-    if (timelineRedoStack.empty())
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    juce::ValueTree stateToRestore;
+    juce::String label;
+    if (! timelineUndoContext.redoTo(timelineModel.createState(), stateToRestore, label))
         return;
 
-    timelineUndoStack.push_back(timelineModel.createState());
-    if (timelineUndoStack.size() > 100)
-        timelineUndoStack.erase(timelineUndoStack.begin());
-
-    auto stateToRestore = timelineRedoStack.back().createCopy();
-    timelineRedoStack.pop_back();
-    restoreTimelineEditState(stateToRestore, "Tracker edit redone.");
+    undoService.setActiveContext(timelineUndoContextId);
+    restoreTimelineEditState(stateToRestore, label.isNotEmpty() ? (label + " redone.") : "Tracker edit redone.");
 }
 
 void MainComponent::splitClipAt(int clipIndex, double splitSeconds)
@@ -7736,11 +7911,33 @@ void MainComponent::renameClip(int clipIndex)
                                           return;
 
                                       auto stateBeforeEdit = safeThis->timelineModel.createState();
+                                      const auto clip = safeThis->timelineModel.getClips()[(size_t) clipIndex];
                                       safeThis->timelineModel.setClipDisplayName(clipIndex, newName);
+
+                                      if (safeThis->projectSession.isValid() && clip.assetId.isNotEmpty())
+                                      {
+                                          auto& assets = safeThis->projectSession.getManifest().assetCatalog.assets;
+                                          for (auto& asset : assets)
+                                          {
+                                              if (asset.id == clip.assetId)
+                                              {
+                                                  asset.displayName = newName;
+                                                  asset.modifiedAt = juce::Time::getCurrentTime();
+                                                  ++asset.revision;
+                                                  break;
+                                              }
+                                          }
+
+                                          juce::String assetError;
+                                          if (! safeThis->projectSession.commit(assetError))
+                                              safeThis->transportBar.setStatusText(assetError.isNotEmpty() ? assetError : "Clip renamed, but project asset metadata could not be saved.");
+                                      }
+
                                       safeThis->pushTimelineUndoState(stateBeforeEdit);
                                       safeThis->selectedClipIndex = clipIndex;
                                       safeThis->trackerPanel.setSelectedClip(clipIndex);
                                       safeThis->trackerPanel.refreshTimelineView();
+                                      safeThis->refreshProjectAssets();
                                       safeThis->projectDirty = true;
                                       safeThis->saveSessionToDisk();
                                       safeThis->transportBar.setStatusText("Clip renamed.");
@@ -7781,14 +7978,20 @@ bool MainComponent::handleGlobalKeyPress(const juce::KeyPress& key)
 
     if (mods.isCommandDown() && ! mods.isShiftDown() && letter == 'Z')
     {
-        undoTimelineEdit();
+        if (activeMode == WorkspaceMode::signal)
+            undoSignalEdit();
+        else
+            undoTimelineEdit();
         return true;
     }
 
     if ((mods.isCommandDown() && ! mods.isShiftDown() && letter == 'Y')
         || (mods.isCommandDown() && mods.isShiftDown() && letter == 'Z'))
     {
-        redoTimelineEdit();
+        if (activeMode == WorkspaceMode::signal)
+            redoSignalEdit();
+        else
+            redoTimelineEdit();
         return true;
     }
 
@@ -7846,27 +8049,45 @@ void MainComponent::loadSessionFromDisk()
 
     transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);
 
-    timelineUndoStack.clear();
-    if (auto undoState = state.getChildWithName("TimelineUndoStack"); undoState.isValid())
+    auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
+    timelineUndoContext.clear();
+    if (auto undoState = state.getChildWithName("TimelineUndoContext"); undoState.isValid())
+        timelineUndoContext.restore(undoState);
+    else
     {
-        for (const auto child : undoState)
-            if (child.hasType("Timeline"))
-                timelineUndoStack.push_back(child.createCopy());
-
-        while (timelineUndoStack.size() > 100)
-            timelineUndoStack.erase(timelineUndoStack.begin());
+        juce::ValueTree legacyUndoState("TimelineUndoContext");
+        legacyUndoState.setProperty("contextId", timelineUndoContextId, nullptr);
+        legacyUndoState.setProperty("maxEntries", 100, nullptr);
+        juce::ValueTree undoStackState("UndoStack");
+        if (auto oldUndoState = state.getChildWithName("TimelineUndoStack"); oldUndoState.isValid())
+        {
+            for (const auto child : oldUndoState)
+            {
+                auto entry = child.createCopy();
+                entry.setProperty("__undoLabel", "Timeline edit", nullptr);
+                undoStackState.addChild(entry, -1, nullptr);
+            }
+        }
+        legacyUndoState.addChild(undoStackState, -1, nullptr);
+        juce::ValueTree redoStackState("RedoStack");
+        if (auto oldRedoState = state.getChildWithName("TimelineRedoStack"); oldRedoState.isValid())
+        {
+            for (const auto child : oldRedoState)
+            {
+                auto entry = child.createCopy();
+                entry.setProperty("__undoLabel", "Timeline edit", nullptr);
+                redoStackState.addChild(entry, -1, nullptr);
+            }
+        }
+        legacyUndoState.addChild(redoStackState, -1, nullptr);
+        timelineUndoContext.restore(legacyUndoState);
     }
+    undoService.setActiveContext(timelineUndoContextId);
 
-    timelineRedoStack.clear();
-    if (auto redoState = state.getChildWithName("TimelineRedoStack"); redoState.isValid())
-    {
-        for (const auto child : redoState)
-            if (child.hasType("Timeline"))
-                timelineRedoStack.push_back(child.createCopy());
-
-        while (timelineRedoStack.size() > 100)
-            timelineRedoStack.erase(timelineRedoStack.begin());
-    }
+    auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
+    signalUndoContext.clear();
+    if (auto signalUndoState = state.getChildWithName("SignalUndoContext"); signalUndoState.isValid())
+        signalUndoContext.restore(signalUndoState);
 
     auto bankOffset = (int) state.getProperty("bankOffset", 0);
     mixerPanel.setBankOffset(bankOffset);
@@ -8237,7 +8458,8 @@ void MainComponent::showMoveToFolderPicker(int trackIndex)
         ++nextItemId;
     }
 
-    menu.showMenuAsync(juce::PopupMenu::Options(), [this, trackIndex, folderTrackIndices](int result)
+    auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }), [this, trackIndex, folderTrackIndices](int result)
     {
         if (result <= 0)
             return;
@@ -8312,11 +8534,22 @@ void MainComponent::showAutomationTargetPicker(int trackIndex)
         auto pluginNames = engine.getTrackPluginNames(otherIndex);
         for (int slotIndex = 0; slotIndex < pluginNames.size(); ++slotIndex)
         {
-            auto paramCount = engine.getTrackPluginParameterCount(otherIndex, slotIndex);
-            if (paramCount <= 0)
-                continue;
-
             juce::PopupMenu pluginMenu;
+            {
+                cs::AutomationTarget target;
+                target.kind = cs::AutomationTargetKind::pluginBypass;
+                target.targetTrackIndex = otherIndex;
+                target.pluginSlotIndex = slotIndex;
+                target.displayName = trackName + " → " + pluginNames[slotIndex] + " → Bypass";
+                target.valueMode = cs::AutomationValueMode::toggle;
+                target.stepCount = 2;
+
+                pluginMenu.addItem(nextItemId, "Bypass");
+                actions->push_back({ target });
+                ++nextItemId;
+            }
+
+            auto paramCount = engine.getTrackPluginParameterCount(otherIndex, slotIndex);
             for (int paramIndex = 0; paramIndex < paramCount; ++paramIndex)
             {
                 auto paramName = engine.getTrackPluginParameterName(otherIndex, slotIndex, paramIndex);
@@ -8347,7 +8580,8 @@ void MainComponent::showAutomationTargetPicker(int trackIndex)
         menu.addItem(-1, "No other tracks available", false);
     }
 
-    menu.showMenuAsync(juce::PopupMenu::Options(), [this, trackIndex, actions](int result)
+    auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }), [this, trackIndex, actions](int result)
     {
         if (result <= 0 || (size_t) result > actions->size())
             return;
