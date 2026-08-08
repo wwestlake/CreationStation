@@ -2061,6 +2061,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             transportBar.setStatusText(errorMessage);
     };
 
+    signalLabPanel.onStopRequested = [this]
+    {
+        engine.stopAssetPreview();
+        transportBar.setStatusText("Stopped signal preview.");
+    };
+
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
     {
         pushSignalUndoState(stateBeforeEdit, label);
@@ -2278,7 +2284,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             menu.addItem(index + 1, label + detail);
         }
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&signalLabPanel),
+        auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }),
                            [this, patchAssets](int result)
                            {
                                if (result <= 0 || result > patchAssets.size())
@@ -8451,7 +8458,8 @@ void MainComponent::showMoveToFolderPicker(int trackIndex)
         ++nextItemId;
     }
 
-    menu.showMenuAsync(juce::PopupMenu::Options(), [this, trackIndex, folderTrackIndices](int result)
+    auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }), [this, trackIndex, folderTrackIndices](int result)
     {
         if (result <= 0)
             return;
@@ -8572,7 +8580,8 @@ void MainComponent::showAutomationTargetPicker(int trackIndex)
         menu.addItem(-1, "No other tracks available", false);
     }
 
-    menu.showMenuAsync(juce::PopupMenu::Options(), [this, trackIndex, actions](int result)
+    auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }), [this, trackIndex, actions](int result)
     {
         if (result <= 0 || (size_t) result > actions->size())
             return;

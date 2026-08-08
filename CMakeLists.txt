@@ -195,6 +195,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/ContentPanel.h
     Source/Views/DslPanel.cpp
     Source/Views/DslPanel.h
+    Source/Views/DockingWorkspace.cpp
+    Source/Views/DockingWorkspace.h
     Source/Views/GraphPanel.cpp
     Source/Views/GraphPanel.h
     Source/Views/TourGuideOverlay.cpp

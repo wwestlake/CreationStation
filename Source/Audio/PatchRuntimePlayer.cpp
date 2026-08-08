@@ -20,6 +20,14 @@ float applyBrightnessFilterRuntime(float input, float& state, float brightness, 
     return state;
 }
 
+float applyOnePoleLowPassRuntime(float input, float& state, float cutoffHz, double sampleRate)
+{
+    auto clampedCutoff = juce::jlimit(20.0f, (float) (sampleRate * 0.45), cutoffHz);
+    auto alpha = juce::jlimit(0.0005f, 0.99f, (float) (juce::MathConstants<double>::twoPi * clampedCutoff / sampleRate));
+    state += alpha * (input - state);
+    return state;
+}
+
 float getNumericProperty(const juce::NamedValueSet& properties, const juce::Identifier& key, float fallback)
 {
     return (float) properties.getWithDefault(key, fallback);
@@ -163,6 +171,11 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     float filterCutoffHz = 3600.0f;
     float filterResonance = 0.90f;
     float filterEnvelopeAmount = 0.35f;
+    float sineLevel = 0.65f;
+    float sawLevel = 0.15f;
+    float squareLevel = 0.08f;
+    float triangleLevel = 0.12f;
+    float noiseLevel = 0.10f;
     float macroHardness = 0.50f;
     float macroWeight = 0.50f;
     float macroAir = 0.50f;
@@ -178,6 +191,16 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
             filterResonance = (float) parameter.defaultValue;
         else if (parameter.id == "filterEnvelopeAmount")
             filterEnvelopeAmount = (float) parameter.defaultValue;
+        else if (parameter.id == "sineLevel")
+            sineLevel = (float) parameter.defaultValue;
+        else if (parameter.id == "sawLevel")
+            sawLevel = (float) parameter.defaultValue;
+        else if (parameter.id == "squareLevel")
+            squareLevel = (float) parameter.defaultValue;
+        else if (parameter.id == "triangleLevel")
+            triangleLevel = (float) parameter.defaultValue;
+        else if (parameter.id == "noiseLevel")
+            noiseLevel = (float) parameter.defaultValue;
         else if (parameter.id == "macroHardness")
             macroHardness = (float) parameter.defaultValue;
         else if (parameter.id == "macroWeight")
@@ -262,6 +285,8 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
                                             : filterMode == "bandpass" ? juce::dsp::StateVariableTPTFilterType::bandpass
                                                                        : juce::dsp::StateVariableTPTFilterType::lowpass);
 
+    float bodyState = 0.0f;
+    float previousEnvelope = 0.0f;
     for (int sample = 0; sample < numSamples; ++sample)
     {
         auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
@@ -269,11 +294,23 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         auto gainMotion = sampleTargetLanesRuntime(patch.automationLanes, "outputGain", t, 1.0);
         auto filterMotion = sampleTargetLanesRuntime(patch.automationLanes, "filterCutoff", t, 0.5);
         auto resonanceMotion = sampleTargetLanesRuntime(patch.automationLanes, "filterResonance", t, filterResonance);
-        auto noiseMotion = sampleTargetLanesRuntime(patch.automationLanes, "noiseLevel", t, 0.0);
+        auto filterEnvelopeMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "filterEnvelopeAmount", t, filterEnvelopeAmount);
+        auto noiseMotion = sampleTargetLanesRuntime(patch.automationLanes, "noiseLevel", t, noiseLevel);
         auto baseFrequencyMotion = sampleTargetLanesRuntime(patch.automationLanes, "baseFrequency", t, baseFrequency);
+        auto sineLevelMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "sineLevel", t, sineLevel);
+        auto sawLevelMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "sawLevel", t, sawLevel);
+        auto squareLevelMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "squareLevel", t, squareLevel);
+        auto triangleLevelMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "triangleLevel", t, triangleLevel);
+        auto hardnessMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "macroHardness", t, macroHardness);
+        auto weightMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "macroWeight", t, macroWeight);
+        auto airMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "macroAir", t, macroAir);
+        auto gritMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "macroGrit", t, macroGrit);
+        auto sizeMotion = (float) sampleTargetLanesRuntime(patch.automationLanes, "macroSize", t, macroSize);
         auto pitchSemitones = (float) pitchMotion
-                            + juce::jmap(macroWeight, 0.0f, 1.0f, 2.0f, -2.0f) * (t - 0.5f) * 2.0f;
-        auto weightedBaseFrequency = baseFrequencyMotion * (double) juce::jmap(macroWeight, 0.0f, 1.0f, 1.16f, 0.86f);
+                            + juce::jmap(weightMotion, 0.0f, 1.0f, 2.0f, -2.0f) * (t - 0.5f) * 2.0f;
+        auto weightedBaseFrequency = baseFrequencyMotion
+                                   * (double) juce::jmap(weightMotion, 0.0f, 1.0f, 1.16f, 0.86f)
+                                   * (double) juce::jmap(sizeMotion, 0.0f, 1.0f, 1.04f, 0.94f);
         auto frequency = weightedBaseFrequency * std::pow(2.0, pitchSemitones / 12.0);
         auto phase = juce::MathConstants<double>::twoPi * frequency * ((double) sample / sampleRate);
 
@@ -283,6 +320,15 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
             float sourceSample = 0.0f;
             if (source.kind == "oscillator")
             {
+                auto animatedLevel = (float) source.level;
+                if (source.waveform == "sine")
+                    animatedLevel = sineLevelMotion;
+                else if (source.waveform == "saw")
+                    animatedLevel = sawLevelMotion;
+                else if (source.waveform == "square")
+                    animatedLevel = squareLevelMotion;
+                else if (source.waveform == "triangle")
+                    animatedLevel = triangleLevelMotion;
                 if (source.waveform == "sine")
                     sourceSample = (float) std::sin(phase);
                 else if (source.waveform == "saw")
@@ -291,32 +337,44 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
                     sourceSample = std::sin(phase) >= 0.0 ? 1.0f : -1.0f;
                 else if (source.waveform == "triangle")
                     sourceSample = std::asin(std::sin(phase)) * (2.0f / juce::MathConstants<float>::pi);
+
+                mixed += sourceSample * animatedLevel;
+                continue;
             }
             else if (source.kind == "noise")
             {
                 auto hashed = std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f;
                 sourceSample = 2.0f * (hashed - std::floor(hashed)) - 1.0f;
+                mixed += sourceSample * (float) juce::jlimit(0.0, 1.0, noiseMotion);
+                continue;
             }
-
-            mixed += sourceSample * (float) source.level;
         }
 
         auto envelope = (float) sampleAutomationPoints(envelopePoints, envelopeCurveMode, t, 0.0);
+        auto transient = juce::jmax(0.0f, envelope - previousEnvelope);
+        previousEnvelope = envelope;
 
-        auto gritDrive = 1.0f + macroGrit * 5.5f;
-        auto macroNoise = juce::jlimit(0.0f, 1.0f, (float) noiseMotion + macroAir * 0.18f + macroGrit * 0.12f);
+        auto gritDrive = 1.0f + gritMotion * 5.5f;
+        auto macroNoise = juce::jlimit(0.0f, 1.0f, (float) noiseMotion + airMotion * 0.18f + gritMotion * 0.12f);
         mixed += macroNoise * ((std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f) - std::floor(std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f));
         auto value = normalizer * envelope * (float) gainMotion * outputGain * mixed;
+        value += transient * juce::jmap(hardnessMotion, 0.0f, 1.0f, 0.0f, 0.45f);
         value = std::tanh(value * gritDrive) / std::tanh(gritDrive);
+        auto bodyCutoff = juce::jmap(weightMotion, 0.0f, 1.0f, 120.0f, 520.0f);
+        auto bodyComponent = applyOnePoleLowPassRuntime(value, bodyState, bodyCutoff, sampleRate);
+        value += bodyComponent * juce::jmap(weightMotion, 0.0f, 1.0f, 0.0f, 0.32f);
+        value *= juce::jmap(sizeMotion, 0.0f, 1.0f, 0.98f, 1.12f + 0.08f * std::sin(t * juce::MathConstants<float>::pi));
         auto filterNormalized = clamp01Runtime(cutoffToNormalized(filterCutoffHz)
                                                + ((float) filterMotion - 0.5f) * 0.75f
-                                               + (envelope - 0.5f) * (filterEnvelopeAmount + macroHardness * 0.30f)
-                                               + macroAir * 0.18f
-                                               - macroWeight * 0.10f);
+                                               + (envelope - 0.5f) * (filterEnvelopeMotion + hardnessMotion * 0.30f)
+                                               + airMotion * 0.18f
+                                               - weightMotion * 0.10f
+                                               - sizeMotion * 0.06f);
         auto cutoffHz = normalizedToCutoff(filterNormalized);
         filter.setCutoffFrequency(juce::jlimit(kMinFilterCutoffHz, (float) (sampleRate * 0.45), cutoffHz));
-        filter.setResonance(juce::jlimit(0.30f, 8.0f, (float) resonanceMotion + macroHardness * 0.9f - macroWeight * 0.15f));
-        value = filter.processSample(0, value);
+        filter.setResonance(juce::jlimit(0.30f, 8.0f, (float) resonanceMotion + hardnessMotion * 0.9f - weightMotion * 0.15f));
+        auto filteredValue = filter.processSample(0, value);
+        value = juce::jmap(airMotion, filteredValue, juce::jlimit(-1.0f, 1.0f, value));
         destination.setSample(0, sample, value);
         destination.setSample(1, sample, value);
     }

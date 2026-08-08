@@ -36,6 +36,8 @@ juce::var laneToVar(const cw::PatchAutomationLane& lane)
     object->setProperty("name", lane.name);
     object->setProperty("targetParameter", lane.targetParameter);
     object->setProperty("interpolation", lane.interpolation);
+    object->setProperty("startTime", lane.startTime);
+    object->setProperty("endTime", lane.endTime);
 
     auto* range = new juce::DynamicObject();
     range->setProperty("min", lane.rangeMin);
@@ -225,6 +227,8 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                 lane.name = object->getProperty("name").toString();
                 lane.targetParameter = object->getProperty("targetParameter").toString();
                 lane.interpolation = object->getProperty("interpolation").toString();
+                lane.startTime = object->hasProperty("startTime") ? (double) object->getProperty("startTime") : 0.0;
+                lane.endTime = object->hasProperty("endTime") ? (double) object->getProperty("endTime") : 1.0;
                 if (lane.interpolation.isEmpty())
                     lane.interpolation = "linear";
 
