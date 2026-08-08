@@ -159,6 +159,42 @@ const AutomationTargetSpec& getTargetSpec(const juce::String& parameterId)
     return getAutomationTargetSpecs()[0];
 }
 
+// Which of the modulatable parameters (see getAutomationTargetSpecs) live on
+// which node's inspector panel -- used to expose each editable parameter as
+// its own graph input port, one per slider the user can already move by hand.
+juce::StringArray nodeParameterIds(const juce::String& nodeType)
+{
+    if (nodeType == "filter")
+        return { "filterCutoff", "filterResonance", "filterEnvelopeAmount" };
+    if (nodeType == "output")
+        return { "pitchOffsetSemitones", "macroHardness", "macroWeight", "macroAir", "macroGrit", "macroSize" };
+    if (nodeType == "sine")     return { "sineLevel" };
+    if (nodeType == "saw")      return { "sawLevel" };
+    if (nodeType == "square")   return { "squareLevel" };
+    if (nodeType == "triangle") return { "triangleLevel" };
+    if (nodeType == "noise")    return { "noiseLevel" };
+    if (nodeType == "mix")      return { "baseFrequency" };
+    return {};
+}
+
+// Short label for a parameter port -- the inspector already carries the full
+// name, so the graph-side label just needs to disambiguate at a glance.
+juce::String shortParamLabel(const juce::String& parameterId)
+{
+    if (parameterId == "filterCutoff") return "Cutoff";
+    if (parameterId == "filterResonance") return "Reso";
+    if (parameterId == "filterEnvelopeAmount") return "Env Amt";
+    if (parameterId == "pitchOffsetSemitones") return "Pitch";
+    if (parameterId == "baseFrequency") return "Pitch";
+    if (parameterId == "macroHardness") return "Hardness";
+    if (parameterId == "macroWeight") return "Weight";
+    if (parameterId == "macroAir") return "Air";
+    if (parameterId == "macroGrit") return "Grit";
+    if (parameterId == "macroSize") return "Size";
+    if (parameterId.endsWith("Level")) return "Level";
+    return parameterId;
+}
+
 bool usesLogScale(const juce::String& parameterId)
 {
     return parameterId == "filterCutoff" || parameterId == "baseFrequency";
@@ -1157,89 +1193,6 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
     for (int y = 0; y < bounds.getHeight(); y += 32)
         g.drawHorizontalLine(y, 0.0f, (float) bounds.getWidth());
 
-    auto indexOfType = [this](const juce::String& type)
-    {
-        for (int index = 0; index < owner.graphNodes.size(); ++index)
-            if (owner.graphNodes.getReference(index).type == type)
-                return index;
-        return -1;
-    };
-
-    auto drawConnection = [&](int fromIndex, int toIndex, juce::Colour colour)
-    {
-        if (fromIndex < 0 || toIndex < 0)
-            return;
-
-        auto fromPoint = owner.graphToCanvas(owner.getNodeAudioOutputPort(fromIndex));
-        auto toPoint = owner.graphToCanvas(owner.getNodeAudioInputPort(toIndex));
-        auto handle = juce::jmax(40.0f, std::abs(toPoint.x - fromPoint.x) * 0.35f);
-        juce::Path path;
-        path.startNewSubPath(fromPoint);
-        path.cubicTo(fromPoint.translated(handle, 0.0f), toPoint.translated(-handle, 0.0f), toPoint);
-        g.setColour(colour.withAlpha(0.85f));
-        g.strokePath(path, juce::PathStrokeType(3.0f));
-    };
-
-    auto drawControlConnection = [&](juce::Point<float> fromPoint, juce::Point<float> toPoint, juce::Colour colour)
-    {
-        auto handle = juce::jmax(28.0f, std::abs(toPoint.y - fromPoint.y) * 0.25f);
-        juce::Path path;
-        path.startNewSubPath(fromPoint);
-        path.cubicTo(fromPoint.translated(0.0f, -handle),
-                     toPoint.translated(0.0f, handle),
-                     toPoint);
-        g.setColour(colour.withAlpha(0.75f));
-        g.strokePath(path, juce::PathStrokeType(2.0f, juce::PathStrokeType::JointStyle::curved, juce::PathStrokeType::EndCapStyle::rounded));
-    };
-
-    auto mixIndex = indexOfType("mix");
-    auto filterIndex = indexOfType("filter");
-    auto envelopeIndex = indexOfType("envelope");
-    auto outputIndex = indexOfType("output");
-
-    for (int index = 0; index < owner.graphNodes.size(); ++index)
-    {
-        auto type = owner.graphNodes.getReference(index).type;
-        if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
-            drawConnection(index, mixIndex, owner.graphNodes.getReference(index).accent);
-    }
-
-    drawConnection(mixIndex, filterIndex, signalMixColour());
-    drawConnection(filterIndex, envelopeIndex, signalFilterColour());
-    drawConnection(envelopeIndex, outputIndex, signalEnvelopeColour());
-
-    for (int index = 0; index < owner.graphNodes.size(); ++index)
-    {
-        auto& node = owner.graphNodes.getReference(index);
-        if (node.type != "timeline" || node.targetParameter.isEmpty())
-            continue;
-
-        for (int targetIndex = 0; targetIndex < owner.graphNodes.size(); ++targetIndex)
-        {
-            auto& targetNode = owner.graphNodes.getReference(targetIndex);
-            if (targetNode.type == "timeline")
-                continue;
-
-            auto targetType = targetNode.type;
-            auto param = node.targetParameter;
-            auto matches = (param == "filterCutoff" || param == "filterResonance" || param == "filterEnvelopeAmount") && targetType == "filter";
-            matches = matches || (param == "macroHardness" || param == "macroWeight" || param == "macroAir" || param == "macroGrit" || param == "macroSize" || param == "pitchOffsetSemitones") && targetType == "output";
-            matches = matches || (param == "sineLevel" && targetType == "sine");
-            matches = matches || (param == "sawLevel" && targetType == "saw");
-            matches = matches || (param == "squareLevel" && targetType == "square");
-            matches = matches || (param == "triangleLevel" && targetType == "triangle");
-            matches = matches || (param == "noiseLevel" && targetType == "noise");
-            matches = matches || (param == "baseFrequency" && targetType == "mix");
-            if (matches)
-            {
-                drawControlConnection(owner.graphToCanvas(owner.getNodeAudioOutputPort(index)),
-                                      owner.graphToCanvas(owner.getNodeControlInputPort(targetIndex)),
-                                      node.accent);
-                break;
-            }
-        }
-    }
-
     for (int index = 0; index < owner.graphNodes.size(); ++index)
     {
         auto boundsF = owner.graphToCanvas(owner.getGraphNodeBounds(index)).toFloat();
@@ -1351,20 +1304,97 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
             }
         }
 
-        auto drawPort = [&](juce::Point<float> centre, juce::Colour colour, bool filled)
+        for (auto& port : owner.getNodePorts(index))
         {
-            g.setColour(filled ? colour : colour.withAlpha(0.2f));
-            g.fillEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f);
-            g.setColour(juce::Colours::white.withAlpha(0.8f));
-            g.drawEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f, 1.0f);
-        };
+            auto centre = owner.graphToCanvas(port.position);
+            if (port.isExec)
+            {
+                juce::Rectangle<float> box(centre.x - 6.0f, centre.y - 6.0f, 12.0f, 12.0f);
+                g.setColour(juce::Colours::white);
+                g.drawRect(box, 1.5f);
+                juce::Path triangle;
+                if (port.isOutput)
+                {
+                    triangle.addTriangle(box.getRight() + 2.0f, box.getCentreY(),
+                                          box.getRight() + 9.0f, box.getCentreY() - 4.0f,
+                                          box.getRight() + 9.0f, box.getCentreY() + 4.0f);
+                }
+                else
+                {
+                    triangle.addTriangle(box.getX() - 9.0f, box.getCentreY() - 4.0f,
+                                          box.getX() - 9.0f, box.getCentreY() + 4.0f,
+                                          box.getX() - 2.0f, box.getCentreY());
+                }
+                g.setColour(juce::Colours::white);
+                g.fillPath(triangle);
+            }
+            else
+            {
+                auto colour = SignalLabPanel::portValueColour(port.valueType);
+                g.setColour(colour);
+                g.fillEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f);
+                g.setColour(juce::Colours::white.withAlpha(0.8f));
+                g.drawEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f, 1.0f);
 
-        if (node.type != "sine" && node.type != "saw" && node.type != "square" && node.type != "triangle" && node.type != "noise" && node.type != "timeline" && node.type != "value")
-            drawPort(owner.graphToCanvas(owner.getNodeAudioInputPort(index)), juce::Colour(0xff90a4be), false);
-        if (node.type != "output")
-            drawPort(owner.graphToCanvas(owner.getNodeAudioOutputPort(index)), node.accent, true);
-        if (node.type != "mix" && node.type != "scope" && node.type != "analyzer")
-            drawPort(owner.graphToCanvas(owner.getNodeControlInputPort(index)), juce::Colour(0xffffd166), true);
+                if (port.label.isNotEmpty())
+                {
+                    g.setColour(juce::Colour(0xffb9c4d6));
+                    g.setFont(juce::Font(9.5f));
+                    auto justification = port.isOutput ? juce::Justification::centredLeft : juce::Justification::centredRight;
+                    auto labelX = port.isOutput ? centre.x + 9.0f : centre.x - 69.0f;
+                    g.drawText(port.label, juce::Rectangle<int>((int) labelX, (int) centre.y - 7, 60, 14), justification, true);
+                }
+            }
+        }
+    }
+
+    for (int connectionIndex = 0; connectionIndex < owner.graphConnections.size(); ++connectionIndex)
+    {
+        auto& connection = owner.graphConnections.getReference(connectionIndex);
+        auto fromPoint = owner.graphToCanvas(owner.resolvePortPosition(connection.fromNodeId, connection.fromPortId, true));
+        auto toPoint = owner.graphToCanvas(owner.resolvePortPosition(connection.toNodeId, connection.toPortId, false));
+        auto colour = connection.isExec ? juce::Colours::white : SignalLabPanel::portValueColour(connection.valueType);
+        auto selected = connectionIndex == owner.selectedConnectionIndex;
+
+        juce::Array<juce::Point<int>> canvasPoints;
+        canvasPoints.add(fromPoint);
+        for (auto& waypoint : connection.waypoints)
+            canvasPoints.add(owner.graphToCanvas(waypoint));
+        canvasPoints.add(toPoint);
+
+        juce::Path path;
+        path.startNewSubPath(canvasPoints.getReference(0).toFloat());
+        for (int pointIndex = 1; pointIndex < canvasPoints.size(); ++pointIndex)
+        {
+            auto a = canvasPoints.getReference(pointIndex - 1).toFloat();
+            auto b = canvasPoints.getReference(pointIndex).toFloat();
+            auto handle = juce::jmax(24.0f, std::abs(b.x - a.x) * 0.4f);
+            path.cubicTo(a.translated(handle, 0.0f), b.translated(-handle, 0.0f), b);
+        }
+        g.setColour(colour.withAlpha(selected ? 1.0f : 0.85f));
+        g.strokePath(path, juce::PathStrokeType(selected ? 3.5f : 2.5f));
+
+        for (auto& waypoint : connection.waypoints)
+        {
+            auto centre = owner.graphToCanvas(waypoint).toFloat();
+            g.setColour(juce::Colour(0xff171d28));
+            g.fillEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f);
+            g.setColour(colour);
+            g.drawEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f, 2.0f);
+        }
+    }
+
+    if (wireDragging)
+    {
+        auto fromPoint = owner.graphToCanvas(wireDragPort.position);
+        auto toPoint = wireDragCurrentPoint.toFloat();
+        auto colour = wireDragPort.isExec ? juce::Colours::white : SignalLabPanel::portValueColour(wireDragPort.valueType);
+        auto handle = juce::jmax(24.0f, std::abs(toPoint.x - fromPoint.x) * 0.4f);
+        juce::Path path;
+        path.startNewSubPath(fromPoint);
+        path.cubicTo(fromPoint.translated(handle, 0.0f), toPoint.translated(-handle, 0.0f), toPoint);
+        g.setColour(colour.withAlpha(0.65f));
+        g.strokePath(path, juce::PathStrokeType(2.5f));
     }
 }
 
@@ -1375,11 +1405,47 @@ void SignalLabPanel::NodeGraphCanvas::mouseDown(const juce::MouseEvent& event)
     if (event.mods.isRightButtonDown())
     {
         auto hit = owner.findGraphNodeAt(event.getPosition());
-        owner.setSelectedGraphNodeIndex(hit);
         if (hit >= 0)
+        {
+            owner.setSelectedGraphNodeIndex(hit);
             owner.showNodeContextMenu(hit, event.getPosition());
-        else
-            owner.showCanvasActionMenu(event.getPosition());
+            return;
+        }
+
+        int waypointIndex = -1;
+        auto connectionHit = owner.findConnectionAt(event.getPosition(), &waypointIndex);
+        if (connectionHit >= 0)
+        {
+            owner.selectedConnectionIndex = connectionHit;
+            owner.showConnectionContextMenu(connectionHit, waypointIndex, event.getPosition());
+            return;
+        }
+
+        owner.showCanvasActionMenu(event.getPosition());
+        return;
+    }
+
+    auto portHit = owner.findPortAt(event.getPosition());
+    if (portHit.found)
+    {
+        wireDragging = true;
+        wireDragNodeIndex = portHit.nodeIndex;
+        wireDragPort = portHit.port;
+        wireDragCurrentPoint = event.getPosition();
+        owner.setSelectedGraphNodeIndex(-1);
+        owner.selectedConnectionIndex = -1;
+        repaint();
+        return;
+    }
+
+    int waypointIndex = -1;
+    auto connectionHit = owner.findConnectionAt(event.getPosition(), &waypointIndex);
+    if (connectionHit >= 0 && waypointIndex >= 0)
+    {
+        waypointDragConnectionIndex = connectionHit;
+        waypointDragIndex = waypointIndex;
+        owner.selectedConnectionIndex = connectionHit;
+        repaint();
         return;
     }
 
@@ -1387,9 +1453,17 @@ void SignalLabPanel::NodeGraphCanvas::mouseDown(const juce::MouseEvent& event)
     dragMoved = false;
     owner.setSelectedGraphNodeIndex(dragNodeIndex);
     if (dragNodeIndex >= 0)
+    {
+        owner.selectedConnectionIndex = -1;
         dragOffset = event.getPosition() - owner.graphToCanvas(owner.getGraphNodeBounds(dragNodeIndex)).getPosition();
+    }
+    else if (connectionHit >= 0)
+    {
+        owner.selectedConnectionIndex = connectionHit;
+    }
     else
     {
+        owner.selectedConnectionIndex = -1;
         panning = true;
         panAnchor = event.getScreenPosition().roundToInt();
         viewportAnchor = { owner.graphViewport.getViewPositionX(), owner.graphViewport.getViewPositionY() };
@@ -1399,6 +1473,25 @@ void SignalLabPanel::NodeGraphCanvas::mouseDown(const juce::MouseEvent& event)
 
 void SignalLabPanel::NodeGraphCanvas::mouseDrag(const juce::MouseEvent& event)
 {
+    if (wireDragging)
+    {
+        wireDragCurrentPoint = event.getPosition();
+        repaint();
+        return;
+    }
+
+    if (waypointDragConnectionIndex >= 0)
+    {
+        if (waypointDragConnectionIndex < owner.graphConnections.size())
+        {
+            auto& connection = owner.graphConnections.getReference(waypointDragConnectionIndex);
+            if (waypointDragIndex >= 0 && waypointDragIndex < connection.waypoints.size())
+                connection.waypoints.getReference(waypointDragIndex) = owner.canvasToGraph(event.getPosition());
+        }
+        repaint();
+        return;
+    }
+
     if (panning)
     {
         auto delta = event.getScreenPosition().roundToInt() - panAnchor;
@@ -1426,6 +1519,22 @@ void SignalLabPanel::NodeGraphCanvas::mouseDrag(const juce::MouseEvent& event)
 
 void SignalLabPanel::NodeGraphCanvas::mouseUp(const juce::MouseEvent& event)
 {
+    if (wireDragging)
+    {
+        wireDragging = false;
+        owner.tryCompleteConnection(wireDragNodeIndex, wireDragPort, event.getPosition());
+        wireDragNodeIndex = -1;
+        repaint();
+        return;
+    }
+
+    if (waypointDragConnectionIndex >= 0)
+    {
+        waypointDragConnectionIndex = -1;
+        waypointDragIndex = -1;
+        return;
+    }
+
     if (panning)
     {
         panning = false;
@@ -1472,7 +1581,10 @@ bool SignalLabPanel::NodeGraphCanvas::keyPressed(const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
     {
-        owner.removeSelectedGraphNode();
+        if (owner.selectedConnectionIndex >= 0)
+            owner.removeConnection(owner.selectedConnectionIndex);
+        else
+            owner.removeSelectedGraphNode();
         return true;
     }
 
@@ -1493,16 +1605,9 @@ SignalLabPanel::FloatingWindow::FloatingWindow(SignalLabPanel& ownerRef, Kind ki
 
 SignalLabPanel::NodeToolboxPane::NodeToolboxPane()
 {
-    titleLabel.setText("Variables", juce::dontSendNotification);
-    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    titleLabel.setFont(juce::Font(16.0f).boldened());
-    addAndMakeVisible(titleLabel);
-    addVariableButton.onClick = [this]
-    {
-        if (onAddVariableRequested)
-            onAddVariableRequested();
-    };
-    addAndMakeVisible(addVariableButton);
+    // Title and Add button live outside the pane (SignalLabPanel's fixed
+    // "Variables" header + addLocalControlButton) so they stay put while
+    // this pane's row list scrolls beneath them.
 }
 
 void SignalLabPanel::NodeToolboxPane::VariableButton::mouseDown(const juce::MouseEvent& event)
@@ -1547,15 +1652,19 @@ void SignalLabPanel::NodeToolboxPane::paint(juce::Graphics& g)
 void SignalLabPanel::NodeToolboxPane::resized()
 {
     auto area = getLocalBounds().reduced(10);
-    titleLabel.setBounds(area.removeFromTop(26));
-    area.removeFromTop(8);
-    addVariableButton.setBounds(area.removeFromTop(28));
-    area.removeFromTop(10);
-    for (auto* button : variableButtons)
+    for (int index = 0; index < variableButtons.size(); ++index)
     {
-        button->setBounds(area.removeFromTop(42));
+        auto row = area.removeFromTop(42);
+        removeButtons[index]->setBounds(row.removeFromRight(28));
+        row.removeFromRight(6);
+        variableButtons[index]->setBounds(row);
         area.removeFromTop(6);
     }
+}
+
+int SignalLabPanel::NodeToolboxPane::getRequiredHeight() const
+{
+    return 20 + localVariables.size() * (42 + 6);
 }
 
 void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalControlVariable>& variables)
@@ -1565,12 +1674,15 @@ void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalContro
     {
         auto* button = variableButtons.add(new VariableButton({}));
         addAndMakeVisible(button);
+        auto* removeButton = removeButtons.add(new juce::TextButton("x"));
+        addAndMakeVisible(removeButton);
     }
 
     for (int index = 0; index < variableButtons.size(); ++index)
     {
         auto visible = index < localVariables.size();
         variableButtons[index]->setVisible(visible);
+        removeButtons[index]->setVisible(visible);
         if (! visible)
             continue;
 
@@ -1582,6 +1694,11 @@ void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalContro
         {
             if (onVariableSelected)
                 onVariableSelected(variableId);
+        };
+        removeButtons[index]->onClick = [this, variableId = variable.id]
+        {
+            if (onVariableRemoveRequested)
+                onVariableRemoveRequested(variableId);
         };
         variableButtons[index]->onDragStarted = [this](const juce::String& variableId, juce::Point<int> screenPoint)
         {
@@ -1600,6 +1717,7 @@ void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalContro
         };
     }
 
+    setSize(getWidth(), getRequiredHeight());
     resized();
 }
 
@@ -1774,10 +1892,32 @@ SignalLabPanel::SignalLabPanel()
                 selectedLocalControlIndex = index;
         refreshSelectedVariableEditor();
     };
+    toolboxPane.onVariableRemoveRequested = [this](const juce::String& variableId)
+    {
+        captureUndoCheckpoint("Remove graph variable");
+        for (int index = 0; index < localControls.size(); ++index)
+        {
+            if (localControls.getReference(index).id == variableId)
+            {
+                localControls.remove(index);
+                break;
+            }
+        }
+        if (selectedLocalControlIndex >= localControls.size())
+            selectedLocalControlIndex = localControls.size() - 1;
+        rebuildLocalControlChrome();
+        refreshVariablePanel();
+        nodeGraphCanvas.repaint();
+    };
     variablesViewport.setViewedComponent(&toolboxPane, false);
     variablesViewport.setScrollBarsShown(true, false);
     variablesViewport.setScrollBarThickness(10);
     addAndMakeVisible(variablesViewport);
+
+    variableDetailsViewport.setViewedComponent(&variableDetailsContent, false);
+    variableDetailsViewport.setScrollBarsShown(true, false);
+    variableDetailsViewport.setScrollBarThickness(10);
+    addAndMakeVisible(variableDetailsViewport);
     nodeGraphCanvas.setWantsKeyboardFocus(true);
     graphViewport.setViewedComponent(&nodeGraphCanvas, false);
     graphViewport.setScrollBarsShown(false, false);
@@ -1839,6 +1979,31 @@ SignalLabPanel::SignalLabPanel()
     };
     addAndMakeVisible(nameEditor);
 
+    descriptionLabel.setText("Description", juce::dontSendNotification);
+    descriptionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(descriptionLabel);
+
+    descriptionEditor.setMultiLine(true, true);
+    descriptionEditor.setReturnKeyStartsNewLine(true);
+    descriptionEditor.setText(recipe.description, juce::dontSendNotification);
+    descriptionEditor.onTextChange = [this]
+    {
+        if (suppressCallbacks)
+            return;
+
+        if (! descriptionEditUndoCaptured)
+        {
+            captureUndoCheckpoint("Edit signal description");
+            descriptionEditUndoCaptured = true;
+        }
+        recipe.description = descriptionEditor.getText();
+    };
+    descriptionEditor.onFocusLost = [this]
+    {
+        descriptionEditUndoCaptured = false;
+    };
+    addAndMakeVisible(descriptionEditor);
+
     propertiesHeaderLabel.setText("Properties", juce::dontSendNotification);
     propertiesHeaderLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     propertiesHeaderLabel.setFont(juce::Font(18.0f).boldened());
@@ -1857,8 +2022,11 @@ SignalLabPanel::SignalLabPanel()
     addAndMakeVisible(selectedVariableSectionLabel);
 
     addAndMakeVisible(signalPropertiesPanel);
+    signalPropertiesPanel.toBack();
     addAndMakeVisible(variablesPanel);
+    variablesPanel.toBack();
     addAndMakeVisible(variableDetailsPanel);
+    variableDetailsPanel.toBack();
 
     signalMetaLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9aafc8));
     signalMetaLabel.setJustificationType(juce::Justification::topLeft);
@@ -1866,8 +2034,8 @@ SignalLabPanel::SignalLabPanel()
 
     variableNameLabel.setText("Name", juce::dontSendNotification);
     variableNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableNameLabel);
-    addAndMakeVisible(variableNameEditor);
+    variableDetailsContent.addAndMakeVisible(variableNameLabel);
+    variableDetailsContent.addAndMakeVisible(variableNameEditor);
     variableNameEditor.onTextChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1877,13 +2045,26 @@ SignalLabPanel::SignalLabPanel()
         nodeGraphCanvas.repaint();
     };
 
+    variableDescriptionLabel.setText("Description", juce::dontSendNotification);
+    variableDescriptionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    variableDetailsContent.addAndMakeVisible(variableDescriptionLabel);
+    variableDescriptionEditor.setMultiLine(true, true);
+    variableDescriptionEditor.setReturnKeyStartsNewLine(true);
+    variableDetailsContent.addAndMakeVisible(variableDescriptionEditor);
+    variableDescriptionEditor.onTextChange = [this]
+    {
+        if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
+            return;
+        localControls.getReference(selectedLocalControlIndex).description = variableDescriptionEditor.getText();
+    };
+
     variableTypeLabel.setText("Type", juce::dontSendNotification);
     variableTypeLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableTypeLabel);
+    variableDetailsContent.addAndMakeVisible(variableTypeLabel);
     variableTypeSelector.addItem("Float", 1);
     variableTypeSelector.addItem("Int", 2);
     variableTypeSelector.addItem("Bool", 3);
-    addAndMakeVisible(variableTypeSelector);
+    variableDetailsContent.addAndMakeVisible(variableTypeSelector);
     variableTypeSelector.onChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1894,10 +2075,10 @@ SignalLabPanel::SignalLabPanel()
 
     variableAccessLabel.setText("Access", juce::dontSendNotification);
     variableAccessLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableAccessLabel);
+    variableDetailsContent.addAndMakeVisible(variableAccessLabel);
     variableAccessSelector.addItem("Private", 1);
     variableAccessSelector.addItem("Public", 2);
-    addAndMakeVisible(variableAccessSelector);
+    variableDetailsContent.addAndMakeVisible(variableAccessSelector);
     variableAccessSelector.onChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1907,8 +2088,8 @@ SignalLabPanel::SignalLabPanel()
 
     variableValueLabel.setText("Value", juce::dontSendNotification);
     variableValueLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableValueLabel);
-    addAndMakeVisible(variableValueEditor);
+    variableDetailsContent.addAndMakeVisible(variableValueLabel);
+    variableDetailsContent.addAndMakeVisible(variableValueEditor);
     variableValueEditor.onTextChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1925,7 +2106,7 @@ SignalLabPanel::SignalLabPanel()
         regenerateSignal();
     };
 
-    addAndMakeVisible(variableAutomationToggle);
+    variableDetailsContent.addAndMakeVisible(variableAutomationToggle);
     variableAutomationToggle.onClick = [this]
     {
         if (selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -2323,13 +2504,28 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
 
     if (selectedGraphNodeIndex >= graphNodes.size())
         selectedGraphNodeIndex = graphNodes.isEmpty() ? -1 : 0;
+
+    auto nodeStillExists = [this](const juce::String& nodeId)
+    {
+        for (auto& node : graphNodes)
+            if (node.id == nodeId)
+                return true;
+        return false;
+    };
+    for (int index = graphConnections.size() - 1; index >= 0; --index)
+    {
+        auto& connection = graphConnections.getReference(index);
+        if (! nodeStillExists(connection.fromNodeId) || ! nodeStillExists(connection.toNodeId))
+            graphConnections.remove(index);
+    }
+    if (selectedConnectionIndex >= graphConnections.size())
+        selectedConnectionIndex = -1;
 }
 
 void SignalLabPanel::updateInspectorForSelection()
 {
     auto hideAll = [this]()
     {
-        nameLabel.setVisible(false); nameEditor.setVisible(false);
         frequencyLabel.setVisible(false); frequencySlider.setVisible(false);
         durationLabel.setVisible(false); durationSlider.setVisible(false);
         pitchLabel.setVisible(false); pitchSlider.setVisible(false);
@@ -2399,7 +2595,6 @@ void SignalLabPanel::updateInspectorForSelection()
     else if (type == "output")
     {
         inspectorBodyLabel.setText("Final sound settings and character macros before preview or render.", juce::dontSendNotification);
-        nameLabel.setVisible(true); nameEditor.setVisible(true);
         durationLabel.setVisible(true); durationSlider.setVisible(true);
         pitchLabel.setVisible(true); pitchSlider.setVisible(true);
         macroHardnessLabel.setVisible(true); macroHardnessSlider.setVisible(true);
@@ -2478,6 +2673,7 @@ void SignalLabPanel::showCanvasActionMenu(juce::Point<int> canvasPosition, bool 
 
     auto panel = std::make_unique<NodeSearchPanel>();
     panel->setEntries(entries);
+    panel->setSize(240, juce::jmin(480, 48 + entries.size() * 32));
     panel->onEntryChosen = [this, canvasPosition](const juce::String& type, const juce::String& payload)
     {
         addGraphNode(type, canvasPosition, payload);
@@ -2634,7 +2830,31 @@ juce::Rectangle<int> SignalLabPanel::getGraphNodeBounds(int index) const
 {
     if (index < 0 || index >= graphNodes.size())
         return {};
-    return { graphNodes.getReference(index).position.x, graphNodes.getReference(index).position.y, 180, 96 };
+    auto& node = graphNodes.getReference(index);
+    return { node.position.x, node.position.y, 180, getGraphNodeHeight(index) };
+}
+
+int SignalLabPanel::getGraphNodeHeight(int index) const
+{
+    if (index < 0 || index >= graphNodes.size())
+        return 96;
+
+    auto& node = graphNodes.getReference(index);
+
+    // Node body grows to fit however many stacked left-edge parameter ports
+    // it has, plus room for a type-specific inline preview (e.g. the scope
+    // node's live mini-trace, the analyzer's mini spectrum bars). Full
+    // instrument detail still lives in the detachable floating window
+    // opened via double-click -- this inline area is a compact preview only.
+    int leftPortRows = nodeParameterIds(node.type).size();
+
+    int height = 96;
+    if (leftPortRows > 2)
+        height += (leftPortRows - 2) * 22;
+    if (node.type == "scope" || node.type == "analyzer")
+        height = juce::jmax(height, 118);
+
+    return height;
 }
 
 void SignalLabPanel::setSelectedGraphNodeIndex(int index)
@@ -3031,6 +3251,8 @@ void SignalLabPanel::refreshSelectedVariableEditor()
 
     variableNameLabel.setVisible(hasSelection);
     variableNameEditor.setVisible(hasSelection);
+    variableDescriptionLabel.setVisible(hasSelection);
+    variableDescriptionEditor.setVisible(hasSelection);
     variableTypeLabel.setVisible(hasSelection);
     variableTypeSelector.setVisible(hasSelection);
     variableAccessLabel.setVisible(hasSelection);
@@ -3048,6 +3270,7 @@ void SignalLabPanel::refreshSelectedVariableEditor()
     suppressCallbacks = true;
     auto& variable = localControls.getReference(selectedLocalControlIndex);
     variableNameEditor.setText(variable.name, juce::dontSendNotification);
+    variableDescriptionEditor.setText(variable.description, juce::dontSendNotification);
     variableTypeSelector.setText(variable.valueType, juce::dontSendNotification);
     variableAccessSelector.setText(variable.accessScope, juce::dontSendNotification);
     if (variable.valueType == "Bool")
@@ -3066,28 +3289,236 @@ void SignalLabPanel::refreshSelectedVariableEditor()
                             juce::dontSendNotification);
 }
 
-juce::Point<float> SignalLabPanel::getNodeAudioInputPort(int index) const
-{
-    auto bounds = getGraphNodeBounds(index).toFloat();
-    return { bounds.getX(), bounds.getCentreY() };
-}
-
-juce::Point<float> SignalLabPanel::getNodeAudioOutputPort(int index) const
-{
-    auto bounds = getGraphNodeBounds(index).toFloat();
-    return { bounds.getRight(), bounds.getCentreY() };
-}
-
-juce::Point<float> SignalLabPanel::getNodeControlInputPort(int index) const
-{
-    auto bounds = getGraphNodeBounds(index).toFloat();
-    return { bounds.getCentreX(), bounds.getY() };
-}
-
 juce::Point<float> SignalLabPanel::getControlPadOutputPort(int index) const
 {
     auto top = controlPadBounds.getY() + 82 + index * 48;
     return { (float) controlPadBounds.getRight(), (float) top };
+}
+
+juce::Colour SignalLabPanel::portValueColour(PortValueType type)
+{
+    switch (type)
+    {
+        case PortValueType::Float: return juce::Colour(0xffe5484d);
+        case PortValueType::Int:   return juce::Colour(0xff4d8fe5);
+        case PortValueType::Bool:  return juce::Colour(0xff4de58f);
+    }
+    return juce::Colours::white;
+}
+
+juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) const
+{
+    juce::Array<GraphPort> ports;
+    if (index < 0 || index >= graphNodes.size())
+        return ports;
+
+    const auto& node = graphNodes.getReference(index);
+    auto bounds = getGraphNodeBounds(index).toFloat();
+
+    // The white ports carry the actual audio signal being processed through
+    // the chain (source -> mix -> filter -> envelope -> output) -- there is
+    // no separate abstract "signal" port alongside them. Sources only emit
+    // (no signal-in); the final Output node only receives (no signal-out).
+    bool hasSignalIn = node.type != "sine" && node.type != "saw" && node.type != "square"
+                     && node.type != "triangle" && node.type != "noise" && node.type != "timeline"
+                     && node.type != "value";
+    bool hasSignalOut = node.type != "output";
+
+    if (hasSignalIn)
+    {
+        GraphPort p;
+        p.portId = "signalIn";
+        p.label = "Signal";
+        p.isOutput = false;
+        p.isExec = true;
+        p.position = { bounds.getX() + 20.0f, bounds.getY() + 8.0f };
+        ports.add(p);
+    }
+    if (hasSignalOut)
+    {
+        GraphPort p;
+        p.portId = "signalOut";
+        p.label = "Signal";
+        p.isOutput = true;
+        p.isExec = true;
+        p.position = { bounds.getRight() - 20.0f, bounds.getY() + 8.0f };
+        ports.add(p);
+    }
+
+    float leftY = bounds.getY() + 30.0f;
+    for (auto& parameterId : nodeParameterIds(node.type))
+    {
+        GraphPort p;
+        p.portId = "param:" + parameterId;
+        p.label = shortParamLabel(parameterId);
+        p.isOutput = false;
+        p.isExec = false;
+        p.valueType = PortValueType::Float;
+        p.position = { bounds.getX(), leftY };
+        ports.add(p);
+        leftY += 22.0f;
+    }
+
+    return ports;
+}
+
+SignalLabPanel::PortHit SignalLabPanel::findPortAt(juce::Point<int> canvasPosition) const
+{
+    constexpr float hitRadius = 9.0f;
+    for (int index = graphNodes.size() - 1; index >= 0; --index)
+    {
+        for (auto& port : getNodePorts(index))
+        {
+            auto screenPos = graphToCanvas(port.position);
+            if (screenPos.getDistanceFrom(canvasPosition.toFloat()) <= hitRadius)
+                return { true, index, port };
+        }
+    }
+    return {};
+}
+
+juce::Point<int> SignalLabPanel::resolvePortPosition(const juce::String& nodeId, const juce::String& portId, bool wantOutput) const
+{
+    juce::ignoreUnused(wantOutput);
+    for (int index = 0; index < graphNodes.size(); ++index)
+    {
+        if (graphNodes.getReference(index).id != nodeId)
+            continue;
+        for (auto& port : getNodePorts(index))
+            if (port.portId == portId)
+                return port.position.roundToInt();
+    }
+    return {};
+}
+
+int SignalLabPanel::findConnectionAt(juce::Point<int> canvasPosition, int* outWaypointIndex) const
+{
+    if (outWaypointIndex != nullptr)
+        *outWaypointIndex = -1;
+
+    constexpr float waypointHitRadius = 8.0f;
+    constexpr float lineHitDistance = 6.0f;
+
+    for (int connectionIndex = 0; connectionIndex < graphConnections.size(); ++connectionIndex)
+    {
+        auto& connection = graphConnections.getReference(connectionIndex);
+
+        for (int waypointIndex = 0; waypointIndex < connection.waypoints.size(); ++waypointIndex)
+        {
+            auto centre = graphToCanvas(connection.waypoints.getReference(waypointIndex));
+            if (centre.toFloat().getDistanceFrom(canvasPosition.toFloat()) <= waypointHitRadius)
+            {
+                if (outWaypointIndex != nullptr)
+                    *outWaypointIndex = waypointIndex;
+                return connectionIndex;
+            }
+        }
+
+        juce::Array<juce::Point<int>> points;
+        points.add(graphToCanvas(resolvePortPosition(connection.fromNodeId, connection.fromPortId, true)));
+        for (auto& waypoint : connection.waypoints)
+            points.add(graphToCanvas(waypoint));
+        points.add(graphToCanvas(resolvePortPosition(connection.toNodeId, connection.toPortId, false)));
+
+        for (int segment = 1; segment < points.size(); ++segment)
+        {
+            juce::Line<float> line(points.getReference(segment - 1).toFloat(), points.getReference(segment).toFloat());
+            auto nearest = line.findNearestPointTo(canvasPosition.toFloat());
+            if (nearest.getDistanceFrom(canvasPosition.toFloat()) <= lineHitDistance)
+                return connectionIndex;
+        }
+    }
+
+    return -1;
+}
+
+void SignalLabPanel::tryCompleteConnection(int fromNodeIndex, const GraphPort& fromPort, juce::Point<int> releaseCanvasPosition)
+{
+    auto hit = findPortAt(releaseCanvasPosition);
+    if (! hit.found || hit.nodeIndex == fromNodeIndex)
+        return;
+
+    if (hit.port.isExec != fromPort.isExec)
+        return;
+    if (! hit.port.isExec && hit.port.valueType != fromPort.valueType)
+        return;
+    if (hit.port.isOutput == fromPort.isOutput)
+        return;
+
+    const GraphPort& outputPort = fromPort.isOutput ? fromPort : hit.port;
+    const GraphPort& inputPort = fromPort.isOutput ? hit.port : fromPort;
+    int outputNodeIndex = fromPort.isOutput ? fromNodeIndex : hit.nodeIndex;
+    int inputNodeIndex = fromPort.isOutput ? hit.nodeIndex : fromNodeIndex;
+
+    captureUndoCheckpoint("Connect nodes");
+
+    for (int index = graphConnections.size() - 1; index >= 0; --index)
+    {
+        auto& existing = graphConnections.getReference(index);
+        if (existing.toNodeId == graphNodes.getReference(inputNodeIndex).id && existing.toPortId == inputPort.portId)
+            graphConnections.remove(index);
+    }
+
+    GraphConnection connection;
+    connection.id = "connection" + juce::String(juce::Random::getSystemRandom().nextInt64());
+    connection.fromNodeId = graphNodes.getReference(outputNodeIndex).id;
+    connection.fromPortId = outputPort.portId;
+    connection.toNodeId = graphNodes.getReference(inputNodeIndex).id;
+    connection.toPortId = inputPort.portId;
+    connection.isExec = outputPort.isExec;
+    connection.valueType = outputPort.valueType;
+    graphConnections.add(connection);
+
+    nodeGraphCanvas.repaint();
+}
+
+void SignalLabPanel::removeConnection(int index)
+{
+    if (index < 0 || index >= graphConnections.size())
+        return;
+    captureUndoCheckpoint("Delete connection");
+    graphConnections.remove(index);
+    if (selectedConnectionIndex == index)
+        selectedConnectionIndex = -1;
+    nodeGraphCanvas.repaint();
+}
+
+void SignalLabPanel::showConnectionContextMenu(int connectionIndex, int waypointIndex, juce::Point<int> canvasPosition)
+{
+    if (connectionIndex < 0 || connectionIndex >= graphConnections.size())
+        return;
+
+    juce::PopupMenu menu;
+    if (waypointIndex >= 0)
+        menu.addItem(1, "Remove Reroute Point");
+    else
+        menu.addItem(2, "Add Reroute Point Here");
+    menu.addItem(3, "Delete Connection");
+
+    auto area = nodeGraphCanvas.localAreaToGlobal(juce::Rectangle<int>(canvasPosition.x, canvasPosition.y, 1, 1));
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
+                       [this, connectionIndex, waypointIndex, canvasPosition](int result)
+                       {
+                           if (connectionIndex < 0 || connectionIndex >= graphConnections.size())
+                               return;
+
+                           if (result == 1 && waypointIndex >= 0)
+                           {
+                               captureUndoCheckpoint("Remove reroute point");
+                               graphConnections.getReference(connectionIndex).waypoints.remove(waypointIndex);
+                               nodeGraphCanvas.repaint();
+                           }
+                           else if (result == 2)
+                           {
+                               captureUndoCheckpoint("Add reroute point");
+                               graphConnections.getReference(connectionIndex).waypoints.add(canvasToGraph(canvasPosition));
+                               nodeGraphCanvas.repaint();
+                           }
+                           else if (result == 3)
+                           {
+                               removeConnection(connectionIndex);
+                           }
+                       });
 }
 
 juce::ValueTree SignalLabPanel::createState() const
@@ -3235,6 +3666,7 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
     filterNodeEnabled = false;
     envelopeNodeEnabled = false;
     recipe.name = document.name.isNotEmpty() ? document.name : recipe.name;
+    recipe.description = document.description;
 
     for (const auto& parameter : document.parameters)
     {
@@ -3473,7 +3905,7 @@ void SignalLabPanel::resized()
     propertiesHeaderLabel.setBounds(propertiesArea.removeFromTop(28));
     propertiesArea.removeFromTop(8);
 
-    auto signalArea = propertiesArea.removeFromTop(126);
+    auto signalArea = propertiesArea.removeFromTop(210);
     signalPropertiesPanel.setBounds(signalArea);
     auto signalContent = signalArea.reduced(12);
     signalSectionLabel.setBounds(signalContent.removeFromTop(22));
@@ -3483,6 +3915,10 @@ void SignalLabPanel::resized()
     nameLabel.setBounds(signalContent.removeFromTop(20));
     signalContent.removeFromTop(4);
     nameEditor.setBounds(signalContent.removeFromTop(26));
+    signalContent.removeFromTop(8);
+    descriptionLabel.setBounds(signalContent.removeFromTop(20));
+    signalContent.removeFromTop(4);
+    descriptionEditor.setBounds(signalContent.removeFromTop(50));
     signalContent.removeFromTop(8);
     signalMetaLabel.setBounds(signalContent);
 
@@ -3497,30 +3933,32 @@ void SignalLabPanel::resized()
     addLocalControlButton.setBounds(variableContent.removeFromTop(26));
     variableContent.removeFromTop(6);
     variablesViewport.setBounds(variableContent);
-    toolboxPane.setSize(variableContent.getWidth(), juce::jmax(variableContent.getHeight(), 240));
+    toolboxPane.setSize(variableContent.getWidth(), juce::jmax(variableContent.getHeight(), toolboxPane.getRequiredHeight()));
 
     propertiesArea.removeFromTop(10);
     variableDetailsPanel.setBounds(propertiesArea);
     auto detailContent = propertiesArea.reduced(12);
     selectedVariableSectionLabel.setBounds(detailContent.removeFromTop(22));
     detailContent.removeFromTop(6);
-    variableNameLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableNameEditor.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(6);
-    variableTypeLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableTypeSelector.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(6);
-    variableAccessLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableAccessSelector.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(6);
-    variableValueLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableValueEditor.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(8);
-    variableAutomationToggle.setBounds(detailContent.removeFromTop(24));
+    variableDetailsViewport.setBounds(detailContent);
+
+    auto layoutDetailField = [](juce::Rectangle<int>& content, juce::Component& label, juce::Component& field, int fieldHeight)
+    {
+        label.setBounds(content.removeFromTop(20));
+        content.removeFromTop(4);
+        field.setBounds(content.removeFromTop(fieldHeight));
+        content.removeFromTop(6);
+    };
+
+    auto scratchArea = juce::Rectangle<int>(0, 0, juce::jmax(1, detailContent.getWidth()), 4000);
+    layoutDetailField(scratchArea, variableNameLabel, variableNameEditor, 24);
+    layoutDetailField(scratchArea, variableDescriptionLabel, variableDescriptionEditor, 44);
+    layoutDetailField(scratchArea, variableTypeLabel, variableTypeSelector, 24);
+    layoutDetailField(scratchArea, variableAccessLabel, variableAccessSelector, 24);
+    layoutDetailField(scratchArea, variableValueLabel, variableValueEditor, 24);
+    variableAutomationToggle.setBounds(scratchArea.removeFromTop(24));
+
+    variableDetailsContent.setSize(detailContent.getWidth(), 4000 - scratchArea.getHeight());
 
     area.removeFromLeft(10);
     graphViewport.setBounds(area);
@@ -3706,7 +4144,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.patchId = cw::makePatchId(recipeCopy.name);
     document.name = recipeCopy.name;
     document.type = "instrument";
-    document.description = "Signal Lab exported instrument patch.";
+    document.description = recipeCopy.description;
     document.createdAt = juce::Time::getCurrentTime().toISO8601(true);
     document.updatedAt = document.createdAt;
 
@@ -3917,6 +4355,7 @@ void SignalLabPanel::refreshControlsFromRecipe()
     ensureRecipe(recipe);
     suppressCallbacks = true;
     nameEditor.setText(recipe.name, juce::dontSendNotification);
+    descriptionEditor.setText(recipe.description, juce::dontSendNotification);
     templateSelector.setSelectedId(1, juce::dontSendNotification);
     frequencySlider.setValue(recipe.baseFrequencyHz, juce::dontSendNotification);
     durationSlider.setValue(recipe.durationSeconds, juce::dontSendNotification);

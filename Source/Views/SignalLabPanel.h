@@ -12,6 +12,7 @@ public:
         SignalRecipe();
 
         juce::String name { "Signal-Lab-Render" };
+        juce::String description;
         double sampleRate = 48000.0;
         double durationSeconds = 1.5;
         float baseFrequencyHz = 180.0f;
@@ -70,10 +71,42 @@ private:
         bool required = false;
     };
 
+    enum class PortValueType { Float, Int, Bool };
+
+    struct GraphPort
+    {
+        juce::String portId;
+        juce::String label;
+        bool isOutput = false;
+        bool isExec = false;
+        PortValueType valueType = PortValueType::Float;
+        juce::Point<float> position;
+    };
+
+    struct PortHit
+    {
+        bool found = false;
+        int nodeIndex = -1;
+        GraphPort port;
+    };
+
+    struct GraphConnection
+    {
+        juce::String id;
+        juce::String fromNodeId;
+        juce::String fromPortId;
+        juce::String toNodeId;
+        juce::String toPortId;
+        bool isExec = false;
+        PortValueType valueType = PortValueType::Float;
+        juce::Array<juce::Point<int>> waypoints;
+    };
+
     struct LocalControlVariable
     {
         juce::String id;
         juce::String name;
+        juce::String description;
         juce::String valueType { "Float" };
         juce::String accessScope { "Private" };
         juce::String targetParameter;
@@ -191,6 +224,14 @@ private:
         bool panning = false;
         juce::Point<int> panAnchor;
         juce::Point<int> viewportAnchor;
+
+        bool wireDragging = false;
+        int wireDragNodeIndex = -1;
+        GraphPort wireDragPort;
+        juce::Point<int> wireDragCurrentPoint;
+
+        int waypointDragConnectionIndex = -1;
+        int waypointDragIndex = -1;
     };
 
     class NodeToolboxPane final : public juce::Component
@@ -221,6 +262,7 @@ private:
         void paint(juce::Graphics& g) override;
 
         void setVariables(const juce::Array<LocalControlVariable>& variables);
+        int getRequiredHeight() const;
 
         std::function<void()> onAddVariableRequested;
         std::function<void(const juce::String& variableId)> onPlaceVariableRequested;
@@ -228,11 +270,13 @@ private:
         std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragMoved;
         std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragEnded;
         std::function<void(const juce::String& variableId)> onVariableSelected;
+        std::function<void(const juce::String& variableId)> onVariableRemoveRequested;
 
     private:
         juce::Label titleLabel;
         juce::TextButton addVariableButton { "+ Variable" };
         juce::OwnedArray<VariableButton> variableButtons;
+        juce::OwnedArray<juce::TextButton> removeButtons;
         juce::Array<LocalControlVariable> localVariables;
     };
 
@@ -314,6 +358,7 @@ private:
     void removeSelectedGraphNode();
     int findGraphNodeAt(juce::Point<int> position) const;
     juce::Rectangle<int> getGraphNodeBounds(int index) const;
+    int getGraphNodeHeight(int index) const;
     void setSelectedGraphNodeIndex(int index);
     bool hasGraphNodeType(const juce::String& type) const;
     void openNodeEditorForSelection();
@@ -333,14 +378,21 @@ private:
     juce::Rectangle<int> graphToCanvas(juce::Rectangle<int> bounds) const;
     juce::Point<int> canvasToGraph(juce::Point<int> position) const;
     juce::Point<float> canvasToGraph(juce::Point<float> position) const;
-    juce::Point<float> getNodeAudioInputPort(int index) const;
-    juce::Point<float> getNodeAudioOutputPort(int index) const;
-    juce::Point<float> getNodeControlInputPort(int index) const;
     juce::Point<float> getControlPadOutputPort(int index) const;
+    juce::Array<GraphPort> getNodePorts(int nodeIndex) const;
+    PortHit findPortAt(juce::Point<int> canvasPosition) const;
+    juce::Point<int> resolvePortPosition(const juce::String& nodeId, const juce::String& portId, bool wantOutput) const;
+    int findConnectionAt(juce::Point<int> canvasPosition, int* outWaypointIndex) const;
+    void tryCompleteConnection(int fromNodeIndex, const GraphPort& fromPort, juce::Point<int> releaseCanvasPosition);
+    void removeConnection(int index);
+    void showConnectionContextMenu(int connectionIndex, int waypointIndex, juce::Point<int> canvasPosition);
+    static juce::Colour portValueColour(PortValueType type);
 
     SignalRecipe recipe;
     ProbeSettings probeSettings;
     juce::Array<GraphNodeModel> graphNodes;
+    juce::Array<GraphConnection> graphConnections;
+    int selectedConnectionIndex = -1;
     juce::Array<LocalControlVariable> localControls;
     juce::AudioBuffer<float> generatedBuffer;
     bool variableDragActive = false;
@@ -359,6 +411,7 @@ private:
     bool suppressCallbacks = false;
     bool undoGestureActive = false;
     bool nameEditUndoCaptured = false;
+    bool descriptionEditUndoCaptured = false;
     PatchRuntimePlayer runtimePlayer;
     int selectedGraphNodeIndex = -1;
     int editingNodeIndex = -1;
@@ -389,6 +442,8 @@ private:
     SectionPanel variableDetailsPanel;
     NodeToolboxPane toolboxPane;
     juce::Viewport variablesViewport;
+    juce::Component variableDetailsContent;
+    juce::Viewport variableDetailsViewport;
     juce::Viewport graphViewport;
     NodeGraphCanvas nodeGraphCanvas { *this };
     FloatingWindow nodeEditorWindow { *this, FloatingWindow::Kind::NodeEditor };
@@ -400,8 +455,12 @@ private:
     juce::Label inspectorBodyLabel;
     juce::Label nameLabel;
     juce::TextEditor nameEditor;
+    juce::Label descriptionLabel;
+    juce::TextEditor descriptionEditor;
     juce::Label variableNameLabel;
     juce::TextEditor variableNameEditor;
+    juce::Label variableDescriptionLabel;
+    juce::TextEditor variableDescriptionEditor;
     juce::Label variableTypeLabel;
     juce::ComboBox variableTypeSelector;
     juce::Label variableAccessLabel;

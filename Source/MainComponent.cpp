@@ -7447,7 +7447,6 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     state.setProperty("dslSource", dslPanel.getSourceText(), nullptr);
     state.setProperty("selectedClipIndex", selectedClipIndex, nullptr);
     state.addChild(arrangeView.createState(), -1, nullptr);
-    state.addChild(signalLabPanel.createState(), -1, nullptr);
     state.addChild(graphPanel.createState(), -1, nullptr);
     state.addChild(scorePanel.createState(), -1, nullptr);
     state.addChild(timelineModel.createState(), -1, nullptr);
@@ -8144,9 +8143,6 @@ void MainComponent::loadSessionFromDisk()
 
     if (auto arrangeState = state.getChildWithName("ArrangeView"); arrangeState.isValid())
         arrangeView.restoreState(arrangeState);
-
-    if (auto signalState = state.getChildWithName("SignalLab"); signalState.isValid())
-        signalLabPanel.restoreState(signalState);
 
     if (auto scoreState = state.getChildWithName("ScoreView"); scoreState.isValid())
         scorePanel.restoreState(scoreState);
