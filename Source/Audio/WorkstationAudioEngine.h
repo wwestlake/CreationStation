@@ -121,10 +121,25 @@ public:
         bool isController = false;
     };
 
+    // What kind of physical control the caller is expecting to learn -- lets armMidiLearn ignore
+    // a candidate that's obviously the wrong shape for what's being bound, instead of grabbing
+    // whatever arrives first. Concretely: a motorized fader's touch sensor fires a Note the
+    // instant you touch it, *before* any of the actual pitch-wheel position data -- learning a
+    // Fader Control node with no filtering would capture that touch-note instead of the fader
+    // itself. More kinds (e.g. a relative encoder) can be added here as more MIDI Control node
+    // types are added; Any preserves today's behavior for the transport-button learn path.
+    enum class MidiLearnKind
+    {
+        Any,        // accept the first Note, CC, or pitch-wheel candidate (transport buttons)
+        Continuous, // accept CC or pitch-wheel, reject a plain Note (Fader Control nodes)
+        Discrete    // accept Note or CC, reject pitch-wheel (Button Control nodes)
+    };
+
     // Message-thread-safe: arms a one-shot capture of the next note-on or active CC message,
-    // optionally restricted to one device (empty = accept from any enabled device) - this is the
-    // backend for "right-click a control, choose Learn, wiggle the hardware" binding setup.
-    void armMidiLearn(const juce::String& deviceIdFilter = {});
+    // optionally restricted to one device (empty = accept from any enabled device) and to one
+    // kind of control - this is the backend for "right-click a control, choose Learn, wiggle the
+    // hardware" binding setup.
+    void armMidiLearn(const juce::String& deviceIdFilter = {}, MidiLearnKind expectedKind = MidiLearnKind::Any);
     void cancelMidiLearn();
     bool isMidiLearnArmed() const noexcept;
     // Message-thread-safe: returns true and fills result if a capture has landed since arming.
@@ -739,6 +754,7 @@ private:
     {
         bool armed = false;
         juce::String deviceIdFilter;
+        MidiLearnKind expectedKind = MidiLearnKind::Any;
         bool hasResult = false;
         MidiLearnResult result;
     };

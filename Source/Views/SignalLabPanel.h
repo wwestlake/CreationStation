@@ -91,9 +91,16 @@ public:
     std::function<bool()> onLiveFinishedFlagRequested;
     std::function<void(const juce::String& nodeId, float value)> onLiveMidiValueChanged;
     // Requests the app-level "Learn MIDI Binding" dialog (shared with the
-    // transport buttons' MIDI learn -- see MainComponent::requestSignalLabMidiLearn).
+    // transport buttons' MIDI learn -- see MainComponent::requestGenericMidiLearn).
     // onLearned fires once with the captured (deviceId, channel, number, isController).
-    std::function<void(const juce::String& displayLabel,
+    // wantsContinuousControl tells the capture step what kind of message to
+    // actually wait for (true = a fader/knob's CC or pitch-wheel data,
+    // false = a button's Note/CC) so it doesn't grab the wrong thing --
+    // e.g. a motorized fader's touch-sensor Note firing before its real
+    // pitch-wheel position data. See WorkstationAudioEngine::MidiLearnKind
+    // for the full reasoning; kept as a plain bool here rather than pulling
+    // that engine-level enum into this UI header.
+    std::function<void(const juce::String& displayLabel, bool wantsContinuousControl,
                        std::function<void(juce::String deviceId, int channel, int number, bool isController)> onLearned)> onMidiLearnRequested;
 
     void paint(juce::Graphics&) override;

@@ -2414,11 +2414,12 @@ void WorkstationAudioEngine::requestAllNotesOff()
     allNotesOffRequested.store(true);
 }
 
-void WorkstationAudioEngine::armMidiLearn(const juce::String& deviceIdFilter)
+void WorkstationAudioEngine::armMidiLearn(const juce::String& deviceIdFilter, MidiLearnKind expectedKind)
 {
     const juce::ScopedLock lock(midiLearnLock);
     midiLearnState.armed = true;
     midiLearnState.deviceIdFilter = deviceIdFilter;
+    midiLearnState.expectedKind = expectedKind;
     midiLearnState.hasResult = false;
 }
 
@@ -2454,6 +2455,15 @@ bool WorkstationAudioEngine::offerMidiLearnCandidate(const juce::String& deviceI
 
     if (midiLearnState.deviceIdFilter.isNotEmpty() && midiLearnState.deviceIdFilter != deviceId)
         return false;
+
+    // number < 0 is the pitch-wheel marker (see handleIncomingMidiMessage). Reject a candidate
+    // that's the wrong shape for what's being learned instead of grabbing whichever arrives
+    // first -- stays armed, keeps waiting for a real match.
+    auto isPitchWheelCandidate = isController && number < 0;
+    if (midiLearnState.expectedKind == MidiLearnKind::Continuous && ! isController)
+        return false; // a plain Note isn't a fader
+    if (midiLearnState.expectedKind == MidiLearnKind::Discrete && isPitchWheelCandidate)
+        return false; // a button never sends pitch-wheel
 
     midiLearnState.result.deviceId = deviceId;
     midiLearnState.result.channel = channel;

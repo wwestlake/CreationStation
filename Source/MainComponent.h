@@ -448,7 +448,8 @@ private:
     // having it saved into ControlSurfaceMappingStore under a transport targetId - e.g. Signal
     // Lab's MIDI Control nodes, which keep their own binding on the node itself.
     void requestGenericMidiLearn(const juce::String& displayLabel,
-                                 std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned);
+                                 std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned,
+                                 WorkstationAudioEngine::MidiLearnKind expectedKind = WorkstationAudioEngine::MidiLearnKind::Any);
     void rescanVstCatalog();
     void showPluginLoadMenu(const std::function<void(const juce::File&)>& onPluginChosen);
     void refreshPluginsPanel();

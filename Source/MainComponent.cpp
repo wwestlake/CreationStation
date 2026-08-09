@@ -230,8 +230,9 @@ public:
     };
 
     MidiLearnPanel(WorkstationAudioEngine& engineRef, juce::String targetIdIn, const juce::String& displayLabel,
-                   const ExistingBinding& existing)
-        : engine(engineRef), targetId(std::move(targetIdIn))
+                   const ExistingBinding& existing,
+                   WorkstationAudioEngine::MidiLearnKind expectedKindIn = WorkstationAudioEngine::MidiLearnKind::Any)
+        : engine(engineRef), targetId(std::move(targetIdIn)), expectedKind(expectedKindIn)
     {
         titleLabel.setText("Learn MIDI Binding: " + displayLabel, juce::dontSendNotification);
         titleLabel.setFont(juce::Font(16.0f).boldened());
@@ -386,7 +387,7 @@ private:
             if (it != deviceIdsByItemId.end())
                 deviceIdFilter = it->second;
         }
-        engine.armMidiLearn(deviceIdFilter);
+        engine.armMidiLearn(deviceIdFilter, expectedKind);
         statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff5f93ff));
         statusLabel.setText("Listening - move or press the control now...", juce::dontSendNotification);
     }
@@ -435,6 +436,7 @@ private:
 
     WorkstationAudioEngine& engine;
     juce::String targetId;
+    WorkstationAudioEngine::MidiLearnKind expectedKind = WorkstationAudioEngine::MidiLearnKind::Any;
     std::map<int, juce::String> deviceIdsByItemId;
 
     juce::Label titleLabel, instructionsLabel, currentBindingLabel, deviceLabel, statusLabel,
@@ -2075,10 +2077,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         showAudioSettings();
     };
 
-    signalLabPanel.onMidiLearnRequested = [this](const juce::String& displayLabel,
+    signalLabPanel.onMidiLearnRequested = [this](const juce::String& displayLabel, bool wantsContinuousControl,
                                                  std::function<void(juce::String, int, int, bool)> onLearned)
     {
-        requestGenericMidiLearn(displayLabel, std::move(onLearned));
+        auto expectedKind = wantsContinuousControl ? WorkstationAudioEngine::MidiLearnKind::Continuous
+                                                    : WorkstationAudioEngine::MidiLearnKind::Discrete;
+        requestGenericMidiLearn(displayLabel, std::move(onLearned), expectedKind);
     };
 
     // Signal Lab live playback -- thin passthrough to the matching
@@ -4968,7 +4972,8 @@ void MainComponent::showMidiLearnDialog(const juce::String& targetId, const juce
 }
 
 void MainComponent::requestGenericMidiLearn(const juce::String& displayLabel,
-                                            std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned)
+                                            std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned,
+                                            WorkstationAudioEngine::MidiLearnKind expectedKind)
 {
     // Shares the single app-wide learn dialog with showMidiLearnDialog above (only one binding
     // can sensibly be learned at a time) - but the result goes straight back to the caller instead
@@ -4980,7 +4985,7 @@ void MainComponent::requestGenericMidiLearn(const juce::String& displayLabel,
         return;
     }
 
-    auto panel = std::make_unique<MidiLearnPanel>(engine, juce::String(), displayLabel, MidiLearnPanel::ExistingBinding {});
+    auto panel = std::make_unique<MidiLearnPanel>(engine, juce::String(), displayLabel, MidiLearnPanel::ExistingBinding {}, expectedKind);
     auto* panelPtr = panel.get();
 
     auto window = std::make_unique<ManagedDocumentWindow>("Learn MIDI Binding",

@@ -3891,12 +3891,12 @@ void SignalLabPanel::openNodeEditorForSelection()
         juce::Component::SafePointer<juce::Label> statusLabelSafe(statusLabelForNode);
 
         auto& learnButton = content->addButtonRow(node.midiLearned ? "Re-learn..." : "Learn...");
-        learnButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title]
+        learnButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title, wantsContinuousControl = node.type == "midiFader"]
         {
             if (! onMidiLearnRequested)
                 return;
 
-            onMidiLearnRequested(nodeTitle, [this, findMidiNode, statusLabelSafe, describeBinding]
+            onMidiLearnRequested(nodeTitle, wantsContinuousControl, [this, findMidiNode, statusLabelSafe, describeBinding]
                                  (juce::String deviceId, int channel, int number, bool isController)
             {
                 auto* target = findMidiNode();
