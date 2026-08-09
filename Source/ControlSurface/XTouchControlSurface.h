@@ -57,6 +57,13 @@ public:
     void setTransportState(bool playing, bool recording);
     void refreshVisibleWindow();
 
+    // Motorized-fader position echo for MIDI Control (Fader Control) nodes: these are bound
+    // directly to a raw MIDI channel via Learn, not to a Tracker track/bank slot, so this skips
+    // the trackIndex/bankOffset remap sendFaderValue() does and writes the channel straight
+    // through. Without this, a motorized fader's motor never learns where the software value
+    // moved to, so on touch-release it snaps back to whatever position it last held.
+    void sendRawFaderFeedback(int channel, float unitValue);
+
     void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage&) override;
 
 private:

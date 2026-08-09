@@ -90,6 +90,12 @@ public:
     std::function<bool()> onLiveIsActiveRequested;
     std::function<bool()> onLiveFinishedFlagRequested;
     std::function<void(const juce::String& nodeId, float value)> onLiveMidiValueChanged;
+    // Fires whenever a Fader Control node's live value changes and it was
+    // learned from a real motorized fader (pitch-wheel binding). Lets the
+    // physical fader's motor track the software value in real time instead
+    // of springing back to a stale position whenever it's released -- see
+    // XTouchControlSurface::sendRawFaderFeedback.
+    std::function<void(int channel, float value)> onMidiFaderFeedbackRequested;
     // Requests the app-level "Learn MIDI Binding" dialog (shared with the
     // transport buttons' MIDI learn -- see MainComponent::requestGenericMidiLearn).
     // onLearned fires once with the captured (deviceId, channel, number, isController).

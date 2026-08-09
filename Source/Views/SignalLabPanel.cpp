@@ -5596,6 +5596,15 @@ void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlCh
             if (onLiveMidiValueChanged)
                 onLiveMidiValueChanged(node.id, node.midiLiveValue);
 
+            // Echo the value straight back to the physical fader's motor so
+            // it holds/tracks the position we just set instead of springing
+            // back to whatever it last was on release. Only meaningful for
+            // Fader Control nodes bound to a real motorized fader (the
+            // pitch-wheel/number==-1 convention) -- Button Control nodes
+            // have no motor to sync.
+            if (node.type == "midiFader" && node.midiIsController && node.midiNumber == -1 && onMidiFaderFeedbackRequested)
+                onMidiFaderFeedbackRequested(node.midiChannel, node.midiLiveValue);
+
             anyApplied = true;
         }
     }

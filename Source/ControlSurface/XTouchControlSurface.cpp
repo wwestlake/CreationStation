@@ -418,6 +418,17 @@ void XTouchControlSurface::sendMasterFaderValue(float gain)
     midiOutput->sendMessageNow(juce::MidiMessage::pitchWheel(9, gainToDisplayValue(gain)));
 }
 
+void XTouchControlSurface::sendRawFaderFeedback(int channel, float unitValue)
+{
+    if (midiOutput == nullptr)
+        return;
+
+    if (channel < 1 || channel > 16)
+        return;
+
+    midiOutput->sendMessageNow(juce::MidiMessage::pitchWheel(channel, gainToDisplayValue(unitValue)));
+}
+
 void XTouchControlSurface::setChannelName(int trackIndex, const juce::String& name)
 {
     if (juce::isPositiveAndBelow(trackIndex, totalTrackCount))

@@ -2113,6 +2113,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         engine.setSignalLabLiveMidiValue(nodeId, value);
     };
+    signalLabPanel.onMidiFaderFeedbackRequested = [this](int channel, float value)
+    {
+        midiSurface.sendRawFaderFeedback(channel, value);
+    };
 
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
     {
