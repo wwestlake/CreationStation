@@ -62,6 +62,14 @@ struct PatchConnection
     // Cosmetic reroute points along the wire, in canvas graph-space
     // coordinates. Purely visual -- they don't affect rendering.
     juce::Array<juce::Point<int>> waypoints;
+    // False (default, so older saved files still parse as before) = an
+    // audio signal wire. True = a value wire carrying a live-bound
+    // parameter (currently only ever from a midiFader/midiButton node into
+    // another node's parameter port, e.g. a Mixer channel's Weight) rather
+    // than audio -- PatchLiveVoice/PatchRuntimePlayer both only walk signal
+    // wires for the audio topology itself; a value wire exists purely so
+    // the binding survives save/load, not to be treated as an audio path.
+    bool isValueWire = false;
 };
 
 struct PatchNode

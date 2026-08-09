@@ -4722,16 +4722,20 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
     for (const auto& patchNode : document.nodes)
     {
         if (patchNode.kind != "mix" && patchNode.kind != "filter" && patchNode.kind != "envelope"
-            && patchNode.kind != "output" && patchNode.kind != "scope" && patchNode.kind != "analyzer")
+            && patchNode.kind != "output" && patchNode.kind != "scope" && patchNode.kind != "analyzer"
+            && patchNode.kind != "midiFader" && patchNode.kind != "midiButton")
             continue;
 
         GraphNodeModel node;
         // Mix/Output/Scope/Analyzer are still singleton, so their fixed
         // kind-as-id keeps rebuildNodeGraphFromRecipe()'s prior-position
-        // lookup working. Filter/Envelope are real independent instances
-        // now (Phase 3) -- use the actual saved id so multiple instances
-        // round-trip correctly instead of collapsing onto one shared id.
-        node.id = (patchNode.kind == "filter" || patchNode.kind == "envelope") ? patchNode.id : patchNode.kind;
+        // lookup working. Filter/Envelope/MIDI Control nodes are real
+        // independent instances -- use the actual saved id so multiple
+        // instances round-trip correctly instead of collapsing onto one
+        // shared id.
+        node.id = (patchNode.kind == "filter" || patchNode.kind == "envelope"
+                   || patchNode.kind == "midiFader" || patchNode.kind == "midiButton")
+                ? patchNode.id : patchNode.kind;
         node.type = patchNode.kind;
         node.title = graphNodeTitle(node.type);
         node.position = { patchNode.canvasX, patchNode.canvasY };
@@ -4766,6 +4770,16 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             if (node.envelopePoints.isEmpty())
                 node.envelopePoints = makeDefaultEnvelopePoints(node.envelopeCurveMode);
         }
+        else if (patchNode.kind == "midiFader" || patchNode.kind == "midiButton")
+        {
+            node.midiLearned = (bool) patchNode.properties.getWithDefault("midiLearned", false);
+            node.midiDeviceId = patchNode.properties.getWithDefault("midiDeviceId", {}).toString();
+            node.midiDeviceLabel = patchNode.properties.getWithDefault("midiDeviceLabel", {}).toString();
+            node.midiChannel = (int) patchNode.properties.getWithDefault("midiChannel", node.midiChannel);
+            node.midiNumber = (int) patchNode.properties.getWithDefault("midiNumber", node.midiNumber);
+            node.midiIsController = (bool) patchNode.properties.getWithDefault("midiIsController", node.midiIsController);
+            node.midiButtonMode = patchNode.properties.getWithDefault("midiButtonMode", node.midiButtonMode).toString();
+        }
 
         graphNodes.add(node);
     }
@@ -4778,8 +4792,31 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
         graphConnection.toNodeId = connection.to;
         graphConnection.fromPortId = connection.fromPort.isNotEmpty() ? connection.fromPort : "signalOut";
         graphConnection.toPortId = connection.toPort.isNotEmpty() ? connection.toPort : "signalIn";
-        graphConnection.isExec = true;
-        graphConnection.waypoints = connection.waypoints;
+
+        if (connection.isValueWire)
+        {
+            graphConnection.isExec = false;
+            // The only value-wire source today is a MIDI Control node,
+            // whose port type follows its control kind (Float for
+            // midiFader, Bool for midiButton) -- look up which one this
+            // came from rather than assuming Float, so a Button Control's
+            // wire round-trips with the right port colour/type too.
+            graphConnection.valueType = PortValueType::Float;
+            for (auto& sourceNode : graphNodes)
+            {
+                if (sourceNode.id != connection.from)
+                    continue;
+                if (sourceNode.type == "midiButton")
+                    graphConnection.valueType = PortValueType::Bool;
+                break;
+            }
+        }
+        else
+        {
+            graphConnection.isExec = true;
+            graphConnection.waypoints = connection.waypoints;
+        }
+
         graphConnections.add(graphConnection);
     }
 
@@ -5545,7 +5582,8 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
             document.sources.add(source);
         }
         else if (node.type == "mix" || node.type == "filter" || node.type == "envelope"
-                 || node.type == "output" || node.type == "scope" || node.type == "analyzer")
+                 || node.type == "output" || node.type == "scope" || node.type == "analyzer"
+                 || node.type == "midiFader" || node.type == "midiButton")
         {
             cw::PatchNode patchNode;
             patchNode.id = node.id;
@@ -5576,18 +5614,56 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
                 patchNode.properties.set("curveMode", node.envelopeCurveMode);
                 patchNode.properties.set("pointsJson", serialisePointsJson(node.envelopePoints));
             }
+            else if (node.type == "midiFader" || node.type == "midiButton")
+            {
+                // Deliberately not midiLiveValue -- that's a live, transient
+                // reading of wherever the physical control currently sits,
+                // not something a saved patch should freeze in place.
+                patchNode.properties.set("midiLearned", node.midiLearned);
+                patchNode.properties.set("midiDeviceId", node.midiDeviceId);
+                patchNode.properties.set("midiDeviceLabel", node.midiDeviceLabel);
+                patchNode.properties.set("midiChannel", node.midiChannel);
+                patchNode.properties.set("midiNumber", node.midiNumber);
+                patchNode.properties.set("midiIsController", node.midiIsController);
+                patchNode.properties.set("midiButtonMode", node.midiButtonMode);
+            }
 
             document.nodes.add(patchNode);
         }
     }
 
-    // Mirror the real wires from the canvas -- only signal (white/exec)
-    // connections matter to the audio graph; value-port wiring (Get/Set,
-    // filter cutoff knobs, etc.) isn't part of this signal-path document.
+    // Mirror the real wires from the canvas. Signal (white/exec)
+    // connections are the audio topology. Most value-port wiring (Get/Set
+    // variable, filter cutoff knobs dragged from a Get node, etc.) still
+    // isn't part of this document -- it gets resolved into a baked scalar
+    // above instead (findWiredParameterValue), same as always. The one
+    // exception: a value wire whose source is a MIDI Control node is
+    // preserved as its own connection (isValueWire = true) so the binding
+    // itself -- not just its momentary resolved value -- survives
+    // save/load and can be re-wired to a live PatchLiveVoice slot on load.
     for (auto& connection : graphConnections)
     {
         if (! connection.isExec)
+        {
+            bool fromMidiControl = false;
+            for (auto& sourceNode : graphNodes)
+                if (sourceNode.id == connection.fromNodeId && (sourceNode.type == "midiFader" || sourceNode.type == "midiButton"))
+                {
+                    fromMidiControl = true;
+                    break;
+                }
+            if (! fromMidiControl)
+                continue;
+
+            cw::PatchConnection valueConnection;
+            valueConnection.from = connection.fromNodeId;
+            valueConnection.to = connection.toNodeId;
+            valueConnection.fromPort = connection.fromPortId;
+            valueConnection.toPort = connection.toPortId;
+            valueConnection.isValueWire = true;
+            document.connections.add(valueConnection);
             continue;
+        }
 
         cw::PatchConnection patchConnection;
         patchConnection.from = connection.fromNodeId;
