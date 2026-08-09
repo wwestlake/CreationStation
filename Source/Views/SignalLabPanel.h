@@ -435,6 +435,7 @@ private:
     PortHit findPortAt(juce::Point<int> canvasPosition) const;
     juce::Point<int> resolvePortPosition(const juce::String& nodeId, const juce::String& portId, bool wantOutput) const;
     int findConnectionAt(juce::Point<int> canvasPosition, int* outWaypointIndex) const;
+    juce::Path buildConnectionPath(int connectionIndex) const;
     void tryCompleteConnection(int fromNodeIndex, const GraphPort& fromPort, juce::Point<int> releaseCanvasPosition);
     void removeConnection(int index);
     void showConnectionContextMenu(int connectionIndex, int waypointIndex, juce::Point<int> canvasPosition);

@@ -1451,26 +1451,10 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
     for (int connectionIndex = 0; connectionIndex < owner.graphConnections.size(); ++connectionIndex)
     {
         auto& connection = owner.graphConnections.getReference(connectionIndex);
-        auto fromPoint = owner.graphToCanvas(owner.resolvePortPosition(connection.fromNodeId, connection.fromPortId, true));
-        auto toPoint = owner.graphToCanvas(owner.resolvePortPosition(connection.toNodeId, connection.toPortId, false));
         auto colour = connection.isExec ? juce::Colours::white : SignalLabPanel::portValueColour(connection.valueType);
         auto selected = connectionIndex == owner.selectedConnectionIndex;
 
-        juce::Array<juce::Point<int>> canvasPoints;
-        canvasPoints.add(fromPoint);
-        for (auto& waypoint : connection.waypoints)
-            canvasPoints.add(owner.graphToCanvas(waypoint));
-        canvasPoints.add(toPoint);
-
-        juce::Path path;
-        path.startNewSubPath(canvasPoints.getReference(0).toFloat());
-        for (int pointIndex = 1; pointIndex < canvasPoints.size(); ++pointIndex)
-        {
-            auto a = canvasPoints.getReference(pointIndex - 1).toFloat();
-            auto b = canvasPoints.getReference(pointIndex).toFloat();
-            auto handle = juce::jmax(24.0f, std::abs(b.x - a.x) * 0.4f);
-            path.cubicTo(a.translated(handle, 0.0f), b.translated(-handle, 0.0f), b);
-        }
+        auto path = owner.buildConnectionPath(connectionIndex);
         g.setColour(colour.withAlpha(selected ? 1.0f : 0.85f));
         g.strokePath(path, juce::PathStrokeType(selected ? 3.5f : 2.5f));
 
@@ -3983,13 +3967,45 @@ juce::Point<int> SignalLabPanel::resolvePortPosition(const juce::String& nodeId,
     return {};
 }
 
+juce::Path SignalLabPanel::buildConnectionPath(int connectionIndex) const
+{
+    juce::Path path;
+    if (connectionIndex < 0 || connectionIndex >= graphConnections.size())
+        return path;
+
+    auto& connection = graphConnections.getReference(connectionIndex);
+    auto fromPoint = graphToCanvas(resolvePortPosition(connection.fromNodeId, connection.fromPortId, true));
+    auto toPoint = graphToCanvas(resolvePortPosition(connection.toNodeId, connection.toPortId, false));
+
+    juce::Array<juce::Point<int>> canvasPoints;
+    canvasPoints.add(fromPoint);
+    for (auto& waypoint : connection.waypoints)
+        canvasPoints.add(graphToCanvas(waypoint));
+    canvasPoints.add(toPoint);
+
+    path.startNewSubPath(canvasPoints.getReference(0).toFloat());
+    for (int pointIndex = 1; pointIndex < canvasPoints.size(); ++pointIndex)
+    {
+        auto a = canvasPoints.getReference(pointIndex - 1).toFloat();
+        auto b = canvasPoints.getReference(pointIndex).toFloat();
+        auto handle = juce::jmax(24.0f, std::abs(b.x - a.x) * 0.4f);
+        path.cubicTo(a.translated(handle, 0.0f), b.translated(-handle, 0.0f), b);
+    }
+    return path;
+}
+
 int SignalLabPanel::findConnectionAt(juce::Point<int> canvasPosition, int* outWaypointIndex) const
 {
     if (outWaypointIndex != nullptr)
         *outWaypointIndex = -1;
 
-    constexpr float waypointHitRadius = 8.0f;
-    constexpr float lineHitDistance = 6.0f;
+    // Generous on purpose -- these wires are drawn as bowed bezier curves
+    // (see buildConnectionPath/paint), not straight lines between their
+    // endpoints, and a tight pixel tolerance meant a click that visually
+    // looked like it was right on the wire would miss the hit-test and fall
+    // through to the generic canvas menu instead of the wire's own menu.
+    constexpr float waypointHitRadius = 10.0f;
+    constexpr float lineHitDistance = 9.0f;
 
     for (int connectionIndex = 0; connectionIndex < graphConnections.size(); ++connectionIndex)
     {
@@ -4006,19 +4022,15 @@ int SignalLabPanel::findConnectionAt(juce::Point<int> canvasPosition, int* outWa
             }
         }
 
-        juce::Array<juce::Point<int>> points;
-        points.add(graphToCanvas(resolvePortPosition(connection.fromNodeId, connection.fromPortId, true)));
-        for (auto& waypoint : connection.waypoints)
-            points.add(graphToCanvas(waypoint));
-        points.add(graphToCanvas(resolvePortPosition(connection.toNodeId, connection.toPortId, false)));
-
-        for (int segment = 1; segment < points.size(); ++segment)
-        {
-            juce::Line<float> line(points.getReference(segment - 1).toFloat(), points.getReference(segment).toFloat());
-            auto nearest = line.findNearestPointTo(canvasPosition.toFloat());
-            if (nearest.getDistanceFrom(canvasPosition.toFloat()) <= lineHitDistance)
-                return connectionIndex;
-        }
+        // Hit-test against the actual curve, not the straight line between
+        // its endpoints -- stroke the real path out to the hit tolerance and
+        // do a containment test, which follows the bow correctly no matter
+        // how far the curve departs from a straight line.
+        auto path = buildConnectionPath(connectionIndex);
+        juce::Path strokeOutline;
+        juce::PathStrokeType(lineHitDistance * 2.0f).createStrokedPath(strokeOutline, path);
+        if (strokeOutline.contains(canvasPosition.toFloat()))
+            return connectionIndex;
     }
 
     return -1;
@@ -4632,10 +4644,38 @@ void SignalLabPanel::centerCanvasOnGraphNode(const juce::String& nodeId)
 
 void SignalLabPanel::triggerTransportPlay()
 {
-    if (audioDirty)
-        compileGraph();
+    // Compiling + rendering runs synchronously on the message thread and can
+    // take a noticeable moment on a busy graph -- without this the whole app
+    // just appears to hang between clicking Play and hearing anything. Force
+    // an immediate repaint of the status text (rather than waiting for the
+    // next natural paint pass, which won't happen until this function
+    // returns) so the user sees what's going on.
+    auto showBusyStatus = [this](const juce::String& text)
+    {
+        statusLabel.setText(text, juce::dontSendNotification);
+        statusLabel.repaint();
+        if (auto* peer = getPeer())
+            peer->performAnyPendingRepaintsNow();
+    };
 
-    if (! previewCurrentSignal())
+    const bool wasDirty = audioDirty;
+    if (wasDirty)
+    {
+        juce::MouseCursor::showWaitCursor();
+        showBusyStatus("Compiling...");
+        compileGraph();
+        showBusyStatus("Rendering audio...");
+    }
+
+    bool played = previewCurrentSignal();
+
+    if (wasDirty)
+    {
+        juce::MouseCursor::hideWaitCursor();
+        updateStatusText();
+    }
+
+    if (! played)
         return;
 
     if (repeatEnabled)
