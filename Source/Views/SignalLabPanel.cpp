@@ -80,10 +80,23 @@ public:
         return *combo;
     }
 
-    void addCustomComponent(juce::Component& component, int height)
+    // Takes ownership of a heap-allocated component -- every call site hands
+    // this a freshly-`new`'d component with nothing else holding a pointer
+    // to it, so it must be owned here or it leaks for the life of the app
+    // every time a node tool window is opened.
+    void addCustomComponent(juce::Component* component, int height)
     {
         addAndMakeVisible(component);
-        rows.add({ &component, height });
+        rows.add({ component, height });
+        ownedCustomComponents.add(component);
+    }
+
+    juce::TextButton& addButtonRow(const juce::String& buttonText)
+    {
+        auto* button = buttons.add(new juce::TextButton(buttonText));
+        addAndMakeVisible(button);
+        rows.add({ button, 28 });
+        return *button;
     }
 
     void resized() override
@@ -101,7 +114,152 @@ private:
     juce::OwnedArray<juce::Label> labels;
     juce::OwnedArray<juce::Slider> sliders;
     juce::OwnedArray<juce::ComboBox> combos;
+    juce::OwnedArray<juce::TextButton> buttons;
+    juce::OwnedArray<juce::Component> ownedCustomComponents;
     juce::Array<Row> rows;
+};
+
+struct CompileErrorRow
+{
+    juce::String nodeId;
+    juce::String message;
+};
+
+class CompileErrorListContent final : public juce::Component
+{
+public:
+    void setErrors(const juce::Array<CompileErrorRow>& newErrors, std::function<void(const juce::String&)> onErrorClickedIn)
+    {
+        onErrorClicked = std::move(onErrorClickedIn);
+        errorButtons.clear();
+
+        if (newErrors.isEmpty())
+        {
+            if (okLabel == nullptr)
+            {
+                okLabel = std::make_unique<juce::Label>();
+                okLabel->setColour(juce::Label::textColourId, juce::Colour(0xff8fd978));
+                okLabel->setFont(juce::Font(14.0f).boldened());
+                addAndMakeVisible(*okLabel);
+            }
+            okLabel->setText("No problems found -- the graph is ready to play.", juce::dontSendNotification);
+            okLabel->setVisible(true);
+        }
+        else if (okLabel != nullptr)
+        {
+            okLabel->setVisible(false);
+        }
+
+        for (auto& error : newErrors)
+        {
+            auto* button = errorButtons.add(new juce::TextButton());
+            button->setButtonText(error.message);
+            button->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a1a1e));
+            button->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffff9a9a));
+            auto nodeId = error.nodeId;
+            button->onClick = [this, nodeId]
+            {
+                if (onErrorClicked)
+                    onErrorClicked(nodeId);
+            };
+            addAndMakeVisible(button);
+        }
+
+        resized();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(12);
+        if (okLabel != nullptr && okLabel->isVisible())
+            okLabel->setBounds(area.removeFromTop(24));
+
+        for (auto* button : errorButtons)
+        {
+            button->setBounds(area.removeFromTop(30));
+            area.removeFromTop(6);
+        }
+    }
+
+private:
+    std::unique_ptr<juce::Label> okLabel;
+    juce::OwnedArray<juce::TextButton> errorButtons;
+    std::function<void(const juce::String&)> onErrorClicked;
+};
+
+// A real mixing-board look for the Mixer node's tool window: one vertical
+// fader per channel instead of the horizontal label/slider rows every other
+// node's editor uses. A channel whose weight port has a Get-variable wired
+// into it is shown at the wired value but disabled -- manual control is
+// disabled while wired, same rule as every other parameter in this app.
+class MixerFaderBank final : public juce::Component
+{
+public:
+    struct ChannelState
+    {
+        juce::String label;
+        float value = 1.0f;
+        bool wired = false;
+        double wiredValue = 0.0;
+    };
+
+    void setChannels(const juce::Array<ChannelState>& channels, std::function<void(int channelIndex, float newValue)> onChannelChangedIn)
+    {
+        onChannelChanged = std::move(onChannelChangedIn);
+        sliders.clear();
+        labels.clear();
+
+        for (int index = 0; index < channels.size(); ++index)
+        {
+            auto& state = channels.getReference(index);
+
+            auto* slider = sliders.add(new juce::Slider());
+            slider->setSliderStyle(juce::Slider::LinearVertical);
+            slider->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 56, 20);
+            slider->setRange(0.0, 1.5, 0.001);
+            slider->setValue(state.wired ? state.wiredValue : (double) state.value, juce::dontSendNotification);
+            slider->setEnabled(! state.wired);
+            if (! state.wired)
+            {
+                auto channelIndex = index;
+                slider->onValueChange = [this, channelIndex, slider = slider]
+                {
+                    if (onChannelChanged)
+                        onChannelChanged(channelIndex, (float) slider->getValue());
+                };
+            }
+            addAndMakeVisible(slider);
+
+            auto* label = labels.add(new juce::Label());
+            label->setText(state.label, juce::dontSendNotification);
+            label->setJustificationType(juce::Justification::centred);
+            label->setColour(juce::Label::textColourId, state.wired ? juce::Colour(0xff8fd978) : juce::Colours::white);
+            label->setFont(juce::Font(11.0f));
+            addAndMakeVisible(label);
+        }
+
+        resized();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(6);
+        if (sliders.isEmpty())
+            return;
+
+        auto channelWidth = juce::jmax(44, area.getWidth() / sliders.size());
+        for (int index = 0; index < sliders.size(); ++index)
+        {
+            auto column = area.removeFromLeft(channelWidth);
+            labels[index]->setBounds(column.removeFromBottom(18));
+            sliders[index]->setBounds(column.reduced(6, 0));
+        }
+    }
+
+private:
+    juce::OwnedArray<juce::Slider> sliders;
+    juce::OwnedArray<juce::Label> labels;
+    std::function<void(int, float)> onChannelChanged;
 };
 
 struct AutomationTargetSpec
@@ -157,6 +315,42 @@ const AutomationTargetSpec& getTargetSpec(const juce::String& parameterId)
             return spec;
 
     return getAutomationTargetSpecs()[0];
+}
+
+// Which of the modulatable parameters (see getAutomationTargetSpecs) live on
+// which node's inspector panel -- used to expose each editable parameter as
+// its own graph input port, one per slider the user can already move by hand.
+juce::StringArray nodeParameterIds(const juce::String& nodeType)
+{
+    if (nodeType == "filter")
+        return { "filterCutoff", "filterResonance", "filterEnvelopeAmount" };
+    if (nodeType == "output")
+        return {};
+    if (nodeType == "sine")     return { "sineLevel" };
+    if (nodeType == "saw")      return { "sawLevel" };
+    if (nodeType == "square")   return { "squareLevel" };
+    if (nodeType == "triangle") return { "triangleLevel" };
+    if (nodeType == "noise")    return { "noiseLevel" };
+    if (nodeType == "mix")      return {};
+    return {};
+}
+
+// Short label for a parameter port -- the inspector already carries the full
+// name, so the graph-side label just needs to disambiguate at a glance.
+juce::String shortParamLabel(const juce::String& parameterId)
+{
+    if (parameterId == "filterCutoff") return "Cutoff";
+    if (parameterId == "filterResonance") return "Reso";
+    if (parameterId == "filterEnvelopeAmount") return "Env Amt";
+    if (parameterId == "pitchOffsetSemitones") return "Pitch";
+    if (parameterId == "baseFrequency") return "Pitch";
+    if (parameterId == "macroHardness") return "Hardness";
+    if (parameterId == "macroWeight") return "Weight";
+    if (parameterId == "macroAir") return "Air";
+    if (parameterId == "macroGrit") return "Grit";
+    if (parameterId == "macroSize") return "Size";
+    if (parameterId.endsWith("Level")) return "Level";
+    return parameterId;
 }
 
 bool usesLogScale(const juce::String& parameterId)
@@ -599,6 +793,8 @@ double getLegacySustainLevel(const juce::Array<cw::PatchAutomationPoint>& points
 juce::String graphNodeTitle(const juce::String& type)
 {
     if (type == "value") return "Value";
+    if (type == "valueGet") return "Get";
+    if (type == "valueSet") return "Set";
     if (type == "sine") return "Sine Osc";
     if (type == "saw") return "Saw Osc";
     if (type == "square") return "Square Osc";
@@ -607,10 +803,18 @@ juce::String graphNodeTitle(const juce::String& type)
     if (type == "mix") return "Mixer";
     if (type == "filter") return "Filter";
     if (type == "envelope") return "Envelope";
-    if (type == "output") return "Output";
+    if (type == "output") return "Sink";
     if (type == "scope") return "Oscilloscope";
     if (type == "analyzer") return "Frequency Analyzer";
+    if (type == "midiFader") return "Fader Control";
+    if (type == "midiButton") return "Button Control";
     return type;
+}
+
+juce::String graphNodeTypeBadge(const juce::String& type)
+{
+    if (type == "output") return "SINK";
+    return type.toUpperCase();
 }
 
 juce::String timelineNodeTitle(const cw::PatchAutomationLane& lane)
@@ -627,7 +831,8 @@ juce::Colour graphNodeAccent(const juce::String& type)
     if (type == "mix") return signalMixColour();
     if (type == "scope") return juce::Colour(0xff66e0ff);
     if (type == "analyzer") return juce::Colour(0xffff91c1);
-    if (type == "value") return juce::Colour(0xffffd166);
+    if (type == "value" || type == "valueGet" || type == "valueSet") return juce::Colour(0xffffd166);
+    if (type == "midiFader" || type == "midiButton") return juce::Colour(0xffff5c8a);
     return signalSourceColour();
 }
 }
@@ -1157,89 +1362,6 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
     for (int y = 0; y < bounds.getHeight(); y += 32)
         g.drawHorizontalLine(y, 0.0f, (float) bounds.getWidth());
 
-    auto indexOfType = [this](const juce::String& type)
-    {
-        for (int index = 0; index < owner.graphNodes.size(); ++index)
-            if (owner.graphNodes.getReference(index).type == type)
-                return index;
-        return -1;
-    };
-
-    auto drawConnection = [&](int fromIndex, int toIndex, juce::Colour colour)
-    {
-        if (fromIndex < 0 || toIndex < 0)
-            return;
-
-        auto fromPoint = owner.graphToCanvas(owner.getNodeAudioOutputPort(fromIndex));
-        auto toPoint = owner.graphToCanvas(owner.getNodeAudioInputPort(toIndex));
-        auto handle = juce::jmax(40.0f, std::abs(toPoint.x - fromPoint.x) * 0.35f);
-        juce::Path path;
-        path.startNewSubPath(fromPoint);
-        path.cubicTo(fromPoint.translated(handle, 0.0f), toPoint.translated(-handle, 0.0f), toPoint);
-        g.setColour(colour.withAlpha(0.85f));
-        g.strokePath(path, juce::PathStrokeType(3.0f));
-    };
-
-    auto drawControlConnection = [&](juce::Point<float> fromPoint, juce::Point<float> toPoint, juce::Colour colour)
-    {
-        auto handle = juce::jmax(28.0f, std::abs(toPoint.y - fromPoint.y) * 0.25f);
-        juce::Path path;
-        path.startNewSubPath(fromPoint);
-        path.cubicTo(fromPoint.translated(0.0f, -handle),
-                     toPoint.translated(0.0f, handle),
-                     toPoint);
-        g.setColour(colour.withAlpha(0.75f));
-        g.strokePath(path, juce::PathStrokeType(2.0f, juce::PathStrokeType::JointStyle::curved, juce::PathStrokeType::EndCapStyle::rounded));
-    };
-
-    auto mixIndex = indexOfType("mix");
-    auto filterIndex = indexOfType("filter");
-    auto envelopeIndex = indexOfType("envelope");
-    auto outputIndex = indexOfType("output");
-
-    for (int index = 0; index < owner.graphNodes.size(); ++index)
-    {
-        auto type = owner.graphNodes.getReference(index).type;
-        if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
-            drawConnection(index, mixIndex, owner.graphNodes.getReference(index).accent);
-    }
-
-    drawConnection(mixIndex, filterIndex, signalMixColour());
-    drawConnection(filterIndex, envelopeIndex, signalFilterColour());
-    drawConnection(envelopeIndex, outputIndex, signalEnvelopeColour());
-
-    for (int index = 0; index < owner.graphNodes.size(); ++index)
-    {
-        auto& node = owner.graphNodes.getReference(index);
-        if (node.type != "timeline" || node.targetParameter.isEmpty())
-            continue;
-
-        for (int targetIndex = 0; targetIndex < owner.graphNodes.size(); ++targetIndex)
-        {
-            auto& targetNode = owner.graphNodes.getReference(targetIndex);
-            if (targetNode.type == "timeline")
-                continue;
-
-            auto targetType = targetNode.type;
-            auto param = node.targetParameter;
-            auto matches = (param == "filterCutoff" || param == "filterResonance" || param == "filterEnvelopeAmount") && targetType == "filter";
-            matches = matches || (param == "macroHardness" || param == "macroWeight" || param == "macroAir" || param == "macroGrit" || param == "macroSize" || param == "pitchOffsetSemitones") && targetType == "output";
-            matches = matches || (param == "sineLevel" && targetType == "sine");
-            matches = matches || (param == "sawLevel" && targetType == "saw");
-            matches = matches || (param == "squareLevel" && targetType == "square");
-            matches = matches || (param == "triangleLevel" && targetType == "triangle");
-            matches = matches || (param == "noiseLevel" && targetType == "noise");
-            matches = matches || (param == "baseFrequency" && targetType == "mix");
-            if (matches)
-            {
-                drawControlConnection(owner.graphToCanvas(owner.getNodeAudioOutputPort(index)),
-                                      owner.graphToCanvas(owner.getNodeControlInputPort(targetIndex)),
-                                      node.accent);
-                break;
-            }
-        }
-    }
-
     for (int index = 0; index < owner.graphNodes.size(); ++index)
     {
         auto boundsF = owner.graphToCanvas(owner.getGraphNodeBounds(index)).toFloat();
@@ -1250,35 +1372,48 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
         g.setColour(selected ? juce::Colours::white : node.accent);
         g.drawRoundedRectangle(boundsF, 14.0f, selected ? 3.0f : 2.0f);
 
+        auto badgeBounds = juce::Rectangle<float>(boundsF.getCentreX() - 42.0f, boundsF.getY() + 12.0f, 84.0f, 20.0f);
         g.setColour(node.accent.withAlpha(0.22f));
-        g.fillRoundedRectangle(juce::Rectangle<float>(boundsF.getX() + 12.0f, boundsF.getY() + 12.0f, 78.0f, 18.0f), 8.0f);
+        g.fillRoundedRectangle(badgeBounds, 9.0f);
         g.setColour(node.accent);
-        g.setFont(juce::Font(11.0f).boldened());
-        g.drawText(node.type.toUpperCase(), juce::Rectangle<int>((int) boundsF.getX() + 14, (int) boundsF.getY() + 12, 72, 18), juce::Justification::centred, false);
+        g.setFont(juce::Font(13.0f));
+        g.drawText(graphNodeTypeBadge(node.type), badgeBounds.toNearestInt(), juce::Justification::centred, false);
 
         g.setColour(juce::Colours::white);
         g.setFont(juce::Font(16.0f).boldened());
         g.drawText(node.title, juce::Rectangle<int>((int) boundsF.getX() + 12, (int) boundsF.getY() + 38, (int) boundsF.getWidth() - 24, 22), juce::Justification::centredLeft, true);
 
         juce::String detail;
-        if (node.type == "sine") detail = "Level " + juce::String(owner.recipe.sineLevel, 2);
-        else if (node.type == "saw") detail = "Level " + juce::String(owner.recipe.sawLevel, 2);
-        else if (node.type == "square") detail = "Level " + juce::String(owner.recipe.squareLevel, 2);
-        else if (node.type == "triangle") detail = "Level " + juce::String(owner.recipe.triangleLevel, 2);
-        else if (node.type == "noise") detail = "Level " + juce::String(owner.recipe.noiseLevel, 2);
-        else if (node.type == "filter") detail = owner.recipe.filterMode + " • " + juce::String(juce::roundToInt(owner.recipe.filterCutoffHz)) + " Hz";
-        else if (node.type == "envelope") detail = owner.recipe.envelopeCurveMode + " curve";
-        else if (node.type == "output") detail = formatDurationText(owner.recipe.durationSeconds);
-        else if (node.type == "value")
+        if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
+            detail = "Level " + juce::String(node.oscillatorLevel, 2) + " • " + juce::String(juce::roundToInt(node.oscillatorFrequencyHz)) + " Hz";
+        else if (node.type == "noise") detail = "Level " + juce::String(node.oscillatorLevel, 2);
+        else if (node.type == "filter") detail = node.filterMode + " • " + juce::String(juce::roundToInt(node.filterCutoffHz)) + " Hz";
+        else if (node.type == "envelope") detail = node.envelopeCurveMode + " curve";
+        else if (node.type == "output") detail = formatDurationText(owner.recipe.durationSeconds) + " • " + (owner.recipe.sinkMode == "wave" ? "Wave" : "Audio");
+        else if (node.type == "value" || node.type == "valueGet" || node.type == "valueSet")
         {
-            detail = "Constant";
+            detail = node.type == "valueSet" ? "Driven by automation" : "Reads current value";
             for (auto& variable : owner.localControls)
             {
                 if (variable.id == node.targetParameter)
                 {
-                    detail = variable.targetParameter + " • " + juce::String(variable.value, 2);
+                    detail = variable.name + " • " + juce::String(variable.value, 2)
+                            + (node.type == "valueSet" ? " (setter)" : "");
                     break;
                 }
+            }
+        }
+        else if (node.type == "midiFader" || node.type == "midiButton")
+        {
+            if (! node.midiLearned)
+                detail = "Not learned — double-click, Learn";
+            else
+            {
+                detail = (node.midiDeviceLabel.isNotEmpty() ? node.midiDeviceLabel : "Any device") + " • "
+                        + (node.midiIsController ? "CC " : "Note ") + juce::String(node.midiNumber)
+                        + " • " + juce::String(node.midiLiveValue, 2);
+                if (node.type == "midiButton")
+                    detail += node.midiButtonMode == "toggle" ? " (toggle)" : " (momentary)";
             }
         }
         else if (node.type == "scope") detail = "2 traces • " + juce::String(owner.probeSettings.scopeTimebaseMs, 1) + " ms";
@@ -1298,22 +1433,24 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
                 }
             }
         }
+        else if (node.type == "mix") detail = "Weighted sum • " + juce::String(node.mixerInputVolumes.size()) + " channels";
         else detail = "Auto sum bus";
 
         g.setColour(juce::Colour(0xff9db0c8));
         g.setFont(juce::Font(12.0f));
         g.drawText(detail, juce::Rectangle<int>((int) boundsF.getX() + 12, (int) boundsF.getBottom() - 28, (int) boundsF.getWidth() - 24, 16), juce::Justification::centredLeft, true);
 
-        if (node.type == "scope" && owner.generatedBuffer.getNumSamples() > 8)
+        if (node.type == "scope" && owner.getDisplayBufferForNode(node.id).getNumSamples() > 8)
         {
+            auto& tapBuffer = owner.getDisplayBufferForNode(node.id);
             auto mini = juce::Rectangle<float>(boundsF.getX() + 12.0f, boundsF.getY() + 64.0f, boundsF.getWidth() - 24.0f, 18.0f);
             g.setColour(juce::Colour(0xff0f141c));
             g.fillRoundedRectangle(mini, 4.0f);
             auto drawTrace = [&](int channel, juce::Colour colour, float gain)
             {
                 juce::Path path;
-                auto* data = owner.generatedBuffer.getReadPointer(juce::jmin(channel, owner.generatedBuffer.getNumChannels() - 1));
-                auto samples = owner.generatedBuffer.getNumSamples();
+                auto* data = tapBuffer.getReadPointer(juce::jmin(channel, tapBuffer.getNumChannels() - 1));
+                auto samples = tapBuffer.getNumSamples();
                 auto step = juce::jmax(1, samples / juce::jmax(1, (int) mini.getWidth()));
                 bool started = false;
                 int plotIndex = 0;
@@ -1330,17 +1467,18 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
             drawTrace(0, juce::Colour(0xff66e0ff), (float) owner.probeSettings.scopeGainA);
             drawTrace(1, juce::Colour(0xffff9ac9), (float) owner.probeSettings.scopeGainB);
         }
-        else if (node.type == "analyzer" && owner.generatedBuffer.getNumSamples() > 32)
+        else if (node.type == "analyzer" && owner.getDisplayBufferForNode(node.id).getNumSamples() > 32)
         {
+            auto& tapBuffer = owner.getDisplayBufferForNode(node.id);
             auto mini = juce::Rectangle<float>(boundsF.getX() + 12.0f, boundsF.getY() + 62.0f, boundsF.getWidth() - 24.0f, 20.0f);
             g.setColour(juce::Colour(0xff0f141c));
             g.fillRoundedRectangle(mini, 4.0f);
-            auto* data = owner.generatedBuffer.getReadPointer(0);
+            auto* data = tapBuffer.getReadPointer(0);
             auto bins = 24;
             for (int bin = 0; bin < bins; ++bin)
             {
-                auto start = bin * owner.generatedBuffer.getNumSamples() / bins;
-                auto end = juce::jmin(owner.generatedBuffer.getNumSamples(), (bin + 1) * owner.generatedBuffer.getNumSamples() / bins);
+                auto start = bin * tapBuffer.getNumSamples() / bins;
+                auto end = juce::jmin(tapBuffer.getNumSamples(), (bin + 1) * tapBuffer.getNumSamples() / bins);
                 float peak = 0.0f;
                 for (int i = start; i < end; ++i)
                     peak = juce::jmax(peak, std::abs(data[i]));
@@ -1351,20 +1489,93 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
             }
         }
 
-        auto drawPort = [&](juce::Point<float> centre, juce::Colour colour, bool filled)
+        for (auto& port : owner.getNodePorts(index))
         {
-            g.setColour(filled ? colour : colour.withAlpha(0.2f));
-            g.fillEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f);
-            g.setColour(juce::Colours::white.withAlpha(0.8f));
-            g.drawEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f, 1.0f);
-        };
+            auto centre = owner.graphToCanvas(port.position);
+            if (port.isExec)
+            {
+                juce::Rectangle<float> box(centre.x - 6.0f, centre.y - 6.0f, 12.0f, 12.0f);
+                g.setColour(juce::Colours::white);
+                g.drawRect(box, 1.5f);
+                juce::Path triangle;
+                if (port.isOutput)
+                {
+                    triangle.addTriangle(box.getRight() + 2.0f, box.getCentreY(),
+                                          box.getRight() + 9.0f, box.getCentreY() - 4.0f,
+                                          box.getRight() + 9.0f, box.getCentreY() + 4.0f);
+                }
+                else
+                {
+                    triangle.addTriangle(box.getX() - 9.0f, box.getCentreY() - 4.0f,
+                                          box.getX() - 9.0f, box.getCentreY() + 4.0f,
+                                          box.getX() - 2.0f, box.getCentreY());
+                }
+                g.setColour(juce::Colours::white);
+                g.fillPath(triangle);
+            }
+            else
+            {
+                auto colour = SignalLabPanel::portValueColour(port.valueType);
+                g.setColour(colour);
+                g.fillEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f);
+                g.setColour(juce::Colours::white.withAlpha(0.8f));
+                g.drawEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f, 1.0f);
 
-        if (node.type != "sine" && node.type != "saw" && node.type != "square" && node.type != "triangle" && node.type != "noise" && node.type != "timeline" && node.type != "value")
-            drawPort(owner.graphToCanvas(owner.getNodeAudioInputPort(index)), juce::Colour(0xff90a4be), false);
-        if (node.type != "output")
-            drawPort(owner.graphToCanvas(owner.getNodeAudioOutputPort(index)), node.accent, true);
-        if (node.type != "mix" && node.type != "scope" && node.type != "analyzer")
-            drawPort(owner.graphToCanvas(owner.getNodeControlInputPort(index)), juce::Colour(0xffffd166), true);
+                if (port.label.isNotEmpty())
+                {
+                    g.setColour(juce::Colour(0xffb9c4d6));
+                    g.setFont(juce::Font(12.0f));
+                    auto justification = port.isOutput ? juce::Justification::centredLeft : juce::Justification::centredRight;
+                    auto labelX = port.isOutput ? centre.x + 9.0f : centre.x - 81.0f;
+                    g.drawText(port.label, juce::Rectangle<int>((int) labelX, (int) centre.y - 8, 72, 16), justification, true);
+                }
+            }
+        }
+
+        if (node.type == "mix")
+        {
+            auto buttonBounds = owner.graphToCanvas(owner.getMixerAddInputButtonBounds(index)).toFloat();
+            g.setColour(juce::Colour(0xff232c3d));
+            g.fillRoundedRectangle(buttonBounds, 4.0f);
+            g.setColour(juce::Colour(0xff5a6b85));
+            g.drawRoundedRectangle(buttonBounds, 4.0f, 1.0f);
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(11.0f));
+            g.drawText("+ Input", buttonBounds, juce::Justification::centred, false);
+        }
+    }
+
+    for (int connectionIndex = 0; connectionIndex < owner.graphConnections.size(); ++connectionIndex)
+    {
+        auto& connection = owner.graphConnections.getReference(connectionIndex);
+        auto colour = connection.isExec ? juce::Colours::white : SignalLabPanel::portValueColour(connection.valueType);
+        auto selected = connectionIndex == owner.selectedConnectionIndex;
+
+        auto path = owner.buildConnectionPath(connectionIndex);
+        g.setColour(colour.withAlpha(selected ? 1.0f : 0.85f));
+        g.strokePath(path, juce::PathStrokeType(selected ? 3.5f : 2.5f));
+
+        for (auto& waypoint : connection.waypoints)
+        {
+            auto centre = owner.graphToCanvas(waypoint).toFloat();
+            g.setColour(juce::Colour(0xff171d28));
+            g.fillEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f);
+            g.setColour(colour);
+            g.drawEllipse(centre.x - 5.0f, centre.y - 5.0f, 10.0f, 10.0f, 2.0f);
+        }
+    }
+
+    if (wireDragging)
+    {
+        auto fromPoint = owner.graphToCanvas(wireDragPort.position);
+        auto toPoint = wireDragCurrentPoint.toFloat();
+        auto colour = wireDragPort.isExec ? juce::Colours::white : SignalLabPanel::portValueColour(wireDragPort.valueType);
+        auto handle = juce::jmax(24.0f, std::abs(toPoint.x - fromPoint.x) * 0.4f);
+        juce::Path path;
+        path.startNewSubPath(fromPoint);
+        path.cubicTo(fromPoint.translated(handle, 0.0f), toPoint.translated(-handle, 0.0f), toPoint);
+        g.setColour(colour.withAlpha(0.65f));
+        g.strokePath(path, juce::PathStrokeType(2.5f));
     }
 }
 
@@ -1375,21 +1586,75 @@ void SignalLabPanel::NodeGraphCanvas::mouseDown(const juce::MouseEvent& event)
     if (event.mods.isRightButtonDown())
     {
         auto hit = owner.findGraphNodeAt(event.getPosition());
-        owner.setSelectedGraphNodeIndex(hit);
         if (hit >= 0)
+        {
+            owner.setSelectedGraphNodeIndex(hit);
             owner.showNodeContextMenu(hit, event.getPosition());
-        else
-            owner.showCanvasActionMenu(event.getPosition());
+            return;
+        }
+
+        int waypointIndex = -1;
+        auto connectionHit = owner.findConnectionAt(event.getPosition(), &waypointIndex);
+        if (connectionHit >= 0)
+        {
+            owner.selectedConnectionIndex = connectionHit;
+            owner.showConnectionContextMenu(connectionHit, waypointIndex, event.getPosition());
+            return;
+        }
+
+        owner.showCanvasActionMenu(event.getPosition());
+        return;
+    }
+
+    auto portHit = owner.findPortAt(event.getPosition());
+    if (portHit.found)
+    {
+        wireDragging = true;
+        wireDragNodeIndex = portHit.nodeIndex;
+        wireDragPort = portHit.port;
+        wireDragCurrentPoint = event.getPosition();
+        owner.setSelectedGraphNodeIndex(-1);
+        owner.selectedConnectionIndex = -1;
+        repaint();
+        return;
+    }
+
+    int waypointIndex = -1;
+    auto connectionHit = owner.findConnectionAt(event.getPosition(), &waypointIndex);
+    if (connectionHit >= 0 && waypointIndex >= 0)
+    {
+        waypointDragConnectionIndex = connectionHit;
+        waypointDragIndex = waypointIndex;
+        owner.selectedConnectionIndex = connectionHit;
+        repaint();
         return;
     }
 
     dragNodeIndex = owner.findGraphNodeAt(event.getPosition());
+    if (dragNodeIndex >= 0 && owner.graphNodes.getReference(dragNodeIndex).type == "mix"
+        && owner.graphToCanvas(owner.getMixerAddInputButtonBounds(dragNodeIndex)).contains(event.getPosition()))
+    {
+        owner.addMixerInput(dragNodeIndex);
+        dragNodeIndex = -1;
+        dragMoved = true;
+        repaint();
+        return;
+    }
+
     dragMoved = false;
     owner.setSelectedGraphNodeIndex(dragNodeIndex);
     if (dragNodeIndex >= 0)
+    {
+        owner.selectedConnectionIndex = -1;
         dragOffset = event.getPosition() - owner.graphToCanvas(owner.getGraphNodeBounds(dragNodeIndex)).getPosition();
+    }
+    else if (connectionHit >= 0)
+    {
+        owner.selectedConnectionIndex = connectionHit;
+    }
     else
     {
+        owner.selectedConnectionIndex = -1;
         panning = true;
         panAnchor = event.getScreenPosition().roundToInt();
         viewportAnchor = { owner.graphViewport.getViewPositionX(), owner.graphViewport.getViewPositionY() };
@@ -1399,6 +1664,25 @@ void SignalLabPanel::NodeGraphCanvas::mouseDown(const juce::MouseEvent& event)
 
 void SignalLabPanel::NodeGraphCanvas::mouseDrag(const juce::MouseEvent& event)
 {
+    if (wireDragging)
+    {
+        wireDragCurrentPoint = event.getPosition();
+        repaint();
+        return;
+    }
+
+    if (waypointDragConnectionIndex >= 0)
+    {
+        if (waypointDragConnectionIndex < owner.graphConnections.size())
+        {
+            auto& connection = owner.graphConnections.getReference(waypointDragConnectionIndex);
+            if (waypointDragIndex >= 0 && waypointDragIndex < connection.waypoints.size())
+                connection.waypoints.getReference(waypointDragIndex) = owner.canvasToGraph(event.getPosition());
+        }
+        repaint();
+        return;
+    }
+
     if (panning)
     {
         auto delta = event.getScreenPosition().roundToInt() - panAnchor;
@@ -1426,6 +1710,22 @@ void SignalLabPanel::NodeGraphCanvas::mouseDrag(const juce::MouseEvent& event)
 
 void SignalLabPanel::NodeGraphCanvas::mouseUp(const juce::MouseEvent& event)
 {
+    if (wireDragging)
+    {
+        wireDragging = false;
+        owner.tryCompleteConnection(wireDragNodeIndex, wireDragPort, event.getPosition());
+        wireDragNodeIndex = -1;
+        repaint();
+        return;
+    }
+
+    if (waypointDragConnectionIndex >= 0)
+    {
+        waypointDragConnectionIndex = -1;
+        waypointDragIndex = -1;
+        return;
+    }
+
     if (panning)
     {
         panning = false;
@@ -1472,7 +1772,10 @@ bool SignalLabPanel::NodeGraphCanvas::keyPressed(const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
     {
-        owner.removeSelectedGraphNode();
+        if (owner.selectedConnectionIndex >= 0)
+            owner.removeConnection(owner.selectedConnectionIndex);
+        else
+            owner.removeSelectedGraphNode();
         return true;
     }
 
@@ -1493,16 +1796,9 @@ SignalLabPanel::FloatingWindow::FloatingWindow(SignalLabPanel& ownerRef, Kind ki
 
 SignalLabPanel::NodeToolboxPane::NodeToolboxPane()
 {
-    titleLabel.setText("Variables", juce::dontSendNotification);
-    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    titleLabel.setFont(juce::Font(16.0f).boldened());
-    addAndMakeVisible(titleLabel);
-    addVariableButton.onClick = [this]
-    {
-        if (onAddVariableRequested)
-            onAddVariableRequested();
-    };
-    addAndMakeVisible(addVariableButton);
+    // Title and Add button live outside the pane (SignalLabPanel's fixed
+    // "Variables" header + addLocalControlButton) so they stay put while
+    // this pane's row list scrolls beneath them.
 }
 
 void SignalLabPanel::NodeToolboxPane::VariableButton::mouseDown(const juce::MouseEvent& event)
@@ -1547,15 +1843,19 @@ void SignalLabPanel::NodeToolboxPane::paint(juce::Graphics& g)
 void SignalLabPanel::NodeToolboxPane::resized()
 {
     auto area = getLocalBounds().reduced(10);
-    titleLabel.setBounds(area.removeFromTop(26));
-    area.removeFromTop(8);
-    addVariableButton.setBounds(area.removeFromTop(28));
-    area.removeFromTop(10);
-    for (auto* button : variableButtons)
+    for (int index = 0; index < variableButtons.size(); ++index)
     {
-        button->setBounds(area.removeFromTop(42));
+        auto row = area.removeFromTop(42);
+        removeButtons[index]->setBounds(row.removeFromRight(28));
+        row.removeFromRight(6);
+        variableButtons[index]->setBounds(row);
         area.removeFromTop(6);
     }
+}
+
+int SignalLabPanel::NodeToolboxPane::getRequiredHeight() const
+{
+    return 20 + localVariables.size() * (42 + 6);
 }
 
 void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalControlVariable>& variables)
@@ -1565,12 +1865,15 @@ void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalContro
     {
         auto* button = variableButtons.add(new VariableButton({}));
         addAndMakeVisible(button);
+        auto* removeButton = removeButtons.add(new juce::TextButton("x"));
+        addAndMakeVisible(removeButton);
     }
 
     for (int index = 0; index < variableButtons.size(); ++index)
     {
         auto visible = index < localVariables.size();
         variableButtons[index]->setVisible(visible);
+        removeButtons[index]->setVisible(visible);
         if (! visible)
             continue;
 
@@ -1582,6 +1885,11 @@ void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalContro
         {
             if (onVariableSelected)
                 onVariableSelected(variableId);
+        };
+        removeButtons[index]->onClick = [this, variableId = variable.id]
+        {
+            if (onVariableRemoveRequested)
+                onVariableRemoveRequested(variableId);
         };
         variableButtons[index]->onDragStarted = [this](const juce::String& variableId, juce::Point<int> screenPoint)
         {
@@ -1600,11 +1908,13 @@ void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalContro
         };
     }
 
+    setSize(getWidth(), getRequiredHeight());
     resized();
 }
 
 SignalLabPanel::NodeSearchPanel::NodeSearchPanel()
 {
+    searchEditor.setFont(juce::Font(11.0f));
     searchEditor.setTextToShowWhenEmpty("Search nodes...", juce::Colour(0xff72839b));
     searchEditor.onTextChange = [this] { refreshResults(); };
     addAndMakeVisible(searchEditor);
@@ -1629,6 +1939,7 @@ void SignalLabPanel::NodeSearchPanel::refreshResults()
     while (resultButtons.size() < visibleEntries.size())
     {
         auto* button = resultButtons.add(new juce::TextButton());
+        button->setLookAndFeel(&compactLookAndFeel);
         addAndMakeVisible(button);
     }
 
@@ -1645,8 +1956,8 @@ void SignalLabPanel::NodeSearchPanel::refreshResults()
         {
             if (onEntryChosen)
                 onEntryChosen(entry.type, entry.payload);
-            if (auto* callout = findParentComponentOfClass<juce::CallOutBox>())
-                callout->dismiss();
+            if (onDismissRequested)
+                onDismissRequested();
         };
     }
 
@@ -1660,15 +1971,15 @@ void SignalLabPanel::NodeSearchPanel::paint(juce::Graphics& g)
 
 void SignalLabPanel::NodeSearchPanel::resized()
 {
-    auto area = getLocalBounds().reduced(10);
-    searchEditor.setBounds(area.removeFromTop(28));
-    area.removeFromTop(8);
+    auto area = getLocalBounds().reduced(8);
+    searchEditor.setBounds(area.removeFromTop(22));
+    area.removeFromTop(6);
     for (auto* button : resultButtons)
     {
         if (! button->isVisible())
             continue;
-        button->setBounds(area.removeFromTop(28));
-        area.removeFromTop(4);
+        button->setBounds(area.removeFromTop(20));
+        area.removeFromTop(2);
     }
 }
 
@@ -1744,6 +2055,9 @@ SignalLabPanel::SignalLabPanel()
     };
     addAndMakeVisible(signalMenuButton);
 
+    compileButton.onClick = [this] { compileGraph(); };
+    addAndMakeVisible(compileButton);
+
     playButton.onClick = [this] { triggerTransportPlay(); };
     addAndMakeVisible(playButton);
 
@@ -1765,7 +2079,12 @@ SignalLabPanel::SignalLabPanel()
     toolboxPane.onPlaceVariableRequested = [this](const juce::String& variableId)
     {
         auto dropPoint = juce::Point<int>(220, 80 + graphNodes.size() * 18);
-        addGraphNode("value", dropPoint, variableId);
+        bool isAutomated = false;
+        for (auto& variable : localControls)
+            if (variable.id == variableId)
+                isAutomated = variable.exposedToAutomation;
+        auto nodeType = (isAutomated && ! hasSetterNodeForVariable(variableId)) ? "valueSet" : "valueGet";
+        addGraphNode(nodeType, dropPoint, variableId);
     };
     toolboxPane.onVariableSelected = [this](const juce::String& variableId)
     {
@@ -1774,10 +2093,32 @@ SignalLabPanel::SignalLabPanel()
                 selectedLocalControlIndex = index;
         refreshSelectedVariableEditor();
     };
+    toolboxPane.onVariableRemoveRequested = [this](const juce::String& variableId)
+    {
+        captureUndoCheckpoint("Remove graph variable");
+        for (int index = 0; index < localControls.size(); ++index)
+        {
+            if (localControls.getReference(index).id == variableId)
+            {
+                localControls.remove(index);
+                break;
+            }
+        }
+        if (selectedLocalControlIndex >= localControls.size())
+            selectedLocalControlIndex = localControls.size() - 1;
+        rebuildLocalControlChrome();
+        refreshVariablePanel();
+        nodeGraphCanvas.repaint();
+    };
     variablesViewport.setViewedComponent(&toolboxPane, false);
     variablesViewport.setScrollBarsShown(true, false);
     variablesViewport.setScrollBarThickness(10);
     addAndMakeVisible(variablesViewport);
+
+    variableDetailsViewport.setViewedComponent(&variableDetailsContent, false);
+    variableDetailsViewport.setScrollBarsShown(true, false);
+    variableDetailsViewport.setScrollBarThickness(10);
+    addAndMakeVisible(variableDetailsViewport);
     nodeGraphCanvas.setWantsKeyboardFocus(true);
     graphViewport.setViewedComponent(&nodeGraphCanvas, false);
     graphViewport.setScrollBarsShown(false, false);
@@ -1839,6 +2180,31 @@ SignalLabPanel::SignalLabPanel()
     };
     addAndMakeVisible(nameEditor);
 
+    descriptionLabel.setText("Description", juce::dontSendNotification);
+    descriptionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(descriptionLabel);
+
+    descriptionEditor.setMultiLine(true, true);
+    descriptionEditor.setReturnKeyStartsNewLine(true);
+    descriptionEditor.setText(recipe.description, juce::dontSendNotification);
+    descriptionEditor.onTextChange = [this]
+    {
+        if (suppressCallbacks)
+            return;
+
+        if (! descriptionEditUndoCaptured)
+        {
+            captureUndoCheckpoint("Edit signal description");
+            descriptionEditUndoCaptured = true;
+        }
+        recipe.description = descriptionEditor.getText();
+    };
+    descriptionEditor.onFocusLost = [this]
+    {
+        descriptionEditUndoCaptured = false;
+    };
+    addAndMakeVisible(descriptionEditor);
+
     propertiesHeaderLabel.setText("Properties", juce::dontSendNotification);
     propertiesHeaderLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     propertiesHeaderLabel.setFont(juce::Font(18.0f).boldened());
@@ -1857,8 +2223,11 @@ SignalLabPanel::SignalLabPanel()
     addAndMakeVisible(selectedVariableSectionLabel);
 
     addAndMakeVisible(signalPropertiesPanel);
+    signalPropertiesPanel.toBack();
     addAndMakeVisible(variablesPanel);
+    variablesPanel.toBack();
     addAndMakeVisible(variableDetailsPanel);
+    variableDetailsPanel.toBack();
 
     signalMetaLabel.setColour(juce::Label::textColourId, juce::Colour(0xff9aafc8));
     signalMetaLabel.setJustificationType(juce::Justification::topLeft);
@@ -1866,8 +2235,8 @@ SignalLabPanel::SignalLabPanel()
 
     variableNameLabel.setText("Name", juce::dontSendNotification);
     variableNameLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableNameLabel);
-    addAndMakeVisible(variableNameEditor);
+    variableDetailsContent.addAndMakeVisible(variableNameLabel);
+    variableDetailsContent.addAndMakeVisible(variableNameEditor);
     variableNameEditor.onTextChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1877,13 +2246,26 @@ SignalLabPanel::SignalLabPanel()
         nodeGraphCanvas.repaint();
     };
 
+    variableDescriptionLabel.setText("Description", juce::dontSendNotification);
+    variableDescriptionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    variableDetailsContent.addAndMakeVisible(variableDescriptionLabel);
+    variableDescriptionEditor.setMultiLine(true, true);
+    variableDescriptionEditor.setReturnKeyStartsNewLine(true);
+    variableDetailsContent.addAndMakeVisible(variableDescriptionEditor);
+    variableDescriptionEditor.onTextChange = [this]
+    {
+        if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
+            return;
+        localControls.getReference(selectedLocalControlIndex).description = variableDescriptionEditor.getText();
+    };
+
     variableTypeLabel.setText("Type", juce::dontSendNotification);
     variableTypeLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableTypeLabel);
+    variableDetailsContent.addAndMakeVisible(variableTypeLabel);
     variableTypeSelector.addItem("Float", 1);
     variableTypeSelector.addItem("Int", 2);
     variableTypeSelector.addItem("Bool", 3);
-    addAndMakeVisible(variableTypeSelector);
+    variableDetailsContent.addAndMakeVisible(variableTypeSelector);
     variableTypeSelector.onChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1894,10 +2276,10 @@ SignalLabPanel::SignalLabPanel()
 
     variableAccessLabel.setText("Access", juce::dontSendNotification);
     variableAccessLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableAccessLabel);
+    variableDetailsContent.addAndMakeVisible(variableAccessLabel);
     variableAccessSelector.addItem("Private", 1);
     variableAccessSelector.addItem("Public", 2);
-    addAndMakeVisible(variableAccessSelector);
+    variableDetailsContent.addAndMakeVisible(variableAccessSelector);
     variableAccessSelector.onChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1907,8 +2289,8 @@ SignalLabPanel::SignalLabPanel()
 
     variableValueLabel.setText("Value", juce::dontSendNotification);
     variableValueLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(variableValueLabel);
-    addAndMakeVisible(variableValueEditor);
+    variableDetailsContent.addAndMakeVisible(variableValueLabel);
+    variableDetailsContent.addAndMakeVisible(variableValueEditor);
     variableValueEditor.onTextChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -1925,7 +2307,7 @@ SignalLabPanel::SignalLabPanel()
         regenerateSignal();
     };
 
-    addAndMakeVisible(variableAutomationToggle);
+    variableDetailsContent.addAndMakeVisible(variableAutomationToggle);
     variableAutomationToggle.onClick = [this]
     {
         if (selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
@@ -2064,7 +2446,14 @@ SignalLabPanel::SignalLabPanel()
     wireSliderUndo(triangleSlider, "Adjust triangle level");
     wireSliderUndo(noiseSlider, "Adjust noise level");
 
-    frequencySlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.baseFrequencyHz = (float) frequencySlider.getValue(); regenerateSignal(); } };
+    frequencySlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).oscillatorFrequencyHz = (float) frequencySlider.getValue();
+        regenerateSignal();
+    };
     durationSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.durationSeconds = durationSlider.getValue(); regenerateSignal(); } };
     pitchSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.pitchSweepSemitones = (float) pitchSlider.getValue(); regenerateSignal(); } };
     filterModeSelector.onChange = [this]
@@ -2073,23 +2462,27 @@ SignalLabPanel::SignalLabPanel()
             return;
 
         captureUndoCheckpoint("Change filter type");
-        recipe.filterMode = filterModeSelector.getSelectedId() == 2 ? "bandpass"
-                          : filterModeSelector.getSelectedId() == 3 ? "highpass"
-                                                                    : "lowpass";
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterMode = filterModeSelector.getSelectedId() == 2 ? "bandpass"
+                                                                        : filterModeSelector.getSelectedId() == 3 ? "highpass"
+                                                                                                                   : "lowpass";
         regenerateSignal();
     };
     envelopeCurveSelector.onChange = [this]
     {
         if (suppressCallbacks)
             return;
+        if (selectedGraphNodeIndex < 0 || selectedGraphNodeIndex >= graphNodes.size())
+            return;
 
         captureUndoCheckpoint("Change envelope curve");
-        recipe.envelopeCurveMode = envelopeCurveSelector.getSelectedId() == 3 ? "stepped"
-                                  : envelopeCurveSelector.getSelectedId() == 1 ? "linear"
-                                                                               : "smooth";
-        ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
-        for (auto& point : recipe.envelopePoints)
-            point.curve = recipe.envelopeCurveMode;
+        auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
+        selectedNode.envelopeCurveMode = envelopeCurveSelector.getSelectedId() == 3 ? "stepped"
+                                        : envelopeCurveSelector.getSelectedId() == 1 ? "linear"
+                                                                                     : "smooth";
+        ensureEnvelopePoints(selectedNode.envelopePoints, selectedNode.envelopeCurveMode);
+        for (auto& point : selectedNode.envelopePoints)
+            point.curve = selectedNode.envelopeCurveMode;
         regenerateSignal();
     };
     automationCurveSelector.onChange = [this]
@@ -2109,19 +2502,51 @@ SignalLabPanel::SignalLabPanel()
         }
         regenerateSignal();
     };
-    filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
-    filterResonanceSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterResonance = (float) filterResonanceSlider.getValue(); regenerateSignal(); } };
-    filterEnvelopeSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue(); regenerateSignal(); } };
+    filterCutoffSlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterCutoffHz = (float) filterCutoffSlider.getValue();
+        regenerateSignal();
+    };
+    filterResonanceSlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterResonance = (float) filterResonanceSlider.getValue();
+        regenerateSignal();
+    };
+    filterEnvelopeSlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue();
+        regenerateSignal();
+    };
     macroHardnessSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroHardness = (float) macroHardnessSlider.getValue(); regenerateSignal(); } };
     macroWeightSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroWeight = (float) macroWeightSlider.getValue(); regenerateSignal(); } };
     macroAirSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroAir = (float) macroAirSlider.getValue(); regenerateSignal(); } };
     macroGritSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroGrit = (float) macroGritSlider.getValue(); regenerateSignal(); } };
     macroSizeSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroSize = (float) macroSizeSlider.getValue(); regenerateSignal(); } };
-    sineSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.sineLevel = (float) sineSlider.getValue(); regenerateSignal(); } };
-    sawSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.sawLevel = (float) sawSlider.getValue(); regenerateSignal(); } };
-    squareSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.squareLevel = (float) squareSlider.getValue(); regenerateSignal(); } };
-    triangleSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.triangleLevel = (float) triangleSlider.getValue(); regenerateSignal(); } };
-    noiseSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.noiseLevel = (float) noiseSlider.getValue(); regenerateSignal(); } };
+    auto bindOscillatorLevelSlider = [this](juce::Slider& slider)
+    {
+        slider.onValueChange = [this, &slider]
+        {
+            if (suppressCallbacks) return;
+            noteInteraction();
+            if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+                graphNodes.getReference(selectedGraphNodeIndex).oscillatorLevel = (float) slider.getValue();
+            regenerateSignal();
+        };
+    };
+    bindOscillatorLevelSlider(sineSlider);
+    bindOscillatorLevelSlider(sawSlider);
+    bindOscillatorLevelSlider(squareSlider);
+    bindOscillatorLevelSlider(triangleSlider);
+    bindOscillatorLevelSlider(noiseSlider);
     probeControlASlider.onValueChange = [this]
     {
         if (suppressCallbacks) return;
@@ -2167,13 +2592,21 @@ SignalLabPanel::SignalLabPanel()
     envelopeEditor.onEnvelopeChanged = [this](const juce::Array<cw::PatchAutomationPoint>& points)
     {
         noteInteraction();
-        recipe.envelopePoints = points;
-        ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+        {
+            auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
+            if (selectedNode.type == "envelope")
+            {
+                selectedNode.envelopePoints = points;
+                ensureEnvelopePoints(selectedNode.envelopePoints, selectedNode.envelopeCurveMode);
+            }
+        }
         regenerateSignal();
     };
 
     previewButton.onClick = [this]
     {
+        ensureAudioRendered();
         if (onPreviewRequested && generatedBuffer.getNumSamples() > 0)
             onPreviewRequested(generatedBuffer, recipe.sampleRate, recipe.name);
     };
@@ -2182,6 +2615,7 @@ SignalLabPanel::SignalLabPanel()
 
     renderButton.onClick = [this]
     {
+        ensureAudioRendered();
         if (onRenderRequested && generatedBuffer.getNumSamples() > 0)
             onRenderRequested(generatedBuffer, recipe.sampleRate, recipe.name);
     };
@@ -2277,44 +2711,71 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
     for (auto& node : graphNodes)
         priorPositions.set(node.id, node.position);
 
+    // Get/Set variable nodes are explicitly placed by the user (drag from
+    // the Variables panel, or the right-click menu) -- not auto-generated
+    // per variable the way the old "value" node used to be. This rebuild
+    // still clears and re-derives everything else from the recipe/flags,
+    // so preserve any already-placed getter/setter nodes verbatim across
+    // it, dropping only ones whose variable was deleted. Oscillator/noise
+    // source nodes are preserved the same way -- each instance owns its own
+    // level/frequency now (GraphNodeModel::oscillatorLevel/oscillatorFrequencyHz),
+    // so there's nothing to re-derive them from; the old single-node-per-type
+    // recipe.XLevel scalars are only used as a one-shot seed by
+    // seedOscillatorNodesFromRecipeLevels() (templates, patch load), never
+    // read here.
+    juce::Array<GraphNodeModel> preservedValueNodes;
+    juce::Array<GraphNodeModel> preservedOscillatorNodes;
+    juce::Array<GraphNodeModel> preservedFilterEnvelopeNodes;
+    juce::Array<GraphNodeModel> preservedMidiControlNodes;
+    juce::Array<float> preservedMixerInputVolumes { 1.0f, 1.0f };
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "valueGet" || node.type == "valueSet")
+            preservedValueNodes.add(node);
+        else if (node.type == "mix")
+            preservedMixerInputVolumes = node.mixerInputVolumes;
+        else if (node.type == "sine" || node.type == "saw" || node.type == "square"
+                 || node.type == "triangle" || node.type == "noise")
+            preservedOscillatorNodes.add(node);
+        else if (node.type == "filter" || node.type == "envelope")
+            preservedFilterEnvelopeNodes.add(node);
+        else if (node.type == "midiFader" || node.type == "midiButton")
+            preservedMidiControlNodes.add(node);
+    }
+
     graphNodes.clear();
 
-    int sourceY = 36;
-    auto addSourceIfActive = [&](const juce::String& type, float level)
-    {
-        if (level <= 0.0f)
-            return;
-        auto nodeId = type + "Source";
-        addNode(type, priorPositions.contains(nodeId) ? priorPositions[nodeId] : juce::Point<int>(36, sourceY), false, false, nodeId);
-        sourceY += 110;
-    };
+    for (auto& preserved : preservedOscillatorNodes)
+        graphNodes.add(preserved);
 
-    addSourceIfActive("sine", recipe.sineLevel);
-    addSourceIfActive("saw", recipe.sawLevel);
-    addSourceIfActive("square", recipe.squareLevel);
-    addSourceIfActive("triangle", recipe.triangleLevel);
-    addSourceIfActive("noise", recipe.noiseLevel);
+    // Filter/Envelope are real independent instances now too (multiple can
+    // exist, each with its own settings) -- preserved verbatim like
+    // oscillators, not re-derived from the old filterNodeEnabled/
+    // envelopeNodeEnabled singleton flags.
+    for (auto& preserved : preservedFilterEnvelopeNodes)
+        graphNodes.add(preserved);
 
-    int valueY = 36;
-    for (auto& variable : localControls)
+    // MIDI Control nodes carry a learned hardware binding that took real
+    // user effort to set up -- preserved verbatim like everything else
+    // above, never re-derived from anything.
+    for (auto& preserved : preservedMidiControlNodes)
+        graphNodes.add(preserved);
+
+    for (auto& preserved : preservedValueNodes)
     {
-        auto nodeId = "value:" + variable.id;
-        addNode("value",
-                priorPositions.contains(nodeId) ? priorPositions[nodeId] : juce::Point<int>(260, valueY),
-                false,
-                false,
-                nodeId,
-                variable.name,
-                variable.id);
-        valueY += 110;
+        bool variableStillExists = false;
+        for (auto& variable : localControls)
+            if (variable.id == preserved.targetParameter)
+                variableStillExists = true;
+        if (variableStillExists)
+            graphNodes.add(preserved);
     }
 
     if (mixNodeEnabled)
+    {
         addNode("mix", priorPositions.contains("mix") ? priorPositions["mix"] : juce::Point<int>(470, 180), false, false, "mix");
-    if (filterNodeEnabled)
-        addNode("filter", priorPositions.contains("filter") ? priorPositions["filter"] : juce::Point<int>(680, 180), false, false, "filter");
-    if (envelopeNodeEnabled)
-        addNode("envelope", priorPositions.contains("envelope") ? priorPositions["envelope"] : juce::Point<int>(890, 180), false, false, "envelope");
+        graphNodes.getReference(graphNodes.size() - 1).mixerInputVolumes = preservedMixerInputVolumes;
+    }
     addNode("output", priorPositions.contains("output") ? priorPositions["output"] : juce::Point<int>(1100, 180), false, true, "output");
     if (probeSettings.scopeEnabled)
         addNode("scope", priorPositions.contains("scope") ? priorPositions["scope"] : juce::Point<int>(890, 36), false, false, "scope");
@@ -2323,13 +2784,68 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
 
     if (selectedGraphNodeIndex >= graphNodes.size())
         selectedGraphNodeIndex = graphNodes.isEmpty() ? -1 : 0;
+
+    auto nodeStillExists = [this](const juce::String& nodeId)
+    {
+        for (auto& node : graphNodes)
+            if (node.id == nodeId)
+                return true;
+        return false;
+    };
+    for (int index = graphConnections.size() - 1; index >= 0; --index)
+    {
+        auto& connection = graphConnections.getReference(index);
+        if (! nodeStillExists(connection.fromNodeId) || ! nodeStillExists(connection.toNodeId))
+            graphConnections.remove(index);
+    }
+    if (selectedConnectionIndex >= graphConnections.size())
+        selectedConnectionIndex = -1;
+}
+
+// One-shot conversion from the legacy single-instance recipe.XLevel scalars
+// into a fresh set of oscillator graph nodes -- used only by operations that
+// replace the whole sound wholesale (applying an AI template, loading a
+// saved patch), where those scalars are the only source of truth available.
+// Regular editing never calls this; rebuildNodeGraphFromRecipe() preserves
+// whatever oscillator nodes already exist instead.
+void SignalLabPanel::seedOscillatorNodesFromRecipeLevels()
+{
+    for (int index = graphNodes.size() - 1; index >= 0; --index)
+    {
+        auto& node = graphNodes.getReference(index);
+        if (node.type == "sine" || node.type == "saw" || node.type == "square"
+            || node.type == "triangle" || node.type == "noise")
+            graphNodes.remove(index);
+    }
+
+    int sourceY = 36;
+    auto addSourceIfActive = [&](const juce::String& type, float level)
+    {
+        if (level <= 0.0f)
+            return;
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = { 36, sourceY };
+        node.accent = graphNodeAccent(type);
+        node.oscillatorLevel = level;
+        node.oscillatorFrequencyHz = recipe.baseFrequencyHz;
+        graphNodes.add(node);
+        sourceY += 110;
+    };
+
+    addSourceIfActive("sine", recipe.sineLevel);
+    addSourceIfActive("saw", recipe.sawLevel);
+    addSourceIfActive("square", recipe.squareLevel);
+    addSourceIfActive("triangle", recipe.triangleLevel);
+    addSourceIfActive("noise", recipe.noiseLevel);
 }
 
 void SignalLabPanel::updateInspectorForSelection()
 {
     auto hideAll = [this]()
     {
-        nameLabel.setVisible(false); nameEditor.setVisible(false);
         frequencyLabel.setVisible(false); frequencySlider.setVisible(false);
         durationLabel.setVisible(false); durationSlider.setVisible(false);
         pitchLabel.setVisible(false); pitchSlider.setVisible(false);
@@ -2374,32 +2890,69 @@ void SignalLabPanel::updateInspectorForSelection()
 
     if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
     {
-        inspectorBodyLabel.setText("Source node. Set the shared pitch, then balance this source in the mix.", juce::dontSendNotification);
+        inspectorBodyLabel.setText("Source node. Each instance has its own frequency and level.", juce::dontSendNotification);
+        auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
+
+        suppressCallbacks = true;
         frequencyLabel.setVisible(true); frequencySlider.setVisible(true);
-        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); }
-        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); }
-        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); }
-        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); }
-        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); }
+        frequencySlider.setValue(selectedNode.oscillatorFrequencyHz, juce::dontSendNotification);
+        frequencySlider.setEnabled(true); // no port for frequency yet -- always manual
+
+        double wiredLevel = 0.0;
+        auto isLevelWired = findWiredParameterValue(selectedNode.id, "param:" + type + "Level", wiredLevel);
+        auto levelToShow = isLevelWired ? (float) wiredLevel : selectedNode.oscillatorLevel;
+        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); sineSlider.setValue(levelToShow, juce::dontSendNotification); sineSlider.setEnabled(! isLevelWired); }
+        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); sawSlider.setValue(levelToShow, juce::dontSendNotification); sawSlider.setEnabled(! isLevelWired); }
+        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); squareSlider.setValue(levelToShow, juce::dontSendNotification); squareSlider.setEnabled(! isLevelWired); }
+        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); triangleSlider.setValue(levelToShow, juce::dontSendNotification); triangleSlider.setEnabled(! isLevelWired); }
+        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); noiseSlider.setValue(levelToShow, juce::dontSendNotification); noiseSlider.setEnabled(! isLevelWired); }
+        suppressCallbacks = false;
     }
     else if (type == "filter")
     {
-        inspectorBodyLabel.setText("Tone-shaping stage after the source mixer.", juce::dontSendNotification);
+        inspectorBodyLabel.setText("Tone-shaping stage. Position in the chain now comes from how it's wired, not a fixed slot.", juce::dontSendNotification);
+        auto& filterNode = graphNodes.getReference(selectedGraphNodeIndex);
+        double wiredValue = 0.0;
+
+        suppressCallbacks = true;
         filterModeLabel.setVisible(true); filterModeSelector.setVisible(true);
+        filterModeSelector.setSelectedId(filterNode.filterMode == "bandpass" ? 2 : filterNode.filterMode == "highpass" ? 3 : 1, juce::dontSendNotification);
+
         filterCutoffLabel.setVisible(true); filterCutoffSlider.setVisible(true);
+        auto cutoffWired = findWiredParameterValue(filterNode.id, "param:filterCutoff", wiredValue);
+        filterCutoffSlider.setValue(cutoffWired ? wiredValue : (double) filterNode.filterCutoffHz, juce::dontSendNotification);
+        filterCutoffSlider.setEnabled(! cutoffWired);
+
         filterResonanceLabel.setVisible(true); filterResonanceSlider.setVisible(true);
+        auto resonanceWired = findWiredParameterValue(filterNode.id, "param:filterResonance", wiredValue);
+        filterResonanceSlider.setValue(resonanceWired ? wiredValue : (double) filterNode.filterResonance, juce::dontSendNotification);
+        filterResonanceSlider.setEnabled(! resonanceWired);
+
         filterEnvelopeLabel.setVisible(true); filterEnvelopeSlider.setVisible(true);
+        auto envAmountWired = findWiredParameterValue(filterNode.id, "param:filterEnvelopeAmount", wiredValue);
+        filterEnvelopeSlider.setValue(envAmountWired ? wiredValue : (double) filterNode.filterEnvelopeAmount, juce::dontSendNotification);
+        filterEnvelopeSlider.setEnabled(! envAmountWired);
+        suppressCallbacks = false;
     }
     else if (type == "envelope")
     {
         inspectorBodyLabel.setText("Amplitude contour for the rendered sound. Drag points directly in the envelope view.", juce::dontSendNotification);
+        auto& envelopeNode = graphNodes.getReference(selectedGraphNodeIndex);
+
+        suppressCallbacks = true;
         envelopeCurveLabel.setVisible(true); envelopeCurveSelector.setVisible(true);
+        envelopeCurveSelector.setSelectedId(envelopeNode.envelopeCurveMode == "stepped" ? 3 : envelopeNode.envelopeCurveMode == "linear" ? 1 : 2, juce::dontSendNotification);
+        suppressCallbacks = false;
+
         envelopeEditor.setVisible(true);
+        SignalRecipe envelopeView;
+        envelopeView.envelopeCurveMode = envelopeNode.envelopeCurveMode;
+        envelopeView.envelopePoints = envelopeNode.envelopePoints;
+        envelopeEditor.setRecipe(envelopeView);
     }
     else if (type == "output")
     {
         inspectorBodyLabel.setText("Final sound settings and character macros before preview or render.", juce::dontSendNotification);
-        nameLabel.setVisible(true); nameEditor.setVisible(true);
         durationLabel.setVisible(true); durationSlider.setVisible(true);
         pitchLabel.setVisible(true); pitchSlider.setVisible(true);
         macroHardnessLabel.setVisible(true); macroHardnessSlider.setVisible(true);
@@ -2469,22 +3022,36 @@ void SignalLabPanel::showCanvasActionMenu(juce::Point<int> canvasPosition, bool 
     entries.add({ "Mixer", "mix", {} });
     entries.add({ "Filter", "filter", {} });
     entries.add({ "Envelope", "envelope", {} });
-    entries.add({ "Output", "output", {} });
+    entries.add({ "Sink", "output", {} });
     entries.add({ "Timeline", "timeline", {} });
     entries.add({ "Oscilloscope", "scope", {} });
     entries.add({ "Frequency Analyzer", "analyzer", {} });
+    entries.add({ "Fader Control", "midiFader", {} });
+    entries.add({ "Button Control", "midiButton", {} });
     for (auto& variable : localControls)
-        entries.add({ variable.name + " (Value)", "value", variable.id });
+    {
+        entries.add({ "Get " + variable.name, "valueGet", variable.id });
+        if (! hasSetterNodeForVariable(variable.id))
+            entries.add({ "Set " + variable.name, "valueSet", variable.id });
+    }
 
     auto panel = std::make_unique<NodeSearchPanel>();
     panel->setEntries(entries);
+    panel->setSize(180, juce::jmin(400, 44 + entries.size() * 22));
     panel->onEntryChosen = [this, canvasPosition](const juce::String& type, const juce::String& payload)
     {
         addGraphNode(type, canvasPosition, payload);
     };
 
+    auto* rawPanel = panel.get();
     auto area = nodeGraphCanvas.localAreaToGlobal(juce::Rectangle<int>(canvasPosition.x, canvasPosition.y, 1, 1));
-    juce::CallOutBox::launchAsynchronously(std::move(panel), area, nullptr);
+    auto& callout = juce::CallOutBox::launchAsynchronously(std::move(panel), area, nullptr);
+    auto* calloutPtr = &callout;
+    rawPanel->onDismissRequested = [calloutPtr]
+    {
+        calloutPtr->setVisible(false);
+        calloutPtr->dismiss();
+    };
 }
 
 void SignalLabPanel::showNodeContextMenu(int nodeIndex, juce::Point<int> canvasPosition)
@@ -2539,6 +3106,7 @@ void SignalLabPanel::showSignalMenu()
                            }
                            else if (result == 5)
                            {
+                               ensureAudioRendered();
                                if (onRenderRequested)
                                    onRenderRequested(generatedBuffer, recipe.sampleRate, recipe.name);
                            }
@@ -2565,19 +3133,130 @@ void SignalLabPanel::createNewSignal()
 
 void SignalLabPanel::addGraphNode(const juce::String& type, juce::Point<int> canvasPosition, const juce::String& payload)
 {
-    if (type != "value" && type != "mix" && hasGraphNodeType(type))
+    // Get nodes are explicitly-placed, and multiple instances of the same
+    // variable are allowed (UE4-style: drop a fresh "Get" wherever you need
+    // the value instead of routing one long wire) -- each placement always
+    // creates a new node, never finds-and-repositions an existing one.
+    if (type == "valueGet")
+    {
+        captureUndoCheckpoint("Add Get " + payload);
+        GraphNodeModel node;
+        node.id = "valueGet:" + payload + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = "valueGet";
+        for (auto& variable : localControls)
+            if (variable.id == payload)
+                node.title = "Get " + variable.name;
+        node.targetParameter = payload;
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        return;
+    }
+
+    // Set nodes: only one allowed per variable (the single driven instance).
+    // If one already exists, just reposition/select it rather than adding
+    // a second -- the right-click menu already omits "Set" once one
+    // exists, this is the defensive fallback for any other call path.
+    if (type == "valueSet")
+    {
+        for (int index = 0; index < graphNodes.size(); ++index)
+        {
+            if (graphNodes.getReference(index).type == "valueSet" && graphNodes.getReference(index).targetParameter == payload)
+            {
+                if (canvasPosition != juce::Point<int>())
+                    graphNodes.getReference(index).position = canvasToGraph(canvasPosition);
+                setSelectedGraphNodeIndex(index);
+                return;
+            }
+        }
+
+        captureUndoCheckpoint("Add Set " + payload);
+        GraphNodeModel node;
+        node.id = "valueSet:" + payload;
+        node.type = "valueSet";
+        for (auto& variable : localControls)
+            if (variable.id == payload)
+                node.title = "Set " + variable.name;
+        node.targetParameter = payload;
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        return;
+    }
+
+    // Oscillator/noise sources: each placement always creates a new,
+    // independent instance (same reasoning as Get nodes above) -- each one
+    // owns its own level and frequency, so there's no shared slot to guard
+    // against a duplicate of.
+    if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
+    {
+        captureUndoCheckpoint("Add " + graphNodeTitle(type));
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        node.oscillatorFrequencyHz = recipe.baseFrequencyHz;
+        node.oscillatorLevel = type == "sine" ? 0.65f
+                              : type == "saw" ? 0.20f
+                              : type == "square" ? 0.15f
+                              : type == "triangle" ? 0.20f
+                                                    : 0.10f;
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        regenerateSignal();
+        return;
+    }
+
+    // Filter/Envelope: same reasoning as oscillators -- each placement
+    // creates a new, independent instance with its own settings, so
+    // multiple Filters (or Envelopes) in different chain positions don't
+    // fight over one shared slot.
+    if (type == "filter" || type == "envelope")
+    {
+        captureUndoCheckpoint("Add " + graphNodeTitle(type));
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        if (type == "envelope")
+            node.envelopePoints = makeDefaultEnvelopePoints(node.envelopeCurveMode);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        regenerateSignal();
+        return;
+    }
+
+    // MIDI Control nodes: same reasoning as oscillators/filter/envelope --
+    // you may want several physical controls bound to different parameters,
+    // so each placement is its own independent instance, unlearned until
+    // the user opens it and hits Learn.
+    if (type == "midiFader" || type == "midiButton")
+    {
+        captureUndoCheckpoint("Add " + graphNodeTitle(type));
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        regenerateSignal();
+        return;
+    }
+
+    if (hasGraphNodeType(type) && type != "mix")
         return;
 
     captureUndoCheckpoint("Add " + graphNodeTitle(type));
 
-    if (type == "sine") recipe.sineLevel = juce::jmax(0.25f, recipe.sineLevel);
-    else if (type == "saw") recipe.sawLevel = juce::jmax(0.20f, recipe.sawLevel);
-    else if (type == "square") recipe.squareLevel = juce::jmax(0.15f, recipe.squareLevel);
-    else if (type == "triangle") recipe.triangleLevel = juce::jmax(0.20f, recipe.triangleLevel);
-    else if (type == "noise") recipe.noiseLevel = juce::jmax(0.10f, recipe.noiseLevel);
-    else if (type == "mix") mixNodeEnabled = true;
-    else if (type == "filter") filterNodeEnabled = true;
-    else if (type == "envelope") envelopeNodeEnabled = true;
+    if (type == "mix") mixNodeEnabled = true;
     else if (type == "scope") probeSettings.scopeEnabled = true;
     else if (type == "analyzer") probeSettings.analyzerEnabled = true;
 
@@ -2585,8 +3264,7 @@ void SignalLabPanel::addGraphNode(const juce::String& type, juce::Point<int> can
 
     for (int index = 0; index < graphNodes.size(); ++index)
     {
-        if (graphNodes.getReference(index).type == type
-            && (type != "value" || graphNodes.getReference(index).targetParameter == payload))
+        if (graphNodes.getReference(index).type == type)
         {
             if (canvasPosition != juce::Point<int>())
                 graphNodes.getReference(index).position = canvasToGraph(canvasPosition);
@@ -2607,14 +3285,14 @@ void SignalLabPanel::removeSelectedGraphNode()
 
     captureUndoCheckpoint("Remove " + graphNodeTitle(type));
 
-    if (type == "sine") recipe.sineLevel = 0.0f;
-    else if (type == "saw") recipe.sawLevel = 0.0f;
-    else if (type == "square") recipe.squareLevel = 0.0f;
-    else if (type == "triangle") recipe.triangleLevel = 0.0f;
-    else if (type == "noise") recipe.noiseLevel = 0.0f;
+    // Oscillator/noise nodes are independent instances now (no shared
+    // recipe.XLevel slot to clear) -- rebuildNodeGraphFromRecipe() preserves
+    // whatever's already in graphNodes for these types, so this one has to
+    // be removed from the array directly rather than gated off by a flag.
+    if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise"
+        || type == "filter" || type == "envelope" || type == "midiFader" || type == "midiButton")
+        graphNodes.remove(selectedGraphNodeIndex);
     else if (type == "mix") mixNodeEnabled = false;
-    else if (type == "filter") filterNodeEnabled = false;
-    else if (type == "envelope") envelopeNodeEnabled = false;
     else if (type == "scope") probeSettings.scopeEnabled = false;
     else if (type == "analyzer") probeSettings.analyzerEnabled = false;
 
@@ -2634,7 +3312,52 @@ juce::Rectangle<int> SignalLabPanel::getGraphNodeBounds(int index) const
 {
     if (index < 0 || index >= graphNodes.size())
         return {};
-    return { graphNodes.getReference(index).position.x, graphNodes.getReference(index).position.y, 180, 96 };
+    auto& node = graphNodes.getReference(index);
+    return { node.position.x, node.position.y, 180, getGraphNodeHeight(index) };
+}
+
+int SignalLabPanel::getGraphNodeHeight(int index) const
+{
+    if (index < 0 || index >= graphNodes.size())
+        return 96;
+
+    auto& node = graphNodes.getReference(index);
+
+    // Node body grows to fit however many stacked left-edge parameter ports
+    // it has, plus room for a type-specific inline preview (e.g. the scope
+    // node's live mini-trace, the analyzer's mini spectrum bars). Full
+    // instrument detail still lives in the detachable floating window
+    // opened via double-click -- this inline area is a compact preview only.
+    int leftPortRows = nodeParameterIds(node.type).size();
+    if (node.type == "mix")
+        leftPortRows += node.mixerInputVolumes.size() * 2 + 2; // signal+weight pair per input, plus room for the "+ Input" button
+
+    bool hasSignalIn = node.type != "sine" && node.type != "saw" && node.type != "square"
+                     && node.type != "triangle" && node.type != "noise" && node.type != "timeline"
+                     && node.type != "value" && node.type != "valueGet" && node.type != "valueSet"
+                     && node.type != "mix" && node.type != "midiFader" && node.type != "midiButton";
+    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet"
+                      && node.type != "midiFader" && node.type != "midiButton";
+    if (hasSignalIn || hasSignalOut)
+        leftPortRows += 1; // signal ports now get their own row under the header
+
+    int height = 96;
+    if (leftPortRows > 2)
+        height += (leftPortRows - 2) * 22;
+    if (node.type == "scope" || node.type == "analyzer")
+        height = juce::jmax(height, 118);
+
+    return height;
+}
+
+juce::Rectangle<int> SignalLabPanel::getMixerAddInputButtonBounds(int index) const
+{
+    if (index < 0 || index >= graphNodes.size())
+        return {};
+    auto bounds = getGraphNodeBounds(index);
+    auto& node = graphNodes.getReference(index);
+    auto y = bounds.getY() + 30 + node.mixerInputVolumes.size() * 44;
+    return { bounds.getX() + 10, y, bounds.getWidth() - 20, 20 };
 }
 
 void SignalLabPanel::setSelectedGraphNodeIndex(int index)
@@ -2653,6 +3376,72 @@ bool SignalLabPanel::hasGraphNodeType(const juce::String& type) const
         if (node.type == type)
             return true;
     return false;
+}
+
+bool SignalLabPanel::hasSetterNodeForVariable(const juce::String& variableId) const
+{
+    for (auto& node : graphNodes)
+        if (node.type == "valueSet" && node.targetParameter == variableId)
+            return true;
+    return false;
+}
+
+// Value-port wiring (a Get-variable node's "valueOut" wired into a
+// parameter port -- Mixer Weight, Filter Cutoff/Resonance/EnvAmt,
+// oscillator Level) was previously decorative: the wire could be drawn but
+// nothing downstream ever read it, so the manual knob value always won.
+// This resolves whatever's actually wired in, if anything, so callers can
+// use it in place of the manual value and disable the manual control.
+bool SignalLabPanel::findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const
+{
+    for (auto& connection : graphConnections)
+    {
+        if (connection.isExec || connection.toNodeId != nodeId || connection.toPortId != portId)
+            continue;
+
+        for (auto& sourceNode : graphNodes)
+        {
+            if (sourceNode.id != connection.fromNodeId)
+                continue;
+
+            if (sourceNode.type == "valueGet")
+            {
+                for (auto& variable : localControls)
+                {
+                    if (variable.id != sourceNode.targetParameter)
+                        continue;
+                    outValue = variable.value;
+                    return true;
+                }
+            }
+            else if (sourceNode.type == "midiFader" || sourceNode.type == "midiButton")
+            {
+                // A MIDI Control node IS a value source, same role as a
+                // Get-variable node above -- just driven by hardware instead
+                // of a manually-set variable. This one function change is
+                // what makes MIDI Control nodes work everywhere a parameter
+                // port already resolves wired values (oscillator level,
+                // filter cutoff/resonance, mixer weight) with no other
+                // changes needed at any of those call sites.
+                outValue = sourceNode.midiLiveValue;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void SignalLabPanel::addMixerInput(int nodeIndex)
+{
+    if (nodeIndex < 0 || nodeIndex >= graphNodes.size())
+        return;
+    auto& node = graphNodes.getReference(nodeIndex);
+    if (node.type != "mix")
+        return;
+
+    captureUndoCheckpoint("Add mixer input");
+    node.mixerInputVolumes.add(1.0f);
+    updateCanvasWorkspace();
 }
 
 void SignalLabPanel::openNodeEditorForSelection()
@@ -2678,11 +3467,26 @@ void SignalLabPanel::openNodeEditorForSelection()
 
     if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle" || node.type == "noise")
     {
-        auto& freq = content->addSliderRow("Base Frequency", 30.0, 2400.0, 1.0);
-        freq.setValue(recipe.baseFrequencyHz, juce::dontSendNotification);
-        freq.onValueChange = [this, &freq]
+        // Each oscillator instance owns its own frequency/level now (that's
+        // the whole point -- two Sine nodes must not edit the same value),
+        // so look the node up by id at callback time rather than binding to
+        // the shared recipe or a captured index that could go stale if
+        // nodes are added/removed while this window stays open.
+        auto nodeId = node.id;
+        auto findNode = [this, nodeId]() -> GraphNodeModel*
         {
-            recipe.baseFrequencyHz = (float) freq.getValue();
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        auto& freq = content->addSliderRow("Frequency", 30.0, 2400.0, 1.0);
+        freq.setValue(node.oscillatorFrequencyHz, juce::dontSendNotification);
+        freq.onValueChange = [this, &freq, findNode]
+        {
+            if (auto* target = findNode())
+                target->oscillatorFrequencyHz = (float) freq.getValue();
             regenerateSignal();
         };
 
@@ -2695,43 +3499,229 @@ void SignalLabPanel::openNodeEditorForSelection()
 
         if (level != nullptr)
         {
-            if (node.type == "sine") level->setValue(recipe.sineLevel, juce::dontSendNotification);
-            else if (node.type == "saw") level->setValue(recipe.sawLevel, juce::dontSendNotification);
-            else if (node.type == "square") level->setValue(recipe.squareLevel, juce::dontSendNotification);
-            else if (node.type == "triangle") level->setValue(recipe.triangleLevel, juce::dontSendNotification);
-            else if (node.type == "noise") level->setValue(recipe.noiseLevel, juce::dontSendNotification);
-
-            level->onValueChange = [this, level, type = node.type]
+            double wiredLevel = 0.0;
+            if (findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel))
             {
-                auto value = (float) level->getValue();
-                if (type == "sine") recipe.sineLevel = value;
-                else if (type == "saw") recipe.sawLevel = value;
-                else if (type == "square") recipe.squareLevel = value;
-                else if (type == "triangle") recipe.triangleLevel = value;
-                else if (type == "noise") recipe.noiseLevel = value;
-                regenerateSignal();
-            };
+                level->setValue(wiredLevel, juce::dontSendNotification);
+                level->setEnabled(false);
+            }
+            else
+            {
+                level->setValue(node.oscillatorLevel, juce::dontSendNotification);
+                level->onValueChange = [this, level, findNode]
+                {
+                    if (auto* target = findNode())
+                        target->oscillatorLevel = (float) level->getValue();
+                    regenerateSignal();
+                };
+            }
         }
     }
     else if (node.type == "filter")
     {
-        auto& mode = content->addComboRow("Filter Type", { "Low-pass", "Band-pass", "High-pass" });
-        mode.setSelectedId(recipe.filterMode == "bandpass" ? 2 : recipe.filterMode == "highpass" ? 3 : 1, juce::dontSendNotification);
-        mode.onChange = [this, &mode]
+        // Each Filter instance owns its own mode/cutoff/resonance now --
+        // same reasoning and pattern as oscillators above.
+        auto nodeId = node.id;
+        auto findFilterNode = [this, nodeId]() -> GraphNodeModel*
         {
-            recipe.filterMode = mode.getSelectedId() == 2 ? "bandpass"
-                              : mode.getSelectedId() == 3 ? "highpass"
-                                                          : "lowpass";
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        auto& mode = content->addComboRow("Filter Type", { "Low-pass", "Band-pass", "High-pass" });
+        mode.setSelectedId(node.filterMode == "bandpass" ? 2 : node.filterMode == "highpass" ? 3 : 1, juce::dontSendNotification);
+        mode.onChange = [this, &mode, findFilterNode]
+        {
+            if (auto* target = findFilterNode())
+                target->filterMode = mode.getSelectedId() == 2 ? "bandpass"
+                                    : mode.getSelectedId() == 3 ? "highpass"
+                                                                : "lowpass";
             regenerateSignal();
         };
 
         auto& cutoff = content->addSliderRow("Cutoff", kMinFilterCutoffHz, kMaxFilterCutoffHz, 1.0);
-        cutoff.setValue(recipe.filterCutoffHz, juce::dontSendNotification);
-        cutoff.onValueChange = [this, &cutoff] { recipe.filterCutoffHz = (float) cutoff.getValue(); regenerateSignal(); };
+        double wiredCutoff = 0.0;
+        if (findWiredParameterValue(node.id, "param:filterCutoff", wiredCutoff))
+        {
+            cutoff.setValue(wiredCutoff, juce::dontSendNotification);
+            cutoff.setEnabled(false);
+        }
+        else
+        {
+            cutoff.setValue(node.filterCutoffHz, juce::dontSendNotification);
+            cutoff.onValueChange = [this, &cutoff, findFilterNode]
+            {
+                if (auto* target = findFilterNode())
+                    target->filterCutoffHz = (float) cutoff.getValue();
+                regenerateSignal();
+            };
+        }
 
         auto& resonance = content->addSliderRow("Resonance", 0.30, 8.0, 0.01);
-        resonance.setValue(recipe.filterResonance, juce::dontSendNotification);
-        resonance.onValueChange = [this, &resonance] { recipe.filterResonance = (float) resonance.getValue(); regenerateSignal(); };
+        double wiredResonance = 0.0;
+        if (findWiredParameterValue(node.id, "param:filterResonance", wiredResonance))
+        {
+            resonance.setValue(wiredResonance, juce::dontSendNotification);
+            resonance.setEnabled(false);
+        }
+        else
+        {
+            resonance.setValue(node.filterResonance, juce::dontSendNotification);
+            resonance.onValueChange = [this, &resonance, findFilterNode]
+            {
+                if (auto* target = findFilterNode())
+                    target->filterResonance = (float) resonance.getValue();
+                regenerateSignal();
+            };
+        }
+    }
+    else if (node.type == "mix")
+    {
+        // Real mixing-board faders, one per channel, instead of the "+
+        // Input" button being the only way to touch a channel's weight.
+        // Wiring a Get-variable into a channel's Weight port still works
+        // (buildPatchDocument already resolves it via
+        // findWiredParameterValue) -- that channel's fader just shows the
+        // wired value and disables, same rule as every other parameter.
+        auto nodeId = node.id;
+        auto findMixNode = [this, nodeId]() -> GraphNodeModel*
+        {
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        juce::Array<MixerFaderBank::ChannelState> channelStates;
+        for (int channelIndex = 0; channelIndex < node.mixerInputVolumes.size(); ++channelIndex)
+        {
+            MixerFaderBank::ChannelState state;
+            state.label = "Ch " + juce::String(channelIndex + 1);
+            state.value = node.mixerInputVolumes[channelIndex];
+
+            double wiredWeight = 0.0;
+            if (findWiredParameterValue(node.id, "mixWeight:" + juce::String(channelIndex), wiredWeight))
+            {
+                state.wired = true;
+                state.wiredValue = wiredWeight;
+            }
+            channelStates.add(state);
+        }
+
+        auto* faderBank = new MixerFaderBank();
+        faderBank->setChannels(channelStates, [this, findMixNode](int channelIndex, float newValue)
+        {
+            if (auto* target = findMixNode())
+                if (channelIndex >= 0 && channelIndex < target->mixerInputVolumes.size())
+                    target->mixerInputVolumes.getReference(channelIndex) = newValue;
+            regenerateSignal();
+        });
+        content->addCustomComponent(faderBank, 170);
+    }
+    else if (node.type == "midiFader" || node.type == "midiButton")
+    {
+        auto nodeId = node.id;
+        auto findMidiNode = [this, nodeId]() -> GraphNodeModel*
+        {
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        auto describeBinding = [](const GraphNodeModel& n) -> juce::String
+        {
+            if (! n.midiLearned)
+                return "Not learned yet -- click Learn, then move or press the control.";
+            return "Bound to " + (n.midiDeviceLabel.isNotEmpty() ? n.midiDeviceLabel : "any device")
+                 + ", channel " + juce::String(n.midiChannel) + ", "
+                 + (n.midiIsController ? "CC " : "Note ") + juce::String(n.midiNumber);
+        };
+
+        auto* statusLabelForNode = new juce::Label();
+        statusLabelForNode->setJustificationType(juce::Justification::topLeft);
+        statusLabelForNode->setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+        statusLabelForNode->setText(describeBinding(node), juce::dontSendNotification);
+        content->addCustomComponent(statusLabelForNode, 40);
+
+        // SafePointer, not a raw pointer: the Learn dialog spawned below is a
+        // separate top-level window that can outlive this tool window (the
+        // user can close this window while a learn capture is still
+        // pending) -- a raw pointer to statusLabelForNode would dangle in
+        // that case, and a plain null-check wouldn't catch it since nothing
+        // sets it to null on delete.
+        juce::Component::SafePointer<juce::Label> statusLabelSafe(statusLabelForNode);
+
+        auto& learnButton = content->addButtonRow(node.midiLearned ? "Re-learn..." : "Learn...");
+        learnButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title]
+        {
+            if (! onMidiLearnRequested)
+                return;
+
+            onMidiLearnRequested(nodeTitle, [this, findMidiNode, statusLabelSafe, describeBinding]
+                                 (juce::String deviceId, int channel, int number, bool isController)
+            {
+                auto* target = findMidiNode();
+                if (target == nullptr)
+                    return;
+
+                juce::String deviceLabel = "Any device";
+                if (deviceId.isNotEmpty())
+                {
+                    for (const auto& device : juce::MidiInput::getAvailableDevices())
+                    {
+                        if (device.identifier == deviceId)
+                        {
+                            deviceLabel = device.name;
+                            break;
+                        }
+                    }
+                }
+
+                target->midiLearned = true;
+                target->midiDeviceId = deviceId;
+                target->midiDeviceLabel = deviceLabel;
+                target->midiChannel = channel;
+                target->midiNumber = number;
+                target->midiIsController = isController;
+
+                if (auto* label = statusLabelSafe.getComponent())
+                    label->setText(describeBinding(*target), juce::dontSendNotification);
+                nodeGraphCanvas.repaint();
+            });
+        };
+
+        if (node.type == "midiButton")
+        {
+            auto& modeCombo = content->addComboRow("Button Mode", { "Momentary", "Toggle (On/Off)" });
+            modeCombo.setSelectedId(node.midiButtonMode == "toggle" ? 2 : 1, juce::dontSendNotification);
+            modeCombo.onChange = [this, &modeCombo, findMidiNode]
+            {
+                if (auto* target = findMidiNode())
+                    target->midiButtonMode = modeCombo.getSelectedId() == 2 ? "toggle" : "momentary";
+            };
+        }
+
+        auto& clearButton = content->addButtonRow("Clear Binding");
+        clearButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding]
+        {
+            auto* target = findMidiNode();
+            if (target == nullptr)
+                return;
+
+            target->midiLearned = false;
+            target->midiDeviceId.clear();
+            target->midiDeviceLabel.clear();
+            target->midiChannel = 1;
+            target->midiNumber = 0;
+            target->midiLiveValue = 0.0f;
+
+            if (auto* label = statusLabelSafe.getComponent())
+                label->setText(describeBinding(*target), juce::dontSendNotification);
+            regenerateSignal();
+        };
     }
     else if (node.type == "output")
     {
@@ -2739,36 +3729,59 @@ void SignalLabPanel::openNodeEditorForSelection()
         duration.setValue(recipe.durationSeconds, juce::dontSendNotification);
         duration.onValueChange = [this, &duration] { recipe.durationSeconds = duration.getValue(); regenerateSignal(); };
 
-        auto& hardness = content->addSliderRow("Hardness", 0.0, 1.0, 0.01);
-        hardness.setValue(recipe.macroHardness, juce::dontSendNotification);
-        hardness.onValueChange = [this, &hardness] { recipe.macroHardness = (float) hardness.getValue(); regenerateSignal(); };
+        auto& mode = content->addComboRow("Output Mode", { "Audio (Device)", "Wave (File)" });
+        mode.setSelectedId(recipe.sinkMode == "wave" ? 2 : 1, juce::dontSendNotification);
+        mode.onChange = [this, &mode] { recipe.sinkMode = mode.getSelectedId() == 2 ? "wave" : "audio"; regenerateSignal(); };
 
-        auto& weight = content->addSliderRow("Weight", 0.0, 1.0, 0.01);
-        weight.setValue(recipe.macroWeight, juce::dontSendNotification);
-        weight.onValueChange = [this, &weight] { recipe.macroWeight = (float) weight.getValue(); regenerateSignal(); };
+        auto& deviceButton = content->addButtonRow("Change Output Device...");
+        deviceButton.onClick = [this] { if (onAudioSettingsRequested) onAudioSettingsRequested(); };
+
+        auto& renderButton2 = content->addButtonRow("Render \"" + recipe.name + "\" to Project");
+        renderButton2.onClick = [this]
+        {
+            ensureAudioRendered();
+            if (onRenderRequested && generatedBuffer.getNumSamples() > 0)
+                onRenderRequested(generatedBuffer, recipe.sampleRate, recipe.name);
+        };
     }
     else if (node.type == "scope")
     {
+        ensureAudioRendered();
         auto* scope = new ScopePanel();
-        scope->setBuffer(generatedBuffer);
-        content->addCustomComponent(*scope, 220);
+        scope->setBuffer(getDisplayBufferForNode(node.id));
+        content->addCustomComponent(scope, 220);
     }
     else if (node.type == "analyzer")
     {
+        ensureAudioRendered();
         auto* analyzer = new SpectrumPanel();
-        analyzer->setBuffer(generatedBuffer, recipe.sampleRate);
-        content->addCustomComponent(*analyzer, 220);
+        analyzer->setBuffer(getDisplayBufferForNode(node.id), recipe.sampleRate);
+        content->addCustomComponent(analyzer, 220);
     }
     else if (node.type == "envelope")
     {
+        // Each Envelope instance owns its own curve now. EnvelopeEditor only
+        // reads envelopePoints/envelopeCurveMode off whatever SignalRecipe
+        // it's given, so a throwaway recipe carrying just this node's curve
+        // is enough to point it at the right instance without changing the
+        // editor component itself.
+        auto nodeId = node.id;
         auto* editor = new EnvelopeEditor();
-        editor->setRecipe(recipe);
-        editor->onEnvelopeChanged = [this](const juce::Array<cw::PatchAutomationPoint>& points)
+        SignalRecipe envelopeView;
+        envelopeView.envelopeCurveMode = node.envelopeCurveMode;
+        envelopeView.envelopePoints = node.envelopePoints;
+        editor->setRecipe(envelopeView);
+        editor->onEnvelopeChanged = [this, nodeId](const juce::Array<cw::PatchAutomationPoint>& points)
         {
-            recipe.envelopePoints = points;
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                {
+                    candidate.envelopePoints = points;
+                    break;
+                }
             regenerateSignal();
         };
-        content->addCustomComponent(*editor, 220);
+        content->addCustomComponent(editor, 220);
     }
     else if (node.type == "timeline")
     {
@@ -2793,7 +3806,7 @@ void SignalLabPanel::openNodeEditorForSelection()
                 }
             }
         };
-        content->addCustomComponent(*laneEditor, 220);
+        content->addCustomComponent(laneEditor, 220);
     }
     else if (node.type == "value")
     {
@@ -2842,8 +3855,13 @@ void SignalLabPanel::openNodeEditorForSelection()
         }
     });
     window->setContentOwned(content.release(), true);
-    window->centreWithSize(node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 520 : 420,
-                           node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 360 : 280);
+    auto windowWidth = node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 520
+                      : node.type == "mix" ? juce::jmax(420, 70 * node.mixerInputVolumes.size() + 80)
+                      : 420;
+    auto windowHeight = node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 360
+                       : node.type == "mix" ? 340
+                       : 280;
+    window->centreWithSize(windowWidth, windowHeight);
     window->setVisible(true);
     window->toFront(true);
     entry->window = std::move(window);
@@ -3031,6 +4049,8 @@ void SignalLabPanel::refreshSelectedVariableEditor()
 
     variableNameLabel.setVisible(hasSelection);
     variableNameEditor.setVisible(hasSelection);
+    variableDescriptionLabel.setVisible(hasSelection);
+    variableDescriptionEditor.setVisible(hasSelection);
     variableTypeLabel.setVisible(hasSelection);
     variableTypeSelector.setVisible(hasSelection);
     variableAccessLabel.setVisible(hasSelection);
@@ -3048,6 +4068,7 @@ void SignalLabPanel::refreshSelectedVariableEditor()
     suppressCallbacks = true;
     auto& variable = localControls.getReference(selectedLocalControlIndex);
     variableNameEditor.setText(variable.name, juce::dontSendNotification);
+    variableDescriptionEditor.setText(variable.description, juce::dontSendNotification);
     variableTypeSelector.setText(variable.valueType, juce::dontSendNotification);
     variableAccessSelector.setText(variable.accessScope, juce::dontSendNotification);
     if (variable.valueType == "Bool")
@@ -3066,28 +4087,355 @@ void SignalLabPanel::refreshSelectedVariableEditor()
                             juce::dontSendNotification);
 }
 
-juce::Point<float> SignalLabPanel::getNodeAudioInputPort(int index) const
-{
-    auto bounds = getGraphNodeBounds(index).toFloat();
-    return { bounds.getX(), bounds.getCentreY() };
-}
-
-juce::Point<float> SignalLabPanel::getNodeAudioOutputPort(int index) const
-{
-    auto bounds = getGraphNodeBounds(index).toFloat();
-    return { bounds.getRight(), bounds.getCentreY() };
-}
-
-juce::Point<float> SignalLabPanel::getNodeControlInputPort(int index) const
-{
-    auto bounds = getGraphNodeBounds(index).toFloat();
-    return { bounds.getCentreX(), bounds.getY() };
-}
-
 juce::Point<float> SignalLabPanel::getControlPadOutputPort(int index) const
 {
     auto top = controlPadBounds.getY() + 82 + index * 48;
     return { (float) controlPadBounds.getRight(), (float) top };
+}
+
+juce::Colour SignalLabPanel::portValueColour(PortValueType type)
+{
+    switch (type)
+    {
+        case PortValueType::Float: return juce::Colour(0xffe5484d);
+        case PortValueType::Int:   return juce::Colour(0xff4d8fe5);
+        case PortValueType::Bool:  return juce::Colour(0xff4de58f);
+    }
+    return juce::Colours::white;
+}
+
+juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) const
+{
+    juce::Array<GraphPort> ports;
+    if (index < 0 || index >= graphNodes.size())
+        return ports;
+
+    const auto& node = graphNodes.getReference(index);
+    auto bounds = getGraphNodeBounds(index).toFloat();
+
+    // The white ports carry the actual audio signal being processed through
+    // the chain (source -> mix -> filter -> envelope -> output) -- there is
+    // no separate abstract "signal" port alongside them. Sources only emit
+    // (no signal-in); the final Output node only receives (no signal-out).
+    bool hasSignalIn = node.type != "sine" && node.type != "saw" && node.type != "square"
+                     && node.type != "triangle" && node.type != "noise" && node.type != "timeline"
+                     && node.type != "value" && node.type != "valueGet" && node.type != "valueSet"
+                     && node.type != "mix" && node.type != "midiFader" && node.type != "midiButton";
+    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet"
+                      && node.type != "midiFader" && node.type != "midiButton";
+
+    float leftY = bounds.getY() + 30.0f;
+
+    // Signal ports get their own row just under the header, clear of the
+    // type badge, instead of being crammed into the corners of the title
+    // bar. Both sides share the row since one node rarely has both.
+    if (hasSignalIn)
+    {
+        GraphPort p;
+        p.portId = "signalIn";
+        p.label = "Signal";
+        p.isOutput = false;
+        p.isExec = true;
+        p.position = { bounds.getX() + 20.0f, leftY };
+        ports.add(p);
+    }
+    if (hasSignalOut)
+    {
+        GraphPort p;
+        p.portId = "signalOut";
+        p.label = "Signal";
+        p.isOutput = true;
+        p.isExec = true;
+        p.position = { bounds.getRight() - 20.0f, leftY };
+        ports.add(p);
+    }
+    if (hasSignalIn || hasSignalOut)
+        leftY += 22.0f;
+
+    // Mixer output is a weighted sum: out = sum(input_i * weight_i). Each
+    // input is a white Signal port (the stream) paired with a real-valued
+    // weight/multiplier port (Float, automatable) -- variable arity,
+    // default 2 inputs, grown via the node's own "+ Input" button. Unlike
+    // every other node type, this isn't a fixed registry shape from
+    // nodeParameterIds.
+    if (node.type == "mix")
+    {
+        for (int inputIndex = 0; inputIndex < node.mixerInputVolumes.size(); ++inputIndex)
+        {
+            GraphPort signalPort;
+            signalPort.portId = "signalIn:" + juce::String(inputIndex);
+            signalPort.label = "Channel " + juce::String(inputIndex + 1);
+            signalPort.isOutput = false;
+            signalPort.isExec = true;
+            signalPort.position = { bounds.getX(), leftY };
+            ports.add(signalPort);
+            leftY += 22.0f;
+
+            GraphPort weightPort;
+            weightPort.portId = "mixWeight:" + juce::String(inputIndex);
+            weightPort.label = "Weight " + juce::String(inputIndex + 1);
+            weightPort.isOutput = false;
+            weightPort.isExec = false;
+            weightPort.valueType = PortValueType::Float;
+            weightPort.position = { bounds.getX(), leftY };
+            ports.add(weightPort);
+            leftY += 22.0f;
+        }
+        leftY += 26.0f; // room for the "+ Input" button drawn below the last pair
+    }
+
+    for (auto& parameterId : nodeParameterIds(node.type))
+    {
+        GraphPort p;
+        p.portId = "param:" + parameterId;
+        p.label = shortParamLabel(parameterId);
+        p.isOutput = false;
+        p.isExec = false;
+        p.valueType = PortValueType::Float;
+        p.position = { bounds.getX(), leftY };
+        ports.add(p);
+        leftY += 22.0f;
+    }
+
+    if (node.type == "valueGet" || node.type == "valueSet")
+    {
+        PortValueType variableType = PortValueType::Float;
+        for (auto& variable : localControls)
+        {
+            if (variable.id != node.targetParameter)
+                continue;
+            if (variable.valueType == "Int") variableType = PortValueType::Int;
+            else if (variable.valueType == "Bool") variableType = PortValueType::Bool;
+            break;
+        }
+
+        if (node.type == "valueSet")
+        {
+            GraphPort p;
+            p.portId = "valueIn";
+            p.label = "In";
+            p.isOutput = false;
+            p.isExec = false;
+            p.valueType = variableType;
+            p.position = { bounds.getX(), leftY };
+            ports.add(p);
+        }
+
+        GraphPort p;
+        p.portId = "valueOut";
+        p.label = "Value";
+        p.isOutput = true;
+        p.isExec = false;
+        p.valueType = variableType;
+        p.position = { bounds.getRight(), bounds.getY() + 30.0f };
+        ports.add(p);
+    }
+
+    if (node.type == "midiFader" || node.type == "midiButton")
+    {
+        // Single typed output, same shape as a Get-variable node -- a MIDI
+        // Control node IS a value source, just one driven by hardware
+        // instead of a manually-set variable. Type follows the control kind
+        // so it can only wire into ports of the matching colour, same rule
+        // as everything else.
+        GraphPort p;
+        p.portId = "valueOut";
+        p.label = "Value";
+        p.isOutput = true;
+        p.isExec = false;
+        p.valueType = node.type == "midiFader" ? PortValueType::Float : PortValueType::Bool;
+        p.position = { bounds.getRight(), bounds.getY() + 30.0f };
+        ports.add(p);
+    }
+
+    return ports;
+}
+
+SignalLabPanel::PortHit SignalLabPanel::findPortAt(juce::Point<int> canvasPosition) const
+{
+    constexpr float hitRadius = 9.0f;
+    for (int index = graphNodes.size() - 1; index >= 0; --index)
+    {
+        for (auto& port : getNodePorts(index))
+        {
+            auto screenPos = graphToCanvas(port.position);
+            if (screenPos.getDistanceFrom(canvasPosition.toFloat()) <= hitRadius)
+                return { true, index, port };
+        }
+    }
+    return {};
+}
+
+juce::Point<int> SignalLabPanel::resolvePortPosition(const juce::String& nodeId, const juce::String& portId, bool wantOutput) const
+{
+    juce::ignoreUnused(wantOutput);
+    for (int index = 0; index < graphNodes.size(); ++index)
+    {
+        if (graphNodes.getReference(index).id != nodeId)
+            continue;
+        for (auto& port : getNodePorts(index))
+            if (port.portId == portId)
+                return port.position.roundToInt();
+    }
+    return {};
+}
+
+juce::Path SignalLabPanel::buildConnectionPath(int connectionIndex) const
+{
+    juce::Path path;
+    if (connectionIndex < 0 || connectionIndex >= graphConnections.size())
+        return path;
+
+    auto& connection = graphConnections.getReference(connectionIndex);
+    auto fromPoint = graphToCanvas(resolvePortPosition(connection.fromNodeId, connection.fromPortId, true));
+    auto toPoint = graphToCanvas(resolvePortPosition(connection.toNodeId, connection.toPortId, false));
+
+    juce::Array<juce::Point<int>> canvasPoints;
+    canvasPoints.add(fromPoint);
+    for (auto& waypoint : connection.waypoints)
+        canvasPoints.add(graphToCanvas(waypoint));
+    canvasPoints.add(toPoint);
+
+    path.startNewSubPath(canvasPoints.getReference(0).toFloat());
+    for (int pointIndex = 1; pointIndex < canvasPoints.size(); ++pointIndex)
+    {
+        auto a = canvasPoints.getReference(pointIndex - 1).toFloat();
+        auto b = canvasPoints.getReference(pointIndex).toFloat();
+        auto handle = juce::jmax(24.0f, std::abs(b.x - a.x) * 0.4f);
+        path.cubicTo(a.translated(handle, 0.0f), b.translated(-handle, 0.0f), b);
+    }
+    return path;
+}
+
+int SignalLabPanel::findConnectionAt(juce::Point<int> canvasPosition, int* outWaypointIndex) const
+{
+    if (outWaypointIndex != nullptr)
+        *outWaypointIndex = -1;
+
+    // Generous on purpose -- these wires are drawn as bowed bezier curves
+    // (see buildConnectionPath/paint), not straight lines between their
+    // endpoints, and a tight pixel tolerance meant a click that visually
+    // looked like it was right on the wire would miss the hit-test and fall
+    // through to the generic canvas menu instead of the wire's own menu.
+    constexpr float waypointHitRadius = 10.0f;
+    constexpr float lineHitDistance = 9.0f;
+
+    for (int connectionIndex = 0; connectionIndex < graphConnections.size(); ++connectionIndex)
+    {
+        auto& connection = graphConnections.getReference(connectionIndex);
+
+        for (int waypointIndex = 0; waypointIndex < connection.waypoints.size(); ++waypointIndex)
+        {
+            auto centre = graphToCanvas(connection.waypoints.getReference(waypointIndex));
+            if (centre.toFloat().getDistanceFrom(canvasPosition.toFloat()) <= waypointHitRadius)
+            {
+                if (outWaypointIndex != nullptr)
+                    *outWaypointIndex = waypointIndex;
+                return connectionIndex;
+            }
+        }
+
+        // Hit-test against the actual curve, not the straight line between
+        // its endpoints -- stroke the real path out to the hit tolerance and
+        // do a containment test, which follows the bow correctly no matter
+        // how far the curve departs from a straight line.
+        auto path = buildConnectionPath(connectionIndex);
+        juce::Path strokeOutline;
+        juce::PathStrokeType(lineHitDistance * 2.0f).createStrokedPath(strokeOutline, path);
+        if (strokeOutline.contains(canvasPosition.toFloat()))
+            return connectionIndex;
+    }
+
+    return -1;
+}
+
+void SignalLabPanel::tryCompleteConnection(int fromNodeIndex, const GraphPort& fromPort, juce::Point<int> releaseCanvasPosition)
+{
+    auto hit = findPortAt(releaseCanvasPosition);
+    if (! hit.found || hit.nodeIndex == fromNodeIndex)
+        return;
+
+    if (hit.port.isExec != fromPort.isExec)
+        return;
+    if (! hit.port.isExec && hit.port.valueType != fromPort.valueType)
+        return;
+    if (hit.port.isOutput == fromPort.isOutput)
+        return;
+
+    const GraphPort& outputPort = fromPort.isOutput ? fromPort : hit.port;
+    const GraphPort& inputPort = fromPort.isOutput ? hit.port : fromPort;
+    int outputNodeIndex = fromPort.isOutput ? fromNodeIndex : hit.nodeIndex;
+    int inputNodeIndex = fromPort.isOutput ? hit.nodeIndex : fromNodeIndex;
+
+    captureUndoCheckpoint("Connect nodes");
+
+    for (int index = graphConnections.size() - 1; index >= 0; --index)
+    {
+        auto& existing = graphConnections.getReference(index);
+        if (existing.toNodeId == graphNodes.getReference(inputNodeIndex).id && existing.toPortId == inputPort.portId)
+            graphConnections.remove(index);
+    }
+
+    GraphConnection connection;
+    connection.id = "connection" + juce::String(juce::Random::getSystemRandom().nextInt64());
+    connection.fromNodeId = graphNodes.getReference(outputNodeIndex).id;
+    connection.fromPortId = outputPort.portId;
+    connection.toNodeId = graphNodes.getReference(inputNodeIndex).id;
+    connection.toPortId = inputPort.portId;
+    connection.isExec = outputPort.isExec;
+    connection.valueType = outputPort.valueType;
+    graphConnections.add(connection);
+
+    nodeGraphCanvas.repaint();
+}
+
+void SignalLabPanel::removeConnection(int index)
+{
+    if (index < 0 || index >= graphConnections.size())
+        return;
+    captureUndoCheckpoint("Delete connection");
+    graphConnections.remove(index);
+    if (selectedConnectionIndex == index)
+        selectedConnectionIndex = -1;
+    nodeGraphCanvas.repaint();
+}
+
+void SignalLabPanel::showConnectionContextMenu(int connectionIndex, int waypointIndex, juce::Point<int> canvasPosition)
+{
+    if (connectionIndex < 0 || connectionIndex >= graphConnections.size())
+        return;
+
+    juce::PopupMenu menu;
+    if (waypointIndex >= 0)
+        menu.addItem(1, "Remove Reroute Point");
+    else
+        menu.addItem(2, "Add Reroute Point Here");
+    menu.addItem(3, "Delete Connection");
+
+    auto area = nodeGraphCanvas.localAreaToGlobal(juce::Rectangle<int>(canvasPosition.x, canvasPosition.y, 1, 1));
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
+                       [this, connectionIndex, waypointIndex, canvasPosition](int result)
+                       {
+                           if (connectionIndex < 0 || connectionIndex >= graphConnections.size())
+                               return;
+
+                           if (result == 1 && waypointIndex >= 0)
+                           {
+                               captureUndoCheckpoint("Remove reroute point");
+                               graphConnections.getReference(connectionIndex).waypoints.remove(waypointIndex);
+                               nodeGraphCanvas.repaint();
+                           }
+                           else if (result == 2)
+                           {
+                               captureUndoCheckpoint("Add reroute point");
+                               graphConnections.getReference(connectionIndex).waypoints.add(canvasToGraph(canvasPosition));
+                               nodeGraphCanvas.repaint();
+                           }
+                           else if (result == 3)
+                           {
+                               removeConnection(connectionIndex);
+                           }
+                       });
 }
 
 juce::ValueTree SignalLabPanel::createState() const
@@ -3096,6 +4444,7 @@ juce::ValueTree SignalLabPanel::createState() const
     state.setProperty("name", recipe.name, nullptr);
     state.setProperty("sampleRate", recipe.sampleRate, nullptr);
     state.setProperty("durationSeconds", recipe.durationSeconds, nullptr);
+    state.setProperty("sinkMode", recipe.sinkMode, nullptr);
     state.setProperty("baseFrequencyHz", recipe.baseFrequencyHz, nullptr);
     state.setProperty("filterMode", recipe.filterMode, nullptr);
     state.setProperty("filterCutoffHz", recipe.filterCutoffHz, nullptr);
@@ -3162,6 +4511,7 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     recipe.name = state.getProperty("name", recipe.name).toString();
     recipe.sampleRate = (double) state.getProperty("sampleRate", recipe.sampleRate);
     recipe.durationSeconds = (double) state.getProperty("durationSeconds", recipe.durationSeconds);
+    recipe.sinkMode = state.getProperty("sinkMode", recipe.sinkMode).toString();
     recipe.baseFrequencyHz = (float) state.getProperty("baseFrequencyHz", recipe.baseFrequencyHz);
     recipe.filterMode = state.getProperty("filterMode", recipe.filterMode).toString();
     recipe.filterCutoffHz = (float) state.getProperty("filterCutoffHz", recipe.filterCutoffHz);
@@ -3235,6 +4585,7 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
     filterNodeEnabled = false;
     envelopeNodeEnabled = false;
     recipe.name = document.name.isNotEmpty() ? document.name : recipe.name;
+    recipe.description = document.description;
 
     for (const auto& parameter : document.parameters)
     {
@@ -3264,63 +4615,22 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             recipe.noiseLevel = (float) parameter.defaultValue;
     }
 
-    recipe.sineLevel = 0.0f;
-    recipe.sawLevel = 0.0f;
-    recipe.squareLevel = 0.0f;
-    recipe.triangleLevel = 0.0f;
-
-    for (const auto& source : document.sources)
-    {
-        if (source.kind == "oscillator")
-        {
-            if (source.waveform == "sine")
-                recipe.sineLevel = (float) source.level;
-            else if (source.waveform == "saw")
-                recipe.sawLevel = (float) source.level;
-            else if (source.waveform == "square")
-                recipe.squareLevel = (float) source.level;
-            else if (source.waveform == "triangle")
-                recipe.triangleLevel = (float) source.level;
-        }
-        else if (source.kind == "noise")
-        {
-            recipe.noiseLevel = (float) source.level;
-        }
-    }
-
     recipe.envelopePoints.clear();
+    probeSettings = {};
+
+    // Filter/Envelope are real independent instances now (Phase 3) -- their
+    // config is read per-instance below, in the node-reconstruction loop,
+    // straight from each patchNode's own properties. This pass only handles
+    // the stages that are still singleton (Mix, Scope, Analyzer): only
+    // enable one if a node of that kind is actually present in the file --
+    // buildPatchDocument only ever writes nodes that were really on the
+    // canvas, so "present in the file" correctly means "the user placed
+    // one", unlike the old always-emit-everything format.
     for (const auto& node : document.nodes)
     {
-        if (node.kind == "mix")
-            mixNodeEnabled = true;
-        else if (node.kind == "filter")
-            filterNodeEnabled = true;
-        else if (node.kind == "envelope")
-            envelopeNodeEnabled = true;
-
-        if (node.kind == "envelope")
-        {
-            recipe.envelopeCurveMode = node.properties.getWithDefault("curveMode", recipe.envelopeCurveMode).toString();
-            auto pointsJson = node.properties.getWithDefault("pointsJson", {}).toString();
-            if (pointsJson.isNotEmpty())
-                recipe.envelopePoints = parsePointsJson(pointsJson, recipe.envelopeCurveMode);
-
-            if (recipe.envelopePoints.isEmpty())
-            {
-                setEnvelopeFromLegacy(recipe,
-                                      (float) node.properties.getWithDefault("attackPosition", 0.12f),
-                                      (float) node.properties.getWithDefault("sustainPosition", 0.42f),
-                                      (float) node.properties.getWithDefault("releasePosition", 0.82f),
-                                      (float) node.properties.getWithDefault("sustainLevel", 0.48f));
-            }
-        }
-        else if (node.kind == "filter")
-        {
-            recipe.filterMode = node.properties.getWithDefault("mode", recipe.filterMode).toString();
-            recipe.filterCutoffHz = (float) node.properties.getWithDefault("cutoffHz", recipe.filterCutoffHz);
-            recipe.filterResonance = (float) node.properties.getWithDefault("resonance", recipe.filterResonance);
-            recipe.filterEnvelopeAmount = (float) node.properties.getWithDefault("envelopeAmount", recipe.filterEnvelopeAmount);
-        }
+        if (node.kind == "mix") mixNodeEnabled = true;
+        else if (node.kind == "scope") probeSettings.scopeEnabled = true;
+        else if (node.kind == "analyzer") probeSettings.analyzerEnabled = true;
     }
 
     recipe.automationLanes = document.automationLanes;
@@ -3328,6 +4638,104 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
     {
         if (lane.interpolation.isNotEmpty())
             recipe.automationCurveMode = lane.interpolation;
+    }
+
+    // Reconstruct the real graph -- same ids and positions as what was
+    // saved, not fresh default-positioned nodes. rebuildNodeGraphFromRecipe()
+    // (called via regenerateSignal() below) preserves oscillator/noise nodes
+    // verbatim, and for the singleton mix/filter/envelope/output nodes it
+    // looks up prior positions/mixer weights by their fixed id ("mix",
+    // "filter", "envelope", "output") -- so seeding graphNodes here with
+    // those same ids is enough for it to pick everything back up correctly,
+    // without needing to duplicate that logic here.
+    graphNodes.clear();
+    graphConnections.clear();
+
+    for (const auto& source : document.sources)
+    {
+        if (source.kind != "oscillator" && source.kind != "noise")
+            continue;
+
+        GraphNodeModel node;
+        node.id = source.id;
+        node.type = source.kind == "noise" ? "noise" : source.waveform;
+        node.title = graphNodeTitle(node.type);
+        node.position = { source.canvasX, source.canvasY };
+        node.accent = graphNodeAccent(node.type);
+        node.oscillatorLevel = (float) source.level;
+        node.oscillatorFrequencyHz = recipe.baseFrequencyHz;
+        if (source.frequencyParameter.isNotEmpty())
+            for (const auto& parameter : document.parameters)
+                if (parameter.id == source.frequencyParameter)
+                {
+                    node.oscillatorFrequencyHz = (float) parameter.defaultValue;
+                    break;
+                }
+        graphNodes.add(node);
+    }
+
+    for (const auto& patchNode : document.nodes)
+    {
+        if (patchNode.kind != "mix" && patchNode.kind != "filter" && patchNode.kind != "envelope"
+            && patchNode.kind != "output" && patchNode.kind != "scope" && patchNode.kind != "analyzer")
+            continue;
+
+        GraphNodeModel node;
+        // Mix/Output/Scope/Analyzer are still singleton, so their fixed
+        // kind-as-id keeps rebuildNodeGraphFromRecipe()'s prior-position
+        // lookup working. Filter/Envelope are real independent instances
+        // now (Phase 3) -- use the actual saved id so multiple instances
+        // round-trip correctly instead of collapsing onto one shared id.
+        node.id = (patchNode.kind == "filter" || patchNode.kind == "envelope") ? patchNode.id : patchNode.kind;
+        node.type = patchNode.kind;
+        node.title = graphNodeTitle(node.type);
+        node.position = { patchNode.canvasX, patchNode.canvasY };
+        node.accent = graphNodeAccent(node.type);
+        node.required = patchNode.kind == "output";
+
+        if (patchNode.kind == "mix")
+        {
+            auto weightsText = patchNode.properties.getWithDefault("channelWeights", {}).toString();
+            if (weightsText.isNotEmpty())
+            {
+                juce::Array<float> volumes;
+                for (const auto& token : juce::StringArray::fromTokens(weightsText, ",", {}))
+                    volumes.add(token.getFloatValue());
+                if (! volumes.isEmpty())
+                    node.mixerInputVolumes = volumes;
+            }
+        }
+        else if (patchNode.kind == "filter")
+        {
+            node.filterMode = patchNode.properties.getWithDefault("mode", node.filterMode).toString();
+            node.filterCutoffHz = (float) patchNode.properties.getWithDefault("cutoffHz", node.filterCutoffHz);
+            node.filterResonance = (float) patchNode.properties.getWithDefault("resonance", node.filterResonance);
+            node.filterEnvelopeAmount = (float) patchNode.properties.getWithDefault("envelopeAmount", node.filterEnvelopeAmount);
+        }
+        else if (patchNode.kind == "envelope")
+        {
+            node.envelopeCurveMode = patchNode.properties.getWithDefault("curveMode", node.envelopeCurveMode).toString();
+            auto pointsJson = patchNode.properties.getWithDefault("pointsJson", {}).toString();
+            if (pointsJson.isNotEmpty())
+                node.envelopePoints = parsePointsJson(pointsJson, node.envelopeCurveMode);
+            if (node.envelopePoints.isEmpty())
+                node.envelopePoints = makeDefaultEnvelopePoints(node.envelopeCurveMode);
+        }
+
+        graphNodes.add(node);
+    }
+
+    for (const auto& connection : document.connections)
+    {
+        GraphConnection graphConnection;
+        graphConnection.id = "conn:" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        graphConnection.fromNodeId = connection.from;
+        graphConnection.toNodeId = connection.to;
+        graphConnection.fromPortId = connection.fromPort.isNotEmpty() ? connection.fromPort : "signalOut";
+        graphConnection.toPortId = connection.toPort.isNotEmpty() ? connection.toPort : "signalIn";
+        graphConnection.isExec = true;
+        graphConnection.waypoints = connection.waypoints;
+        graphConnections.add(graphConnection);
     }
 
     ensureRecipe(recipe);
@@ -3348,6 +4756,7 @@ void SignalLabPanel::applyAiTemplate(const juce::String& templateName)
 
 bool SignalLabPanel::previewCurrentSignal()
 {
+    ensureAudioRendered();
     if (generatedBuffer.getNumSamples() <= 0 || onPreviewRequested == nullptr)
         return false;
 
@@ -3366,9 +4775,220 @@ void SignalLabPanel::timerCallback()
     triggerTransportPlay();
 }
 
+juce::Array<SignalLabPanel::GraphValidationError> SignalLabPanel::validateGraph() const
+{
+    juce::Array<GraphValidationError> errors;
+
+    auto isSourceType = [](const juce::String& type)
+    {
+        return type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise";
+    };
+
+    // Cycle detection over the signal-carrying (isExec) edges only -- value
+    // wires (a Get-variable feeding a parameter port) legitimately fan out
+    // to many nodes and aren't part of the audio path, so they can't form a
+    // signal cycle.
+    enum class VisitState { Unvisited, Visiting, Done };
+    juce::HashMap<juce::String, VisitState> visitState;
+    for (auto& node : graphNodes)
+        visitState.set(node.id, VisitState::Unvisited);
+
+    std::function<bool(const juce::String&)> visit = [&](const juce::String& nodeId) -> bool
+    {
+        visitState.set(nodeId, VisitState::Visiting);
+        for (auto& connection : graphConnections)
+        {
+            if (! connection.isExec || connection.fromNodeId != nodeId)
+                continue;
+
+            auto nextState = visitState[connection.toNodeId];
+            if (nextState == VisitState::Visiting)
+            {
+                for (auto& node : graphNodes)
+                {
+                    if (node.id == connection.toNodeId)
+                    {
+                        errors.add({ node.id, "Cycle detected in the signal path through \"" + node.title + "\"." });
+                        break;
+                    }
+                }
+                return true;
+            }
+            if (nextState == VisitState::Unvisited && visit(connection.toNodeId))
+                return true;
+        }
+        visitState.set(nodeId, VisitState::Done);
+        return false;
+    };
+
+    for (auto& node : graphNodes)
+        if (visitState[node.id] == VisitState::Unvisited)
+            visit(node.id);
+
+    // Every required node (today, just the Sink) must be reachable from at
+    // least one oscillator/noise source by walking signal connections
+    // backwards -- otherwise it renders silence no matter what else is wired.
+    for (auto& sinkNode : graphNodes)
+    {
+        if (! sinkNode.required)
+            continue;
+
+        juce::Array<juce::String> visited;
+        juce::Array<juce::String> frontier;
+        frontier.add(sinkNode.id);
+        bool sourceFound = false;
+
+        while (! frontier.isEmpty() && ! sourceFound)
+        {
+            auto currentId = frontier.removeAndReturn(frontier.size() - 1);
+            if (visited.contains(currentId))
+                continue;
+            visited.add(currentId);
+
+            for (auto& connection : graphConnections)
+            {
+                if (! connection.isExec || connection.toNodeId != currentId)
+                    continue;
+
+                for (auto& candidate : graphNodes)
+                {
+                    if (candidate.id != connection.fromNodeId)
+                        continue;
+                    if (isSourceType(candidate.type))
+                        sourceFound = true;
+                    break;
+                }
+
+                if (sourceFound)
+                    break;
+
+                frontier.add(connection.fromNodeId);
+            }
+        }
+
+        if (! sourceFound)
+            errors.add({ sinkNode.id, "\"" + sinkNode.title + "\" has no oscillator or noise source feeding it -- it will render silence." });
+    }
+
+    // Placed processing nodes with nothing wired into their signal input are
+    // dead weight in the graph -- flag them so they're easy to find.
+    for (auto& node : graphNodes)
+    {
+        bool needsSignalIn = node.type == "mix" || node.type == "filter" || node.type == "envelope"
+                           || node.type == "scope" || node.type == "analyzer";
+        if (! needsSignalIn)
+            continue;
+
+        bool hasIncomingSignal = false;
+        for (auto& connection : graphConnections)
+        {
+            if (connection.isExec && connection.toNodeId == node.id)
+            {
+                hasIncomingSignal = true;
+                break;
+            }
+        }
+
+        if (! hasIncomingSignal)
+            errors.add({ node.id, "\"" + node.title + "\" has no signal wired into it." });
+    }
+
+    return errors;
+}
+
+void SignalLabPanel::compileGraph()
+{
+    validationErrors = validateGraph();
+    showCompileErrorWindow();
+}
+
+void SignalLabPanel::showCompileErrorWindow()
+{
+    // Non-intrusive by default: a clean graph doesn't pop a window open on
+    // every Play. But if the user already has the log open (inspecting it
+    // while they keep editing), it stays open and refreshes in place rather
+    // than disappearing out from under them.
+    if (validationErrors.isEmpty() && compileErrorWindow == nullptr)
+        return;
+
+    if (compileErrorWindow == nullptr)
+    {
+        auto window = std::make_unique<SignalLabNodeWindow>("Signal Lab -- Compile Results", [this]
+        {
+            compileErrorWindow.reset();
+        });
+        window->setContentOwned(new CompileErrorListContent(), true);
+        window->centreWithSize(440, 320);
+        compileErrorWindow = std::move(window);
+    }
+
+    juce::Array<CompileErrorRow> rows;
+    for (auto& error : validationErrors)
+        rows.add({ error.nodeId, error.message });
+
+    if (auto* content = dynamic_cast<CompileErrorListContent*>(compileErrorWindow->getContentComponent()))
+    {
+        content->setErrors(rows, [this](const juce::String& nodeId)
+        {
+            centerCanvasOnGraphNode(nodeId);
+        });
+    }
+
+    compileErrorWindow->setVisible(true);
+    compileErrorWindow->toFront(true);
+}
+
+void SignalLabPanel::centerCanvasOnGraphNode(const juce::String& nodeId)
+{
+    for (int index = 0; index < graphNodes.size(); ++index)
+    {
+        if (graphNodes.getReference(index).id != nodeId)
+            continue;
+
+        setSelectedGraphNodeIndex(index);
+
+        auto centreGraphPoint = getGraphNodeBounds(index).getCentre();
+        auto centreCanvasPoint = graphToCanvas(centreGraphPoint);
+        graphViewport.setViewPosition(centreCanvasPoint.x - graphViewport.getWidth() / 2,
+                                      centreCanvasPoint.y - graphViewport.getHeight() / 2);
+        break;
+    }
+}
+
 void SignalLabPanel::triggerTransportPlay()
 {
-    if (! previewCurrentSignal())
+    // Compiling + rendering runs synchronously on the message thread and can
+    // take a noticeable moment on a busy graph -- without this the whole app
+    // just appears to hang between clicking Play and hearing anything. Force
+    // an immediate repaint of the status text (rather than waiting for the
+    // next natural paint pass, which won't happen until this function
+    // returns) so the user sees what's going on.
+    auto showBusyStatus = [this](const juce::String& text)
+    {
+        statusLabel.setText(text, juce::dontSendNotification);
+        statusLabel.repaint();
+        if (auto* peer = getPeer())
+            peer->performAnyPendingRepaintsNow();
+    };
+
+    const bool wasDirty = audioDirty;
+    if (wasDirty)
+    {
+        juce::MouseCursor::showWaitCursor();
+        showBusyStatus("Compiling...");
+        compileGraph();
+        showBusyStatus("Rendering audio...");
+    }
+
+    bool played = previewCurrentSignal();
+
+    if (wasDirty)
+    {
+        juce::MouseCursor::hideWaitCursor();
+        updateStatusText();
+    }
+
+    if (! played)
         return;
 
     if (repeatEnabled)
@@ -3463,7 +5083,9 @@ void SignalLabPanel::resized()
     auto topBar = area.removeFromTop(30);
     signalMenuButton.setBounds(topBar.removeFromLeft(110));
     topBar.removeFromLeft(10);
-    auto transportArea = topBar.removeFromLeft(180);
+    auto transportArea = topBar.removeFromLeft(268);
+    compileButton.setBounds(transportArea.removeFromLeft(80));
+    transportArea.removeFromLeft(8);
     playButton.setBounds(transportArea.removeFromLeft(80));
     transportArea.removeFromLeft(8);
     stopButton.setBounds(transportArea.removeFromLeft(80));
@@ -3473,7 +5095,7 @@ void SignalLabPanel::resized()
     propertiesHeaderLabel.setBounds(propertiesArea.removeFromTop(28));
     propertiesArea.removeFromTop(8);
 
-    auto signalArea = propertiesArea.removeFromTop(126);
+    auto signalArea = propertiesArea.removeFromTop(210);
     signalPropertiesPanel.setBounds(signalArea);
     auto signalContent = signalArea.reduced(12);
     signalSectionLabel.setBounds(signalContent.removeFromTop(22));
@@ -3483,6 +5105,10 @@ void SignalLabPanel::resized()
     nameLabel.setBounds(signalContent.removeFromTop(20));
     signalContent.removeFromTop(4);
     nameEditor.setBounds(signalContent.removeFromTop(26));
+    signalContent.removeFromTop(8);
+    descriptionLabel.setBounds(signalContent.removeFromTop(20));
+    signalContent.removeFromTop(4);
+    descriptionEditor.setBounds(signalContent.removeFromTop(50));
     signalContent.removeFromTop(8);
     signalMetaLabel.setBounds(signalContent);
 
@@ -3497,30 +5123,32 @@ void SignalLabPanel::resized()
     addLocalControlButton.setBounds(variableContent.removeFromTop(26));
     variableContent.removeFromTop(6);
     variablesViewport.setBounds(variableContent);
-    toolboxPane.setSize(variableContent.getWidth(), juce::jmax(variableContent.getHeight(), 240));
+    toolboxPane.setSize(variableContent.getWidth(), juce::jmax(variableContent.getHeight(), toolboxPane.getRequiredHeight()));
 
     propertiesArea.removeFromTop(10);
     variableDetailsPanel.setBounds(propertiesArea);
     auto detailContent = propertiesArea.reduced(12);
     selectedVariableSectionLabel.setBounds(detailContent.removeFromTop(22));
     detailContent.removeFromTop(6);
-    variableNameLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableNameEditor.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(6);
-    variableTypeLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableTypeSelector.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(6);
-    variableAccessLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableAccessSelector.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(6);
-    variableValueLabel.setBounds(detailContent.removeFromTop(20));
-    detailContent.removeFromTop(4);
-    variableValueEditor.setBounds(detailContent.removeFromTop(24));
-    detailContent.removeFromTop(8);
-    variableAutomationToggle.setBounds(detailContent.removeFromTop(24));
+    variableDetailsViewport.setBounds(detailContent);
+
+    auto layoutDetailField = [](juce::Rectangle<int>& content, juce::Component& label, juce::Component& field, int fieldHeight)
+    {
+        label.setBounds(content.removeFromTop(20));
+        content.removeFromTop(4);
+        field.setBounds(content.removeFromTop(fieldHeight));
+        content.removeFromTop(6);
+    };
+
+    auto scratchArea = juce::Rectangle<int>(0, 0, juce::jmax(1, detailContent.getWidth()), 4000);
+    layoutDetailField(scratchArea, variableNameLabel, variableNameEditor, 24);
+    layoutDetailField(scratchArea, variableDescriptionLabel, variableDescriptionEditor, 44);
+    layoutDetailField(scratchArea, variableTypeLabel, variableTypeSelector, 24);
+    layoutDetailField(scratchArea, variableAccessLabel, variableAccessSelector, 24);
+    layoutDetailField(scratchArea, variableValueLabel, variableValueEditor, 24);
+    variableAutomationToggle.setBounds(scratchArea.removeFromTop(24));
+
+    variableDetailsContent.setSize(detailContent.getWidth(), 4000 - scratchArea.getHeight());
 
     area.removeFromLeft(10);
     graphViewport.setBounds(area);
@@ -3590,18 +5218,108 @@ void SignalLabPanel::layoutFloatingWindows()
 
 void SignalLabPanel::regenerateSignal()
 {
+    // Cheap path only -- graph/UI bookkeeping so the node cards, status
+    // text, and inspector always stay in sync live as you edit. The actual
+    // DSP render is expensive (multi-second) and is deliberately NOT done
+    // here: doing it on every edit is what made dragging an envelope point
+    // or adding a node feel like it hung. Rendering happens on demand, via
+    // ensureAudioRendered(), only at the handful of places that actually
+    // need audio (Play, Preview, Render, opening a Scope/Analyzer window).
     ensureRecipe(recipe);
+    audioDirty = true;
+    updateStatusText();
+    rebuildNodeGraphFromRecipe();
+    updateInspectorForSelection();
+}
+
+void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes)
+{
+    if (changes.isEmpty())
+        return;
+
+    bool anyApplied = false;
+    for (auto& node : graphNodes)
+    {
+        if ((node.type != "midiFader" && node.type != "midiButton") || ! node.midiLearned)
+            continue;
+
+        for (auto& change : changes)
+        {
+            if (change.channel != node.midiChannel || change.number != node.midiNumber
+                || change.isController != node.midiIsController)
+                continue;
+            // Empty midiDeviceId means "any device", matching how the learn
+            // dialog's device combo works -- otherwise it must be this exact
+            // device (the same physical control from two devices shouldn't
+            // both drive a binding that was learned from one specific one).
+            if (node.midiDeviceId.isNotEmpty() && change.deviceId != node.midiDeviceId)
+                continue;
+
+            if (node.type == "midiFader")
+            {
+                node.midiLiveValue = change.value;
+            }
+            else if (node.midiButtonMode == "toggle")
+            {
+                // Edge-triggered: flip only on the press, ignore the
+                // matching release -- otherwise every press+release pair
+                // would flip twice and the toggle would never visibly latch.
+                if (change.value > 0.5f)
+                    node.midiLiveValue = node.midiLiveValue > 0.5f ? 0.0f : 1.0f;
+            }
+            else
+            {
+                node.midiLiveValue = change.value > 0.5f ? 1.0f : 0.0f;
+            }
+
+            anyApplied = true;
+        }
+    }
+
+    if (! anyApplied)
+        return;
+
+    // A hardware control moving should reach the next render/Play like any
+    // other edit, but -- same reasoning as every other edit in this class --
+    // must not trigger a render right here on every poll tick that carries
+    // a change (this fires at UI-timer rate, not once per Play).
+    audioDirty = true;
+    nodeGraphCanvas.repaint();
+}
+
+void SignalLabPanel::ensureAudioRendered()
+{
+    if (! audioDirty)
+        return;
+
     auto patchDocument = buildPatchDocument(recipe);
     juce::String errorMessage;
-    if (! runtimePlayer.renderPatchToBuffer(patchDocument, recipe.durationSeconds, generatedBuffer, errorMessage))
+    nodeTapBuffers.clear();
+    if (! runtimePlayer.renderPatchToBuffer(patchDocument, recipe.durationSeconds, generatedBuffer, errorMessage, &nodeTapBuffers))
         generatedBuffer = buildSignalBuffer(recipe);
 
     envelopeEditor.setRecipe(recipe);
     scopePanel.setBuffer(generatedBuffer);
     spectrumPanel.setBuffer(generatedBuffer, recipe.sampleRate);
-    updateStatusText();
-    rebuildNodeGraphFromRecipe();
-    updateInspectorForSelection();
+    audioDirty = false;
+
+    // The Scope/Analyzer nodes' inline mini-trace on the canvas reads
+    // generatedBuffer directly during paint() -- nothing else repaints that
+    // canvas after a render happens now that rendering is deferred out of
+    // every edit, so without this the trace stays blank even though audio
+    // played correctly.
+    nodeGraphCanvas.repaint();
+}
+
+const juce::AudioBuffer<float>& SignalLabPanel::getDisplayBufferForNode(const juce::String& nodeId) const
+{
+    for (auto& tap : nodeTapBuffers)
+        if (tap.nodeId == nodeId)
+            return tap.buffer;
+
+    // Not tapped to anything specific yet (e.g. before the first render) --
+    // fall back to the final output rather than showing nothing.
+    return generatedBuffer;
 }
 
 juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& activeRecipe) const
@@ -3706,7 +5424,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.patchId = cw::makePatchId(recipeCopy.name);
     document.name = recipeCopy.name;
     document.type = "instrument";
-    document.description = "Signal Lab exported instrument patch.";
+    document.description = recipeCopy.description;
     document.createdAt = juce::Time::getCurrentTime().toISO8601(true);
     document.updatedAt = document.createdAt;
 
@@ -3728,46 +5446,109 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     for (auto& lane : document.automationLanes)
         ensureLane(lane, recipeCopy.automationCurveMode);
 
-    if (recipeCopy.sineLevel > 0.0f)
-        document.sources.add({ "osc1", "oscillator", "sine", {}, recipeCopy.sineLevel, "baseFrequency" });
-    if (recipeCopy.sawLevel > 0.0f)
-        document.sources.add({ "osc2", "oscillator", "saw", {}, recipeCopy.sawLevel, "baseFrequency" });
-    if (recipeCopy.squareLevel > 0.0f)
-        document.sources.add({ "osc3", "oscillator", "square", {}, recipeCopy.squareLevel, "baseFrequency" });
-    if (recipeCopy.triangleLevel > 0.0f)
-        document.sources.add({ "osc4", "oscillator", "triangle", {}, recipeCopy.triangleLevel, "baseFrequency" });
-    if (recipeCopy.noiseLevel > 0.0f)
-        document.sources.add({ "noise1", "noise", {}, "white", recipeCopy.noiseLevel, {} });
+    // One entry per node actually on the graph, using its real id and
+    // canvas position -- not a fixed osc/mix1/filter1/env1 skeleton. If you
+    // didn't place a Filter, no filter node goes into this document, and
+    // the renderer (which now walks this same structure) won't apply one.
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
+        {
+            double wiredLevel = 0.0;
+            auto effectiveLevel = findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel)
+                                 ? (float) wiredLevel : node.oscillatorLevel;
+            if (effectiveLevel <= 0.0f)
+                continue;
+            auto frequencyParamId = "frequency:" + node.id;
+            document.parameters.add({ frequencyParamId, node.title + " Frequency", "float", node.oscillatorFrequencyHz, 30.0, 2400.0, "hz" });
+            cw::PatchSource source { node.id, "oscillator", node.type, {}, effectiveLevel, frequencyParamId };
+            source.canvasX = node.position.x;
+            source.canvasY = node.position.y;
+            document.sources.add(source);
+        }
+        else if (node.type == "noise")
+        {
+            double wiredLevel = 0.0;
+            auto effectiveLevel = findWiredParameterValue(node.id, "param:noiseLevel", wiredLevel)
+                                 ? (float) wiredLevel : node.oscillatorLevel;
+            if (effectiveLevel <= 0.0f)
+                continue;
+            cw::PatchSource source { node.id, "noise", {}, "white", effectiveLevel, {} };
+            source.canvasX = node.position.x;
+            source.canvasY = node.position.y;
+            document.sources.add(source);
+        }
+        else if (node.type == "mix" || node.type == "filter" || node.type == "envelope"
+                 || node.type == "output" || node.type == "scope" || node.type == "analyzer")
+        {
+            cw::PatchNode patchNode;
+            patchNode.id = node.id;
+            patchNode.kind = node.type;
+            patchNode.canvasX = node.position.x;
+            patchNode.canvasY = node.position.y;
 
-    cw::PatchNode mixNode;
-    mixNode.id = "mix1";
-    mixNode.kind = "mix";
-    document.nodes.add(mixNode);
+            if (node.type == "mix")
+            {
+                juce::StringArray weights;
+                for (auto volume : node.mixerInputVolumes)
+                    weights.add(juce::String(volume, 4));
+                patchNode.properties.set("channelWeights", weights.joinIntoString(","));
+            }
+            else if (node.type == "filter")
+            {
+                double wiredValue = 0.0;
+                patchNode.properties.set("mode", node.filterMode);
+                patchNode.properties.set("cutoffHz", findWiredParameterValue(node.id, "param:filterCutoff", wiredValue)
+                                                    ? wiredValue : (double) node.filterCutoffHz);
+                patchNode.properties.set("resonance", findWiredParameterValue(node.id, "param:filterResonance", wiredValue)
+                                                     ? wiredValue : (double) node.filterResonance);
+                patchNode.properties.set("envelopeAmount", findWiredParameterValue(node.id, "param:filterEnvelopeAmount", wiredValue)
+                                                          ? wiredValue : (double) node.filterEnvelopeAmount);
+            }
+            else if (node.type == "envelope")
+            {
+                patchNode.properties.set("curveMode", node.envelopeCurveMode);
+                patchNode.properties.set("pointsJson", serialisePointsJson(node.envelopePoints));
+            }
 
-    cw::PatchNode filterNode;
-    filterNode.id = "filter1";
-    filterNode.kind = "filter";
-    filterNode.properties.set("mode", recipeCopy.filterMode);
-    filterNode.properties.set("cutoffHz", recipeCopy.filterCutoffHz);
-    filterNode.properties.set("resonance", recipeCopy.filterResonance);
-    filterNode.properties.set("envelopeAmount", recipeCopy.filterEnvelopeAmount);
-    document.nodes.add(filterNode);
+            document.nodes.add(patchNode);
+        }
+    }
 
-    cw::PatchNode envelopeNode;
-    envelopeNode.id = "env1";
-    envelopeNode.kind = "envelope";
-    envelopeNode.properties.set("attackPosition", getLegacyAttackPosition(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("sustainPosition", getLegacySustainPosition(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("releasePosition", getLegacyReleasePosition(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("sustainLevel", getLegacySustainLevel(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("curveMode", recipeCopy.envelopeCurveMode);
-    envelopeNode.properties.set("pointsJson", serialisePointsJson(recipeCopy.envelopePoints));
-    document.nodes.add(envelopeNode);
+    // Mirror the real wires from the canvas -- only signal (white/exec)
+    // connections matter to the audio graph; value-port wiring (Get/Set,
+    // filter cutoff knobs, etc.) isn't part of this signal-path document.
+    for (auto& connection : graphConnections)
+    {
+        if (! connection.isExec)
+            continue;
 
-    for (const auto& source : document.sources)
-        document.connections.add({ source.id, "mix1" });
-    document.connections.add({ "mix1", "filter1" });
-    document.connections.add({ "filter1", "env1" });
+        cw::PatchConnection patchConnection;
+        patchConnection.from = connection.fromNodeId;
+        patchConnection.to = connection.toNodeId;
+        patchConnection.fromPort = connection.fromPortId;
+        patchConnection.toPort = connection.toPortId;
+        patchConnection.weight = 1.0;
+        patchConnection.waypoints = connection.waypoints;
+
+        if (connection.toPortId.startsWith("signalIn:"))
+        {
+            for (auto& targetNode : graphNodes)
+            {
+                if (targetNode.id != connection.toNodeId || targetNode.type != "mix")
+                    continue;
+                auto channelIndex = connection.toPortId.fromFirstOccurrenceOf(":", false, false).getIntValue();
+                double wiredWeight = 0.0;
+                if (findWiredParameterValue(targetNode.id, "mixWeight:" + juce::String(channelIndex), wiredWeight))
+                    patchConnection.weight = wiredWeight;
+                else if (channelIndex >= 0 && channelIndex < targetNode.mixerInputVolumes.size())
+                    patchConnection.weight = targetNode.mixerInputVolumes[channelIndex];
+                break;
+            }
+        }
+
+        document.connections.add(patchConnection);
+    }
 
     document.output.channelMode = "stereo";
     document.output.gain = 0.9;
@@ -3909,6 +5690,30 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
     ensureRecipe(recipe);
     rebuildAutomationChrome();
     refreshControlsFromRecipe();
+    seedOscillatorNodesFromRecipeLevels();
+
+    // Filter/Envelope are independent per-instance nodes now (Phase 3) --
+    // a template only sets the legacy recipe scalars above, so if any
+    // Filter/Envelope nodes are already on the canvas, push the template's
+    // values into them directly. This deliberately doesn't create new
+    // Filter/Envelope nodes -- templates tune character for whatever's
+    // already placed, they don't add structure to the graph.
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "filter")
+        {
+            node.filterMode = recipe.filterMode;
+            node.filterCutoffHz = recipe.filterCutoffHz;
+            node.filterResonance = recipe.filterResonance;
+            node.filterEnvelopeAmount = recipe.filterEnvelopeAmount;
+        }
+        else if (node.type == "envelope")
+        {
+            node.envelopeCurveMode = recipe.envelopeCurveMode;
+            node.envelopePoints = recipe.envelopePoints;
+        }
+    }
+
     regenerateSignal();
 }
 
@@ -3917,6 +5722,7 @@ void SignalLabPanel::refreshControlsFromRecipe()
     ensureRecipe(recipe);
     suppressCallbacks = true;
     nameEditor.setText(recipe.name, juce::dontSendNotification);
+    descriptionEditor.setText(recipe.description, juce::dontSendNotification);
     templateSelector.setSelectedId(1, juce::dontSendNotification);
     frequencySlider.setValue(recipe.baseFrequencyHz, juce::dontSendNotification);
     durationSlider.setValue(recipe.durationSeconds, juce::dontSendNotification);
@@ -3948,7 +5754,10 @@ void SignalLabPanel::refreshControlsFromRecipe()
 
 void SignalLabPanel::updateStatusText()
 {
-    auto sampleCount = generatedBuffer.getNumSamples();
+    // Derived from the recipe, not generatedBuffer -- the buffer is only
+    // rendered on demand now (Play/Preview/Render), so it can be stale or
+    // empty while this status text must stay accurate as you edit.
+    auto sampleCount = juce::jmax(0, juce::roundToInt(recipe.durationSeconds * recipe.sampleRate));
     auto text = "Ready: " + recipe.name
               + "  |  " + juce::String(recipe.durationSeconds, 2) + " s"
               + "  |  " + juce::String((int) recipe.baseFrequencyHz) + " Hz"

@@ -66,6 +66,8 @@ juce::var sourceToVar(const cw::PatchSource& source)
         object->setProperty("frequencyParameter", source.frequencyParameter);
 
     object->setProperty("level", source.level);
+    object->setProperty("canvasX", source.canvasX);
+    object->setProperty("canvasY", source.canvasY);
     return juce::var(object);
 }
 
@@ -74,6 +76,8 @@ juce::var nodeToVar(const cw::PatchNode& node)
     auto* object = new juce::DynamicObject();
     object->setProperty("id", node.id);
     object->setProperty("kind", node.kind);
+    object->setProperty("canvasX", node.canvasX);
+    object->setProperty("canvasY", node.canvasY);
 
     for (int index = 0; index < node.properties.size(); ++index)
         object->setProperty(node.properties.getName(index), node.properties.getValueAt(index));
@@ -86,6 +90,25 @@ juce::var connectionToVar(const cw::PatchConnection& connection)
     auto* object = new juce::DynamicObject();
     object->setProperty("from", connection.from);
     object->setProperty("to", connection.to);
+    if (connection.fromPort.isNotEmpty())
+        object->setProperty("fromPort", connection.fromPort);
+    if (connection.toPort.isNotEmpty())
+        object->setProperty("toPort", connection.toPort);
+    object->setProperty("weight", connection.weight);
+
+    if (! connection.waypoints.isEmpty())
+    {
+        juce::Array<juce::var> waypointVars;
+        for (const auto& waypoint : connection.waypoints)
+        {
+            auto* pointObject = new juce::DynamicObject();
+            pointObject->setProperty("x", waypoint.x);
+            pointObject->setProperty("y", waypoint.y);
+            waypointVars.add(juce::var(pointObject));
+        }
+        object->setProperty("waypoints", juce::var(waypointVars));
+    }
+
     return juce::var(object);
 }
 }
@@ -273,6 +296,8 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                 source.noiseType = object->getProperty("noiseType").toString();
                 source.level = (double) object->getProperty("level");
                 source.frequencyParameter = object->getProperty("frequencyParameter").toString();
+                source.canvasX = (int) object->getProperty("canvasX");
+                source.canvasY = (int) object->getProperty("canvasY");
                 document.sources.add(source);
             }
         }
@@ -289,11 +314,13 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                     PatchNode node;
                     node.id = object->getProperty("id").toString();
                     node.kind = object->getProperty("kind").toString();
+                    node.canvasX = (int) object->getProperty("canvasX");
+                    node.canvasY = (int) object->getProperty("canvasY");
 
                     for (const auto& property : object->getProperties())
                     {
                         auto propertyName = property.name.toString();
-                        if (propertyName != "id" && propertyName != "kind")
+                        if (propertyName != "id" && propertyName != "kind" && propertyName != "canvasX" && propertyName != "canvasY")
                             node.properties.set(property.name, property.value);
                     }
 
@@ -311,6 +338,19 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                     PatchConnection connection;
                     connection.from = object->getProperty("from").toString();
                     connection.to = object->getProperty("to").toString();
+                    connection.fromPort = object->getProperty("fromPort").toString();
+                    connection.toPort = object->getProperty("toPort").toString();
+                    connection.weight = object->hasProperty("weight") ? (double) object->getProperty("weight") : 1.0;
+
+                    if (auto* waypoints = parseArray(object->getProperty("waypoints")))
+                    {
+                        for (const auto& waypointValue : *waypoints)
+                        {
+                            if (auto* waypointObject = waypointValue.getDynamicObject())
+                                connection.waypoints.add({ (int) waypointObject->getProperty("x"), (int) waypointObject->getProperty("y") });
+                        }
+                    }
+
                     document.connections.add(connection);
                 }
             }

@@ -12,8 +12,10 @@ public:
         SignalRecipe();
 
         juce::String name { "Signal-Lab-Render" };
+        juce::String description;
         double sampleRate = 48000.0;
-        double durationSeconds = 1.5;
+        double durationSeconds = 5.0;
+        juce::String sinkMode { "audio" }; // "audio" (live device) or "wave" (render to project file)
         float baseFrequencyHz = 180.0f;
         float sineLevel = 0.0f;
         float sawLevel = 0.0f;
@@ -38,12 +40,30 @@ public:
 
     SignalLabPanel();
 
+    // Mirrors WorkstationAudioEngine::LiveMidiControlChange without pulling
+    // that (heavy, engine-level) header into this UI panel -- MainComponent
+    // adapts one to the other when forwarding.
+    struct MidiControlChange
+    {
+        juce::String deviceId;
+        int channel = 1;
+        int number = 0;
+        bool isController = false;
+        float value = 0.0f;
+    };
+
     juce::ValueTree createState() const;
     void restoreState(const juce::ValueTree& state);
     void resetToBlankSignal();
     bool loadPatchDocument(const cw::PatchDocument& document, juce::String& errorMessage);
     void applyAiTemplate(const juce::String& templateName);
     bool previewCurrentSignal();
+    // Called at UI-timer rate (see MainComponent::timerCallback) with any
+    // MIDI control values that changed since the last call. Updates every
+    // placed midiFader/midiButton node whose learned binding matches one of
+    // these changes, and marks the graph dirty so the new value reaches the
+    // next render -- this does not trigger a render itself.
+    void applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes);
 
     std::function<void(const juce::ValueTree& stateBeforeEdit, const juce::String& label)> onUndoCheckpointRequested;
     std::function<void()> onInteractionStarted;
@@ -53,6 +73,12 @@ public:
     std::function<void(const juce::String& patchJson, const juce::String& suggestedName)> onPatchSaveToLibraryRequested;
     std::function<void()> onPatchLoadRequested;
     std::function<void()> onStopRequested;
+    std::function<void()> onAudioSettingsRequested;
+    // Requests the app-level "Learn MIDI Binding" dialog (shared with the
+    // transport buttons' MIDI learn -- see MainComponent::requestSignalLabMidiLearn).
+    // onLearned fires once with the captured (deviceId, channel, number, isController).
+    std::function<void(const juce::String& displayLabel,
+                       std::function<void(juce::String deviceId, int channel, int number, bool isController)> onLearned)> onMidiLearnRequested;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -68,12 +94,90 @@ private:
         juce::Colour accent;
         bool locked = false;
         bool required = false;
+
+        // Mixer only: one entry per signal input's volume (0..1), default
+        // two inputs. Variable-arity -- grown via the node's own "+ Input"
+        // button rather than being a fixed registry shape like every other
+        // node type's ports.
+        juce::Array<float> mixerInputVolumes { 1.0f, 1.0f };
+
+        // Oscillator/noise sources only (sine/saw/square/triangle/noise):
+        // each instance owns its own level and frequency instead of sharing
+        // the recipe's old singleton fields -- that's what made two Sine
+        // nodes edit the same value. frequencyHz is ignored for noise.
+        float oscillatorLevel = 0.5f;
+        float oscillatorFrequencyHz = 180.0f;
+
+        // Filter instances only: same reasoning as oscillators above -- each
+        // Filter node owns its own cutoff/resonance/mode instead of the
+        // recipe's old singleton fields, so multiple Filters in different
+        // chain positions can have different settings.
+        juce::String filterMode { "lowpass" };
+        float filterCutoffHz = 3600.0f;
+        float filterResonance = 0.90f;
+        float filterEnvelopeAmount = 0.35f;
+
+        // Envelope instances only: each Envelope node owns its own curve.
+        juce::String envelopeCurveMode { "smooth" };
+        juce::Array<cw::PatchAutomationPoint> envelopePoints;
+
+        // MIDI Control nodes only (midiFader / midiButton): the learned
+        // hardware binding (empty deviceId + number 0 == not learned yet)
+        // and this node's current live value, updated from incoming MIDI in
+        // applyLiveMidiControlChanges(). midiButtonMode ("momentary" |
+        // "toggle") only applies to midiButton.
+        bool midiLearned = false;
+        juce::String midiDeviceId;
+        juce::String midiDeviceLabel;
+        int midiChannel = 1;
+        int midiNumber = 0;
+        bool midiIsController = true;
+        juce::String midiButtonMode { "momentary" };
+        float midiLiveValue = 0.0f;
+    };
+
+    enum class PortValueType { Float, Int, Bool };
+
+    struct GraphPort
+    {
+        juce::String portId;
+        juce::String label;
+        bool isOutput = false;
+        bool isExec = false;
+        PortValueType valueType = PortValueType::Float;
+        juce::Point<float> position;
+    };
+
+    struct PortHit
+    {
+        bool found = false;
+        int nodeIndex = -1;
+        GraphPort port;
+    };
+
+    struct GraphConnection
+    {
+        juce::String id;
+        juce::String fromNodeId;
+        juce::String fromPortId;
+        juce::String toNodeId;
+        juce::String toPortId;
+        bool isExec = false;
+        PortValueType valueType = PortValueType::Float;
+        juce::Array<juce::Point<int>> waypoints;
+    };
+
+    struct GraphValidationError
+    {
+        juce::String nodeId;
+        juce::String message;
     };
 
     struct LocalControlVariable
     {
         juce::String id;
         juce::String name;
+        juce::String description;
         juce::String valueType { "Float" };
         juce::String accessScope { "Private" };
         juce::String targetParameter;
@@ -191,6 +295,14 @@ private:
         bool panning = false;
         juce::Point<int> panAnchor;
         juce::Point<int> viewportAnchor;
+
+        bool wireDragging = false;
+        int wireDragNodeIndex = -1;
+        GraphPort wireDragPort;
+        juce::Point<int> wireDragCurrentPoint;
+
+        int waypointDragConnectionIndex = -1;
+        int waypointDragIndex = -1;
     };
 
     class NodeToolboxPane final : public juce::Component
@@ -221,6 +333,7 @@ private:
         void paint(juce::Graphics& g) override;
 
         void setVariables(const juce::Array<LocalControlVariable>& variables);
+        int getRequiredHeight() const;
 
         std::function<void()> onAddVariableRequested;
         std::function<void(const juce::String& variableId)> onPlaceVariableRequested;
@@ -228,11 +341,13 @@ private:
         std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragMoved;
         std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragEnded;
         std::function<void(const juce::String& variableId)> onVariableSelected;
+        std::function<void(const juce::String& variableId)> onVariableRemoveRequested;
 
     private:
         juce::Label titleLabel;
         juce::TextButton addVariableButton { "+ Variable" };
         juce::OwnedArray<VariableButton> variableButtons;
+        juce::OwnedArray<juce::TextButton> removeButtons;
         juce::Array<LocalControlVariable> localVariables;
     };
 
@@ -252,10 +367,17 @@ private:
         void paint(juce::Graphics& g) override;
 
         std::function<void(const juce::String& type, const juce::String& payload)> onEntryChosen;
+        std::function<void()> onDismissRequested;
 
     private:
         void refreshResults();
 
+        struct CompactLookAndFeel final : public juce::LookAndFeel_V4
+        {
+            juce::Font getTextButtonFont(juce::TextButton&, int) override { return juce::Font(11.0f); }
+        };
+
+        CompactLookAndFeel compactLookAndFeel;
         juce::TextEditor searchEditor;
         juce::OwnedArray<juce::TextButton> resultButtons;
         juce::Array<Entry> allEntries;
@@ -292,6 +414,8 @@ private:
 
     void configureSlider(juce::Slider& slider, double min, double max, double step);
     void regenerateSignal();
+    void ensureAudioRendered();
+    const juce::AudioBuffer<float>& getDisplayBufferForNode(const juce::String& nodeId) const;
     juce::AudioBuffer<float> buildSignalBuffer(const SignalRecipe& recipe) const;
     cw::PatchDocument buildPatchDocument(const SignalRecipe& recipe) const;
     void applyTemplate(const juce::String& templateName);
@@ -306,6 +430,8 @@ private:
     void endUndoGesture();
     void noteInteraction();
     void rebuildNodeGraphFromRecipe();
+    void seedOscillatorNodesFromRecipeLevels();
+    bool findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const;
     void updateInspectorForSelection();
     void layoutFloatingWindows();
     void showCanvasActionMenu(juce::Point<int> canvasPosition, bool anchorToButton = false);
@@ -314,8 +440,12 @@ private:
     void removeSelectedGraphNode();
     int findGraphNodeAt(juce::Point<int> position) const;
     juce::Rectangle<int> getGraphNodeBounds(int index) const;
+    int getGraphNodeHeight(int index) const;
+    juce::Rectangle<int> getMixerAddInputButtonBounds(int index) const;
     void setSelectedGraphNodeIndex(int index);
     bool hasGraphNodeType(const juce::String& type) const;
+    bool hasSetterNodeForVariable(const juce::String& variableId) const;
+    void addMixerInput(int nodeIndex);
     void openNodeEditorForSelection();
     void closeNodeEditor();
     void toggleControlPad();
@@ -327,22 +457,37 @@ private:
     void timerCallback() override;
     void triggerTransportPlay();
     void stopTransport();
+    juce::Array<GraphValidationError> validateGraph() const;
+    void compileGraph();
+    void showCompileErrorWindow();
+    void centerCanvasOnGraphNode(const juce::String& nodeId);
     void updateCanvasWorkspace();
     juce::Point<int> graphToCanvas(juce::Point<int> position) const;
     juce::Point<float> graphToCanvas(juce::Point<float> position) const;
     juce::Rectangle<int> graphToCanvas(juce::Rectangle<int> bounds) const;
     juce::Point<int> canvasToGraph(juce::Point<int> position) const;
     juce::Point<float> canvasToGraph(juce::Point<float> position) const;
-    juce::Point<float> getNodeAudioInputPort(int index) const;
-    juce::Point<float> getNodeAudioOutputPort(int index) const;
-    juce::Point<float> getNodeControlInputPort(int index) const;
     juce::Point<float> getControlPadOutputPort(int index) const;
+    juce::Array<GraphPort> getNodePorts(int nodeIndex) const;
+    PortHit findPortAt(juce::Point<int> canvasPosition) const;
+    juce::Point<int> resolvePortPosition(const juce::String& nodeId, const juce::String& portId, bool wantOutput) const;
+    int findConnectionAt(juce::Point<int> canvasPosition, int* outWaypointIndex) const;
+    juce::Path buildConnectionPath(int connectionIndex) const;
+    void tryCompleteConnection(int fromNodeIndex, const GraphPort& fromPort, juce::Point<int> releaseCanvasPosition);
+    void removeConnection(int index);
+    void showConnectionContextMenu(int connectionIndex, int waypointIndex, juce::Point<int> canvasPosition);
+    static juce::Colour portValueColour(PortValueType type);
 
     SignalRecipe recipe;
     ProbeSettings probeSettings;
     juce::Array<GraphNodeModel> graphNodes;
+    juce::Array<GraphConnection> graphConnections;
+    int selectedConnectionIndex = -1;
+    juce::Array<GraphValidationError> validationErrors;
     juce::Array<LocalControlVariable> localControls;
     juce::AudioBuffer<float> generatedBuffer;
+    juce::Array<PatchRuntimePlayer::TapCapture> nodeTapBuffers; // per Scope/Analyzer node id, its real tapped signal
+    bool audioDirty = true; // set by regenerateSignal() on every graph/recipe edit; only ensureAudioRendered() clears it, and only actual playback/render/export call that -- rendering happens on demand, not on every edit
     bool variableDragActive = false;
     juce::String draggedVariableId;
     juce::Point<int> draggedVariableScreenPoint;
@@ -359,6 +504,7 @@ private:
     bool suppressCallbacks = false;
     bool undoGestureActive = false;
     bool nameEditUndoCaptured = false;
+    bool descriptionEditUndoCaptured = false;
     PatchRuntimePlayer runtimePlayer;
     int selectedGraphNodeIndex = -1;
     int editingNodeIndex = -1;
@@ -372,11 +518,13 @@ private:
         std::unique_ptr<juce::DocumentWindow> window;
     };
     juce::OwnedArray<OpenNodeWindow> openNodeWindows;
+    std::unique_ptr<juce::DocumentWindow> compileErrorWindow;
 
     juce::Label titleLabel;
     juce::Label subtitleLabel;
     juce::Label statusLabel;
     juce::TextButton signalMenuButton { "Signal" };
+    juce::TextButton compileButton { "Compile" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
     juce::Label propertiesHeaderLabel;
@@ -389,6 +537,8 @@ private:
     SectionPanel variableDetailsPanel;
     NodeToolboxPane toolboxPane;
     juce::Viewport variablesViewport;
+    juce::Component variableDetailsContent;
+    juce::Viewport variableDetailsViewport;
     juce::Viewport graphViewport;
     NodeGraphCanvas nodeGraphCanvas { *this };
     FloatingWindow nodeEditorWindow { *this, FloatingWindow::Kind::NodeEditor };
@@ -400,8 +550,12 @@ private:
     juce::Label inspectorBodyLabel;
     juce::Label nameLabel;
     juce::TextEditor nameEditor;
+    juce::Label descriptionLabel;
+    juce::TextEditor descriptionEditor;
     juce::Label variableNameLabel;
     juce::TextEditor variableNameEditor;
+    juce::Label variableDescriptionLabel;
+    juce::TextEditor variableDescriptionEditor;
     juce::Label variableTypeLabel;
     juce::ComboBox variableTypeSelector;
     juce::Label variableAccessLabel;

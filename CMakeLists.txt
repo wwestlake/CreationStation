@@ -82,7 +82,7 @@ if(NOT TARGET ce_lang_frontend)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
-    PRODUCT_NAME "Creative Workstation"
+    PRODUCT_NAME "Creation Station"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationstation"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconBig.png"
@@ -90,13 +90,13 @@ juce_add_gui_app(CreativeWorkstation
 )
 
 # Mirrors the built executable into the workspace-level shared bin
-# directory (D:\CreationSuite-Workspaces\codex-<config>-bin) so it's
+# directory (D:\CreationSuite-Workspaces\claude-<config>-bin) so it's
 # reachable at a stable path without needing OS symlink privileges.
 # Every suite agent does this for its own repo -- see AGENTS.md.
 add_custom_command(TARGET CreativeWorkstation POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/codex-$<LOWER_CASE:$<CONFIG>>-bin"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/codex-$<LOWER_CASE:$<CONFIG>>-bin/"
-    COMMENT "Copying CreativeWorkstation to the shared codex bin directory"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
+    COMMENT "Copying CreativeWorkstation to the shared claude bin directory"
 )
 
 juce_add_plugin(CreationStationInstrument
@@ -185,6 +185,12 @@ target_sources(CreativeWorkstation PRIVATE
     Source/MainComponent.h
     Source/Language/SignalGraph.cpp
     Source/Language/SignalGraph.h
+    Source/Language/AudioNodeCatalog.cpp
+    Source/Language/AudioNodeCatalog.h
+    Source/Language/AudioGraphCodegen.cpp
+    Source/Language/AudioGraphCodegen.h
+    Source/Language/AudioGraphSelfTest.cpp
+    Source/Language/AudioGraphSelfTest.h
     Source/Views/AuthGateView.cpp
     Source/Views/AuthGateView.h
     Source/Views/ArrangeView.cpp
@@ -267,6 +273,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_INTEROP_TARGET}
     creation_station_language_host
     ce_lang_frontend
+    ce_lang_jit
     node_system
     juce::juce_audio_devices
     juce::juce_audio_processors

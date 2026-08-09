@@ -518,6 +518,20 @@ void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput* source, co
             return;
     }
 
+    // Same live-dispatch reporting as WorkstationAudioEngine::handleIncomingMidiMessage -- needed
+    // here too because control-surface-family devices (X-Touch/BCR2000/Mackie) are deliberately
+    // excluded from the engine's own MIDI input registration (see attachToDevice), so a learned
+    // binding on one of these devices would otherwise never reach a live parameter.
+    if (source != nullptr && learnEngine != nullptr)
+    {
+        if (message.isController())
+            learnEngine->reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getControllerNumber(), true, message.getControllerValue() / 127.0f);
+        else if (message.isNoteOn(true))
+            learnEngine->reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 1.0f);
+        else if (message.isNoteOff(true))
+            learnEngine->reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 0.0f);
+    }
+
     if (source != nullptr && onTransportCommand)
     {
         auto it = deviceNameById.find(source->getIdentifier());
