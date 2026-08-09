@@ -80,10 +80,15 @@ public:
         return *combo;
     }
 
-    void addCustomComponent(juce::Component& component, int height)
+    // Takes ownership of a heap-allocated component -- every call site hands
+    // this a freshly-`new`'d component with nothing else holding a pointer
+    // to it, so it must be owned here or it leaks for the life of the app
+    // every time a node tool window is opened.
+    void addCustomComponent(juce::Component* component, int height)
     {
         addAndMakeVisible(component);
-        rows.add({ &component, height });
+        rows.add({ component, height });
+        ownedCustomComponents.add(component);
     }
 
     juce::TextButton& addButtonRow(const juce::String& buttonText)
@@ -110,6 +115,7 @@ private:
     juce::OwnedArray<juce::Slider> sliders;
     juce::OwnedArray<juce::ComboBox> combos;
     juce::OwnedArray<juce::TextButton> buttons;
+    juce::OwnedArray<juce::Component> ownedCustomComponents;
     juce::Array<Row> rows;
 };
 
@@ -179,6 +185,81 @@ private:
     std::unique_ptr<juce::Label> okLabel;
     juce::OwnedArray<juce::TextButton> errorButtons;
     std::function<void(const juce::String&)> onErrorClicked;
+};
+
+// A real mixing-board look for the Mixer node's tool window: one vertical
+// fader per channel instead of the horizontal label/slider rows every other
+// node's editor uses. A channel whose weight port has a Get-variable wired
+// into it is shown at the wired value but disabled -- manual control is
+// disabled while wired, same rule as every other parameter in this app.
+class MixerFaderBank final : public juce::Component
+{
+public:
+    struct ChannelState
+    {
+        juce::String label;
+        float value = 1.0f;
+        bool wired = false;
+        double wiredValue = 0.0;
+    };
+
+    void setChannels(const juce::Array<ChannelState>& channels, std::function<void(int channelIndex, float newValue)> onChannelChangedIn)
+    {
+        onChannelChanged = std::move(onChannelChangedIn);
+        sliders.clear();
+        labels.clear();
+
+        for (int index = 0; index < channels.size(); ++index)
+        {
+            auto& state = channels.getReference(index);
+
+            auto* slider = sliders.add(new juce::Slider());
+            slider->setSliderStyle(juce::Slider::LinearVertical);
+            slider->setTextBoxStyle(juce::Slider::TextBoxBelow, false, 56, 20);
+            slider->setRange(0.0, 1.5, 0.001);
+            slider->setValue(state.wired ? state.wiredValue : (double) state.value, juce::dontSendNotification);
+            slider->setEnabled(! state.wired);
+            if (! state.wired)
+            {
+                auto channelIndex = index;
+                slider->onValueChange = [this, channelIndex, slider = slider]
+                {
+                    if (onChannelChanged)
+                        onChannelChanged(channelIndex, (float) slider->getValue());
+                };
+            }
+            addAndMakeVisible(slider);
+
+            auto* label = labels.add(new juce::Label());
+            label->setText(state.label, juce::dontSendNotification);
+            label->setJustificationType(juce::Justification::centred);
+            label->setColour(juce::Label::textColourId, state.wired ? juce::Colour(0xff8fd978) : juce::Colours::white);
+            label->setFont(juce::Font(11.0f));
+            addAndMakeVisible(label);
+        }
+
+        resized();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(6);
+        if (sliders.isEmpty())
+            return;
+
+        auto channelWidth = juce::jmax(44, area.getWidth() / sliders.size());
+        for (int index = 0; index < sliders.size(); ++index)
+        {
+            auto column = area.removeFromLeft(channelWidth);
+            labels[index]->setBounds(column.removeFromBottom(18));
+            sliders[index]->setBounds(column.reduced(6, 0));
+        }
+    }
+
+private:
+    juce::OwnedArray<juce::Slider> sliders;
+    juce::OwnedArray<juce::Label> labels;
+    std::function<void(int, float)> onChannelChanged;
 };
 
 struct AutomationTargetSpec
@@ -3433,6 +3514,49 @@ void SignalLabPanel::openNodeEditorForSelection()
             };
         }
     }
+    else if (node.type == "mix")
+    {
+        // Real mixing-board faders, one per channel, instead of the "+
+        // Input" button being the only way to touch a channel's weight.
+        // Wiring a Get-variable into a channel's Weight port still works
+        // (buildPatchDocument already resolves it via
+        // findWiredParameterValue) -- that channel's fader just shows the
+        // wired value and disables, same rule as every other parameter.
+        auto nodeId = node.id;
+        auto findMixNode = [this, nodeId]() -> GraphNodeModel*
+        {
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        juce::Array<MixerFaderBank::ChannelState> channelStates;
+        for (int channelIndex = 0; channelIndex < node.mixerInputVolumes.size(); ++channelIndex)
+        {
+            MixerFaderBank::ChannelState state;
+            state.label = "Ch " + juce::String(channelIndex + 1);
+            state.value = node.mixerInputVolumes[channelIndex];
+
+            double wiredWeight = 0.0;
+            if (findWiredParameterValue(node.id, "mixWeight:" + juce::String(channelIndex), wiredWeight))
+            {
+                state.wired = true;
+                state.wiredValue = wiredWeight;
+            }
+            channelStates.add(state);
+        }
+
+        auto* faderBank = new MixerFaderBank();
+        faderBank->setChannels(channelStates, [this, findMixNode](int channelIndex, float newValue)
+        {
+            if (auto* target = findMixNode())
+                if (channelIndex >= 0 && channelIndex < target->mixerInputVolumes.size())
+                    target->mixerInputVolumes.getReference(channelIndex) = newValue;
+            regenerateSignal();
+        });
+        content->addCustomComponent(faderBank, 170);
+    }
     else if (node.type == "output")
     {
         auto& duration = content->addSliderRow("Duration", 0.1, 3600.0, 0.01);
@@ -3459,14 +3583,14 @@ void SignalLabPanel::openNodeEditorForSelection()
         ensureAudioRendered();
         auto* scope = new ScopePanel();
         scope->setBuffer(getDisplayBufferForNode(node.id));
-        content->addCustomComponent(*scope, 220);
+        content->addCustomComponent(scope, 220);
     }
     else if (node.type == "analyzer")
     {
         ensureAudioRendered();
         auto* analyzer = new SpectrumPanel();
         analyzer->setBuffer(getDisplayBufferForNode(node.id), recipe.sampleRate);
-        content->addCustomComponent(*analyzer, 220);
+        content->addCustomComponent(analyzer, 220);
     }
     else if (node.type == "envelope")
     {
@@ -3491,7 +3615,7 @@ void SignalLabPanel::openNodeEditorForSelection()
                 }
             regenerateSignal();
         };
-        content->addCustomComponent(*editor, 220);
+        content->addCustomComponent(editor, 220);
     }
     else if (node.type == "timeline")
     {
@@ -3516,7 +3640,7 @@ void SignalLabPanel::openNodeEditorForSelection()
                 }
             }
         };
-        content->addCustomComponent(*laneEditor, 220);
+        content->addCustomComponent(laneEditor, 220);
     }
     else if (node.type == "value")
     {
@@ -3565,8 +3689,13 @@ void SignalLabPanel::openNodeEditorForSelection()
         }
     });
     window->setContentOwned(content.release(), true);
-    window->centreWithSize(node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 520 : 420,
-                           node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 360 : 280);
+    auto windowWidth = node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 520
+                      : node.type == "mix" ? juce::jmax(420, 70 * node.mixerInputVolumes.size() + 80)
+                      : 420;
+    auto windowHeight = node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 360
+                       : node.type == "mix" ? 340
+                       : 280;
+    window->centreWithSize(windowWidth, windowHeight);
     window->setVisible(true);
     window->toFront(true);
     entry->window = std::move(window);
