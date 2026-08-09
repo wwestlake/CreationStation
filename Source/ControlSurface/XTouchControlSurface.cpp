@@ -517,6 +517,18 @@ void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput* source, co
         if (learnEngine->offerMidiLearnCandidate(source->getIdentifier(), message.getChannel(), number, message.isController()))
             return;
     }
+    // Pitch wheel is how X-Touch's actual motorized faders report continuous position (see the
+    // native handling further below, onFaderMoved/onMasterFaderMoved) - a plain Note/CC learn
+    // never sees fader motion at all, only whatever else happens to be near it (a touch-sense
+    // note, a nearby button). Offered as a learn candidate the same way, using number = -1 as the
+    // "this is a fader, not a CC/Note" marker (see WorkstationAudioEngine::handleIncomingMidiMessage
+    // for the same convention and the reasoning for not adding a new field instead) - channel alone
+    // identifies which physical fader.
+    else if (source != nullptr && learnEngine != nullptr && message.isPitchWheel())
+    {
+        if (learnEngine->offerMidiLearnCandidate(source->getIdentifier(), message.getChannel(), -1, true))
+            return;
+    }
 
     // Same live-dispatch reporting as WorkstationAudioEngine::handleIncomingMidiMessage -- needed
     // here too because control-surface-family devices (X-Touch/BCR2000/Mackie) are deliberately
@@ -530,6 +542,8 @@ void XTouchControlSurface::handleIncomingMidiMessage(juce::MidiInput* source, co
             learnEngine->reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 1.0f);
         else if (message.isNoteOff(true))
             learnEngine->reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 0.0f);
+        else if (message.isPitchWheel())
+            learnEngine->reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), -1, true, midi14BitToUnitFloat(message.getPitchWheelValue()));
     }
 
     if (source != nullptr && onTransportCommand)

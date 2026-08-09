@@ -251,7 +251,7 @@ public:
         {
             currentBindingLabel.setText("Currently bound to: " + existing.deviceLabel + ", channel "
                                         + juce::String(existing.channel) + ", "
-                                        + (existing.isController ? "CC " : "Note ") + juce::String(existing.number),
+                                        + (existing.number < 0 ? juce::String("Fader") : (existing.isController ? juce::String("CC ") : juce::String("Note ")) + juce::String(existing.number)),
                                         juce::dontSendNotification);
             currentBindingLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
             addAndMakeVisible(currentBindingLabel);
@@ -420,9 +420,12 @@ private:
             numberEditor.setText(juce::String(result.number), juce::dontSendNotification);
             isCCToggle.setToggleState(result.isController, juce::dontSendNotification);
 
+            // number == -1 marks a captured fader (pitch wheel) rather than a CC/Note -- see
+            // WorkstationAudioEngine::handleIncomingMidiMessage. "CC -1" would be a nonsensical
+            // readout for what a user just physically moved.
             statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff7fe8a0));
             statusLabel.setText("Captured & saved: channel " + juce::String(result.channel) + ", "
-                                + (result.isController ? "CC " : "Note ") + juce::String(result.number),
+                                + (result.number < 0 ? juce::String("Fader") : (result.isController ? juce::String("CC ") : juce::String("Note ")) + juce::String(result.number)),
                                 juce::dontSendNotification);
 
             if (onLearned)

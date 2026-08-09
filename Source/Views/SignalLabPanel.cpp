@@ -354,6 +354,16 @@ juce::String shortParamLabel(const juce::String& parameterId)
     return parameterId;
 }
 
+// number == -1 is the "this is a fader's continuous pitch-wheel position,
+// not a CC or Note number" marker (see WorkstationAudioEngine::handleIncomingMidiMessage) --
+// display it distinctly rather than the nonsensical "CC -1".
+juce::String formatMidiBindingSuffix(bool isController, int number)
+{
+    if (number < 0)
+        return "Fader";
+    return (isController ? juce::String("CC ") : juce::String("Note ")) + juce::String(number);
+}
+
 bool usesLogScale(const juce::String& parameterId)
 {
     return parameterId == "filterCutoff" || parameterId == "baseFrequency";
@@ -1415,9 +1425,31 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
 
         juce::String detail;
         if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
-            detail = "Level " + juce::String(node.oscillatorLevel, 2) + " • " + juce::String(juce::roundToInt(node.oscillatorFrequencyHz)) + " Hz";
-        else if (node.type == "noise") detail = "Level " + juce::String(node.oscillatorLevel, 2);
-        else if (node.type == "filter") detail = node.filterMode + " • " + juce::String(juce::roundToInt(node.filterCutoffHz)) + " Hz";
+        {
+            // Reflects the actual wired/live value, same as the port
+            // indicators next to the dots -- this used to always read the
+            // raw manual fields even when wired, showing stale numbers.
+            double wiredLevel = 0.0, wiredFreq = 0.0;
+            auto level = owner.findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel)
+                       ? scaleNormalizedWiredValue(node.type + "Level", wiredLevel) : (double) node.oscillatorLevel;
+            auto freq = owner.findWiredParameterValue(node.id, "param:" + node.type + "Frequency", wiredFreq)
+                      ? scaleNormalizedWiredValue(node.type + "Frequency", wiredFreq) : (double) node.oscillatorFrequencyHz;
+            detail = "Level " + juce::String(level, 2) + " • " + juce::String(juce::roundToInt(freq)) + " Hz";
+        }
+        else if (node.type == "noise")
+        {
+            double wiredLevel = 0.0;
+            auto level = owner.findWiredParameterValue(node.id, "param:noiseLevel", wiredLevel)
+                       ? wiredLevel : (double) node.oscillatorLevel;
+            detail = "Level " + juce::String(level, 2);
+        }
+        else if (node.type == "filter")
+        {
+            double wiredCutoff = 0.0;
+            auto cutoff = owner.findWiredParameterValue(node.id, "param:filterCutoff", wiredCutoff)
+                        ? scaleNormalizedWiredValue("filterCutoff", wiredCutoff) : (double) node.filterCutoffHz;
+            detail = node.filterMode + " • " + juce::String(juce::roundToInt(cutoff)) + " Hz";
+        }
         else if (node.type == "envelope") detail = node.envelopeCurveMode + " curve";
         else if (node.type == "output") detail = formatDurationText(owner.recipe.durationSeconds) + " • " + (owner.recipe.sinkMode == "wave" ? "Wave" : "Audio");
         else if (node.type == "value" || node.type == "valueGet" || node.type == "valueSet")
@@ -1440,7 +1472,7 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
             else
             {
                 detail = (node.midiDeviceLabel.isNotEmpty() ? node.midiDeviceLabel : "Any device") + " • "
-                        + (node.midiIsController ? "CC " : "Note ") + juce::String(node.midiNumber)
+                        + formatMidiBindingSuffix(node.midiIsController, node.midiNumber)
                         + " • " + juce::String(node.midiLiveValue, 2);
                 if (node.type == "midiButton")
                     detail += node.midiButtonMode == "toggle" ? " (toggle)" : " (momentary)";
@@ -3841,7 +3873,7 @@ void SignalLabPanel::openNodeEditorForSelection()
                 return "Not learned yet -- click Learn, then move or press the control.";
             return "Bound to " + (n.midiDeviceLabel.isNotEmpty() ? n.midiDeviceLabel : "any device")
                  + ", channel " + juce::String(n.midiChannel) + ", "
-                 + (n.midiIsController ? "CC " : "Note ") + juce::String(n.midiNumber);
+                 + formatMidiBindingSuffix(n.midiIsController, n.midiNumber);
         };
 
         auto* statusLabelForNode = new juce::Label();
@@ -5509,8 +5541,32 @@ void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlCh
             // dialog's device combo works -- otherwise it must be this exact
             // device (the same physical control from two devices shouldn't
             // both drive a binding that was learned from one specific one).
+            //
+            // BUT: JUCE's juce::MidiInput identifier strings are not
+            // guaranteed stable across app restarts (a known OS/driver-level
+            // quirk -- the same physical device can re-enumerate with a
+            // different identifier next launch, even though its NAME stays
+            // the same). A binding learned and saved in one session would
+            // otherwise silently stop matching after every restart -- "it
+            // learns it, but nothing happens" is exactly what that looks
+            // like. Falls back to matching by device NAME (already saved as
+            // midiDeviceLabel) when the exact id doesn't match a currently
+            // enumerated device, rather than requiring the user to re-learn
+            // every binding on every launch.
             if (node.midiDeviceId.isNotEmpty() && change.deviceId != node.midiDeviceId)
-                continue;
+            {
+                juce::String currentDeviceName;
+                for (auto& device : juce::MidiInput::getAvailableDevices())
+                {
+                    if (device.identifier == change.deviceId)
+                    {
+                        currentDeviceName = device.name;
+                        break;
+                    }
+                }
+                if (node.midiDeviceLabel.isEmpty() || currentDeviceName != node.midiDeviceLabel)
+                    continue;
+            }
 
             if (node.type == "midiFader")
             {

@@ -2118,10 +2118,21 @@ void WorkstationAudioEngine::handleIncomingMidiMessage(juce::MidiInput* source, 
     if (source == nullptr)
         return;
 
+    // Pitch wheel is how a real motorized fader (X-Touch and most Mackie-Control-compatible
+    // surfaces) reports its continuous position - a plain CC/Note learn never sees it, which
+    // meant "Learn" on a physical fader silently captured something else entirely (a nearby
+    // touch-sense or button note) while the actual fader motion went unrecognized. Represented
+    // with the existing (number, isController) pair via number = -1 (never a real CC/Note number,
+    // which are always 0-127) rather than adding a new field everywhere this tuple travels -
+    // channel alone identifies which fader on a control surface; "number" has no meaning for it.
     if (message.isNoteOn(true) || (message.isController() && message.getControllerValue() > 0))
     {
         auto number = message.isController() ? message.getControllerNumber() : message.getNoteNumber();
         offerMidiLearnCandidate(source->getIdentifier(), message.getChannel(), number, message.isController());
+    }
+    else if (message.isPitchWheel())
+    {
+        offerMidiLearnCandidate(source->getIdentifier(), message.getChannel(), -1, true);
     }
 
     // Unconditional (unlike the learn-candidate check above, which only fires on note-on / CC>0) -
@@ -2133,6 +2144,8 @@ void WorkstationAudioEngine::handleIncomingMidiMessage(juce::MidiInput* source, 
         reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 1.0f);
     else if (message.isNoteOff(true))
         reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 0.0f);
+    else if (message.isPitchWheel())
+        reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), -1, true, juce::jlimit(0.0f, 1.0f, (float) message.getPitchWheelValue() / 16383.0f));
 
     getOrCreateMidiDeviceCollector(source->getIdentifier()).addMessageToQueue(message);
 }
