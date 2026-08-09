@@ -782,7 +782,13 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
     // or while previewing an asset.
     const auto liveMonitoring = owner.anyTrackNeedsLiveMonitoring();
     const auto hasRecentMidiActivity = owner.liveAudioTailSamplesRemaining > 0;
-    if (liveMonitoring || owner.assetPreviewSource.isPreviewing() || hasRecentMidiActivity)
+    // patchLiveVoice.isActive() added alongside the pre-existing gates -- it lives inside
+    // `source` (mixerSource) too, same as assetPreviewSource, but has its own independent
+    // active/inactive state that none of the other three conditions know about. Without this,
+    // Signal Lab's live engine computes correct audio every block but source.getNextAudioBlock()
+    // (the only thing that ever pulls from mixerSource) simply never gets called for it -- silent
+    // even though the DSP itself is right.
+    if (liveMonitoring || owner.assetPreviewSource.isPreviewing() || hasRecentMidiActivity || owner.patchLiveVoice.isActive())
         source.getNextAudioBlock(bufferToFill);
 
     if (owner.playing.load())
