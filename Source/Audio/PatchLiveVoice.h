@@ -158,6 +158,7 @@ private:
         float level = 0.0f;
         double baseFrequencyHz = 180.0;
         int levelMidiSlot = kNoSlot;
+        int frequencyMidiSlot = kNoSlot; // oscillator only (meaningless for noise); log-mapped 30..2400 Hz
 
         // Mix only
         juce::Array<MixFeed> mixFeeds;
@@ -207,7 +208,17 @@ private:
 
     void adoptGraphIfChanged(const std::shared_ptr<const EntityGraph>& graph); // audio thread only
     void processOneBlock(const EntityGraph& graph, juce::AudioBuffer<float>& destBuffer, int destStartSample, int numSamples); // audio thread only
+    // A learned MIDI Control node's live value is always a raw 0..1
+    // normalized number (see WorkstationAudioEngine::LiveMidiControlChange
+    // -- CC/127, or 1.0/0.0 for note on/off), regardless of what it's wired
+    // to. resolveMidiOr() is only correct for a parameter whose own natural
+    // range already IS 0..1 (Level). Everything else needs to be mapped
+    // from that raw 0..1 into the parameter's actual range -- linear for
+    // most, log for anything pitch/frequency-like where a linear sweep
+    // would spend most of its travel in an unusably narrow band.
     float resolveMidiOr(int slot, float fallback) const noexcept;
+    float resolveMidiOrLinear(int slot, float fallback, float rangeMin, float rangeMax) const noexcept;
+    float resolveMidiOrLog(int slot, float fallback, float rangeMin, float rangeMax) const noexcept;
 
     double sampleRate = 48000.0;
     int maxBlockSize = 512;

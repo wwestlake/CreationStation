@@ -326,10 +326,10 @@ juce::StringArray nodeParameterIds(const juce::String& nodeType)
         return { "filterCutoff", "filterResonance", "filterEnvelopeAmount" };
     if (nodeType == "output")
         return {};
-    if (nodeType == "sine")     return { "sineLevel" };
-    if (nodeType == "saw")      return { "sawLevel" };
-    if (nodeType == "square")   return { "squareLevel" };
-    if (nodeType == "triangle") return { "triangleLevel" };
+    if (nodeType == "sine")     return { "sineLevel", "sineFrequency" };
+    if (nodeType == "saw")      return { "sawLevel", "sawFrequency" };
+    if (nodeType == "square")   return { "squareLevel", "squareFrequency" };
+    if (nodeType == "triangle") return { "triangleLevel", "triangleFrequency" };
     if (nodeType == "noise")    return { "noiseLevel" };
     if (nodeType == "mix")      return {};
     return {};
@@ -350,6 +350,7 @@ juce::String shortParamLabel(const juce::String& parameterId)
     if (parameterId == "macroGrit") return "Grit";
     if (parameterId == "macroSize") return "Size";
     if (parameterId.endsWith("Level")) return "Level";
+    if (parameterId.endsWith("Frequency")) return "Freq";
     return parameterId;
 }
 
@@ -431,6 +432,35 @@ float normalizedToCutoff(float normalized)
     auto logMin = std::log(kMinFilterCutoffHz);
     auto logMax = std::log(kMaxFilterCutoffHz);
     return std::exp(logMin + (logMax - logMin) * clamped);
+}
+
+// findWiredParameterValue()'s return convention is always a raw 0..1
+// normalized number, whatever the source (a Get-variable's own 0..1 value
+// slider, or a MIDI Control node's 0..1 CC reading) -- it was never a real
+// Hz/Q/etc. value. Every place that treats a wired value as if it already
+// were the real value (a disabled slider showing it, buildPatchDocument()
+// baking it in, the on-canvas port value indicator) needs to map it into
+// the target parameter's actual range first, same mapping PatchLiveVoice
+// applies for the live path (resolveMidiOrLinear/resolveMidiOrLog) -- kept
+// in sync deliberately, not by sharing code across the two files.
+double scaleNormalizedWiredValue(const juce::String& parameterId, double normalized)
+{
+    auto clamped = juce::jlimit(0.0, 1.0, normalized);
+    if (parameterId == "filterCutoff" || parameterId.endsWith("Frequency"))
+    {
+        if (parameterId == "filterCutoff")
+            return (double) normalizedToCutoff((float) clamped);
+        auto logMin = std::log(30.0);
+        auto logMax = std::log(2400.0);
+        return std::exp(logMin + (logMax - logMin) * clamped);
+    }
+    if (parameterId == "filterResonance")
+        return juce::jmap(clamped, 0.0, 1.0, 0.30, 8.0);
+    if (parameterId == "filterEnvelopeAmount")
+        return juce::jmap(clamped, 0.0, 1.0, -1.0, 1.0);
+    if (parameterId.startsWith("mixWeight"))
+        return juce::jmap(clamped, 0.0, 1.0, 0.0, 1.5);
+    return clamped; // Level and anything else already wants 0..1 as-is
 }
 
 juce::String formatDurationText(double seconds)
@@ -1523,11 +1553,13 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
 
                 if (port.label.isNotEmpty())
                 {
-                    g.setColour(juce::Colour(0xffb9c4d6));
-                    g.setFont(juce::Font(12.0f));
+                    auto valueDisplay = owner.describePortValue(index, port);
+                    auto text = valueDisplay.text.isNotEmpty() ? port.label + " " + valueDisplay.text : port.label;
+                    g.setColour(valueDisplay.isLive ? juce::Colour(0xff7fe8a0) : juce::Colour(0xffb9c4d6));
+                    g.setFont(juce::Font(11.0f));
                     auto justification = port.isOutput ? juce::Justification::centredLeft : juce::Justification::centredRight;
-                    auto labelX = port.isOutput ? centre.x + 9.0f : centre.x - 81.0f;
-                    g.drawText(port.label, juce::Rectangle<int>((int) labelX, (int) centre.y - 8, 72, 16), justification, true);
+                    auto labelX = port.isOutput ? centre.x + 9.0f : centre.x - 99.0f;
+                    g.drawText(text, juce::Rectangle<int>((int) labelX, (int) centre.y - 8, 90, 16), justification, true);
                 }
             }
         }
@@ -2912,8 +2944,17 @@ void SignalLabPanel::updateInspectorForSelection()
 
         suppressCallbacks = true;
         frequencyLabel.setVisible(true); frequencySlider.setVisible(true);
-        frequencySlider.setValue(selectedNode.oscillatorFrequencyHz, juce::dontSendNotification);
-        frequencySlider.setEnabled(true); // no port for frequency yet -- always manual
+        if (type != "noise")
+        {
+            double wiredFrequency = 0.0;
+            auto isFrequencyWired = findWiredParameterValue(selectedNode.id, "param:" + type + "Frequency", wiredFrequency);
+            frequencySlider.setValue(isFrequencyWired ? scaleNormalizedWiredValue(type + "Frequency", wiredFrequency) : (double) selectedNode.oscillatorFrequencyHz, juce::dontSendNotification);
+            frequencySlider.setEnabled(! isFrequencyWired);
+        }
+        else
+        {
+            frequencySlider.setEnabled(false);
+        }
 
         double wiredLevel = 0.0;
         auto isLevelWired = findWiredParameterValue(selectedNode.id, "param:" + type + "Level", wiredLevel);
@@ -2937,17 +2978,17 @@ void SignalLabPanel::updateInspectorForSelection()
 
         filterCutoffLabel.setVisible(true); filterCutoffSlider.setVisible(true);
         auto cutoffWired = findWiredParameterValue(filterNode.id, "param:filterCutoff", wiredValue);
-        filterCutoffSlider.setValue(cutoffWired ? wiredValue : (double) filterNode.filterCutoffHz, juce::dontSendNotification);
+        filterCutoffSlider.setValue(cutoffWired ? scaleNormalizedWiredValue("filterCutoff", wiredValue) : (double) filterNode.filterCutoffHz, juce::dontSendNotification);
         filterCutoffSlider.setEnabled(! cutoffWired);
 
         filterResonanceLabel.setVisible(true); filterResonanceSlider.setVisible(true);
         auto resonanceWired = findWiredParameterValue(filterNode.id, "param:filterResonance", wiredValue);
-        filterResonanceSlider.setValue(resonanceWired ? wiredValue : (double) filterNode.filterResonance, juce::dontSendNotification);
+        filterResonanceSlider.setValue(resonanceWired ? scaleNormalizedWiredValue("filterResonance", wiredValue) : (double) filterNode.filterResonance, juce::dontSendNotification);
         filterResonanceSlider.setEnabled(! resonanceWired);
 
         filterEnvelopeLabel.setVisible(true); filterEnvelopeSlider.setVisible(true);
         auto envAmountWired = findWiredParameterValue(filterNode.id, "param:filterEnvelopeAmount", wiredValue);
-        filterEnvelopeSlider.setValue(envAmountWired ? wiredValue : (double) filterNode.filterEnvelopeAmount, juce::dontSendNotification);
+        filterEnvelopeSlider.setValue(envAmountWired ? scaleNormalizedWiredValue("filterEnvelopeAmount", wiredValue) : (double) filterNode.filterEnvelopeAmount, juce::dontSendNotification);
         filterEnvelopeSlider.setEnabled(! envAmountWired);
         suppressCallbacks = false;
     }
@@ -3468,6 +3509,94 @@ juce::String SignalLabPanel::findWiredMidiSourceNodeId(const juce::String& nodeI
     return {};
 }
 
+namespace
+{
+juce::String formatPortNumber(double value)
+{
+    return juce::String(value, std::abs(value) >= 100.0 ? 0 : 2);
+}
+}
+
+// The actual data behind a port right now -- default, manually-set, or
+// live-fed-in -- so the canvas can show real numbers instead of just a
+// static label. Every wired value is scaled into the target parameter's
+// real range first (scaleNormalizedWiredValue), same as everywhere else a
+// wired value gets displayed or baked -- otherwise this would show the raw
+// 0..1 reading for anything but Level, defeating the point of adding it.
+SignalLabPanel::PortValueDisplay SignalLabPanel::describePortValue(int nodeIndex, const GraphPort& port) const
+{
+    PortValueDisplay display;
+    if (port.isExec || nodeIndex < 0 || nodeIndex >= graphNodes.size())
+        return display;
+
+    auto& node = graphNodes.getReference(nodeIndex);
+    double wired = 0.0;
+    auto isWired = findWiredParameterValue(node.id, port.portId, wired);
+
+    if (port.portId.startsWith("param:"))
+    {
+        auto paramId = port.portId.fromFirstOccurrenceOf(":", false, false);
+        double value = 0.0;
+        if (isWired)
+        {
+            value = scaleNormalizedWiredValue(paramId, wired);
+        }
+        else if (paramId.endsWith("Level"))
+        {
+            value = node.oscillatorLevel;
+        }
+        else if (paramId.endsWith("Frequency"))
+        {
+            value = node.oscillatorFrequencyHz;
+        }
+        else if (paramId == "filterCutoff") value = node.filterCutoffHz;
+        else if (paramId == "filterResonance") value = node.filterResonance;
+        else if (paramId == "filterEnvelopeAmount") value = node.filterEnvelopeAmount;
+
+        display.text = formatPortNumber(value);
+        display.isLive = isWired;
+        return display;
+    }
+
+    if (port.portId.startsWith("mixWeight:"))
+    {
+        double value;
+        if (isWired)
+        {
+            value = scaleNormalizedWiredValue("mixWeight", wired);
+        }
+        else
+        {
+            auto channelIndex = port.portId.fromFirstOccurrenceOf(":", false, false).getIntValue();
+            value = (channelIndex >= 0 && channelIndex < node.mixerInputVolumes.size()) ? node.mixerInputVolumes[channelIndex] : 1.0f;
+        }
+        display.text = formatPortNumber(value);
+        display.isLive = isWired;
+        return display;
+    }
+
+    if (port.portId == "valueOut")
+    {
+        if (node.type == "midiFader" || node.type == "midiButton")
+        {
+            display.text = node.midiLearned ? formatPortNumber(node.midiLiveValue) : "unlearned";
+            display.isLive = node.midiLearned;
+        }
+        else if (node.type == "valueGet" || node.type == "valueSet")
+        {
+            for (auto& variable : localControls)
+            {
+                if (variable.id != node.targetParameter)
+                    continue;
+                display.text = formatPortNumber(variable.value);
+                break;
+            }
+        }
+    }
+
+    return display;
+}
+
 void SignalLabPanel::addMixerInput(int nodeIndex)
 {
     if (nodeIndex < 0 || nodeIndex >= graphNodes.size())
@@ -3519,13 +3648,30 @@ void SignalLabPanel::openNodeEditorForSelection()
         };
 
         auto& freq = content->addSliderRow("Frequency", 30.0, 2400.0, 1.0);
-        freq.setValue(node.oscillatorFrequencyHz, juce::dontSendNotification);
-        freq.onValueChange = [this, &freq, findNode]
+        if (node.type != "noise")
         {
-            if (auto* target = findNode())
-                target->oscillatorFrequencyHz = (float) freq.getValue();
-            regenerateSignal();
-        };
+            double wiredFrequency = 0.0;
+            if (findWiredParameterValue(node.id, "param:" + node.type + "Frequency", wiredFrequency))
+            {
+                freq.setValue(scaleNormalizedWiredValue(node.type + "Frequency", wiredFrequency), juce::dontSendNotification);
+                freq.setEnabled(false);
+            }
+            else
+            {
+                freq.setValue(node.oscillatorFrequencyHz, juce::dontSendNotification);
+                freq.onValueChange = [this, &freq, findNode]
+                {
+                    if (auto* target = findNode())
+                        target->oscillatorFrequencyHz = (float) freq.getValue();
+                    regenerateSignal();
+                };
+            }
+        }
+        else
+        {
+            freq.setEnabled(false);
+            freq.setValue(0.0, juce::dontSendNotification);
+        }
 
         juce::Slider* level = nullptr;
         if (node.type == "sine") level = &content->addSliderRow("Sine Level", 0.0, 1.0, 0.001);
@@ -3582,7 +3728,7 @@ void SignalLabPanel::openNodeEditorForSelection()
         double wiredCutoff = 0.0;
         if (findWiredParameterValue(node.id, "param:filterCutoff", wiredCutoff))
         {
-            cutoff.setValue(wiredCutoff, juce::dontSendNotification);
+            cutoff.setValue(scaleNormalizedWiredValue("filterCutoff", wiredCutoff), juce::dontSendNotification);
             cutoff.setEnabled(false);
         }
         else
@@ -3600,7 +3746,7 @@ void SignalLabPanel::openNodeEditorForSelection()
         double wiredResonance = 0.0;
         if (findWiredParameterValue(node.id, "param:filterResonance", wiredResonance))
         {
-            resonance.setValue(wiredResonance, juce::dontSendNotification);
+            resonance.setValue(scaleNormalizedWiredValue("filterResonance", wiredResonance), juce::dontSendNotification);
             resonance.setEnabled(false);
         }
         else
@@ -3610,6 +3756,27 @@ void SignalLabPanel::openNodeEditorForSelection()
             {
                 if (auto* target = findFilterNode())
                     target->filterResonance = (float) resonance.getValue();
+                regenerateSignal();
+            };
+        }
+
+        // Env Amt has had a wireable port (nodeParameterIds("filter")) since
+        // Filter got its ports, but no manual control here at all -- a real
+        // gap, not just a missing scale fix.
+        auto& envAmount = content->addSliderRow("Env Amount", -1.0, 1.0, 0.01);
+        double wiredEnvAmount = 0.0;
+        if (findWiredParameterValue(node.id, "param:filterEnvelopeAmount", wiredEnvAmount))
+        {
+            envAmount.setValue(scaleNormalizedWiredValue("filterEnvelopeAmount", wiredEnvAmount), juce::dontSendNotification);
+            envAmount.setEnabled(false);
+        }
+        else
+        {
+            envAmount.setValue(node.filterEnvelopeAmount, juce::dontSendNotification);
+            envAmount.onValueChange = [this, &envAmount, findFilterNode]
+            {
+                if (auto* target = findFilterNode())
+                    target->filterEnvelopeAmount = (float) envAmount.getValue();
                 regenerateSignal();
             };
         }
@@ -3642,7 +3809,7 @@ void SignalLabPanel::openNodeEditorForSelection()
             if (findWiredParameterValue(node.id, "mixWeight:" + juce::String(channelIndex), wiredWeight))
             {
                 state.wired = true;
-                state.wiredValue = wiredWeight;
+                state.wiredValue = scaleNormalizedWiredValue("mixWeight", wiredWeight);
             }
             channelStates.add(state);
         }
@@ -5562,8 +5729,11 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
                                  ? (float) wiredLevel : node.oscillatorLevel;
             if (effectiveLevel <= 0.0f)
                 continue;
+            double wiredFrequency = 0.0;
+            auto effectiveFrequency = findWiredParameterValue(node.id, "param:" + node.type + "Frequency", wiredFrequency)
+                                     ? (float) scaleNormalizedWiredValue(node.type + "Frequency", wiredFrequency) : node.oscillatorFrequencyHz;
             auto frequencyParamId = "frequency:" + node.id;
-            document.parameters.add({ frequencyParamId, node.title + " Frequency", "float", node.oscillatorFrequencyHz, 30.0, 2400.0, "hz" });
+            document.parameters.add({ frequencyParamId, node.title + " Frequency", "float", effectiveFrequency, 30.0, 2400.0, "hz" });
             cw::PatchSource source { node.id, "oscillator", node.type, {}, effectiveLevel, frequencyParamId };
             source.canvasX = node.position.x;
             source.canvasY = node.position.y;
@@ -5603,11 +5773,11 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
                 double wiredValue = 0.0;
                 patchNode.properties.set("mode", node.filterMode);
                 patchNode.properties.set("cutoffHz", findWiredParameterValue(node.id, "param:filterCutoff", wiredValue)
-                                                    ? wiredValue : (double) node.filterCutoffHz);
+                                                    ? scaleNormalizedWiredValue("filterCutoff", wiredValue) : (double) node.filterCutoffHz);
                 patchNode.properties.set("resonance", findWiredParameterValue(node.id, "param:filterResonance", wiredValue)
-                                                     ? wiredValue : (double) node.filterResonance);
+                                                     ? scaleNormalizedWiredValue("filterResonance", wiredValue) : (double) node.filterResonance);
                 patchNode.properties.set("envelopeAmount", findWiredParameterValue(node.id, "param:filterEnvelopeAmount", wiredValue)
-                                                          ? wiredValue : (double) node.filterEnvelopeAmount);
+                                                          ? scaleNormalizedWiredValue("filterEnvelopeAmount", wiredValue) : (double) node.filterEnvelopeAmount);
             }
             else if (node.type == "envelope")
             {
@@ -5682,7 +5852,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
                 auto channelIndex = connection.toPortId.fromFirstOccurrenceOf(":", false, false).getIntValue();
                 double wiredWeight = 0.0;
                 if (findWiredParameterValue(targetNode.id, "mixWeight:" + juce::String(channelIndex), wiredWeight))
-                    patchConnection.weight = wiredWeight;
+                    patchConnection.weight = scaleNormalizedWiredValue("mixWeight", wiredWeight);
                 else if (channelIndex >= 0 && channelIndex < targetNode.mixerInputVolumes.size())
                     patchConnection.weight = targetNode.mixerInputVolumes[channelIndex];
                 break;
@@ -5720,6 +5890,9 @@ PatchLiveBindingMap SignalLabPanel::buildLiveBindingMap() const
             auto midiNodeId = findWiredMidiSourceNodeId(node.id, "param:" + node.type + "Level");
             if (midiNodeId.isNotEmpty())
                 map.entries.add({ node.id, "level", midiNodeId });
+            auto freqMidiId = findWiredMidiSourceNodeId(node.id, "param:" + node.type + "Frequency");
+            if (freqMidiId.isNotEmpty())
+                map.entries.add({ node.id, "frequency", freqMidiId });
         }
         else if (node.type == "noise")
         {

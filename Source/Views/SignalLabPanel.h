@@ -171,6 +171,15 @@ private:
         GraphPort port;
     };
 
+    // What a port is actually carrying right now -- the default, a
+    // manually-set value, or a live-fed-in one -- so the canvas can show
+    // real data next to each port instead of just a static label.
+    struct PortValueDisplay
+    {
+        juce::String text;
+        bool isLive = false; // wired to a Get-variable or MIDI Control node
+    };
+
     struct GraphConnection
     {
         juce::String id;
@@ -449,6 +458,7 @@ private:
     void seedOscillatorNodesFromRecipeLevels();
     bool findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const;
     juce::String findWiredMidiSourceNodeId(const juce::String& nodeId, const juce::String& portId) const;
+    PortValueDisplay describePortValue(int nodeIndex, const GraphPort& port) const;
     PatchLiveBindingMap buildLiveBindingMap() const;
     void updateInspectorForSelection();
     void layoutFloatingWindows();

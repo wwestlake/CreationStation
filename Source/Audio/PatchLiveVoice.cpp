@@ -177,6 +177,24 @@ float PatchLiveVoice::resolveMidiOr(int slot, float fallback) const noexcept
     return liveMidiValues[(size_t) slot].load();
 }
 
+float PatchLiveVoice::resolveMidiOrLinear(int slot, float fallback, float rangeMin, float rangeMax) const noexcept
+{
+    if (slot == kNoSlot)
+        return fallback;
+    auto normalized = juce::jlimit(0.0f, 1.0f, liveMidiValues[(size_t) slot].load());
+    return juce::jmap(normalized, 0.0f, 1.0f, rangeMin, rangeMax);
+}
+
+float PatchLiveVoice::resolveMidiOrLog(int slot, float fallback, float rangeMin, float rangeMax) const noexcept
+{
+    if (slot == kNoSlot)
+        return fallback;
+    auto normalized = juce::jlimit(0.0f, 1.0f, liveMidiValues[(size_t) slot].load());
+    auto logMin = std::log(juce::jmax(0.0001f, rangeMin));
+    auto logMax = std::log(juce::jmax(0.0001f, rangeMax));
+    return std::exp(logMin + (logMax - logMin) * normalized);
+}
+
 void PatchLiveVoice::start(double durationSeconds)
 {
     if (currentGraph.load() == nullptr)
@@ -320,6 +338,7 @@ void PatchLiveVoice::rebuild(const cw::PatchDocument& patch, const PatchLiveBind
                 if (parameter.id == source.frequencyParameter) { entity.baseFrequencyHz = parameter.defaultValue; break; }
 
         entity.levelMidiSlot = registerOrReuseSlot(liveBindings.findMidiNodeId(source.id, "level"), liveBindings);
+        entity.frequencyMidiSlot = registerOrReuseSlot(liveBindings.findMidiNodeId(source.id, "frequency"), liveBindings);
 
         graph->entities.add(entity);
         entityIndexById.set(source.id, graph->entities.size() - 1);
@@ -574,7 +593,8 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
                 auto level = resolveMidiOr(entity.levelMidiSlot, entity.level);
                 if (entity.sourceKind == "oscillator")
                 {
-                    auto weightedBaseFrequency = entity.baseFrequencyHz
+                    auto liveBaseFrequency = (double) resolveMidiOrLog(entity.frequencyMidiSlot, (float) entity.baseFrequencyHz, 30.0f, 2400.0f);
+                    auto weightedBaseFrequency = liveBaseFrequency
                                                * (double) juce::jmap(weightMotion, 0.0f, 1.0f, 1.16f, 0.86f)
                                                * (double) juce::jmap(sizeMotion, 0.0f, 1.0f, 1.04f, 0.94f);
                     auto frequency = weightedBaseFrequency * std::pow(2.0, pitchSemitones / 12.0);
@@ -604,7 +624,10 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
                 float mixed = 0.0f;
                 for (auto& feed : entity.mixFeeds)
                 {
-                    auto weight = resolveMidiOr(feed.weightMidiSlot, feed.weight);
+                    // 0..1.5 matches the manual fader's own range (MixerFaderBank) --
+                    // a MIDI fader at max should reach the same boosted ceiling the
+                    // on-screen slider allows, not cap at unity.
+                    auto weight = resolveMidiOrLinear(feed.weightMidiSlot, feed.weight, 0.0f, 1.5f);
                     mixed += runtimeStates[feed.entityIndex]->scratch.getSample(0, localSample) * weight;
                 }
 
@@ -634,9 +657,9 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
             else if (entity.kind == EntityKind::Filter)
             {
                 auto filterMotion = hasAutomationLanes ? sampleTargetLanes(graph.automationLanes, "filterCutoff", t, 0.5) : 0.5;
-                auto baseCutoff = resolveMidiOr(entity.cutoffMidiSlot, entity.cutoffHz);
-                auto baseResonance = resolveMidiOr(entity.resonanceMidiSlot, entity.resonance);
-                auto baseEnvAmount = resolveMidiOr(entity.envelopeAmountMidiSlot, entity.envelopeAmount);
+                auto baseCutoff = resolveMidiOrLog(entity.cutoffMidiSlot, entity.cutoffHz, kMinFilterCutoffHz, kMaxFilterCutoffHz);
+                auto baseResonance = resolveMidiOrLinear(entity.resonanceMidiSlot, entity.resonance, 0.30f, 8.0f);
+                auto baseEnvAmount = resolveMidiOrLinear(entity.envelopeAmountMidiSlot, entity.envelopeAmount, -1.0f, 1.0f);
                 auto resonanceMotion = hasAutomationLanes ? sampleTargetLanes(graph.automationLanes, "filterResonance", t, baseResonance) : (double) baseResonance;
                 auto filterEnvelopeMotion = (float) (hasAutomationLanes ? sampleTargetLanes(graph.automationLanes, "filterEnvelopeAmount", t, baseEnvAmount) : (double) baseEnvAmount);
 
