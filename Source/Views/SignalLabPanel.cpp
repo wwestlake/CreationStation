@@ -2064,6 +2064,17 @@ SignalLabPanel::SignalLabPanel()
     stopButton.onClick = [this] { stopTransport(); };
     addAndMakeVisible(stopButton);
 
+    repeatButton.setClickingTogglesState(true);
+    repeatButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff5f93ff));
+    repeatButton.setTooltip("Loop playback -- each repeat re-renders if the graph changed since the last one, so a live MIDI control keeps updating the sound while it loops.");
+    repeatButton.onClick = [this]
+    {
+        repeatEnabled = repeatButton.getToggleState();
+        if (repeatEnabled)
+            triggerTransportPlay();
+    };
+    addAndMakeVisible(repeatButton);
+
     toolboxPane.onAddVariableRequested = [this]
     {
         captureUndoCheckpoint("Add graph variable");
@@ -5002,6 +5013,7 @@ void SignalLabPanel::stopTransport()
 {
     stopTimer();
     repeatEnabled = false;
+    repeatButton.setToggleState(false, juce::dontSendNotification);
     if (onStopRequested)
         onStopRequested();
 }
@@ -5083,12 +5095,14 @@ void SignalLabPanel::resized()
     auto topBar = area.removeFromTop(30);
     signalMenuButton.setBounds(topBar.removeFromLeft(110));
     topBar.removeFromLeft(10);
-    auto transportArea = topBar.removeFromLeft(268);
+    auto transportArea = topBar.removeFromLeft(356);
     compileButton.setBounds(transportArea.removeFromLeft(80));
     transportArea.removeFromLeft(8);
     playButton.setBounds(transportArea.removeFromLeft(80));
     transportArea.removeFromLeft(8);
     stopButton.setBounds(transportArea.removeFromLeft(80));
+    transportArea.removeFromLeft(8);
+    repeatButton.setBounds(transportArea.removeFromLeft(80));
 
     area.removeFromTop(10);
     auto propertiesArea = area.removeFromLeft(280);

@@ -527,6 +527,7 @@ private:
     juce::TextButton compileButton { "Compile" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
+    juce::TextButton repeatButton { "Repeat" };
     juce::Label propertiesHeaderLabel;
     juce::Label signalSectionLabel;
     juce::Label variablesSectionLabel;
