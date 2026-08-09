@@ -113,6 +113,74 @@ private:
     juce::Array<Row> rows;
 };
 
+struct CompileErrorRow
+{
+    juce::String nodeId;
+    juce::String message;
+};
+
+class CompileErrorListContent final : public juce::Component
+{
+public:
+    void setErrors(const juce::Array<CompileErrorRow>& newErrors, std::function<void(const juce::String&)> onErrorClickedIn)
+    {
+        onErrorClicked = std::move(onErrorClickedIn);
+        errorButtons.clear();
+
+        if (newErrors.isEmpty())
+        {
+            if (okLabel == nullptr)
+            {
+                okLabel = std::make_unique<juce::Label>();
+                okLabel->setColour(juce::Label::textColourId, juce::Colour(0xff8fd978));
+                okLabel->setFont(juce::Font(14.0f).boldened());
+                addAndMakeVisible(*okLabel);
+            }
+            okLabel->setText("No problems found -- the graph is ready to play.", juce::dontSendNotification);
+            okLabel->setVisible(true);
+        }
+        else if (okLabel != nullptr)
+        {
+            okLabel->setVisible(false);
+        }
+
+        for (auto& error : newErrors)
+        {
+            auto* button = errorButtons.add(new juce::TextButton());
+            button->setButtonText(error.message);
+            button->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff2a1a1e));
+            button->setColour(juce::TextButton::textColourOffId, juce::Colour(0xffff9a9a));
+            auto nodeId = error.nodeId;
+            button->onClick = [this, nodeId]
+            {
+                if (onErrorClicked)
+                    onErrorClicked(nodeId);
+            };
+            addAndMakeVisible(button);
+        }
+
+        resized();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(12);
+        if (okLabel != nullptr && okLabel->isVisible())
+            okLabel->setBounds(area.removeFromTop(24));
+
+        for (auto* button : errorButtons)
+        {
+            button->setBounds(area.removeFromTop(30));
+            area.removeFromTop(6);
+        }
+    }
+
+private:
+    std::unique_ptr<juce::Label> okLabel;
+    juce::OwnedArray<juce::TextButton> errorButtons;
+    std::function<void(const juce::String&)> onErrorClicked;
+};
+
 struct AutomationTargetSpec
 {
     const char* parameterId;
@@ -1905,6 +1973,9 @@ SignalLabPanel::SignalLabPanel()
         showSignalMenu();
     };
     addAndMakeVisible(signalMenuButton);
+
+    compileButton.onClick = [this] { compileGraph(); };
+    addAndMakeVisible(compileButton);
 
     playButton.onClick = [this] { triggerTransportPlay(); };
     addAndMakeVisible(playButton);
@@ -4378,8 +4449,191 @@ void SignalLabPanel::timerCallback()
     triggerTransportPlay();
 }
 
+juce::Array<SignalLabPanel::GraphValidationError> SignalLabPanel::validateGraph() const
+{
+    juce::Array<GraphValidationError> errors;
+
+    auto isSourceType = [](const juce::String& type)
+    {
+        return type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise";
+    };
+
+    // Cycle detection over the signal-carrying (isExec) edges only -- value
+    // wires (a Get-variable feeding a parameter port) legitimately fan out
+    // to many nodes and aren't part of the audio path, so they can't form a
+    // signal cycle.
+    enum class VisitState { Unvisited, Visiting, Done };
+    juce::HashMap<juce::String, VisitState> visitState;
+    for (auto& node : graphNodes)
+        visitState.set(node.id, VisitState::Unvisited);
+
+    std::function<bool(const juce::String&)> visit = [&](const juce::String& nodeId) -> bool
+    {
+        visitState.set(nodeId, VisitState::Visiting);
+        for (auto& connection : graphConnections)
+        {
+            if (! connection.isExec || connection.fromNodeId != nodeId)
+                continue;
+
+            auto nextState = visitState[connection.toNodeId];
+            if (nextState == VisitState::Visiting)
+            {
+                for (auto& node : graphNodes)
+                {
+                    if (node.id == connection.toNodeId)
+                    {
+                        errors.add({ node.id, "Cycle detected in the signal path through \"" + node.title + "\"." });
+                        break;
+                    }
+                }
+                return true;
+            }
+            if (nextState == VisitState::Unvisited && visit(connection.toNodeId))
+                return true;
+        }
+        visitState.set(nodeId, VisitState::Done);
+        return false;
+    };
+
+    for (auto& node : graphNodes)
+        if (visitState[node.id] == VisitState::Unvisited)
+            visit(node.id);
+
+    // Every required node (today, just the Sink) must be reachable from at
+    // least one oscillator/noise source by walking signal connections
+    // backwards -- otherwise it renders silence no matter what else is wired.
+    for (auto& sinkNode : graphNodes)
+    {
+        if (! sinkNode.required)
+            continue;
+
+        juce::Array<juce::String> visited;
+        juce::Array<juce::String> frontier;
+        frontier.add(sinkNode.id);
+        bool sourceFound = false;
+
+        while (! frontier.isEmpty() && ! sourceFound)
+        {
+            auto currentId = frontier.removeAndReturn(frontier.size() - 1);
+            if (visited.contains(currentId))
+                continue;
+            visited.add(currentId);
+
+            for (auto& connection : graphConnections)
+            {
+                if (! connection.isExec || connection.toNodeId != currentId)
+                    continue;
+
+                for (auto& candidate : graphNodes)
+                {
+                    if (candidate.id != connection.fromNodeId)
+                        continue;
+                    if (isSourceType(candidate.type))
+                        sourceFound = true;
+                    break;
+                }
+
+                if (sourceFound)
+                    break;
+
+                frontier.add(connection.fromNodeId);
+            }
+        }
+
+        if (! sourceFound)
+            errors.add({ sinkNode.id, "\"" + sinkNode.title + "\" has no oscillator or noise source feeding it -- it will render silence." });
+    }
+
+    // Placed processing nodes with nothing wired into their signal input are
+    // dead weight in the graph -- flag them so they're easy to find.
+    for (auto& node : graphNodes)
+    {
+        bool needsSignalIn = node.type == "mix" || node.type == "filter" || node.type == "envelope"
+                           || node.type == "scope" || node.type == "analyzer";
+        if (! needsSignalIn)
+            continue;
+
+        bool hasIncomingSignal = false;
+        for (auto& connection : graphConnections)
+        {
+            if (connection.isExec && connection.toNodeId == node.id)
+            {
+                hasIncomingSignal = true;
+                break;
+            }
+        }
+
+        if (! hasIncomingSignal)
+            errors.add({ node.id, "\"" + node.title + "\" has no signal wired into it." });
+    }
+
+    return errors;
+}
+
+void SignalLabPanel::compileGraph()
+{
+    validationErrors = validateGraph();
+    showCompileErrorWindow();
+}
+
+void SignalLabPanel::showCompileErrorWindow()
+{
+    // Non-intrusive by default: a clean graph doesn't pop a window open on
+    // every Play. But if the user already has the log open (inspecting it
+    // while they keep editing), it stays open and refreshes in place rather
+    // than disappearing out from under them.
+    if (validationErrors.isEmpty() && compileErrorWindow == nullptr)
+        return;
+
+    if (compileErrorWindow == nullptr)
+    {
+        auto window = std::make_unique<SignalLabNodeWindow>("Signal Lab -- Compile Results", [this]
+        {
+            compileErrorWindow.reset();
+        });
+        window->setContentOwned(new CompileErrorListContent(), true);
+        window->centreWithSize(440, 320);
+        compileErrorWindow = std::move(window);
+    }
+
+    juce::Array<CompileErrorRow> rows;
+    for (auto& error : validationErrors)
+        rows.add({ error.nodeId, error.message });
+
+    if (auto* content = dynamic_cast<CompileErrorListContent*>(compileErrorWindow->getContentComponent()))
+    {
+        content->setErrors(rows, [this](const juce::String& nodeId)
+        {
+            centerCanvasOnGraphNode(nodeId);
+        });
+    }
+
+    compileErrorWindow->setVisible(true);
+    compileErrorWindow->toFront(true);
+}
+
+void SignalLabPanel::centerCanvasOnGraphNode(const juce::String& nodeId)
+{
+    for (int index = 0; index < graphNodes.size(); ++index)
+    {
+        if (graphNodes.getReference(index).id != nodeId)
+            continue;
+
+        setSelectedGraphNodeIndex(index);
+
+        auto centreGraphPoint = getGraphNodeBounds(index).getCentre();
+        auto centreCanvasPoint = graphToCanvas(centreGraphPoint);
+        graphViewport.setViewPosition(centreCanvasPoint.x - graphViewport.getWidth() / 2,
+                                      centreCanvasPoint.y - graphViewport.getHeight() / 2);
+        break;
+    }
+}
+
 void SignalLabPanel::triggerTransportPlay()
 {
+    if (audioDirty)
+        compileGraph();
+
     if (! previewCurrentSignal())
         return;
 
@@ -4475,7 +4729,9 @@ void SignalLabPanel::resized()
     auto topBar = area.removeFromTop(30);
     signalMenuButton.setBounds(topBar.removeFromLeft(110));
     topBar.removeFromLeft(10);
-    auto transportArea = topBar.removeFromLeft(180);
+    auto transportArea = topBar.removeFromLeft(268);
+    compileButton.setBounds(transportArea.removeFromLeft(80));
+    transportArea.removeFromLeft(8);
     playButton.setBounds(transportArea.removeFromLeft(80));
     transportArea.removeFromLeft(8);
     stopButton.setBounds(transportArea.removeFromLeft(80));

@@ -130,6 +130,12 @@ private:
         juce::Array<juce::Point<int>> waypoints;
     };
 
+    struct GraphValidationError
+    {
+        juce::String nodeId;
+        juce::String message;
+    };
+
     struct LocalControlVariable
     {
         juce::String id;
@@ -414,6 +420,10 @@ private:
     void timerCallback() override;
     void triggerTransportPlay();
     void stopTransport();
+    juce::Array<GraphValidationError> validateGraph() const;
+    void compileGraph();
+    void showCompileErrorWindow();
+    void centerCanvasOnGraphNode(const juce::String& nodeId);
     void updateCanvasWorkspace();
     juce::Point<int> graphToCanvas(juce::Point<int> position) const;
     juce::Point<float> graphToCanvas(juce::Point<float> position) const;
@@ -435,6 +445,7 @@ private:
     juce::Array<GraphNodeModel> graphNodes;
     juce::Array<GraphConnection> graphConnections;
     int selectedConnectionIndex = -1;
+    juce::Array<GraphValidationError> validationErrors;
     juce::Array<LocalControlVariable> localControls;
     juce::AudioBuffer<float> generatedBuffer;
     juce::Array<PatchRuntimePlayer::TapCapture> nodeTapBuffers; // per Scope/Analyzer node id, its real tapped signal
@@ -469,11 +480,13 @@ private:
         std::unique_ptr<juce::DocumentWindow> window;
     };
     juce::OwnedArray<OpenNodeWindow> openNodeWindows;
+    std::unique_ptr<juce::DocumentWindow> compileErrorWindow;
 
     juce::Label titleLabel;
     juce::Label subtitleLabel;
     juce::Label statusLabel;
     juce::TextButton signalMenuButton { "Signal" };
+    juce::TextButton compileButton { "Compile" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
     juce::Label propertiesHeaderLabel;
