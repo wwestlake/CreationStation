@@ -2067,6 +2067,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         transportBar.setStatusText("Stopped signal preview.");
     };
 
+    signalLabPanel.onAudioSettingsRequested = [this]
+    {
+        showAudioSettings();
+    };
+
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
     {
         pushSignalUndoState(stateBeforeEdit, label);

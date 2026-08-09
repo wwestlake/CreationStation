@@ -44,12 +44,21 @@ struct PatchSource
     juce::String noiseType;
     double level = 0.0;
     juce::String frequencyParameter;
+    int canvasX = 0;
+    int canvasY = 0;
 };
 
 struct PatchConnection
 {
     juce::String from;
     juce::String to;
+    // Empty for older/simple connections -- only meaningful for multi-port
+    // nodes (e.g. which Mixer channel this feeds).
+    juce::String fromPort;
+    juce::String toPort;
+    // Signal-path gain for this specific connection (Mixer channel weight).
+    // 1.0 for a plain unweighted pass-through connection.
+    double weight = 1.0;
 };
 
 struct PatchNode
@@ -57,6 +66,8 @@ struct PatchNode
     juce::String id;
     juce::String kind;
     juce::NamedValueSet properties;
+    int canvasX = 0;
+    int canvasY = 0;
 };
 
 struct PatchOutput

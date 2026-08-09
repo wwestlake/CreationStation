@@ -82,7 +82,7 @@ if(NOT TARGET ce_lang_frontend)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
-    PRODUCT_NAME "Creative Workstation"
+    PRODUCT_NAME "Creation Station"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationstation"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconBig.png"

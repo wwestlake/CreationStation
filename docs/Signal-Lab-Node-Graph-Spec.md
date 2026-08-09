@@ -397,6 +397,63 @@ concrete 4-step pipeline above.
   ones are editable comfortably. `EnvelopeEditor` already exists in
   `SignalLabPanel.h`/`.cpp`; needs a zoomable time axis. **[OPEN]**
 
+## Mixer node — weighted sum (built)
+
+Confirmed and built: Mixer output is a **weighted sum**:
+`out = sum(input_i * weight_i)`. Each input is a pair of ports — a white
+Signal (Channel N) port for the stream, and a real-valued Weight N Float
+port (automatable) for its multiplier. Default 2 inputs; grown via the
+node's own "+ Input" button drawn on the node body. **[DONE]**
+
+## LFO node + generic Automation/Timeline node — needed, not built yet
+
+From a worked example (sources → Shaper → weighted Mix, with an LFO
+feeding "Mix Modulation", → Final Shaper → output):
+
+- **LFO node**: a control-rate modulation source, distinct from the
+  audio-rate oscillators (Sine/Saw/etc. produce audible signal; an LFO
+  produces a slow-moving value used to modulate a parameter — e.g. it
+  would feed a Mixer's Weight port to slowly crossfade between two
+  sources). **[SPECIFIED, not built]**
+- **Generic Automation/Timeline node**: modeled on UE4's Timeline node —
+  an editable curve over time, evaluated at the current playback
+  position, output wired into whatever parameter it drives. Key
+  difference from UE4: **time here is samples, not ticks/frames** —
+  sample-accurate, matching the audio-rate domain this graph runs in.
+  **[SPECIFIED, not built]**
+- Also needed for the worked example: a **Shaper (waveshaper/distortion
+  curve)** node type — signal in, nonlinear transfer curve, signal out.
+  Not yet in the node catalog. **[SPECIFIED, not built]**
+
+## Graph-level Duration — first-class metadata, not buried in Output
+
+Every graph has a specified length, established up front as real graph
+metadata — not just a field buried in the Output node's inspector.
+**Default 5 seconds** (was 1.5s). Build the sound, then adjust the
+timeline length up or down as needed — same "short, finite, bounded"
+principle as before, just surfaced properly instead of hidden.
+**[IN PROGRESS]**
+
+## Future ideas — noted, not being built yet
+
+- **N-channel Scope with real capture behavior**: today's Scope node is a
+  fixed 2-channel (A/B) mini preview with just gain sliders — no real
+  trigger logic, no per-channel add/remove. Wanted: genuine oscilloscope-
+  like signal capture (proper triggering, multiple simultaneous traces),
+  channel count expandable to at least 4 (with a channel-add control) —
+  functional parity with a real scope, not visual styling. **[OPEN,
+  future]**
+- **MIDI control-surface binding for Signal Lab parameters**: tracked as
+  [CreationStation#40](https://github.com/wwestlake/CreationStation/issues/40).
+  The "right-click -> Learn MIDI Binding" UI/storage
+  (`MainComponent::showMidiLearnDialog`, `WorkstationAudioEngine::
+  armMidiLearn`, `ControlSurfaceMappingStore`) is real and reusable, but
+  the binding store today only supports discrete/momentary actions (e.g.
+  transport play/stop) — there is no dispatch path yet for an incoming
+  continuous CC value to drive a bound parameter's live value. That
+  dispatch path is the real remaining work. **[OPEN, future — issue
+  filed, not being built now]**
+
 ## Already-shipped, adjacent Signal Lab work (for context, not node-graph itself)
 
 - Signal Lab always opens **blank** — no auto-restore from project/session

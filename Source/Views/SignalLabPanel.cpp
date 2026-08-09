@@ -86,6 +86,14 @@ public:
         rows.add({ &component, height });
     }
 
+    juce::TextButton& addButtonRow(const juce::String& buttonText)
+    {
+        auto* button = buttons.add(new juce::TextButton(buttonText));
+        addAndMakeVisible(button);
+        rows.add({ button, 28 });
+        return *button;
+    }
+
     void resized() override
     {
         auto area = getLocalBounds().reduced(12);
@@ -101,6 +109,7 @@ private:
     juce::OwnedArray<juce::Label> labels;
     juce::OwnedArray<juce::Slider> sliders;
     juce::OwnedArray<juce::ComboBox> combos;
+    juce::OwnedArray<juce::TextButton> buttons;
     juce::Array<Row> rows;
 };
 
@@ -167,13 +176,13 @@ juce::StringArray nodeParameterIds(const juce::String& nodeType)
     if (nodeType == "filter")
         return { "filterCutoff", "filterResonance", "filterEnvelopeAmount" };
     if (nodeType == "output")
-        return { "pitchOffsetSemitones", "macroHardness", "macroWeight", "macroAir", "macroGrit", "macroSize" };
+        return {};
     if (nodeType == "sine")     return { "sineLevel" };
     if (nodeType == "saw")      return { "sawLevel" };
     if (nodeType == "square")   return { "squareLevel" };
     if (nodeType == "triangle") return { "triangleLevel" };
     if (nodeType == "noise")    return { "noiseLevel" };
-    if (nodeType == "mix")      return { "baseFrequency" };
+    if (nodeType == "mix")      return {};
     return {};
 }
 
@@ -635,6 +644,8 @@ double getLegacySustainLevel(const juce::Array<cw::PatchAutomationPoint>& points
 juce::String graphNodeTitle(const juce::String& type)
 {
     if (type == "value") return "Value";
+    if (type == "valueGet") return "Get";
+    if (type == "valueSet") return "Set";
     if (type == "sine") return "Sine Osc";
     if (type == "saw") return "Saw Osc";
     if (type == "square") return "Square Osc";
@@ -643,10 +654,16 @@ juce::String graphNodeTitle(const juce::String& type)
     if (type == "mix") return "Mixer";
     if (type == "filter") return "Filter";
     if (type == "envelope") return "Envelope";
-    if (type == "output") return "Output";
+    if (type == "output") return "Sink";
     if (type == "scope") return "Oscilloscope";
     if (type == "analyzer") return "Frequency Analyzer";
     return type;
+}
+
+juce::String graphNodeTypeBadge(const juce::String& type)
+{
+    if (type == "output") return "SINK";
+    return type.toUpperCase();
 }
 
 juce::String timelineNodeTitle(const cw::PatchAutomationLane& lane)
@@ -663,7 +680,7 @@ juce::Colour graphNodeAccent(const juce::String& type)
     if (type == "mix") return signalMixColour();
     if (type == "scope") return juce::Colour(0xff66e0ff);
     if (type == "analyzer") return juce::Colour(0xffff91c1);
-    if (type == "value") return juce::Colour(0xffffd166);
+    if (type == "value" || type == "valueGet" || type == "valueSet") return juce::Colour(0xffffd166);
     return signalSourceColour();
 }
 }
@@ -1203,33 +1220,33 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
         g.setColour(selected ? juce::Colours::white : node.accent);
         g.drawRoundedRectangle(boundsF, 14.0f, selected ? 3.0f : 2.0f);
 
+        auto badgeBounds = juce::Rectangle<float>(boundsF.getCentreX() - 42.0f, boundsF.getY() + 12.0f, 84.0f, 20.0f);
         g.setColour(node.accent.withAlpha(0.22f));
-        g.fillRoundedRectangle(juce::Rectangle<float>(boundsF.getX() + 12.0f, boundsF.getY() + 12.0f, 78.0f, 18.0f), 8.0f);
+        g.fillRoundedRectangle(badgeBounds, 9.0f);
         g.setColour(node.accent);
-        g.setFont(juce::Font(11.0f).boldened());
-        g.drawText(node.type.toUpperCase(), juce::Rectangle<int>((int) boundsF.getX() + 14, (int) boundsF.getY() + 12, 72, 18), juce::Justification::centred, false);
+        g.setFont(juce::Font(13.0f));
+        g.drawText(graphNodeTypeBadge(node.type), badgeBounds.toNearestInt(), juce::Justification::centred, false);
 
         g.setColour(juce::Colours::white);
         g.setFont(juce::Font(16.0f).boldened());
         g.drawText(node.title, juce::Rectangle<int>((int) boundsF.getX() + 12, (int) boundsF.getY() + 38, (int) boundsF.getWidth() - 24, 22), juce::Justification::centredLeft, true);
 
         juce::String detail;
-        if (node.type == "sine") detail = "Level " + juce::String(owner.recipe.sineLevel, 2);
-        else if (node.type == "saw") detail = "Level " + juce::String(owner.recipe.sawLevel, 2);
-        else if (node.type == "square") detail = "Level " + juce::String(owner.recipe.squareLevel, 2);
-        else if (node.type == "triangle") detail = "Level " + juce::String(owner.recipe.triangleLevel, 2);
-        else if (node.type == "noise") detail = "Level " + juce::String(owner.recipe.noiseLevel, 2);
+        if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
+            detail = "Level " + juce::String(node.oscillatorLevel, 2) + " • " + juce::String(juce::roundToInt(node.oscillatorFrequencyHz)) + " Hz";
+        else if (node.type == "noise") detail = "Level " + juce::String(node.oscillatorLevel, 2);
         else if (node.type == "filter") detail = owner.recipe.filterMode + " • " + juce::String(juce::roundToInt(owner.recipe.filterCutoffHz)) + " Hz";
         else if (node.type == "envelope") detail = owner.recipe.envelopeCurveMode + " curve";
-        else if (node.type == "output") detail = formatDurationText(owner.recipe.durationSeconds);
-        else if (node.type == "value")
+        else if (node.type == "output") detail = formatDurationText(owner.recipe.durationSeconds) + " • " + (owner.recipe.sinkMode == "wave" ? "Wave" : "Audio");
+        else if (node.type == "value" || node.type == "valueGet" || node.type == "valueSet")
         {
-            detail = "Constant";
+            detail = node.type == "valueSet" ? "Driven by automation" : "Reads current value";
             for (auto& variable : owner.localControls)
             {
                 if (variable.id == node.targetParameter)
                 {
-                    detail = variable.targetParameter + " • " + juce::String(variable.value, 2);
+                    detail = variable.name + " • " + juce::String(variable.value, 2)
+                            + (node.type == "valueSet" ? " (setter)" : "");
                     break;
                 }
             }
@@ -1251,22 +1268,24 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
                 }
             }
         }
+        else if (node.type == "mix") detail = "Weighted sum • " + juce::String(node.mixerInputVolumes.size()) + " channels";
         else detail = "Auto sum bus";
 
         g.setColour(juce::Colour(0xff9db0c8));
         g.setFont(juce::Font(12.0f));
         g.drawText(detail, juce::Rectangle<int>((int) boundsF.getX() + 12, (int) boundsF.getBottom() - 28, (int) boundsF.getWidth() - 24, 16), juce::Justification::centredLeft, true);
 
-        if (node.type == "scope" && owner.generatedBuffer.getNumSamples() > 8)
+        if (node.type == "scope" && owner.getDisplayBufferForNode(node.id).getNumSamples() > 8)
         {
+            auto& tapBuffer = owner.getDisplayBufferForNode(node.id);
             auto mini = juce::Rectangle<float>(boundsF.getX() + 12.0f, boundsF.getY() + 64.0f, boundsF.getWidth() - 24.0f, 18.0f);
             g.setColour(juce::Colour(0xff0f141c));
             g.fillRoundedRectangle(mini, 4.0f);
             auto drawTrace = [&](int channel, juce::Colour colour, float gain)
             {
                 juce::Path path;
-                auto* data = owner.generatedBuffer.getReadPointer(juce::jmin(channel, owner.generatedBuffer.getNumChannels() - 1));
-                auto samples = owner.generatedBuffer.getNumSamples();
+                auto* data = tapBuffer.getReadPointer(juce::jmin(channel, tapBuffer.getNumChannels() - 1));
+                auto samples = tapBuffer.getNumSamples();
                 auto step = juce::jmax(1, samples / juce::jmax(1, (int) mini.getWidth()));
                 bool started = false;
                 int plotIndex = 0;
@@ -1283,17 +1302,18 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
             drawTrace(0, juce::Colour(0xff66e0ff), (float) owner.probeSettings.scopeGainA);
             drawTrace(1, juce::Colour(0xffff9ac9), (float) owner.probeSettings.scopeGainB);
         }
-        else if (node.type == "analyzer" && owner.generatedBuffer.getNumSamples() > 32)
+        else if (node.type == "analyzer" && owner.getDisplayBufferForNode(node.id).getNumSamples() > 32)
         {
+            auto& tapBuffer = owner.getDisplayBufferForNode(node.id);
             auto mini = juce::Rectangle<float>(boundsF.getX() + 12.0f, boundsF.getY() + 62.0f, boundsF.getWidth() - 24.0f, 20.0f);
             g.setColour(juce::Colour(0xff0f141c));
             g.fillRoundedRectangle(mini, 4.0f);
-            auto* data = owner.generatedBuffer.getReadPointer(0);
+            auto* data = tapBuffer.getReadPointer(0);
             auto bins = 24;
             for (int bin = 0; bin < bins; ++bin)
             {
-                auto start = bin * owner.generatedBuffer.getNumSamples() / bins;
-                auto end = juce::jmin(owner.generatedBuffer.getNumSamples(), (bin + 1) * owner.generatedBuffer.getNumSamples() / bins);
+                auto start = bin * tapBuffer.getNumSamples() / bins;
+                auto end = juce::jmin(tapBuffer.getNumSamples(), (bin + 1) * tapBuffer.getNumSamples() / bins);
                 float peak = 0.0f;
                 for (int i = start; i < end; ++i)
                     peak = juce::jmax(peak, std::abs(data[i]));
@@ -1339,12 +1359,24 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
                 if (port.label.isNotEmpty())
                 {
                     g.setColour(juce::Colour(0xffb9c4d6));
-                    g.setFont(juce::Font(9.5f));
+                    g.setFont(juce::Font(12.0f));
                     auto justification = port.isOutput ? juce::Justification::centredLeft : juce::Justification::centredRight;
-                    auto labelX = port.isOutput ? centre.x + 9.0f : centre.x - 69.0f;
-                    g.drawText(port.label, juce::Rectangle<int>((int) labelX, (int) centre.y - 7, 60, 14), justification, true);
+                    auto labelX = port.isOutput ? centre.x + 9.0f : centre.x - 81.0f;
+                    g.drawText(port.label, juce::Rectangle<int>((int) labelX, (int) centre.y - 8, 72, 16), justification, true);
                 }
             }
+        }
+
+        if (node.type == "mix")
+        {
+            auto buttonBounds = owner.graphToCanvas(owner.getMixerAddInputButtonBounds(index)).toFloat();
+            g.setColour(juce::Colour(0xff232c3d));
+            g.fillRoundedRectangle(buttonBounds, 4.0f);
+            g.setColour(juce::Colour(0xff5a6b85));
+            g.drawRoundedRectangle(buttonBounds, 4.0f, 1.0f);
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(11.0f));
+            g.drawText("+ Input", buttonBounds, juce::Justification::centred, false);
         }
     }
 
@@ -1450,6 +1482,16 @@ void SignalLabPanel::NodeGraphCanvas::mouseDown(const juce::MouseEvent& event)
     }
 
     dragNodeIndex = owner.findGraphNodeAt(event.getPosition());
+    if (dragNodeIndex >= 0 && owner.graphNodes.getReference(dragNodeIndex).type == "mix"
+        && owner.graphToCanvas(owner.getMixerAddInputButtonBounds(dragNodeIndex)).contains(event.getPosition()))
+    {
+        owner.addMixerInput(dragNodeIndex);
+        dragNodeIndex = -1;
+        dragMoved = true;
+        repaint();
+        return;
+    }
+
     dragMoved = false;
     owner.setSelectedGraphNodeIndex(dragNodeIndex);
     if (dragNodeIndex >= 0)
@@ -1723,6 +1765,7 @@ void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalContro
 
 SignalLabPanel::NodeSearchPanel::NodeSearchPanel()
 {
+    searchEditor.setFont(juce::Font(11.0f));
     searchEditor.setTextToShowWhenEmpty("Search nodes...", juce::Colour(0xff72839b));
     searchEditor.onTextChange = [this] { refreshResults(); };
     addAndMakeVisible(searchEditor);
@@ -1747,6 +1790,7 @@ void SignalLabPanel::NodeSearchPanel::refreshResults()
     while (resultButtons.size() < visibleEntries.size())
     {
         auto* button = resultButtons.add(new juce::TextButton());
+        button->setLookAndFeel(&compactLookAndFeel);
         addAndMakeVisible(button);
     }
 
@@ -1763,8 +1807,8 @@ void SignalLabPanel::NodeSearchPanel::refreshResults()
         {
             if (onEntryChosen)
                 onEntryChosen(entry.type, entry.payload);
-            if (auto* callout = findParentComponentOfClass<juce::CallOutBox>())
-                callout->dismiss();
+            if (onDismissRequested)
+                onDismissRequested();
         };
     }
 
@@ -1778,15 +1822,15 @@ void SignalLabPanel::NodeSearchPanel::paint(juce::Graphics& g)
 
 void SignalLabPanel::NodeSearchPanel::resized()
 {
-    auto area = getLocalBounds().reduced(10);
-    searchEditor.setBounds(area.removeFromTop(28));
-    area.removeFromTop(8);
+    auto area = getLocalBounds().reduced(8);
+    searchEditor.setBounds(area.removeFromTop(22));
+    area.removeFromTop(6);
     for (auto* button : resultButtons)
     {
         if (! button->isVisible())
             continue;
-        button->setBounds(area.removeFromTop(28));
-        area.removeFromTop(4);
+        button->setBounds(area.removeFromTop(20));
+        area.removeFromTop(2);
     }
 }
 
@@ -1883,7 +1927,12 @@ SignalLabPanel::SignalLabPanel()
     toolboxPane.onPlaceVariableRequested = [this](const juce::String& variableId)
     {
         auto dropPoint = juce::Point<int>(220, 80 + graphNodes.size() * 18);
-        addGraphNode("value", dropPoint, variableId);
+        bool isAutomated = false;
+        for (auto& variable : localControls)
+            if (variable.id == variableId)
+                isAutomated = variable.exposedToAutomation;
+        auto nodeType = (isAutomated && ! hasSetterNodeForVariable(variableId)) ? "valueSet" : "valueGet";
+        addGraphNode(nodeType, dropPoint, variableId);
     };
     toolboxPane.onVariableSelected = [this](const juce::String& variableId)
     {
@@ -2245,7 +2294,14 @@ SignalLabPanel::SignalLabPanel()
     wireSliderUndo(triangleSlider, "Adjust triangle level");
     wireSliderUndo(noiseSlider, "Adjust noise level");
 
-    frequencySlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.baseFrequencyHz = (float) frequencySlider.getValue(); regenerateSignal(); } };
+    frequencySlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).oscillatorFrequencyHz = (float) frequencySlider.getValue();
+        regenerateSignal();
+    };
     durationSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.durationSeconds = durationSlider.getValue(); regenerateSignal(); } };
     pitchSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.pitchSweepSemitones = (float) pitchSlider.getValue(); regenerateSignal(); } };
     filterModeSelector.onChange = [this]
@@ -2298,11 +2354,22 @@ SignalLabPanel::SignalLabPanel()
     macroAirSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroAir = (float) macroAirSlider.getValue(); regenerateSignal(); } };
     macroGritSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroGrit = (float) macroGritSlider.getValue(); regenerateSignal(); } };
     macroSizeSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroSize = (float) macroSizeSlider.getValue(); regenerateSignal(); } };
-    sineSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.sineLevel = (float) sineSlider.getValue(); regenerateSignal(); } };
-    sawSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.sawLevel = (float) sawSlider.getValue(); regenerateSignal(); } };
-    squareSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.squareLevel = (float) squareSlider.getValue(); regenerateSignal(); } };
-    triangleSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.triangleLevel = (float) triangleSlider.getValue(); regenerateSignal(); } };
-    noiseSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.noiseLevel = (float) noiseSlider.getValue(); regenerateSignal(); } };
+    auto bindOscillatorLevelSlider = [this](juce::Slider& slider)
+    {
+        slider.onValueChange = [this, &slider]
+        {
+            if (suppressCallbacks) return;
+            noteInteraction();
+            if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+                graphNodes.getReference(selectedGraphNodeIndex).oscillatorLevel = (float) slider.getValue();
+            regenerateSignal();
+        };
+    };
+    bindOscillatorLevelSlider(sineSlider);
+    bindOscillatorLevelSlider(sawSlider);
+    bindOscillatorLevelSlider(squareSlider);
+    bindOscillatorLevelSlider(triangleSlider);
+    bindOscillatorLevelSlider(noiseSlider);
     probeControlASlider.onValueChange = [this]
     {
         if (suppressCallbacks) return;
@@ -2355,6 +2422,7 @@ SignalLabPanel::SignalLabPanel()
 
     previewButton.onClick = [this]
     {
+        ensureAudioRendered();
         if (onPreviewRequested && generatedBuffer.getNumSamples() > 0)
             onPreviewRequested(generatedBuffer, recipe.sampleRate, recipe.name);
     };
@@ -2363,6 +2431,7 @@ SignalLabPanel::SignalLabPanel()
 
     renderButton.onClick = [this]
     {
+        ensureAudioRendered();
         if (onRenderRequested && generatedBuffer.getNumSamples() > 0)
             onRenderRequested(generatedBuffer, recipe.sampleRate, recipe.name);
     };
@@ -2458,40 +2527,52 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
     for (auto& node : graphNodes)
         priorPositions.set(node.id, node.position);
 
+    // Get/Set variable nodes are explicitly placed by the user (drag from
+    // the Variables panel, or the right-click menu) -- not auto-generated
+    // per variable the way the old "value" node used to be. This rebuild
+    // still clears and re-derives everything else from the recipe/flags,
+    // so preserve any already-placed getter/setter nodes verbatim across
+    // it, dropping only ones whose variable was deleted. Oscillator/noise
+    // source nodes are preserved the same way -- each instance owns its own
+    // level/frequency now (GraphNodeModel::oscillatorLevel/oscillatorFrequencyHz),
+    // so there's nothing to re-derive them from; the old single-node-per-type
+    // recipe.XLevel scalars are only used as a one-shot seed by
+    // seedOscillatorNodesFromRecipeLevels() (templates, patch load), never
+    // read here.
+    juce::Array<GraphNodeModel> preservedValueNodes;
+    juce::Array<GraphNodeModel> preservedOscillatorNodes;
+    juce::Array<float> preservedMixerInputVolumes { 1.0f, 1.0f };
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "valueGet" || node.type == "valueSet")
+            preservedValueNodes.add(node);
+        else if (node.type == "mix")
+            preservedMixerInputVolumes = node.mixerInputVolumes;
+        else if (node.type == "sine" || node.type == "saw" || node.type == "square"
+                 || node.type == "triangle" || node.type == "noise")
+            preservedOscillatorNodes.add(node);
+    }
+
     graphNodes.clear();
 
-    int sourceY = 36;
-    auto addSourceIfActive = [&](const juce::String& type, float level)
-    {
-        if (level <= 0.0f)
-            return;
-        auto nodeId = type + "Source";
-        addNode(type, priorPositions.contains(nodeId) ? priorPositions[nodeId] : juce::Point<int>(36, sourceY), false, false, nodeId);
-        sourceY += 110;
-    };
+    for (auto& preserved : preservedOscillatorNodes)
+        graphNodes.add(preserved);
 
-    addSourceIfActive("sine", recipe.sineLevel);
-    addSourceIfActive("saw", recipe.sawLevel);
-    addSourceIfActive("square", recipe.squareLevel);
-    addSourceIfActive("triangle", recipe.triangleLevel);
-    addSourceIfActive("noise", recipe.noiseLevel);
-
-    int valueY = 36;
-    for (auto& variable : localControls)
+    for (auto& preserved : preservedValueNodes)
     {
-        auto nodeId = "value:" + variable.id;
-        addNode("value",
-                priorPositions.contains(nodeId) ? priorPositions[nodeId] : juce::Point<int>(260, valueY),
-                false,
-                false,
-                nodeId,
-                variable.name,
-                variable.id);
-        valueY += 110;
+        bool variableStillExists = false;
+        for (auto& variable : localControls)
+            if (variable.id == preserved.targetParameter)
+                variableStillExists = true;
+        if (variableStillExists)
+            graphNodes.add(preserved);
     }
 
     if (mixNodeEnabled)
+    {
         addNode("mix", priorPositions.contains("mix") ? priorPositions["mix"] : juce::Point<int>(470, 180), false, false, "mix");
+        graphNodes.getReference(graphNodes.size() - 1).mixerInputVolumes = preservedMixerInputVolumes;
+    }
     if (filterNodeEnabled)
         addNode("filter", priorPositions.contains("filter") ? priorPositions["filter"] : juce::Point<int>(680, 180), false, false, "filter");
     if (envelopeNodeEnabled)
@@ -2520,6 +2601,46 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
     }
     if (selectedConnectionIndex >= graphConnections.size())
         selectedConnectionIndex = -1;
+}
+
+// One-shot conversion from the legacy single-instance recipe.XLevel scalars
+// into a fresh set of oscillator graph nodes -- used only by operations that
+// replace the whole sound wholesale (applying an AI template, loading a
+// saved patch), where those scalars are the only source of truth available.
+// Regular editing never calls this; rebuildNodeGraphFromRecipe() preserves
+// whatever oscillator nodes already exist instead.
+void SignalLabPanel::seedOscillatorNodesFromRecipeLevels()
+{
+    for (int index = graphNodes.size() - 1; index >= 0; --index)
+    {
+        auto& node = graphNodes.getReference(index);
+        if (node.type == "sine" || node.type == "saw" || node.type == "square"
+            || node.type == "triangle" || node.type == "noise")
+            graphNodes.remove(index);
+    }
+
+    int sourceY = 36;
+    auto addSourceIfActive = [&](const juce::String& type, float level)
+    {
+        if (level <= 0.0f)
+            return;
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = { 36, sourceY };
+        node.accent = graphNodeAccent(type);
+        node.oscillatorLevel = level;
+        node.oscillatorFrequencyHz = recipe.baseFrequencyHz;
+        graphNodes.add(node);
+        sourceY += 110;
+    };
+
+    addSourceIfActive("sine", recipe.sineLevel);
+    addSourceIfActive("saw", recipe.sawLevel);
+    addSourceIfActive("square", recipe.squareLevel);
+    addSourceIfActive("triangle", recipe.triangleLevel);
+    addSourceIfActive("noise", recipe.noiseLevel);
 }
 
 void SignalLabPanel::updateInspectorForSelection()
@@ -2570,13 +2691,18 @@ void SignalLabPanel::updateInspectorForSelection()
 
     if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
     {
-        inspectorBodyLabel.setText("Source node. Set the shared pitch, then balance this source in the mix.", juce::dontSendNotification);
+        inspectorBodyLabel.setText("Source node. Each instance has its own frequency and level.", juce::dontSendNotification);
+        auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
+
+        suppressCallbacks = true;
         frequencyLabel.setVisible(true); frequencySlider.setVisible(true);
-        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); }
-        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); }
-        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); }
-        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); }
-        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); }
+        frequencySlider.setValue(selectedNode.oscillatorFrequencyHz, juce::dontSendNotification);
+        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); sineSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
+        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); sawSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
+        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); squareSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
+        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); triangleSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
+        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); noiseSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
+        suppressCallbacks = false;
     }
     else if (type == "filter")
     {
@@ -2664,23 +2790,34 @@ void SignalLabPanel::showCanvasActionMenu(juce::Point<int> canvasPosition, bool 
     entries.add({ "Mixer", "mix", {} });
     entries.add({ "Filter", "filter", {} });
     entries.add({ "Envelope", "envelope", {} });
-    entries.add({ "Output", "output", {} });
+    entries.add({ "Sink", "output", {} });
     entries.add({ "Timeline", "timeline", {} });
     entries.add({ "Oscilloscope", "scope", {} });
     entries.add({ "Frequency Analyzer", "analyzer", {} });
     for (auto& variable : localControls)
-        entries.add({ variable.name + " (Value)", "value", variable.id });
+    {
+        entries.add({ "Get " + variable.name, "valueGet", variable.id });
+        if (! hasSetterNodeForVariable(variable.id))
+            entries.add({ "Set " + variable.name, "valueSet", variable.id });
+    }
 
     auto panel = std::make_unique<NodeSearchPanel>();
     panel->setEntries(entries);
-    panel->setSize(240, juce::jmin(480, 48 + entries.size() * 32));
+    panel->setSize(180, juce::jmin(400, 44 + entries.size() * 22));
     panel->onEntryChosen = [this, canvasPosition](const juce::String& type, const juce::String& payload)
     {
         addGraphNode(type, canvasPosition, payload);
     };
 
+    auto* rawPanel = panel.get();
     auto area = nodeGraphCanvas.localAreaToGlobal(juce::Rectangle<int>(canvasPosition.x, canvasPosition.y, 1, 1));
-    juce::CallOutBox::launchAsynchronously(std::move(panel), area, nullptr);
+    auto& callout = juce::CallOutBox::launchAsynchronously(std::move(panel), area, nullptr);
+    auto* calloutPtr = &callout;
+    rawPanel->onDismissRequested = [calloutPtr]
+    {
+        calloutPtr->setVisible(false);
+        calloutPtr->dismiss();
+    };
 }
 
 void SignalLabPanel::showNodeContextMenu(int nodeIndex, juce::Point<int> canvasPosition)
@@ -2735,6 +2872,7 @@ void SignalLabPanel::showSignalMenu()
                            }
                            else if (result == 5)
                            {
+                               ensureAudioRendered();
                                if (onRenderRequested)
                                    onRenderRequested(generatedBuffer, recipe.sampleRate, recipe.name);
                            }
@@ -2761,17 +2899,90 @@ void SignalLabPanel::createNewSignal()
 
 void SignalLabPanel::addGraphNode(const juce::String& type, juce::Point<int> canvasPosition, const juce::String& payload)
 {
-    if (type != "value" && type != "mix" && hasGraphNodeType(type))
+    // Get nodes are explicitly-placed, and multiple instances of the same
+    // variable are allowed (UE4-style: drop a fresh "Get" wherever you need
+    // the value instead of routing one long wire) -- each placement always
+    // creates a new node, never finds-and-repositions an existing one.
+    if (type == "valueGet")
+    {
+        captureUndoCheckpoint("Add Get " + payload);
+        GraphNodeModel node;
+        node.id = "valueGet:" + payload + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = "valueGet";
+        for (auto& variable : localControls)
+            if (variable.id == payload)
+                node.title = "Get " + variable.name;
+        node.targetParameter = payload;
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        return;
+    }
+
+    // Set nodes: only one allowed per variable (the single driven instance).
+    // If one already exists, just reposition/select it rather than adding
+    // a second -- the right-click menu already omits "Set" once one
+    // exists, this is the defensive fallback for any other call path.
+    if (type == "valueSet")
+    {
+        for (int index = 0; index < graphNodes.size(); ++index)
+        {
+            if (graphNodes.getReference(index).type == "valueSet" && graphNodes.getReference(index).targetParameter == payload)
+            {
+                if (canvasPosition != juce::Point<int>())
+                    graphNodes.getReference(index).position = canvasToGraph(canvasPosition);
+                setSelectedGraphNodeIndex(index);
+                return;
+            }
+        }
+
+        captureUndoCheckpoint("Add Set " + payload);
+        GraphNodeModel node;
+        node.id = "valueSet:" + payload;
+        node.type = "valueSet";
+        for (auto& variable : localControls)
+            if (variable.id == payload)
+                node.title = "Set " + variable.name;
+        node.targetParameter = payload;
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        return;
+    }
+
+    // Oscillator/noise sources: each placement always creates a new,
+    // independent instance (same reasoning as Get nodes above) -- each one
+    // owns its own level and frequency, so there's no shared slot to guard
+    // against a duplicate of.
+    if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
+    {
+        captureUndoCheckpoint("Add " + graphNodeTitle(type));
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        node.oscillatorFrequencyHz = recipe.baseFrequencyHz;
+        node.oscillatorLevel = type == "sine" ? 0.65f
+                              : type == "saw" ? 0.20f
+                              : type == "square" ? 0.15f
+                              : type == "triangle" ? 0.20f
+                                                    : 0.10f;
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        regenerateSignal();
+        return;
+    }
+
+    if (hasGraphNodeType(type) && type != "mix")
         return;
 
     captureUndoCheckpoint("Add " + graphNodeTitle(type));
 
-    if (type == "sine") recipe.sineLevel = juce::jmax(0.25f, recipe.sineLevel);
-    else if (type == "saw") recipe.sawLevel = juce::jmax(0.20f, recipe.sawLevel);
-    else if (type == "square") recipe.squareLevel = juce::jmax(0.15f, recipe.squareLevel);
-    else if (type == "triangle") recipe.triangleLevel = juce::jmax(0.20f, recipe.triangleLevel);
-    else if (type == "noise") recipe.noiseLevel = juce::jmax(0.10f, recipe.noiseLevel);
-    else if (type == "mix") mixNodeEnabled = true;
+    if (type == "mix") mixNodeEnabled = true;
     else if (type == "filter") filterNodeEnabled = true;
     else if (type == "envelope") envelopeNodeEnabled = true;
     else if (type == "scope") probeSettings.scopeEnabled = true;
@@ -2781,8 +2992,7 @@ void SignalLabPanel::addGraphNode(const juce::String& type, juce::Point<int> can
 
     for (int index = 0; index < graphNodes.size(); ++index)
     {
-        if (graphNodes.getReference(index).type == type
-            && (type != "value" || graphNodes.getReference(index).targetParameter == payload))
+        if (graphNodes.getReference(index).type == type)
         {
             if (canvasPosition != juce::Point<int>())
                 graphNodes.getReference(index).position = canvasToGraph(canvasPosition);
@@ -2803,11 +3013,12 @@ void SignalLabPanel::removeSelectedGraphNode()
 
     captureUndoCheckpoint("Remove " + graphNodeTitle(type));
 
-    if (type == "sine") recipe.sineLevel = 0.0f;
-    else if (type == "saw") recipe.sawLevel = 0.0f;
-    else if (type == "square") recipe.squareLevel = 0.0f;
-    else if (type == "triangle") recipe.triangleLevel = 0.0f;
-    else if (type == "noise") recipe.noiseLevel = 0.0f;
+    // Oscillator/noise nodes are independent instances now (no shared
+    // recipe.XLevel slot to clear) -- rebuildNodeGraphFromRecipe() preserves
+    // whatever's already in graphNodes for these types, so this one has to
+    // be removed from the array directly rather than gated off by a flag.
+    if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
+        graphNodes.remove(selectedGraphNodeIndex);
     else if (type == "mix") mixNodeEnabled = false;
     else if (type == "filter") filterNodeEnabled = false;
     else if (type == "envelope") envelopeNodeEnabled = false;
@@ -2847,6 +3058,16 @@ int SignalLabPanel::getGraphNodeHeight(int index) const
     // instrument detail still lives in the detachable floating window
     // opened via double-click -- this inline area is a compact preview only.
     int leftPortRows = nodeParameterIds(node.type).size();
+    if (node.type == "mix")
+        leftPortRows += node.mixerInputVolumes.size() * 2 + 2; // signal+weight pair per input, plus room for the "+ Input" button
+
+    bool hasSignalIn = node.type != "sine" && node.type != "saw" && node.type != "square"
+                     && node.type != "triangle" && node.type != "noise" && node.type != "timeline"
+                     && node.type != "value" && node.type != "valueGet" && node.type != "valueSet"
+                     && node.type != "mix";
+    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet";
+    if (hasSignalIn || hasSignalOut)
+        leftPortRows += 1; // signal ports now get their own row under the header
 
     int height = 96;
     if (leftPortRows > 2)
@@ -2855,6 +3076,16 @@ int SignalLabPanel::getGraphNodeHeight(int index) const
         height = juce::jmax(height, 118);
 
     return height;
+}
+
+juce::Rectangle<int> SignalLabPanel::getMixerAddInputButtonBounds(int index) const
+{
+    if (index < 0 || index >= graphNodes.size())
+        return {};
+    auto bounds = getGraphNodeBounds(index);
+    auto& node = graphNodes.getReference(index);
+    auto y = bounds.getY() + 30 + node.mixerInputVolumes.size() * 44;
+    return { bounds.getX() + 10, y, bounds.getWidth() - 20, 20 };
 }
 
 void SignalLabPanel::setSelectedGraphNodeIndex(int index)
@@ -2873,6 +3104,27 @@ bool SignalLabPanel::hasGraphNodeType(const juce::String& type) const
         if (node.type == type)
             return true;
     return false;
+}
+
+bool SignalLabPanel::hasSetterNodeForVariable(const juce::String& variableId) const
+{
+    for (auto& node : graphNodes)
+        if (node.type == "valueSet" && node.targetParameter == variableId)
+            return true;
+    return false;
+}
+
+void SignalLabPanel::addMixerInput(int nodeIndex)
+{
+    if (nodeIndex < 0 || nodeIndex >= graphNodes.size())
+        return;
+    auto& node = graphNodes.getReference(nodeIndex);
+    if (node.type != "mix")
+        return;
+
+    captureUndoCheckpoint("Add mixer input");
+    node.mixerInputVolumes.add(1.0f);
+    updateCanvasWorkspace();
 }
 
 void SignalLabPanel::openNodeEditorForSelection()
@@ -2898,11 +3150,26 @@ void SignalLabPanel::openNodeEditorForSelection()
 
     if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle" || node.type == "noise")
     {
-        auto& freq = content->addSliderRow("Base Frequency", 30.0, 2400.0, 1.0);
-        freq.setValue(recipe.baseFrequencyHz, juce::dontSendNotification);
-        freq.onValueChange = [this, &freq]
+        // Each oscillator instance owns its own frequency/level now (that's
+        // the whole point -- two Sine nodes must not edit the same value),
+        // so look the node up by id at callback time rather than binding to
+        // the shared recipe or a captured index that could go stale if
+        // nodes are added/removed while this window stays open.
+        auto nodeId = node.id;
+        auto findNode = [this, nodeId]() -> GraphNodeModel*
         {
-            recipe.baseFrequencyHz = (float) freq.getValue();
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        auto& freq = content->addSliderRow("Frequency", 30.0, 2400.0, 1.0);
+        freq.setValue(node.oscillatorFrequencyHz, juce::dontSendNotification);
+        freq.onValueChange = [this, &freq, findNode]
+        {
+            if (auto* target = findNode())
+                target->oscillatorFrequencyHz = (float) freq.getValue();
             regenerateSignal();
         };
 
@@ -2915,20 +3182,11 @@ void SignalLabPanel::openNodeEditorForSelection()
 
         if (level != nullptr)
         {
-            if (node.type == "sine") level->setValue(recipe.sineLevel, juce::dontSendNotification);
-            else if (node.type == "saw") level->setValue(recipe.sawLevel, juce::dontSendNotification);
-            else if (node.type == "square") level->setValue(recipe.squareLevel, juce::dontSendNotification);
-            else if (node.type == "triangle") level->setValue(recipe.triangleLevel, juce::dontSendNotification);
-            else if (node.type == "noise") level->setValue(recipe.noiseLevel, juce::dontSendNotification);
-
-            level->onValueChange = [this, level, type = node.type]
+            level->setValue(node.oscillatorLevel, juce::dontSendNotification);
+            level->onValueChange = [this, level, findNode]
             {
-                auto value = (float) level->getValue();
-                if (type == "sine") recipe.sineLevel = value;
-                else if (type == "saw") recipe.sawLevel = value;
-                else if (type == "square") recipe.squareLevel = value;
-                else if (type == "triangle") recipe.triangleLevel = value;
-                else if (type == "noise") recipe.noiseLevel = value;
+                if (auto* target = findNode())
+                    target->oscillatorLevel = (float) level->getValue();
                 regenerateSignal();
             };
         }
@@ -2959,24 +3217,33 @@ void SignalLabPanel::openNodeEditorForSelection()
         duration.setValue(recipe.durationSeconds, juce::dontSendNotification);
         duration.onValueChange = [this, &duration] { recipe.durationSeconds = duration.getValue(); regenerateSignal(); };
 
-        auto& hardness = content->addSliderRow("Hardness", 0.0, 1.0, 0.01);
-        hardness.setValue(recipe.macroHardness, juce::dontSendNotification);
-        hardness.onValueChange = [this, &hardness] { recipe.macroHardness = (float) hardness.getValue(); regenerateSignal(); };
+        auto& mode = content->addComboRow("Output Mode", { "Audio (Device)", "Wave (File)" });
+        mode.setSelectedId(recipe.sinkMode == "wave" ? 2 : 1, juce::dontSendNotification);
+        mode.onChange = [this, &mode] { recipe.sinkMode = mode.getSelectedId() == 2 ? "wave" : "audio"; regenerateSignal(); };
 
-        auto& weight = content->addSliderRow("Weight", 0.0, 1.0, 0.01);
-        weight.setValue(recipe.macroWeight, juce::dontSendNotification);
-        weight.onValueChange = [this, &weight] { recipe.macroWeight = (float) weight.getValue(); regenerateSignal(); };
+        auto& deviceButton = content->addButtonRow("Change Output Device...");
+        deviceButton.onClick = [this] { if (onAudioSettingsRequested) onAudioSettingsRequested(); };
+
+        auto& renderButton2 = content->addButtonRow("Render \"" + recipe.name + "\" to Project");
+        renderButton2.onClick = [this]
+        {
+            ensureAudioRendered();
+            if (onRenderRequested && generatedBuffer.getNumSamples() > 0)
+                onRenderRequested(generatedBuffer, recipe.sampleRate, recipe.name);
+        };
     }
     else if (node.type == "scope")
     {
+        ensureAudioRendered();
         auto* scope = new ScopePanel();
-        scope->setBuffer(generatedBuffer);
+        scope->setBuffer(getDisplayBufferForNode(node.id));
         content->addCustomComponent(*scope, 220);
     }
     else if (node.type == "analyzer")
     {
+        ensureAudioRendered();
         auto* analyzer = new SpectrumPanel();
-        analyzer->setBuffer(generatedBuffer, recipe.sampleRate);
+        analyzer->setBuffer(getDisplayBufferForNode(node.id), recipe.sampleRate);
         content->addCustomComponent(*analyzer, 220);
     }
     else if (node.type == "envelope")
@@ -3321,9 +3588,15 @@ juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) c
     // (no signal-in); the final Output node only receives (no signal-out).
     bool hasSignalIn = node.type != "sine" && node.type != "saw" && node.type != "square"
                      && node.type != "triangle" && node.type != "noise" && node.type != "timeline"
-                     && node.type != "value";
-    bool hasSignalOut = node.type != "output";
+                     && node.type != "value" && node.type != "valueGet" && node.type != "valueSet"
+                     && node.type != "mix";
+    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet";
 
+    float leftY = bounds.getY() + 30.0f;
+
+    // Signal ports get their own row just under the header, clear of the
+    // type badge, instead of being crammed into the corners of the title
+    // bar. Both sides share the row since one node rarely has both.
     if (hasSignalIn)
     {
         GraphPort p;
@@ -3331,7 +3604,7 @@ juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) c
         p.label = "Signal";
         p.isOutput = false;
         p.isExec = true;
-        p.position = { bounds.getX() + 20.0f, bounds.getY() + 8.0f };
+        p.position = { bounds.getX() + 20.0f, leftY };
         ports.add(p);
     }
     if (hasSignalOut)
@@ -3341,11 +3614,44 @@ juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) c
         p.label = "Signal";
         p.isOutput = true;
         p.isExec = true;
-        p.position = { bounds.getRight() - 20.0f, bounds.getY() + 8.0f };
+        p.position = { bounds.getRight() - 20.0f, leftY };
         ports.add(p);
     }
+    if (hasSignalIn || hasSignalOut)
+        leftY += 22.0f;
 
-    float leftY = bounds.getY() + 30.0f;
+    // Mixer output is a weighted sum: out = sum(input_i * weight_i). Each
+    // input is a white Signal port (the stream) paired with a real-valued
+    // weight/multiplier port (Float, automatable) -- variable arity,
+    // default 2 inputs, grown via the node's own "+ Input" button. Unlike
+    // every other node type, this isn't a fixed registry shape from
+    // nodeParameterIds.
+    if (node.type == "mix")
+    {
+        for (int inputIndex = 0; inputIndex < node.mixerInputVolumes.size(); ++inputIndex)
+        {
+            GraphPort signalPort;
+            signalPort.portId = "signalIn:" + juce::String(inputIndex);
+            signalPort.label = "Channel " + juce::String(inputIndex + 1);
+            signalPort.isOutput = false;
+            signalPort.isExec = true;
+            signalPort.position = { bounds.getX(), leftY };
+            ports.add(signalPort);
+            leftY += 22.0f;
+
+            GraphPort weightPort;
+            weightPort.portId = "mixWeight:" + juce::String(inputIndex);
+            weightPort.label = "Weight " + juce::String(inputIndex + 1);
+            weightPort.isOutput = false;
+            weightPort.isExec = false;
+            weightPort.valueType = PortValueType::Float;
+            weightPort.position = { bounds.getX(), leftY };
+            ports.add(weightPort);
+            leftY += 22.0f;
+        }
+        leftY += 26.0f; // room for the "+ Input" button drawn below the last pair
+    }
+
     for (auto& parameterId : nodeParameterIds(node.type))
     {
         GraphPort p;
@@ -3357,6 +3663,40 @@ juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) c
         p.position = { bounds.getX(), leftY };
         ports.add(p);
         leftY += 22.0f;
+    }
+
+    if (node.type == "valueGet" || node.type == "valueSet")
+    {
+        PortValueType variableType = PortValueType::Float;
+        for (auto& variable : localControls)
+        {
+            if (variable.id != node.targetParameter)
+                continue;
+            if (variable.valueType == "Int") variableType = PortValueType::Int;
+            else if (variable.valueType == "Bool") variableType = PortValueType::Bool;
+            break;
+        }
+
+        if (node.type == "valueSet")
+        {
+            GraphPort p;
+            p.portId = "valueIn";
+            p.label = "In";
+            p.isOutput = false;
+            p.isExec = false;
+            p.valueType = variableType;
+            p.position = { bounds.getX(), leftY };
+            ports.add(p);
+        }
+
+        GraphPort p;
+        p.portId = "valueOut";
+        p.label = "Value";
+        p.isOutput = true;
+        p.isExec = false;
+        p.valueType = variableType;
+        p.position = { bounds.getRight(), bounds.getY() + 30.0f };
+        ports.add(p);
     }
 
     return ports;
@@ -3527,6 +3867,7 @@ juce::ValueTree SignalLabPanel::createState() const
     state.setProperty("name", recipe.name, nullptr);
     state.setProperty("sampleRate", recipe.sampleRate, nullptr);
     state.setProperty("durationSeconds", recipe.durationSeconds, nullptr);
+    state.setProperty("sinkMode", recipe.sinkMode, nullptr);
     state.setProperty("baseFrequencyHz", recipe.baseFrequencyHz, nullptr);
     state.setProperty("filterMode", recipe.filterMode, nullptr);
     state.setProperty("filterCutoffHz", recipe.filterCutoffHz, nullptr);
@@ -3593,6 +3934,7 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
     recipe.name = state.getProperty("name", recipe.name).toString();
     recipe.sampleRate = (double) state.getProperty("sampleRate", recipe.sampleRate);
     recipe.durationSeconds = (double) state.getProperty("durationSeconds", recipe.durationSeconds);
+    recipe.sinkMode = state.getProperty("sinkMode", recipe.sinkMode).toString();
     recipe.baseFrequencyHz = (float) state.getProperty("baseFrequencyHz", recipe.baseFrequencyHz);
     recipe.filterMode = state.getProperty("filterMode", recipe.filterMode).toString();
     recipe.filterCutoffHz = (float) state.getProperty("filterCutoffHz", recipe.filterCutoffHz);
@@ -3696,39 +4038,20 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             recipe.noiseLevel = (float) parameter.defaultValue;
     }
 
-    recipe.sineLevel = 0.0f;
-    recipe.sawLevel = 0.0f;
-    recipe.squareLevel = 0.0f;
-    recipe.triangleLevel = 0.0f;
-
-    for (const auto& source : document.sources)
-    {
-        if (source.kind == "oscillator")
-        {
-            if (source.waveform == "sine")
-                recipe.sineLevel = (float) source.level;
-            else if (source.waveform == "saw")
-                recipe.sawLevel = (float) source.level;
-            else if (source.waveform == "square")
-                recipe.squareLevel = (float) source.level;
-            else if (source.waveform == "triangle")
-                recipe.triangleLevel = (float) source.level;
-        }
-        else if (source.kind == "noise")
-        {
-            recipe.noiseLevel = (float) source.level;
-        }
-    }
-
     recipe.envelopePoints.clear();
+    probeSettings = {};
+
+    // Only enable a stage if a node of that kind is actually present in the
+    // file -- buildPatchDocument now only ever writes nodes that were
+    // really on the canvas, so "present in the file" correctly means
+    // "the user placed one", unlike the old always-emit-everything format.
     for (const auto& node : document.nodes)
     {
-        if (node.kind == "mix")
-            mixNodeEnabled = true;
-        else if (node.kind == "filter")
-            filterNodeEnabled = true;
-        else if (node.kind == "envelope")
-            envelopeNodeEnabled = true;
+        if (node.kind == "mix") mixNodeEnabled = true;
+        else if (node.kind == "filter") filterNodeEnabled = true;
+        else if (node.kind == "envelope") envelopeNodeEnabled = true;
+        else if (node.kind == "scope") probeSettings.scopeEnabled = true;
+        else if (node.kind == "analyzer") probeSettings.analyzerEnabled = true;
 
         if (node.kind == "envelope")
         {
@@ -3762,6 +4085,82 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             recipe.automationCurveMode = lane.interpolation;
     }
 
+    // Reconstruct the real graph -- same ids and positions as what was
+    // saved, not fresh default-positioned nodes. rebuildNodeGraphFromRecipe()
+    // (called via regenerateSignal() below) preserves oscillator/noise nodes
+    // verbatim, and for the singleton mix/filter/envelope/output nodes it
+    // looks up prior positions/mixer weights by their fixed id ("mix",
+    // "filter", "envelope", "output") -- so seeding graphNodes here with
+    // those same ids is enough for it to pick everything back up correctly,
+    // without needing to duplicate that logic here.
+    graphNodes.clear();
+    graphConnections.clear();
+
+    for (const auto& source : document.sources)
+    {
+        if (source.kind != "oscillator" && source.kind != "noise")
+            continue;
+
+        GraphNodeModel node;
+        node.id = source.id;
+        node.type = source.kind == "noise" ? "noise" : source.waveform;
+        node.title = graphNodeTitle(node.type);
+        node.position = { source.canvasX, source.canvasY };
+        node.accent = graphNodeAccent(node.type);
+        node.oscillatorLevel = (float) source.level;
+        node.oscillatorFrequencyHz = recipe.baseFrequencyHz;
+        if (source.frequencyParameter.isNotEmpty())
+            for (const auto& parameter : document.parameters)
+                if (parameter.id == source.frequencyParameter)
+                {
+                    node.oscillatorFrequencyHz = (float) parameter.defaultValue;
+                    break;
+                }
+        graphNodes.add(node);
+    }
+
+    for (const auto& patchNode : document.nodes)
+    {
+        if (patchNode.kind != "mix" && patchNode.kind != "filter" && patchNode.kind != "envelope"
+            && patchNode.kind != "output" && patchNode.kind != "scope" && patchNode.kind != "analyzer")
+            continue;
+
+        GraphNodeModel node;
+        node.id = patchNode.kind; // singleton types always use their kind as id, matching rebuildNodeGraphFromRecipe()
+        node.type = patchNode.kind;
+        node.title = graphNodeTitle(node.type);
+        node.position = { patchNode.canvasX, patchNode.canvasY };
+        node.accent = graphNodeAccent(node.type);
+        node.required = patchNode.kind == "output";
+
+        if (patchNode.kind == "mix")
+        {
+            auto weightsText = patchNode.properties.getWithDefault("channelWeights", {}).toString();
+            if (weightsText.isNotEmpty())
+            {
+                juce::Array<float> volumes;
+                for (const auto& token : juce::StringArray::fromTokens(weightsText, ",", {}))
+                    volumes.add(token.getFloatValue());
+                if (! volumes.isEmpty())
+                    node.mixerInputVolumes = volumes;
+            }
+        }
+
+        graphNodes.add(node);
+    }
+
+    for (const auto& connection : document.connections)
+    {
+        GraphConnection graphConnection;
+        graphConnection.id = "conn:" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        graphConnection.fromNodeId = connection.from;
+        graphConnection.toNodeId = connection.to;
+        graphConnection.fromPortId = connection.fromPort.isNotEmpty() ? connection.fromPort : "signalOut";
+        graphConnection.toPortId = connection.toPort.isNotEmpty() ? connection.toPort : "signalIn";
+        graphConnection.isExec = true;
+        graphConnections.add(graphConnection);
+    }
+
     ensureRecipe(recipe);
     rebuildAutomationChrome();
     refreshControlsFromRecipe();
@@ -3780,6 +4179,7 @@ void SignalLabPanel::applyAiTemplate(const juce::String& templateName)
 
 bool SignalLabPanel::previewCurrentSignal()
 {
+    ensureAudioRendered();
     if (generatedBuffer.getNumSamples() <= 0 || onPreviewRequested == nullptr)
         return false;
 
@@ -4028,18 +4428,53 @@ void SignalLabPanel::layoutFloatingWindows()
 
 void SignalLabPanel::regenerateSignal()
 {
+    // Cheap path only -- graph/UI bookkeeping so the node cards, status
+    // text, and inspector always stay in sync live as you edit. The actual
+    // DSP render is expensive (multi-second) and is deliberately NOT done
+    // here: doing it on every edit is what made dragging an envelope point
+    // or adding a node feel like it hung. Rendering happens on demand, via
+    // ensureAudioRendered(), only at the handful of places that actually
+    // need audio (Play, Preview, Render, opening a Scope/Analyzer window).
     ensureRecipe(recipe);
+    audioDirty = true;
+    updateStatusText();
+    rebuildNodeGraphFromRecipe();
+    updateInspectorForSelection();
+}
+
+void SignalLabPanel::ensureAudioRendered()
+{
+    if (! audioDirty)
+        return;
+
     auto patchDocument = buildPatchDocument(recipe);
     juce::String errorMessage;
-    if (! runtimePlayer.renderPatchToBuffer(patchDocument, recipe.durationSeconds, generatedBuffer, errorMessage))
+    nodeTapBuffers.clear();
+    if (! runtimePlayer.renderPatchToBuffer(patchDocument, recipe.durationSeconds, generatedBuffer, errorMessage, &nodeTapBuffers))
         generatedBuffer = buildSignalBuffer(recipe);
 
     envelopeEditor.setRecipe(recipe);
     scopePanel.setBuffer(generatedBuffer);
     spectrumPanel.setBuffer(generatedBuffer, recipe.sampleRate);
-    updateStatusText();
-    rebuildNodeGraphFromRecipe();
-    updateInspectorForSelection();
+    audioDirty = false;
+
+    // The Scope/Analyzer nodes' inline mini-trace on the canvas reads
+    // generatedBuffer directly during paint() -- nothing else repaints that
+    // canvas after a render happens now that rendering is deferred out of
+    // every edit, so without this the trace stays blank even though audio
+    // played correctly.
+    nodeGraphCanvas.repaint();
+}
+
+const juce::AudioBuffer<float>& SignalLabPanel::getDisplayBufferForNode(const juce::String& nodeId) const
+{
+    for (auto& tap : nodeTapBuffers)
+        if (tap.nodeId == nodeId)
+            return tap.buffer;
+
+    // Not tapped to anything specific yet (e.g. before the first render) --
+    // fall back to the final output rather than showing nothing.
+    return generatedBuffer;
 }
 
 juce::AudioBuffer<float> SignalLabPanel::buildSignalBuffer(const SignalRecipe& activeRecipe) const
@@ -4166,46 +4601,95 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     for (auto& lane : document.automationLanes)
         ensureLane(lane, recipeCopy.automationCurveMode);
 
-    if (recipeCopy.sineLevel > 0.0f)
-        document.sources.add({ "osc1", "oscillator", "sine", {}, recipeCopy.sineLevel, "baseFrequency" });
-    if (recipeCopy.sawLevel > 0.0f)
-        document.sources.add({ "osc2", "oscillator", "saw", {}, recipeCopy.sawLevel, "baseFrequency" });
-    if (recipeCopy.squareLevel > 0.0f)
-        document.sources.add({ "osc3", "oscillator", "square", {}, recipeCopy.squareLevel, "baseFrequency" });
-    if (recipeCopy.triangleLevel > 0.0f)
-        document.sources.add({ "osc4", "oscillator", "triangle", {}, recipeCopy.triangleLevel, "baseFrequency" });
-    if (recipeCopy.noiseLevel > 0.0f)
-        document.sources.add({ "noise1", "noise", {}, "white", recipeCopy.noiseLevel, {} });
+    // One entry per node actually on the graph, using its real id and
+    // canvas position -- not a fixed osc/mix1/filter1/env1 skeleton. If you
+    // didn't place a Filter, no filter node goes into this document, and
+    // the renderer (which now walks this same structure) won't apply one.
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
+        {
+            if (node.oscillatorLevel <= 0.0f)
+                continue;
+            auto frequencyParamId = "frequency:" + node.id;
+            document.parameters.add({ frequencyParamId, node.title + " Frequency", "float", node.oscillatorFrequencyHz, 30.0, 2400.0, "hz" });
+            cw::PatchSource source { node.id, "oscillator", node.type, {}, node.oscillatorLevel, frequencyParamId };
+            source.canvasX = node.position.x;
+            source.canvasY = node.position.y;
+            document.sources.add(source);
+        }
+        else if (node.type == "noise")
+        {
+            if (node.oscillatorLevel <= 0.0f)
+                continue;
+            cw::PatchSource source { node.id, "noise", {}, "white", node.oscillatorLevel, {} };
+            source.canvasX = node.position.x;
+            source.canvasY = node.position.y;
+            document.sources.add(source);
+        }
+        else if (node.type == "mix" || node.type == "filter" || node.type == "envelope"
+                 || node.type == "output" || node.type == "scope" || node.type == "analyzer")
+        {
+            cw::PatchNode patchNode;
+            patchNode.id = node.id;
+            patchNode.kind = node.type;
+            patchNode.canvasX = node.position.x;
+            patchNode.canvasY = node.position.y;
 
-    cw::PatchNode mixNode;
-    mixNode.id = "mix1";
-    mixNode.kind = "mix";
-    document.nodes.add(mixNode);
+            if (node.type == "mix")
+            {
+                juce::StringArray weights;
+                for (auto volume : node.mixerInputVolumes)
+                    weights.add(juce::String(volume, 4));
+                patchNode.properties.set("channelWeights", weights.joinIntoString(","));
+            }
+            else if (node.type == "filter")
+            {
+                patchNode.properties.set("mode", recipeCopy.filterMode);
+                patchNode.properties.set("cutoffHz", recipeCopy.filterCutoffHz);
+                patchNode.properties.set("resonance", recipeCopy.filterResonance);
+                patchNode.properties.set("envelopeAmount", recipeCopy.filterEnvelopeAmount);
+            }
+            else if (node.type == "envelope")
+            {
+                patchNode.properties.set("curveMode", recipeCopy.envelopeCurveMode);
+                patchNode.properties.set("pointsJson", serialisePointsJson(recipeCopy.envelopePoints));
+            }
 
-    cw::PatchNode filterNode;
-    filterNode.id = "filter1";
-    filterNode.kind = "filter";
-    filterNode.properties.set("mode", recipeCopy.filterMode);
-    filterNode.properties.set("cutoffHz", recipeCopy.filterCutoffHz);
-    filterNode.properties.set("resonance", recipeCopy.filterResonance);
-    filterNode.properties.set("envelopeAmount", recipeCopy.filterEnvelopeAmount);
-    document.nodes.add(filterNode);
+            document.nodes.add(patchNode);
+        }
+    }
 
-    cw::PatchNode envelopeNode;
-    envelopeNode.id = "env1";
-    envelopeNode.kind = "envelope";
-    envelopeNode.properties.set("attackPosition", getLegacyAttackPosition(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("sustainPosition", getLegacySustainPosition(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("releasePosition", getLegacyReleasePosition(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("sustainLevel", getLegacySustainLevel(recipeCopy.envelopePoints));
-    envelopeNode.properties.set("curveMode", recipeCopy.envelopeCurveMode);
-    envelopeNode.properties.set("pointsJson", serialisePointsJson(recipeCopy.envelopePoints));
-    document.nodes.add(envelopeNode);
+    // Mirror the real wires from the canvas -- only signal (white/exec)
+    // connections matter to the audio graph; value-port wiring (Get/Set,
+    // filter cutoff knobs, etc.) isn't part of this signal-path document.
+    for (auto& connection : graphConnections)
+    {
+        if (! connection.isExec)
+            continue;
 
-    for (const auto& source : document.sources)
-        document.connections.add({ source.id, "mix1" });
-    document.connections.add({ "mix1", "filter1" });
-    document.connections.add({ "filter1", "env1" });
+        cw::PatchConnection patchConnection;
+        patchConnection.from = connection.fromNodeId;
+        patchConnection.to = connection.toNodeId;
+        patchConnection.fromPort = connection.fromPortId;
+        patchConnection.toPort = connection.toPortId;
+        patchConnection.weight = 1.0;
+
+        if (connection.toPortId.startsWith("signalIn:"))
+        {
+            for (auto& targetNode : graphNodes)
+            {
+                if (targetNode.id != connection.toNodeId || targetNode.type != "mix")
+                    continue;
+                auto channelIndex = connection.toPortId.fromFirstOccurrenceOf(":", false, false).getIntValue();
+                if (channelIndex >= 0 && channelIndex < targetNode.mixerInputVolumes.size())
+                    patchConnection.weight = targetNode.mixerInputVolumes[channelIndex];
+                break;
+            }
+        }
+
+        document.connections.add(patchConnection);
+    }
 
     document.output.channelMode = "stereo";
     document.output.gain = 0.9;
@@ -4347,6 +4831,7 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
     ensureRecipe(recipe);
     rebuildAutomationChrome();
     refreshControlsFromRecipe();
+    seedOscillatorNodesFromRecipeLevels();
     regenerateSignal();
 }
 
@@ -4387,7 +4872,10 @@ void SignalLabPanel::refreshControlsFromRecipe()
 
 void SignalLabPanel::updateStatusText()
 {
-    auto sampleCount = generatedBuffer.getNumSamples();
+    // Derived from the recipe, not generatedBuffer -- the buffer is only
+    // rendered on demand now (Play/Preview/Render), so it can be stale or
+    // empty while this status text must stay accurate as you edit.
+    auto sampleCount = juce::jmax(0, juce::roundToInt(recipe.durationSeconds * recipe.sampleRate));
     auto text = "Ready: " + recipe.name
               + "  |  " + juce::String(recipe.durationSeconds, 2) + " s"
               + "  |  " + juce::String((int) recipe.baseFrequencyHz) + " Hz"

@@ -14,7 +14,8 @@ public:
         juce::String name { "Signal-Lab-Render" };
         juce::String description;
         double sampleRate = 48000.0;
-        double durationSeconds = 1.5;
+        double durationSeconds = 5.0;
+        juce::String sinkMode { "audio" }; // "audio" (live device) or "wave" (render to project file)
         float baseFrequencyHz = 180.0f;
         float sineLevel = 0.0f;
         float sawLevel = 0.0f;
@@ -54,6 +55,7 @@ public:
     std::function<void(const juce::String& patchJson, const juce::String& suggestedName)> onPatchSaveToLibraryRequested;
     std::function<void()> onPatchLoadRequested;
     std::function<void()> onStopRequested;
+    std::function<void()> onAudioSettingsRequested;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -69,6 +71,19 @@ private:
         juce::Colour accent;
         bool locked = false;
         bool required = false;
+
+        // Mixer only: one entry per signal input's volume (0..1), default
+        // two inputs. Variable-arity -- grown via the node's own "+ Input"
+        // button rather than being a fixed registry shape like every other
+        // node type's ports.
+        juce::Array<float> mixerInputVolumes { 1.0f, 1.0f };
+
+        // Oscillator/noise sources only (sine/saw/square/triangle/noise):
+        // each instance owns its own level and frequency instead of sharing
+        // the recipe's old singleton fields -- that's what made two Sine
+        // nodes edit the same value. frequencyHz is ignored for noise.
+        float oscillatorLevel = 0.5f;
+        float oscillatorFrequencyHz = 180.0f;
     };
 
     enum class PortValueType { Float, Int, Bool };
@@ -296,10 +311,17 @@ private:
         void paint(juce::Graphics& g) override;
 
         std::function<void(const juce::String& type, const juce::String& payload)> onEntryChosen;
+        std::function<void()> onDismissRequested;
 
     private:
         void refreshResults();
 
+        struct CompactLookAndFeel final : public juce::LookAndFeel_V4
+        {
+            juce::Font getTextButtonFont(juce::TextButton&, int) override { return juce::Font(11.0f); }
+        };
+
+        CompactLookAndFeel compactLookAndFeel;
         juce::TextEditor searchEditor;
         juce::OwnedArray<juce::TextButton> resultButtons;
         juce::Array<Entry> allEntries;
@@ -336,6 +358,8 @@ private:
 
     void configureSlider(juce::Slider& slider, double min, double max, double step);
     void regenerateSignal();
+    void ensureAudioRendered();
+    const juce::AudioBuffer<float>& getDisplayBufferForNode(const juce::String& nodeId) const;
     juce::AudioBuffer<float> buildSignalBuffer(const SignalRecipe& recipe) const;
     cw::PatchDocument buildPatchDocument(const SignalRecipe& recipe) const;
     void applyTemplate(const juce::String& templateName);
@@ -350,6 +374,7 @@ private:
     void endUndoGesture();
     void noteInteraction();
     void rebuildNodeGraphFromRecipe();
+    void seedOscillatorNodesFromRecipeLevels();
     void updateInspectorForSelection();
     void layoutFloatingWindows();
     void showCanvasActionMenu(juce::Point<int> canvasPosition, bool anchorToButton = false);
@@ -359,8 +384,11 @@ private:
     int findGraphNodeAt(juce::Point<int> position) const;
     juce::Rectangle<int> getGraphNodeBounds(int index) const;
     int getGraphNodeHeight(int index) const;
+    juce::Rectangle<int> getMixerAddInputButtonBounds(int index) const;
     void setSelectedGraphNodeIndex(int index);
     bool hasGraphNodeType(const juce::String& type) const;
+    bool hasSetterNodeForVariable(const juce::String& variableId) const;
+    void addMixerInput(int nodeIndex);
     void openNodeEditorForSelection();
     void closeNodeEditor();
     void toggleControlPad();
@@ -395,6 +423,8 @@ private:
     int selectedConnectionIndex = -1;
     juce::Array<LocalControlVariable> localControls;
     juce::AudioBuffer<float> generatedBuffer;
+    juce::Array<PatchRuntimePlayer::TapCapture> nodeTapBuffers; // per Scope/Analyzer node id, its real tapped signal
+    bool audioDirty = true; // set by regenerateSignal() on every graph/recipe edit; only ensureAudioRendered() clears it, and only actual playback/render/export call that -- rendering happens on demand, not on every edit
     bool variableDragActive = false;
     juce::String draggedVariableId;
     juce::Point<int> draggedVariableScreenPoint;
