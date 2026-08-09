@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "../Audio/PatchRuntimePlayer.h"
+#include "../Audio/PatchLiveVoice.h"
 #include "../Patch/PatchModel.h"
 class SignalLabPanel final : public juce::Component,
                              private juce::Timer
@@ -61,8 +62,12 @@ public:
     // Called at UI-timer rate (see MainComponent::timerCallback) with any
     // MIDI control values that changed since the last call. Updates every
     // placed midiFader/midiButton node whose learned binding matches one of
-    // these changes, and marks the graph dirty so the new value reaches the
-    // next render -- this does not trigger a render itself.
+    // these changes -- if a PatchLiveVoice playthrough is currently active,
+    // pushes the new value straight into it via onLiveMidiValueChanged so
+    // the already-playing sound updates immediately, no rebuild/recompile
+    // involved. Also marks the graph dirty so the offline Preview/
+    // Render-to-Project path (unrelated to live playback) picks up the new
+    // value whenever it's next used.
     void applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes);
 
     std::function<void(const juce::ValueTree& stateBeforeEdit, const juce::String& label)> onUndoCheckpointRequested;
@@ -74,6 +79,17 @@ public:
     std::function<void()> onPatchLoadRequested;
     std::function<void()> onStopRequested;
     std::function<void()> onAudioSettingsRequested;
+    // Signal Lab live playback -- see PatchLiveVoice.h. Wired by
+    // MainComponent to the matching WorkstationAudioEngine wrapper methods
+    // (engine.rebuildSignalLabLiveGraph, etc.), same callback-injection
+    // pattern as onPreviewRequested/onRenderRequested above rather than
+    // holding a direct engine reference.
+    std::function<void(const cw::PatchDocument&, const PatchLiveBindingMap&)> onLiveGraphRebuildRequested;
+    std::function<void(double durationSeconds)> onLiveStartRequested;
+    std::function<void()> onLiveStopRequested;
+    std::function<bool()> onLiveIsActiveRequested;
+    std::function<bool()> onLiveFinishedFlagRequested;
+    std::function<void(const juce::String& nodeId, float value)> onLiveMidiValueChanged;
     // Requests the app-level "Learn MIDI Binding" dialog (shared with the
     // transport buttons' MIDI learn -- see MainComponent::requestSignalLabMidiLearn).
     // onLearned fires once with the captured (deviceId, channel, number, isController).
@@ -432,6 +448,8 @@ private:
     void rebuildNodeGraphFromRecipe();
     void seedOscillatorNodesFromRecipeLevels();
     bool findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const;
+    juce::String findWiredMidiSourceNodeId(const juce::String& nodeId, const juce::String& portId) const;
+    PatchLiveBindingMap buildLiveBindingMap() const;
     void updateInspectorForSelection();
     void layoutFloatingWindows();
     void showCanvasActionMenu(juce::Point<int> canvasPosition, bool anchorToButton = false);
@@ -488,6 +506,13 @@ private:
     juce::AudioBuffer<float> generatedBuffer;
     juce::Array<PatchRuntimePlayer::TapCapture> nodeTapBuffers; // per Scope/Analyzer node id, its real tapped signal
     bool audioDirty = true; // set by regenerateSignal() on every graph/recipe edit; only ensureAudioRendered() clears it, and only actual playback/render/export call that -- rendering happens on demand, not on every edit
+    // Separate from audioDirty on purpose: audioDirty exclusively governs the offline
+    // Preview/Render-to-Project path (ensureAudioRendered()) and must not be touched by the live
+    // engine, or Render-to-Project would silently use a stale buffer after a live-only Play.
+    // liveGraphDirty governs PatchLiveVoice's topology instead -- set alongside audioDirty by
+    // regenerateSignal(), cleared only by triggerTransportPlay() after a live rebuild succeeds. A
+    // MIDI Control node's value changing does NOT set this -- see applyLiveMidiControlChanges().
+    bool liveGraphDirty = true;
     bool variableDragActive = false;
     juce::String draggedVariableId;
     juce::Point<int> draggedVariableScreenPoint;
@@ -528,6 +553,7 @@ private:
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
     juce::TextButton repeatButton { "Repeat" };
+    juce::Slider repeatDelaySlider; // seconds between repeats -- 0 = back to back
     juce::Label propertiesHeaderLabel;
     juce::Label signalSectionLabel;
     juce::Label variablesSectionLabel;

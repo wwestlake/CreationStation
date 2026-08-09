@@ -2066,7 +2066,7 @@ SignalLabPanel::SignalLabPanel()
 
     repeatButton.setClickingTogglesState(true);
     repeatButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff5f93ff));
-    repeatButton.setTooltip("Loop playback -- each repeat re-renders if the graph changed since the last one, so a live MIDI control keeps updating the sound while it loops.");
+    repeatButton.setTooltip("Play again after a delay, on its own pace -- not a seamless loop. Set the gap with the seconds field next to it.");
     repeatButton.onClick = [this]
     {
         repeatEnabled = repeatButton.getToggleState();
@@ -2074,6 +2074,12 @@ SignalLabPanel::SignalLabPanel()
             triggerTransportPlay();
     };
     addAndMakeVisible(repeatButton);
+
+    configureSlider(repeatDelaySlider, 0.0, 10.0, 0.1);
+    repeatDelaySlider.setValue(repeatDelaySeconds, juce::dontSendNotification);
+    repeatDelaySlider.setTextValueSuffix(" s");
+    repeatDelaySlider.setTooltip("Seconds to wait between repeats (0 = back to back)");
+    repeatDelaySlider.onValueChange = [this] { repeatDelaySeconds = repeatDelaySlider.getValue(); };
 
     toolboxPane.onAddVariableRequested = [this]
     {
@@ -3442,6 +3448,26 @@ bool SignalLabPanel::findWiredParameterValue(const juce::String& nodeId, const j
     return false;
 }
 
+// Sibling to findWiredParameterValue above, for the live engine: it needs
+// to know *which* MIDI Control node id is driving a port (to register a
+// live atomic slot for it in PatchLiveVoice), not just its current value.
+// Empty string if the port isn't wired to a MIDI Control node (unwired, or
+// wired to a Get-variable instead -- variables aren't live yet, see the
+// CEL/control-graph roadmap note).
+juce::String SignalLabPanel::findWiredMidiSourceNodeId(const juce::String& nodeId, const juce::String& portId) const
+{
+    for (auto& connection : graphConnections)
+    {
+        if (connection.isExec || connection.toNodeId != nodeId || connection.toPortId != portId)
+            continue;
+
+        for (auto& sourceNode : graphNodes)
+            if (sourceNode.id == connection.fromNodeId && (sourceNode.type == "midiFader" || sourceNode.type == "midiButton"))
+                return sourceNode.id;
+    }
+    return {};
+}
+
 void SignalLabPanel::addMixerInput(int nodeIndex)
 {
     if (nodeIndex < 0 || nodeIndex >= graphNodes.size())
@@ -4397,6 +4423,13 @@ void SignalLabPanel::tryCompleteConnection(int fromNodeIndex, const GraphPort& f
     connection.valueType = outputPort.valueType;
     graphConnections.add(connection);
 
+    // Pre-existing gap, fixed here because it directly matters for MIDI
+    // Control wiring: neither audioDirty nor liveGraphDirty was ever marked
+    // by completing a wire (only by the handful of edits that already
+    // called regenerateSignal() elsewhere) -- wiring a MIDI Control node
+    // into a parameter port after an earlier Play, then pressing Play
+    // again, would silently keep using the old topology.
+    regenerateSignal();
     nodeGraphCanvas.repaint();
 }
 
@@ -4408,6 +4441,7 @@ void SignalLabPanel::removeConnection(int index)
     graphConnections.remove(index);
     if (selectedConnectionIndex == index)
         selectedConnectionIndex = -1;
+    regenerateSignal(); // see the matching comment in tryCompleteConnection
     nodeGraphCanvas.repaint();
 }
 
@@ -4968,12 +5002,14 @@ void SignalLabPanel::centerCanvasOnGraphNode(const juce::String& nodeId)
 
 void SignalLabPanel::triggerTransportPlay()
 {
-    // Compiling + rendering runs synchronously on the message thread and can
-    // take a noticeable moment on a busy graph -- without this the whole app
-    // just appears to hang between clicking Play and hearing anything. Force
-    // an immediate repaint of the status text (rather than waiting for the
-    // next natural paint pass, which won't happen until this function
-    // returns) so the user sees what's going on.
+    // Play drives the live engine (PatchLiveVoice), not the offline
+    // renderer -- audioDirty stays untouched here on purpose (it exclusively
+    // governs the separate offline Preview/Render-to-Project path via
+    // ensureAudioRendered(); see the comment on liveGraphDirty in the
+    // header). Compiling (topology rebuild) still only happens when the
+    // graph actually changed structurally, same "compile if dirty, then
+    // run" rule as before -- a MIDI Control node's value moving never sets
+    // liveGraphDirty, so it never causes a rebuild here, live or offline.
     auto showBusyStatus = [this](const juce::String& text)
     {
         statusLabel.setText(text, juce::dontSendNotification);
@@ -4982,25 +5018,23 @@ void SignalLabPanel::triggerTransportPlay()
             peer->performAnyPendingRepaintsNow();
     };
 
-    const bool wasDirty = audioDirty;
+    const bool wasDirty = liveGraphDirty;
     if (wasDirty)
     {
         juce::MouseCursor::showWaitCursor();
         showBusyStatus("Compiling...");
         compileGraph();
-        showBusyStatus("Rendering audio...");
-    }
-
-    bool played = previewCurrentSignal();
-
-    if (wasDirty)
-    {
+        if (onLiveGraphRebuildRequested)
+            onLiveGraphRebuildRequested(buildPatchDocument(recipe), buildLiveBindingMap());
+        liveGraphDirty = false;
+        showBusyStatus({});
         juce::MouseCursor::hideWaitCursor();
-        updateStatusText();
     }
 
-    if (! played)
-        return;
+    if (onLiveStartRequested)
+        onLiveStartRequested(recipe.durationSeconds);
+
+    updateStatusText();
 
     if (repeatEnabled)
     {
@@ -5014,6 +5048,8 @@ void SignalLabPanel::stopTransport()
     stopTimer();
     repeatEnabled = false;
     repeatButton.setToggleState(false, juce::dontSendNotification);
+    if (onLiveStopRequested)
+        onLiveStopRequested();
     if (onStopRequested)
         onStopRequested();
 }
@@ -5095,7 +5131,7 @@ void SignalLabPanel::resized()
     auto topBar = area.removeFromTop(30);
     signalMenuButton.setBounds(topBar.removeFromLeft(110));
     topBar.removeFromLeft(10);
-    auto transportArea = topBar.removeFromLeft(356);
+    auto transportArea = topBar.removeFromLeft(546);
     compileButton.setBounds(transportArea.removeFromLeft(80));
     transportArea.removeFromLeft(8);
     playButton.setBounds(transportArea.removeFromLeft(80));
@@ -5103,6 +5139,8 @@ void SignalLabPanel::resized()
     stopButton.setBounds(transportArea.removeFromLeft(80));
     transportArea.removeFromLeft(8);
     repeatButton.setBounds(transportArea.removeFromLeft(80));
+    transportArea.removeFromLeft(8);
+    repeatDelaySlider.setBounds(transportArea.removeFromLeft(180));
 
     area.removeFromTop(10);
     auto propertiesArea = area.removeFromLeft(280);
@@ -5241,6 +5279,7 @@ void SignalLabPanel::regenerateSignal()
     // need audio (Play, Preview, Render, opening a Scope/Analyzer window).
     ensureRecipe(recipe);
     audioDirty = true;
+    liveGraphDirty = true;
     updateStatusText();
     rebuildNodeGraphFromRecipe();
     updateInspectorForSelection();
@@ -5286,6 +5325,17 @@ void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlCh
                 node.midiLiveValue = change.value > 0.5f ? 1.0f : 0.0f;
             }
 
+            // Straight through to the currently-playing live voice, if any
+            // -- this is the actual point of this whole feature: a value
+            // change reaches already-playing sound immediately, with no
+            // rebuild, no Play press, no compile step. If nothing is
+            // playing right now this is a harmless no-op (PatchLiveVoice
+            // ignores an unregistered/inactive node id); the value still
+            // reaches the next Play through the normal rebuild path since
+            // node.midiLiveValue seeds a fresh slot at rebuild() time.
+            if (onLiveMidiValueChanged)
+                onLiveMidiValueChanged(node.id, node.midiLiveValue);
+
             anyApplied = true;
         }
     }
@@ -5293,10 +5343,12 @@ void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlCh
     if (! anyApplied)
         return;
 
-    // A hardware control moving should reach the next render/Play like any
-    // other edit, but -- same reasoning as every other edit in this class --
-    // must not trigger a render right here on every poll tick that carries
-    // a change (this fires at UI-timer rate, not once per Play).
+    // Deliberately NOT liveGraphDirty -- a value-only change never needs a
+    // topology rebuild, live or offline; that's the entire point of this
+    // method. audioDirty is still set so the *offline* Preview/
+    // Render-to-Project path (a completely separate use case, unrelated to
+    // whether anything is live-playing right now) reflects the new value
+    // whenever it's next used.
     audioDirty = true;
     nodeGraphCanvas.repaint();
 }
@@ -5569,6 +5621,60 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.output.pan = 0.0;
 
     return document;
+}
+
+// Sibling to buildPatchDocument(), built from the same graph at the same
+// moment (call both together) -- buildPatchDocument() already resolves a
+// wired MIDI value into a plain baked scalar (findWiredParameterValue), but
+// deliberately doesn't record *which* node it came from, since the
+// document is meant to be a portable, resolved format. PatchLiveVoice needs
+// that extra "which node" information to keep reading a parameter live
+// after the graph is compiled -- this is where it comes from.
+PatchLiveBindingMap SignalLabPanel::buildLiveBindingMap() const
+{
+    PatchLiveBindingMap map;
+
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "midiFader" || node.type == "midiButton")
+            map.midiNodeValues.add({ node.id, node.midiLiveValue });
+
+        if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
+        {
+            auto midiNodeId = findWiredMidiSourceNodeId(node.id, "param:" + node.type + "Level");
+            if (midiNodeId.isNotEmpty())
+                map.entries.add({ node.id, "level", midiNodeId });
+        }
+        else if (node.type == "noise")
+        {
+            auto midiNodeId = findWiredMidiSourceNodeId(node.id, "param:noiseLevel");
+            if (midiNodeId.isNotEmpty())
+                map.entries.add({ node.id, "level", midiNodeId });
+        }
+        else if (node.type == "filter")
+        {
+            auto cutoffMidiId = findWiredMidiSourceNodeId(node.id, "param:filterCutoff");
+            if (cutoffMidiId.isNotEmpty())
+                map.entries.add({ node.id, "cutoff", cutoffMidiId });
+            auto resonanceMidiId = findWiredMidiSourceNodeId(node.id, "param:filterResonance");
+            if (resonanceMidiId.isNotEmpty())
+                map.entries.add({ node.id, "resonance", resonanceMidiId });
+            auto envAmountMidiId = findWiredMidiSourceNodeId(node.id, "param:filterEnvelopeAmount");
+            if (envAmountMidiId.isNotEmpty())
+                map.entries.add({ node.id, "envelopeAmount", envAmountMidiId });
+        }
+        else if (node.type == "mix")
+        {
+            for (int channelIndex = 0; channelIndex < node.mixerInputVolumes.size(); ++channelIndex)
+            {
+                auto weightMidiId = findWiredMidiSourceNodeId(node.id, "mixWeight:" + juce::String(channelIndex));
+                if (weightMidiId.isNotEmpty())
+                    map.entries.add({ node.id, "mixWeight:" + juce::String(channelIndex), weightMidiId });
+            }
+        }
+    }
+
+    return map;
 }
 
 void SignalLabPanel::applyTemplate(const juce::String& templateName)

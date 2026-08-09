@@ -1149,6 +1149,7 @@ WorkstationAudioEngine::WorkstationAudioEngine()
     recordingThread.startThread();
 
     mixerSource.addInputSource(&assetPreviewSource, false);
+    mixerSource.addInputSource(&patchLiveVoice, false);
 }
 
 void WorkstationAudioEngine::prepareGraph(double sampleRate, int blockSize)

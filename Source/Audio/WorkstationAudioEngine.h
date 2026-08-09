@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include "SignalGraphRuntime.h"
+#include "PatchLiveVoice.h"
 #include "../Timeline/TimelineModel.h"
 
 class WorkstationAudioEngine final : public juce::AudioIODeviceCallback,
@@ -154,6 +155,17 @@ public:
     // Message-thread-safe: returns true and fills outChanges if anything has moved since the last
     // call, then clears the pending set.
     bool takeLiveMidiControlChanges(juce::Array<LiveMidiControlChange>& outChanges);
+
+    // Signal Lab live playback -- thin wrappers over patchLiveVoice, mirroring the
+    // setTrackGain-style shape used for the rest of this engine's live-adjustable state. See
+    // PatchLiveVoice.h for the real design rationale (why parameter changes never rebuild, why
+    // structural changes do).
+    void rebuildSignalLabLiveGraph(const cw::PatchDocument& patch, const PatchLiveBindingMap& liveBindings) { patchLiveVoice.rebuild(patch, liveBindings); }
+    void startSignalLabLivePlayback(double durationSeconds) { patchLiveVoice.start(durationSeconds); }
+    void stopSignalLabLivePlayback() { patchLiveVoice.stop(); }
+    bool isSignalLabLivePlaybackActive() const noexcept { return patchLiveVoice.isActive(); }
+    bool takeSignalLabLivePlaybackFinishedFlag() noexcept { return patchLiveVoice.takeFinishedFlag(); }
+    void setSignalLabLiveMidiValue(const juce::String& nodeId, float value) { patchLiveVoice.setLiveMidiValue(nodeId, value); }
 
     // A single captured MIDI event during live recording, timestamped as an absolute sample
     // position on the engine's running audio clock (not clip-relative) - paired up into notes and
@@ -706,6 +718,7 @@ private:
     juce::Array<InputSourceDescriptor> inputSources;
     juce::MixerAudioSource mixerSource;
     AssetPreviewSource assetPreviewSource;
+    PatchLiveVoice patchLiveVoice;
     ArrangementSource arrangementSource;
     PluginInsertSource masterInsertSource;
     PluginInsertSource graphVstInsertSource;

@@ -2078,6 +2078,35 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         requestGenericMidiLearn(displayLabel, std::move(onLearned));
     };
 
+    // Signal Lab live playback -- thin passthrough to the matching
+    // WorkstationAudioEngine wrapper methods (see PatchLiveVoice.h for the
+    // actual design). Same callback-injection pattern as
+    // onPreviewRequested/onRenderRequested above.
+    signalLabPanel.onLiveGraphRebuildRequested = [this](const cw::PatchDocument& patch, const PatchLiveBindingMap& liveBindings)
+    {
+        engine.rebuildSignalLabLiveGraph(patch, liveBindings);
+    };
+    signalLabPanel.onLiveStartRequested = [this](double durationSeconds)
+    {
+        engine.startSignalLabLivePlayback(durationSeconds);
+    };
+    signalLabPanel.onLiveStopRequested = [this]
+    {
+        engine.stopSignalLabLivePlayback();
+    };
+    signalLabPanel.onLiveIsActiveRequested = [this]
+    {
+        return engine.isSignalLabLivePlaybackActive();
+    };
+    signalLabPanel.onLiveFinishedFlagRequested = [this]
+    {
+        return engine.takeSignalLabLivePlaybackFinishedFlag();
+    };
+    signalLabPanel.onLiveMidiValueChanged = [this](const juce::String& nodeId, float value)
+    {
+        engine.setSignalLabLiveMidiValue(nodeId, value);
+    };
+
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
     {
         pushSignalUndoState(stateBeforeEdit, label);
