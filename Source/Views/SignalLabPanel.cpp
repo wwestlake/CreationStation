@@ -806,6 +806,8 @@ juce::String graphNodeTitle(const juce::String& type)
     if (type == "output") return "Sink";
     if (type == "scope") return "Oscilloscope";
     if (type == "analyzer") return "Frequency Analyzer";
+    if (type == "midiFader") return "Fader Control";
+    if (type == "midiButton") return "Button Control";
     return type;
 }
 
@@ -830,6 +832,7 @@ juce::Colour graphNodeAccent(const juce::String& type)
     if (type == "scope") return juce::Colour(0xff66e0ff);
     if (type == "analyzer") return juce::Colour(0xffff91c1);
     if (type == "value" || type == "valueGet" || type == "valueSet") return juce::Colour(0xffffd166);
+    if (type == "midiFader" || type == "midiButton") return juce::Colour(0xffff5c8a);
     return signalSourceColour();
 }
 }
@@ -1398,6 +1401,19 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
                             + (node.type == "valueSet" ? " (setter)" : "");
                     break;
                 }
+            }
+        }
+        else if (node.type == "midiFader" || node.type == "midiButton")
+        {
+            if (! node.midiLearned)
+                detail = "Not learned — double-click, Learn";
+            else
+            {
+                detail = (node.midiDeviceLabel.isNotEmpty() ? node.midiDeviceLabel : "Any device") + " • "
+                        + (node.midiIsController ? "CC " : "Note ") + juce::String(node.midiNumber)
+                        + " • " + juce::String(node.midiLiveValue, 2);
+                if (node.type == "midiButton")
+                    detail += node.midiButtonMode == "toggle" ? " (toggle)" : " (momentary)";
             }
         }
         else if (node.type == "scope") detail = "2 traces • " + juce::String(owner.probeSettings.scopeTimebaseMs, 1) + " ms";
@@ -2710,6 +2726,7 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
     juce::Array<GraphNodeModel> preservedValueNodes;
     juce::Array<GraphNodeModel> preservedOscillatorNodes;
     juce::Array<GraphNodeModel> preservedFilterEnvelopeNodes;
+    juce::Array<GraphNodeModel> preservedMidiControlNodes;
     juce::Array<float> preservedMixerInputVolumes { 1.0f, 1.0f };
     for (auto& node : graphNodes)
     {
@@ -2722,6 +2739,8 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
             preservedOscillatorNodes.add(node);
         else if (node.type == "filter" || node.type == "envelope")
             preservedFilterEnvelopeNodes.add(node);
+        else if (node.type == "midiFader" || node.type == "midiButton")
+            preservedMidiControlNodes.add(node);
     }
 
     graphNodes.clear();
@@ -2734,6 +2753,12 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
     // oscillators, not re-derived from the old filterNodeEnabled/
     // envelopeNodeEnabled singleton flags.
     for (auto& preserved : preservedFilterEnvelopeNodes)
+        graphNodes.add(preserved);
+
+    // MIDI Control nodes carry a learned hardware binding that took real
+    // user effort to set up -- preserved verbatim like everything else
+    // above, never re-derived from anything.
+    for (auto& preserved : preservedMidiControlNodes)
         graphNodes.add(preserved);
 
     for (auto& preserved : preservedValueNodes)
@@ -3001,6 +3026,8 @@ void SignalLabPanel::showCanvasActionMenu(juce::Point<int> canvasPosition, bool 
     entries.add({ "Timeline", "timeline", {} });
     entries.add({ "Oscilloscope", "scope", {} });
     entries.add({ "Frequency Analyzer", "analyzer", {} });
+    entries.add({ "Fader Control", "midiFader", {} });
+    entries.add({ "Button Control", "midiButton", {} });
     for (auto& variable : localControls)
     {
         entries.add({ "Get " + variable.name, "valueGet", variable.id });
@@ -3205,6 +3232,25 @@ void SignalLabPanel::addGraphNode(const juce::String& type, juce::Point<int> can
         return;
     }
 
+    // MIDI Control nodes: same reasoning as oscillators/filter/envelope --
+    // you may want several physical controls bound to different parameters,
+    // so each placement is its own independent instance, unlearned until
+    // the user opens it and hits Learn.
+    if (type == "midiFader" || type == "midiButton")
+    {
+        captureUndoCheckpoint("Add " + graphNodeTitle(type));
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        regenerateSignal();
+        return;
+    }
+
     if (hasGraphNodeType(type) && type != "mix")
         return;
 
@@ -3244,7 +3290,7 @@ void SignalLabPanel::removeSelectedGraphNode()
     // whatever's already in graphNodes for these types, so this one has to
     // be removed from the array directly rather than gated off by a flag.
     if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise"
-        || type == "filter" || type == "envelope")
+        || type == "filter" || type == "envelope" || type == "midiFader" || type == "midiButton")
         graphNodes.remove(selectedGraphNodeIndex);
     else if (type == "mix") mixNodeEnabled = false;
     else if (type == "scope") probeSettings.scopeEnabled = false;
@@ -3289,8 +3335,9 @@ int SignalLabPanel::getGraphNodeHeight(int index) const
     bool hasSignalIn = node.type != "sine" && node.type != "saw" && node.type != "square"
                      && node.type != "triangle" && node.type != "noise" && node.type != "timeline"
                      && node.type != "value" && node.type != "valueGet" && node.type != "valueSet"
-                     && node.type != "mix";
-    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet";
+                     && node.type != "mix" && node.type != "midiFader" && node.type != "midiButton";
+    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet"
+                      && node.type != "midiFader" && node.type != "midiButton";
     if (hasSignalIn || hasSignalOut)
         leftPortRows += 1; // signal ports now get their own row under the header
 
@@ -3354,13 +3401,29 @@ bool SignalLabPanel::findWiredParameterValue(const juce::String& nodeId, const j
 
         for (auto& sourceNode : graphNodes)
         {
-            if (sourceNode.id != connection.fromNodeId || sourceNode.type != "valueGet")
+            if (sourceNode.id != connection.fromNodeId)
                 continue;
-            for (auto& variable : localControls)
+
+            if (sourceNode.type == "valueGet")
             {
-                if (variable.id != sourceNode.targetParameter)
-                    continue;
-                outValue = variable.value;
+                for (auto& variable : localControls)
+                {
+                    if (variable.id != sourceNode.targetParameter)
+                        continue;
+                    outValue = variable.value;
+                    return true;
+                }
+            }
+            else if (sourceNode.type == "midiFader" || sourceNode.type == "midiButton")
+            {
+                // A MIDI Control node IS a value source, same role as a
+                // Get-variable node above -- just driven by hardware instead
+                // of a manually-set variable. This one function change is
+                // what makes MIDI Control nodes work everywhere a parameter
+                // port already resolves wired values (oscillator level,
+                // filter cutoff/resonance, mixer weight) with no other
+                // changes needed at any of those call sites.
+                outValue = sourceNode.midiLiveValue;
                 return true;
             }
         }
@@ -3556,6 +3619,109 @@ void SignalLabPanel::openNodeEditorForSelection()
             regenerateSignal();
         });
         content->addCustomComponent(faderBank, 170);
+    }
+    else if (node.type == "midiFader" || node.type == "midiButton")
+    {
+        auto nodeId = node.id;
+        auto findMidiNode = [this, nodeId]() -> GraphNodeModel*
+        {
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        auto describeBinding = [](const GraphNodeModel& n) -> juce::String
+        {
+            if (! n.midiLearned)
+                return "Not learned yet -- click Learn, then move or press the control.";
+            return "Bound to " + (n.midiDeviceLabel.isNotEmpty() ? n.midiDeviceLabel : "any device")
+                 + ", channel " + juce::String(n.midiChannel) + ", "
+                 + (n.midiIsController ? "CC " : "Note ") + juce::String(n.midiNumber);
+        };
+
+        auto* statusLabelForNode = new juce::Label();
+        statusLabelForNode->setJustificationType(juce::Justification::topLeft);
+        statusLabelForNode->setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+        statusLabelForNode->setText(describeBinding(node), juce::dontSendNotification);
+        content->addCustomComponent(statusLabelForNode, 40);
+
+        // SafePointer, not a raw pointer: the Learn dialog spawned below is a
+        // separate top-level window that can outlive this tool window (the
+        // user can close this window while a learn capture is still
+        // pending) -- a raw pointer to statusLabelForNode would dangle in
+        // that case, and a plain null-check wouldn't catch it since nothing
+        // sets it to null on delete.
+        juce::Component::SafePointer<juce::Label> statusLabelSafe(statusLabelForNode);
+
+        auto& learnButton = content->addButtonRow(node.midiLearned ? "Re-learn..." : "Learn...");
+        learnButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title]
+        {
+            if (! onMidiLearnRequested)
+                return;
+
+            onMidiLearnRequested(nodeTitle, [this, findMidiNode, statusLabelSafe, describeBinding]
+                                 (juce::String deviceId, int channel, int number, bool isController)
+            {
+                auto* target = findMidiNode();
+                if (target == nullptr)
+                    return;
+
+                juce::String deviceLabel = "Any device";
+                if (deviceId.isNotEmpty())
+                {
+                    for (const auto& device : juce::MidiInput::getAvailableDevices())
+                    {
+                        if (device.identifier == deviceId)
+                        {
+                            deviceLabel = device.name;
+                            break;
+                        }
+                    }
+                }
+
+                target->midiLearned = true;
+                target->midiDeviceId = deviceId;
+                target->midiDeviceLabel = deviceLabel;
+                target->midiChannel = channel;
+                target->midiNumber = number;
+                target->midiIsController = isController;
+
+                if (auto* label = statusLabelSafe.getComponent())
+                    label->setText(describeBinding(*target), juce::dontSendNotification);
+                nodeGraphCanvas.repaint();
+            });
+        };
+
+        if (node.type == "midiButton")
+        {
+            auto& modeCombo = content->addComboRow("Button Mode", { "Momentary", "Toggle (On/Off)" });
+            modeCombo.setSelectedId(node.midiButtonMode == "toggle" ? 2 : 1, juce::dontSendNotification);
+            modeCombo.onChange = [this, &modeCombo, findMidiNode]
+            {
+                if (auto* target = findMidiNode())
+                    target->midiButtonMode = modeCombo.getSelectedId() == 2 ? "toggle" : "momentary";
+            };
+        }
+
+        auto& clearButton = content->addButtonRow("Clear Binding");
+        clearButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding]
+        {
+            auto* target = findMidiNode();
+            if (target == nullptr)
+                return;
+
+            target->midiLearned = false;
+            target->midiDeviceId.clear();
+            target->midiDeviceLabel.clear();
+            target->midiChannel = 1;
+            target->midiNumber = 0;
+            target->midiLiveValue = 0.0f;
+
+            if (auto* label = statusLabelSafe.getComponent())
+                label->setText(describeBinding(*target), juce::dontSendNotification);
+            regenerateSignal();
+        };
     }
     else if (node.type == "output")
     {
@@ -3954,8 +4120,9 @@ juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) c
     bool hasSignalIn = node.type != "sine" && node.type != "saw" && node.type != "square"
                      && node.type != "triangle" && node.type != "noise" && node.type != "timeline"
                      && node.type != "value" && node.type != "valueGet" && node.type != "valueSet"
-                     && node.type != "mix";
-    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet";
+                     && node.type != "mix" && node.type != "midiFader" && node.type != "midiButton";
+    bool hasSignalOut = node.type != "output" && node.type != "valueGet" && node.type != "valueSet"
+                      && node.type != "midiFader" && node.type != "midiButton";
 
     float leftY = bounds.getY() + 30.0f;
 
@@ -4060,6 +4227,23 @@ juce::Array<SignalLabPanel::GraphPort> SignalLabPanel::getNodePorts(int index) c
         p.isOutput = true;
         p.isExec = false;
         p.valueType = variableType;
+        p.position = { bounds.getRight(), bounds.getY() + 30.0f };
+        ports.add(p);
+    }
+
+    if (node.type == "midiFader" || node.type == "midiButton")
+    {
+        // Single typed output, same shape as a Get-variable node -- a MIDI
+        // Control node IS a value source, just one driven by hardware
+        // instead of a manually-set variable. Type follows the control kind
+        // so it can only wire into ports of the matching colour, same rule
+        // as everything else.
+        GraphPort p;
+        p.portId = "valueOut";
+        p.label = "Value";
+        p.isOutput = true;
+        p.isExec = false;
+        p.valueType = node.type == "midiFader" ? PortValueType::Float : PortValueType::Bool;
         p.position = { bounds.getRight(), bounds.getY() + 30.0f };
         ports.add(p);
     }
@@ -5046,6 +5230,61 @@ void SignalLabPanel::regenerateSignal()
     updateStatusText();
     rebuildNodeGraphFromRecipe();
     updateInspectorForSelection();
+}
+
+void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes)
+{
+    if (changes.isEmpty())
+        return;
+
+    bool anyApplied = false;
+    for (auto& node : graphNodes)
+    {
+        if ((node.type != "midiFader" && node.type != "midiButton") || ! node.midiLearned)
+            continue;
+
+        for (auto& change : changes)
+        {
+            if (change.channel != node.midiChannel || change.number != node.midiNumber
+                || change.isController != node.midiIsController)
+                continue;
+            // Empty midiDeviceId means "any device", matching how the learn
+            // dialog's device combo works -- otherwise it must be this exact
+            // device (the same physical control from two devices shouldn't
+            // both drive a binding that was learned from one specific one).
+            if (node.midiDeviceId.isNotEmpty() && change.deviceId != node.midiDeviceId)
+                continue;
+
+            if (node.type == "midiFader")
+            {
+                node.midiLiveValue = change.value;
+            }
+            else if (node.midiButtonMode == "toggle")
+            {
+                // Edge-triggered: flip only on the press, ignore the
+                // matching release -- otherwise every press+release pair
+                // would flip twice and the toggle would never visibly latch.
+                if (change.value > 0.5f)
+                    node.midiLiveValue = node.midiLiveValue > 0.5f ? 0.0f : 1.0f;
+            }
+            else
+            {
+                node.midiLiveValue = change.value > 0.5f ? 1.0f : 0.0f;
+            }
+
+            anyApplied = true;
+        }
+    }
+
+    if (! anyApplied)
+        return;
+
+    // A hardware control moving should reach the next render/Play like any
+    // other edit, but -- same reasoning as every other edit in this class --
+    // must not trigger a render right here on every poll tick that carries
+    // a change (this fires at UI-timer rate, not once per Play).
+    audioDirty = true;
+    nodeGraphCanvas.repaint();
 }
 
 void SignalLabPanel::ensureAudioRendered()

@@ -40,12 +40,30 @@ public:
 
     SignalLabPanel();
 
+    // Mirrors WorkstationAudioEngine::LiveMidiControlChange without pulling
+    // that (heavy, engine-level) header into this UI panel -- MainComponent
+    // adapts one to the other when forwarding.
+    struct MidiControlChange
+    {
+        juce::String deviceId;
+        int channel = 1;
+        int number = 0;
+        bool isController = false;
+        float value = 0.0f;
+    };
+
     juce::ValueTree createState() const;
     void restoreState(const juce::ValueTree& state);
     void resetToBlankSignal();
     bool loadPatchDocument(const cw::PatchDocument& document, juce::String& errorMessage);
     void applyAiTemplate(const juce::String& templateName);
     bool previewCurrentSignal();
+    // Called at UI-timer rate (see MainComponent::timerCallback) with any
+    // MIDI control values that changed since the last call. Updates every
+    // placed midiFader/midiButton node whose learned binding matches one of
+    // these changes, and marks the graph dirty so the new value reaches the
+    // next render -- this does not trigger a render itself.
+    void applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes);
 
     std::function<void(const juce::ValueTree& stateBeforeEdit, const juce::String& label)> onUndoCheckpointRequested;
     std::function<void()> onInteractionStarted;
@@ -56,6 +74,11 @@ public:
     std::function<void()> onPatchLoadRequested;
     std::function<void()> onStopRequested;
     std::function<void()> onAudioSettingsRequested;
+    // Requests the app-level "Learn MIDI Binding" dialog (shared with the
+    // transport buttons' MIDI learn -- see MainComponent::requestSignalLabMidiLearn).
+    // onLearned fires once with the captured (deviceId, channel, number, isController).
+    std::function<void(const juce::String& displayLabel,
+                       std::function<void(juce::String deviceId, int channel, int number, bool isController)> onLearned)> onMidiLearnRequested;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -97,6 +120,20 @@ private:
         // Envelope instances only: each Envelope node owns its own curve.
         juce::String envelopeCurveMode { "smooth" };
         juce::Array<cw::PatchAutomationPoint> envelopePoints;
+
+        // MIDI Control nodes only (midiFader / midiButton): the learned
+        // hardware binding (empty deviceId + number 0 == not learned yet)
+        // and this node's current live value, updated from incoming MIDI in
+        // applyLiveMidiControlChanges(). midiButtonMode ("momentary" |
+        // "toggle") only applies to midiButton.
+        bool midiLearned = false;
+        juce::String midiDeviceId;
+        juce::String midiDeviceLabel;
+        int midiChannel = 1;
+        int midiNumber = 0;
+        bool midiIsController = true;
+        juce::String midiButtonMode { "momentary" };
+        float midiLiveValue = 0.0f;
     };
 
     enum class PortValueType { Float, Int, Bool };

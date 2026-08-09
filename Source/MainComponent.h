@@ -444,6 +444,11 @@ private:
     void editControlSurfaceMappings();
     void showMidiLearnDialog(const juce::String& targetId, const juce::String& displayLabel);
     void applyLearnedMidiBinding(const juce::String& targetId, const juce::String& deviceId, int channel, int number, bool isCC);
+    // Generic version of the above, for callers that want the raw captured binding instead of
+    // having it saved into ControlSurfaceMappingStore under a transport targetId - e.g. Signal
+    // Lab's MIDI Control nodes, which keep their own binding on the node itself.
+    void requestGenericMidiLearn(const juce::String& displayLabel,
+                                 std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned);
     void rescanVstCatalog();
     void showPluginLoadMenu(const std::function<void(const juce::File&)>& onPluginChosen);
     void refreshPluginsPanel();

@@ -135,6 +135,26 @@ public:
     // learnable even though they're excluded from live instrument routing.
     bool offerMidiLearnCandidate(const juce::String& deviceId, int channel, int number, bool isController);
 
+    // Live dispatch for controls that were already learned (as opposed to the one-shot capture
+    // above, which is only for the moment of learning a new binding). A UI panel with placed,
+    // learned MIDI-bound controls (e.g. Signal Lab's Fader/Button Control nodes) polls
+    // takeLiveMidiControlChanges() at UI-timer rate to find out what moved since the last poll.
+    struct LiveMidiControlChange
+    {
+        juce::String deviceId;
+        int channel = 1;
+        int number = 0;
+        bool isController = false;
+        float value = 0.0f; // 0..1 normalized: CC/127, or 1.0 (note-on) / 0.0 (note-off)
+    };
+    // Message-thread-safe (called from any MIDI callback thread): records the latest value for
+    // this (deviceId, channel, number, isController) tuple. Deliberately coarse - last-value-wins
+    // per tuple between polls, not a queue - callers are UI-rate consumers, not audio-rate.
+    void reportLiveMidiControlValue(const juce::String& deviceId, int channel, int number, bool isController, float normalizedValue);
+    // Message-thread-safe: returns true and fills outChanges if anything has moved since the last
+    // call, then clears the pending set.
+    bool takeLiveMidiControlChanges(juce::Array<LiveMidiControlChange>& outChanges);
+
     // A single captured MIDI event during live recording, timestamped as an absolute sample
     // position on the engine's running audio clock (not clip-relative) - paired up into notes and
     // converted to clip-relative beats once recording stops, on the message thread.
@@ -711,6 +731,13 @@ private:
     };
     mutable juce::CriticalSection midiLearnLock;
     MidiLearnState midiLearnState;
+
+    struct LiveMidiControlState
+    {
+        juce::Array<LiveMidiControlChange> pendingChanges;
+    };
+    mutable juce::CriticalSection liveMidiControlLock;
+    LiveMidiControlState liveMidiControlState;
     // Kept open for a few seconds after the last delivered note, not just the exact block a
     // note-on/off fell in - otherwise a drum hit would be truncated to one audio block (~10-20ms)
     // instead of being allowed to ring out. Only touched from the audio thread.

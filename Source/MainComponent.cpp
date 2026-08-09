@@ -2072,6 +2072,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         showAudioSettings();
     };
 
+    signalLabPanel.onMidiLearnRequested = [this](const juce::String& displayLabel,
+                                                 std::function<void(juce::String, int, int, bool)> onLearned)
+    {
+        requestGenericMidiLearn(displayLabel, std::move(onLearned));
+    };
+
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
     {
         pushSignalUndoState(stateBeforeEdit, label);
@@ -3658,6 +3664,17 @@ void MainComponent::timerCallback()
 
     pollHostedPluginStateAutosave();
 
+    {
+        juce::Array<WorkstationAudioEngine::LiveMidiControlChange> midiChanges;
+        if (engine.takeLiveMidiControlChanges(midiChanges))
+        {
+            juce::Array<SignalLabPanel::MidiControlChange> forwarded;
+            for (auto& change : midiChanges)
+                forwarded.add({ change.deviceId, change.channel, change.number, change.isController, change.value });
+            signalLabPanel.applyLiveMidiControlChanges(forwarded);
+        }
+    }
+
     if (layoutDirty && juce::Time::getMillisecondCounterHiRes() * 0.001 - layoutLastChangeWallSeconds > 0.75)
         saveLayoutToDisk();
 
@@ -4902,6 +4919,49 @@ void MainComponent::showMidiLearnDialog(const juce::String& targetId, const juce
     {
         applyLearnedMidiBinding(targetId, deviceId, channel, number, isCC);
     };
+    panelPtr->onCancelled = [this]
+    {
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->midiLearnWindow.reset();
+        });
+    };
+
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(460, 400);
+    window->setVisible(true);
+    midiLearnWindow = std::move(window);
+}
+
+void MainComponent::requestGenericMidiLearn(const juce::String& displayLabel,
+                                            std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned)
+{
+    // Shares the single app-wide learn dialog with showMidiLearnDialog above (only one binding
+    // can sensibly be learned at a time) - but the result goes straight back to the caller instead
+    // of being saved into ControlSurfaceMappingStore under a transport targetId. Callers like
+    // Signal Lab's MIDI Control nodes keep their own binding on their own model instead.
+    if (midiLearnWindow != nullptr)
+    {
+        midiLearnWindow->toFront(true);
+        return;
+    }
+
+    auto panel = std::make_unique<MidiLearnPanel>(engine, juce::String(), displayLabel, MidiLearnPanel::ExistingBinding {});
+    auto* panelPtr = panel.get();
+
+    auto window = std::make_unique<ManagedDocumentWindow>("Learn MIDI Binding",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              midiLearnWindow.reset();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(false, false);
+
+    panelPtr->onLearned = std::move(onLearned);
     panelPtr->onCancelled = [this]
     {
         juce::Component::SafePointer<MainComponent> safeThis(this);

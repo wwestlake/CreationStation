@@ -2117,6 +2117,16 @@ void WorkstationAudioEngine::handleIncomingMidiMessage(juce::MidiInput* source, 
         offerMidiLearnCandidate(source->getIdentifier(), message.getChannel(), number, message.isController());
     }
 
+    // Unconditional (unlike the learn-candidate check above, which only fires on note-on / CC>0) -
+    // live dispatch needs CC==0 and note-off too, e.g. a fader sitting at zero or a momentary
+    // button release.
+    if (message.isController())
+        reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getControllerNumber(), true, message.getControllerValue() / 127.0f);
+    else if (message.isNoteOn(true))
+        reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 1.0f);
+    else if (message.isNoteOff(true))
+        reportLiveMidiControlValue(source->getIdentifier(), message.getChannel(), message.getNoteNumber(), false, 0.0f);
+
     getOrCreateMidiDeviceCollector(source->getIdentifier()).addMessageToQueue(message);
 }
 
@@ -2431,6 +2441,35 @@ bool WorkstationAudioEngine::offerMidiLearnCandidate(const juce::String& deviceI
     midiLearnState.result.isController = isController;
     midiLearnState.hasResult = true;
     midiLearnState.armed = false;
+    return true;
+}
+
+void WorkstationAudioEngine::reportLiveMidiControlValue(const juce::String& deviceId, int channel, int number, bool isController, float normalizedValue)
+{
+    const juce::ScopedLock lock(liveMidiControlLock);
+
+    for (auto& change : liveMidiControlState.pendingChanges)
+    {
+        if (change.deviceId == deviceId && change.channel == channel && change.number == number
+            && change.isController == isController)
+        {
+            change.value = normalizedValue;
+            return;
+        }
+    }
+
+    liveMidiControlState.pendingChanges.add({ deviceId, channel, number, isController, normalizedValue });
+}
+
+bool WorkstationAudioEngine::takeLiveMidiControlChanges(juce::Array<LiveMidiControlChange>& outChanges)
+{
+    const juce::ScopedLock lock(liveMidiControlLock);
+
+    if (liveMidiControlState.pendingChanges.isEmpty())
+        return false;
+
+    outChanges = liveMidiControlState.pendingChanges;
+    liveMidiControlState.pendingChanges.clear();
     return true;
 }
 
