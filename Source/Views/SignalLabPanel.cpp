@@ -4339,10 +4339,15 @@ void SignalLabPanel::openNodeEditorForSelection()
         }
     });
     window->setContentOwned(content.release(), true);
-    auto windowWidth = node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 520
+    auto windowWidth = node.type == "scope" ? 640
+                      : node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 520
                       : node.type == "mix" ? juce::jmax(420, 70 * node.mixerInputVolumes.size() + 80)
                       : 420;
-    auto windowHeight = node.type == "scope" || node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 360
+    // Scope carries its own 4-slider control strip (60px) on top of its
+    // plot, on top of the usual title/body text block above it -- the
+    // shared 360 used to leave the control strip clipped off the bottom.
+    auto windowHeight = node.type == "scope" ? 520
+                       : node.type == "analyzer" || node.type == "timeline" || node.type == "envelope" ? 360
                        : node.type == "mix" ? 340
                        : 280;
     window->centreWithSize(windowWidth, windowHeight);
