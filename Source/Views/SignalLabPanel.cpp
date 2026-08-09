@@ -2697,20 +2697,30 @@ void SignalLabPanel::updateInspectorForSelection()
         suppressCallbacks = true;
         frequencyLabel.setVisible(true); frequencySlider.setVisible(true);
         frequencySlider.setValue(selectedNode.oscillatorFrequencyHz, juce::dontSendNotification);
-        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); sineSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
-        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); sawSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
-        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); squareSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
-        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); triangleSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
-        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); noiseSlider.setValue(selectedNode.oscillatorLevel, juce::dontSendNotification); }
+        frequencySlider.setEnabled(true); // no port for frequency yet -- always manual
+
+        double wiredLevel = 0.0;
+        auto isLevelWired = findWiredParameterValue(selectedNode.id, "param:" + type + "Level", wiredLevel);
+        auto levelToShow = isLevelWired ? (float) wiredLevel : selectedNode.oscillatorLevel;
+        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); sineSlider.setValue(levelToShow, juce::dontSendNotification); sineSlider.setEnabled(! isLevelWired); }
+        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); sawSlider.setValue(levelToShow, juce::dontSendNotification); sawSlider.setEnabled(! isLevelWired); }
+        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); squareSlider.setValue(levelToShow, juce::dontSendNotification); squareSlider.setEnabled(! isLevelWired); }
+        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); triangleSlider.setValue(levelToShow, juce::dontSendNotification); triangleSlider.setEnabled(! isLevelWired); }
+        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); noiseSlider.setValue(levelToShow, juce::dontSendNotification); noiseSlider.setEnabled(! isLevelWired); }
         suppressCallbacks = false;
     }
     else if (type == "filter")
     {
         inspectorBodyLabel.setText("Tone-shaping stage after the source mixer.", juce::dontSendNotification);
+        auto filterNodeId = graphNodes.getReference(selectedGraphNodeIndex).id;
+        double wiredValue = 0.0;
         filterModeLabel.setVisible(true); filterModeSelector.setVisible(true);
         filterCutoffLabel.setVisible(true); filterCutoffSlider.setVisible(true);
+        filterCutoffSlider.setEnabled(! findWiredParameterValue(filterNodeId, "param:filterCutoff", wiredValue));
         filterResonanceLabel.setVisible(true); filterResonanceSlider.setVisible(true);
+        filterResonanceSlider.setEnabled(! findWiredParameterValue(filterNodeId, "param:filterResonance", wiredValue));
         filterEnvelopeLabel.setVisible(true); filterEnvelopeSlider.setVisible(true);
+        filterEnvelopeSlider.setEnabled(! findWiredParameterValue(filterNodeId, "param:filterEnvelopeAmount", wiredValue));
     }
     else if (type == "envelope")
     {
@@ -3114,6 +3124,35 @@ bool SignalLabPanel::hasSetterNodeForVariable(const juce::String& variableId) co
     return false;
 }
 
+// Value-port wiring (a Get-variable node's "valueOut" wired into a
+// parameter port -- Mixer Weight, Filter Cutoff/Resonance/EnvAmt,
+// oscillator Level) was previously decorative: the wire could be drawn but
+// nothing downstream ever read it, so the manual knob value always won.
+// This resolves whatever's actually wired in, if anything, so callers can
+// use it in place of the manual value and disable the manual control.
+bool SignalLabPanel::findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const
+{
+    for (auto& connection : graphConnections)
+    {
+        if (connection.isExec || connection.toNodeId != nodeId || connection.toPortId != portId)
+            continue;
+
+        for (auto& sourceNode : graphNodes)
+        {
+            if (sourceNode.id != connection.fromNodeId || sourceNode.type != "valueGet")
+                continue;
+            for (auto& variable : localControls)
+            {
+                if (variable.id != sourceNode.targetParameter)
+                    continue;
+                outValue = variable.value;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void SignalLabPanel::addMixerInput(int nodeIndex)
 {
     if (nodeIndex < 0 || nodeIndex >= graphNodes.size())
@@ -3182,13 +3221,22 @@ void SignalLabPanel::openNodeEditorForSelection()
 
         if (level != nullptr)
         {
-            level->setValue(node.oscillatorLevel, juce::dontSendNotification);
-            level->onValueChange = [this, level, findNode]
+            double wiredLevel = 0.0;
+            if (findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel))
             {
-                if (auto* target = findNode())
-                    target->oscillatorLevel = (float) level->getValue();
-                regenerateSignal();
-            };
+                level->setValue(wiredLevel, juce::dontSendNotification);
+                level->setEnabled(false);
+            }
+            else
+            {
+                level->setValue(node.oscillatorLevel, juce::dontSendNotification);
+                level->onValueChange = [this, level, findNode]
+                {
+                    if (auto* target = findNode())
+                        target->oscillatorLevel = (float) level->getValue();
+                    regenerateSignal();
+                };
+            }
         }
     }
     else if (node.type == "filter")
@@ -3204,12 +3252,30 @@ void SignalLabPanel::openNodeEditorForSelection()
         };
 
         auto& cutoff = content->addSliderRow("Cutoff", kMinFilterCutoffHz, kMaxFilterCutoffHz, 1.0);
-        cutoff.setValue(recipe.filterCutoffHz, juce::dontSendNotification);
-        cutoff.onValueChange = [this, &cutoff] { recipe.filterCutoffHz = (float) cutoff.getValue(); regenerateSignal(); };
+        double wiredCutoff = 0.0;
+        if (findWiredParameterValue(node.id, "param:filterCutoff", wiredCutoff))
+        {
+            cutoff.setValue(wiredCutoff, juce::dontSendNotification);
+            cutoff.setEnabled(false);
+        }
+        else
+        {
+            cutoff.setValue(recipe.filterCutoffHz, juce::dontSendNotification);
+            cutoff.onValueChange = [this, &cutoff] { recipe.filterCutoffHz = (float) cutoff.getValue(); regenerateSignal(); };
+        }
 
         auto& resonance = content->addSliderRow("Resonance", 0.30, 8.0, 0.01);
-        resonance.setValue(recipe.filterResonance, juce::dontSendNotification);
-        resonance.onValueChange = [this, &resonance] { recipe.filterResonance = (float) resonance.getValue(); regenerateSignal(); };
+        double wiredResonance = 0.0;
+        if (findWiredParameterValue(node.id, "param:filterResonance", wiredResonance))
+        {
+            resonance.setValue(wiredResonance, juce::dontSendNotification);
+            resonance.setEnabled(false);
+        }
+        else
+        {
+            resonance.setValue(recipe.filterResonance, juce::dontSendNotification);
+            resonance.onValueChange = [this, &resonance] { recipe.filterResonance = (float) resonance.getValue(); regenerateSignal(); };
+        }
     }
     else if (node.type == "output")
     {
@@ -4609,20 +4675,26 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     {
         if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
         {
-            if (node.oscillatorLevel <= 0.0f)
+            double wiredLevel = 0.0;
+            auto effectiveLevel = findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel)
+                                 ? (float) wiredLevel : node.oscillatorLevel;
+            if (effectiveLevel <= 0.0f)
                 continue;
             auto frequencyParamId = "frequency:" + node.id;
             document.parameters.add({ frequencyParamId, node.title + " Frequency", "float", node.oscillatorFrequencyHz, 30.0, 2400.0, "hz" });
-            cw::PatchSource source { node.id, "oscillator", node.type, {}, node.oscillatorLevel, frequencyParamId };
+            cw::PatchSource source { node.id, "oscillator", node.type, {}, effectiveLevel, frequencyParamId };
             source.canvasX = node.position.x;
             source.canvasY = node.position.y;
             document.sources.add(source);
         }
         else if (node.type == "noise")
         {
-            if (node.oscillatorLevel <= 0.0f)
+            double wiredLevel = 0.0;
+            auto effectiveLevel = findWiredParameterValue(node.id, "param:noiseLevel", wiredLevel)
+                                 ? (float) wiredLevel : node.oscillatorLevel;
+            if (effectiveLevel <= 0.0f)
                 continue;
-            cw::PatchSource source { node.id, "noise", {}, "white", node.oscillatorLevel, {} };
+            cw::PatchSource source { node.id, "noise", {}, "white", effectiveLevel, {} };
             source.canvasX = node.position.x;
             source.canvasY = node.position.y;
             document.sources.add(source);
@@ -4645,10 +4717,14 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
             }
             else if (node.type == "filter")
             {
+                double wiredValue = 0.0;
                 patchNode.properties.set("mode", recipeCopy.filterMode);
-                patchNode.properties.set("cutoffHz", recipeCopy.filterCutoffHz);
-                patchNode.properties.set("resonance", recipeCopy.filterResonance);
-                patchNode.properties.set("envelopeAmount", recipeCopy.filterEnvelopeAmount);
+                patchNode.properties.set("cutoffHz", findWiredParameterValue(node.id, "param:filterCutoff", wiredValue)
+                                                    ? wiredValue : (double) recipeCopy.filterCutoffHz);
+                patchNode.properties.set("resonance", findWiredParameterValue(node.id, "param:filterResonance", wiredValue)
+                                                     ? wiredValue : (double) recipeCopy.filterResonance);
+                patchNode.properties.set("envelopeAmount", findWiredParameterValue(node.id, "param:filterEnvelopeAmount", wiredValue)
+                                                          ? wiredValue : (double) recipeCopy.filterEnvelopeAmount);
             }
             else if (node.type == "envelope")
             {
@@ -4682,7 +4758,10 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
                 if (targetNode.id != connection.toNodeId || targetNode.type != "mix")
                     continue;
                 auto channelIndex = connection.toPortId.fromFirstOccurrenceOf(":", false, false).getIntValue();
-                if (channelIndex >= 0 && channelIndex < targetNode.mixerInputVolumes.size())
+                double wiredWeight = 0.0;
+                if (findWiredParameterValue(targetNode.id, "mixWeight:" + juce::String(channelIndex), wiredWeight))
+                    patchConnection.weight = wiredWeight;
+                else if (channelIndex >= 0 && channelIndex < targetNode.mixerInputVolumes.size())
                     patchConnection.weight = targetNode.mixerInputVolumes[channelIndex];
                 break;
             }

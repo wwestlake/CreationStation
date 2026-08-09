@@ -1,6 +1,7 @@
 #include "PatchRuntimePlayer.h"
 
 #include <cmath>
+#include <functional>
 
 namespace
 {
@@ -151,12 +152,6 @@ const cw::PatchNode* PatchRuntimePlayer::findNode(const cw::PatchDocument& patch
     return nullptr;
 }
 
-namespace
-{
-enum class TapStage { Source, Mix, Envelope, Filter, Output };
-struct TapPlan { juce::String nodeId; TapStage stage; int sourceIndex; };
-}
-
 bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
                                              double durationSeconds,
                                              juce::AudioBuffer<float>& destination,
@@ -173,49 +168,6 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     auto numSamples = juce::jmax(1, juce::roundToInt(safeDuration * sampleRate));
     destination.setSize(2, numSamples, false, false, true);
     destination.clear();
-
-    // Scope/Analyzer nodes show whatever's actually wired into them -- a
-    // specific source, the mix bus, post-envelope, or post-filter -- instead
-    // of always showing the final output regardless of where they're placed.
-    // The pipeline is still fixed-order internally (no arbitrary rewiring),
-    // but each of those stage boundaries is a real, distinct value now, so
-    // tapping "mix" genuinely differs from tapping "envelope" or "filter".
-    juce::Array<TapPlan> tapPlans;
-    if (taps != nullptr)
-    {
-        for (auto& node : patch.nodes)
-        {
-            if (node.kind != "scope" && node.kind != "analyzer")
-                continue;
-
-            TapPlan plan { node.id, TapStage::Output, -1 };
-            for (auto& connection : patch.connections)
-            {
-                if (connection.to != node.id)
-                    continue;
-                if (connection.from == "mix") plan.stage = TapStage::Mix;
-                else if (connection.from == "envelope") plan.stage = TapStage::Envelope;
-                else if (connection.from == "filter") plan.stage = TapStage::Filter;
-                else if (connection.from == "output") plan.stage = TapStage::Output;
-                else
-                {
-                    for (int sourceIndex = 0; sourceIndex < patch.sources.size(); ++sourceIndex)
-                        if (patch.sources.getReference(sourceIndex).id == connection.from)
-                        {
-                            plan.stage = TapStage::Source;
-                            plan.sourceIndex = sourceIndex;
-                            break;
-                        }
-                }
-                break;
-            }
-
-            tapPlans.add(plan);
-            TapCapture capture { node.id, juce::AudioBuffer<float>(1, numSamples) };
-            capture.buffer.clear();
-            taps->add(std::move(capture));
-        }
-    }
 
     double baseFrequency = 180.0;
     float filterCutoffHz = 3600.0f;
@@ -258,8 +210,8 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     // buildPatchDocument only ever writes a filter/envelope node into the
     // document if the user actually placed one on the canvas -- so their
     // presence here is the real signal, not just extra config to read.
-    // "No Filter node placed" now genuinely means no filtering happens.
-    bool hasFilterNode = filterNode != nullptr;
+    // "No Filter node placed" now genuinely means computeFilter() is never
+    // called at all (gated on filterId being empty, further down).
     bool hasEnvelopeNode = envelopeNode != nullptr;
     auto filterMode = filterNode != nullptr ? filterNode->properties.getWithDefault("mode", juce::String("lowpass")).toString()
                                             : juce::String("lowpass");
@@ -318,16 +270,6 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         totalSourceLevel += source.level;
 
     auto normalizer = totalSourceLevel > 0.0 ? (0.9f / (float) totalSourceLevel) : 0.0f;
-    juce::dsp::StateVariableTPTFilter<float> filter;
-    juce::dsp::ProcessSpec spec;
-    spec.sampleRate = sampleRate;
-    spec.maximumBlockSize = (uint32) juce::jmax(1, maximumBlockSize);
-    spec.numChannels = 1;
-    filter.prepare(spec);
-    filter.reset();
-    filter.setType(filterMode == "highpass" ? juce::dsp::StateVariableTPTFilterType::highpass
-                                            : filterMode == "bandpass" ? juce::dsp::StateVariableTPTFilterType::bandpass
-                                                                       : juce::dsp::StateVariableTPTFilterType::lowpass);
 
     // sampleTargetLanesRuntime already degenerates to "return fallbackValue"
     // when there are no automation lanes targeting a parameter -- but under
@@ -359,120 +301,236 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         sourceBaseFrequencyHz.add(freq);
     }
 
-    // A source's mix weight comes from the connection actually wiring it
-    // into a Mixer channel (buildPatchDocument resolves that from the
-    // channel's real weight port). No matching connection -- the common
-    // case of a source feeding straight into the bus with no Mixer in
-    // between -- just passes through at unity weight, same as before.
-    juce::Array<float> sourceMixWeight;
-    for (const auto& source : patch.sources)
+    // --- Step 1: every source computes its own buffer, independently. ---
+    // Sources have no inputs, so this can always run first regardless of how
+    // the rest of the graph is wired.
+    juce::OwnedArray<juce::AudioBuffer<float>> sourceBuffers;
+    for (int sourceIndex = 0; sourceIndex < patch.sources.size(); ++sourceIndex)
     {
-        float weight = 1.0f;
-        for (const auto& connection : patch.connections)
-            if (connection.from == source.id)
-            {
-                weight = (float) connection.weight;
-                break;
-            }
-        sourceMixWeight.add(weight);
-    }
-
-    juce::Array<float> sourceTapValue;
-    sourceTapValue.insertMultiple(0, 0.0f, patch.sources.size());
-
-    float bodyState = 0.0f;
-    float previousEnvelope = 0.0f;
-    for (int sample = 0; sample < numSamples; ++sample)
-    {
-        auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
-        auto pitchMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "pitchOffsetSemitones", t, 0.0) : 0.0;
-        auto gainMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "outputGain", t, 1.0) : 1.0;
-        auto filterMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "filterCutoff", t, 0.5) : 0.5;
-        auto resonanceMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "filterResonance", t, filterResonance) : (double) filterResonance;
-        auto filterEnvelopeMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "filterEnvelopeAmount", t, filterEnvelopeAmount) : (double) filterEnvelopeAmount);
-        auto noiseMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "noiseLevel", t, noiseLevel) : (double) noiseLevel;
-        auto hardnessMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroHardness", t, macroHardness) : (double) macroHardness);
-        auto weightMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroWeight", t, macroWeight) : (double) macroWeight);
-        auto airMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroAir", t, macroAir) : (double) macroAir);
-        auto gritMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroGrit", t, macroGrit) : (double) macroGrit);
-        auto sizeMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroSize", t, macroSize) : (double) macroSize);
-        auto pitchSemitones = (float) pitchMotion
-                            + juce::jmap(weightMotion, 0.0f, 1.0f, 2.0f, -2.0f) * (t - 0.5f) * 2.0f;
-
-        // Same pseudo-random hash used both by the noise source and by the
-        // macro grit/air texture layer below -- compute std::sin once and
-        // reuse it instead of recomputing the identical value up to three
-        // times per sample.
-        auto hashed = std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f;
-        auto hashNoise = 2.0f * (hashed - std::floor(hashed)) - 1.0f;
-
-        float mixed = 0.0f;
-        for (int sourceIndex = 0; sourceIndex < patch.sources.size(); ++sourceIndex)
+        auto* buffer = sourceBuffers.add(new juce::AudioBuffer<float>(1, numSamples));
+        const auto& source = patch.sources.getReference(sourceIndex);
+        for (int sample = 0; sample < numSamples; ++sample)
         {
-            const auto& source = patch.sources.getReference(sourceIndex);
+            auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
+            auto pitchMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "pitchOffsetSemitones", t, 0.0) : 0.0;
+            auto weightMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroWeight", t, macroWeight) : (double) macroWeight);
+            auto sizeMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroSize", t, macroSize) : (double) macroSize);
+            auto pitchSemitones = (float) pitchMotion + juce::jmap(weightMotion, 0.0f, 1.0f, 2.0f, -2.0f) * (t - 0.5f) * 2.0f;
+
             float sourceSample = 0.0f;
             if (source.kind == "oscillator")
             {
-                // Each source carries its own level and (via
-                // sourceBaseFrequencyHz, resolved once before this loop from
-                // its own uniquely-id'd parameter) its own base frequency --
-                // that's what keeps multiple instances of the same waveform
-                // independent instead of all sharing one pitch/level.
+                // Each source carries its own level and its own base
+                // frequency (sourceBaseFrequencyHz, resolved above from its
+                // own uniquely-id'd parameter) -- that's what keeps multiple
+                // instances of the same waveform independent.
                 auto weightedBaseFrequency = sourceBaseFrequencyHz[sourceIndex]
                                            * (double) juce::jmap(weightMotion, 0.0f, 1.0f, 1.16f, 0.86f)
                                            * (double) juce::jmap(sizeMotion, 0.0f, 1.0f, 1.04f, 0.94f);
                 auto frequency = weightedBaseFrequency * std::pow(2.0, pitchSemitones / 12.0);
                 auto phase = juce::MathConstants<double>::twoPi * frequency * ((double) sample / sampleRate);
 
-                auto animatedLevel = (float) source.level * sourceMixWeight[sourceIndex];
+                float waveform = 0.0f;
                 if (source.waveform == "sine")
-                    sourceSample = (float) std::sin(phase);
+                    waveform = (float) std::sin(phase);
                 else if (source.waveform == "saw")
-                    sourceSample = 2.0f * ((float) (phase / juce::MathConstants<double>::twoPi) - std::floor(0.5f + (float) (phase / juce::MathConstants<double>::twoPi)));
+                    waveform = 2.0f * ((float) (phase / juce::MathConstants<double>::twoPi) - std::floor(0.5f + (float) (phase / juce::MathConstants<double>::twoPi)));
                 else if (source.waveform == "square")
-                    sourceSample = std::sin(phase) >= 0.0 ? 1.0f : -1.0f;
+                    waveform = std::sin(phase) >= 0.0 ? 1.0f : -1.0f;
                 else if (source.waveform == "triangle")
-                    sourceSample = std::asin(std::sin(phase)) * (2.0f / juce::MathConstants<float>::pi);
-
-                sourceTapValue.set(sourceIndex, sourceSample * animatedLevel);
-                mixed += sourceSample * animatedLevel;
-                continue;
+                    waveform = std::asin(std::sin(phase)) * (2.0f / juce::MathConstants<float>::pi);
+                sourceSample = waveform * (float) source.level;
             }
             else if (source.kind == "noise")
             {
-                sourceSample = hashNoise;
-                auto noiseContribution = sourceSample * (float) juce::jlimit(0.0, 1.0, source.level) * sourceMixWeight[sourceIndex];
-                sourceTapValue.set(sourceIndex, noiseContribution);
-                mixed += noiseContribution;
+                auto hashed = std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f;
+                sourceSample = (2.0f * (hashed - std::floor(hashed)) - 1.0f) * (float) juce::jlimit(0.0, 1.0, source.level);
+            }
+            buffer->setSample(0, sample, sourceSample);
+        }
+    }
+
+    // --- Step 2: figure out the shape of the rest of the graph. ---
+    // Filter and Envelope are still singleton node types (Phase 3 makes them
+    // real multi-instance, matching oscillators), so there's at most one id
+    // for each -- but which one processes the other's output, and whether
+    // Filter even sits after Mix at all, now comes from the real wires
+    // instead of always being sources -> mix -> envelope -> filter -> sink.
+    juce::String mixId, filterId, envelopeId, outputId;
+    for (auto& node : patch.nodes)
+    {
+        if (node.kind == "mix") mixId = node.id;
+        else if (node.kind == "filter") filterId = node.id;
+        else if (node.kind == "envelope") envelopeId = node.id;
+        else if (node.kind == "output") outputId = node.id;
+    }
+
+    juce::StringArray sourcesWithOutgoingWire;
+    for (auto& connection : patch.connections)
+        for (auto& source : patch.sources)
+            if (source.id == connection.from && ! sourcesWithOutgoingWire.contains(connection.from))
+                sourcesWithOutgoingWire.add(connection.from);
+
+    juce::AudioBuffer<float> mixBuffer(1, numSamples), filterBuffer(1, numSamples);
+    bool mixReady = false, filterReady = false, mixComputing = false, filterComputing = false;
+
+    std::function<const juce::AudioBuffer<float>*()> computeMix;
+    std::function<const juce::AudioBuffer<float>*()> computeFilter;
+
+    // What feeds a plain single-input node (Filter, Output, Scope, Analyzer)
+    // -- a specific source, the Mix bus, or Filter's own output if it's
+    // wired to feed something downstream of itself. Returns null if nothing
+    // is actually wired in. A connection whose source is the Envelope node
+    // resolves to the same Mix buffer -- Envelope's amplitude shaping is
+    // already fused into computeMix() (see its comment), so wiring
+    // Mix -> Envelope -> Sink (the default topology, and what every tested
+    // graph so far actually uses) must still reach the real, already-shaped
+    // signal rather than finding no match and going silent.
+    auto resolveSingleInput = [&](const juce::String& nodeId) -> const juce::AudioBuffer<float>*
+    {
+        for (auto& connection : patch.connections)
+        {
+            if (connection.to != nodeId)
                 continue;
+            for (int i = 0; i < patch.sources.size(); ++i)
+                if (patch.sources.getReference(i).id == connection.from)
+                    return sourceBuffers[i];
+            if ((! mixId.isEmpty() && connection.from == mixId)
+                || (! envelopeId.isEmpty() && connection.from == envelopeId))
+                return computeMix();
+            if (! filterId.isEmpty() && connection.from == filterId)
+                return computeFilter();
+        }
+        return nullptr;
+    };
+
+    // Mix: weighted sum of whatever's actually wired into it (or, if no
+    // Mix node exists at all, every source that isn't explicitly wired
+    // elsewhere -- the same tolerant "just place oscillators, no wiring
+    // needed" behavior this always had). Also where the always-on macro
+    // character shaping (hardness/weight/air/grit/size, saturation, body
+    // resonance) and the Envelope curve's amplitude shaping happen, exactly
+    // as before -- those aren't tied to a placeable node, and Envelope's
+    // role is still "provides the curve and gates whether it's real vs.
+    // flat," not a separately-repositionable stage, in this phase.
+    computeMix = [&]() -> const juce::AudioBuffer<float>*
+    {
+        if (mixReady) return &mixBuffer;
+        if (mixComputing) return nullptr;
+        mixComputing = true;
+        mixBuffer.clear();
+
+        juce::Array<int> feedIndices;
+        juce::Array<float> feedWeights;
+        if (! mixId.isEmpty())
+        {
+            for (auto& connection : patch.connections)
+            {
+                if (connection.to != mixId) continue;
+                for (int i = 0; i < patch.sources.size(); ++i)
+                    if (patch.sources.getReference(i).id == connection.from)
+                    {
+                        feedIndices.add(i);
+                        feedWeights.add((float) connection.weight);
+                    }
             }
         }
-
-        // No Envelope node placed -- play at flat level for the duration
-        // (no shaping, no attack transient) instead of computing a curve
-        // that was never really configured by anything on the canvas.
-        auto envelope = hasEnvelopeNode ? (float) sampleAutomationPoints(envelopePoints, envelopeCurveMode, t, 0.0) : 1.0f;
-        auto transient = juce::jmax(0.0f, envelope - previousEnvelope);
-        previousEnvelope = envelope;
-
-        auto gritDrive = 1.0f + gritMotion * 5.5f;
-        auto macroNoise = juce::jlimit(0.0f, 1.0f, (float) noiseMotion + airMotion * 0.18f + gritMotion * 0.12f);
-        mixed += macroNoise * (hashed - std::floor(hashed));
-        auto mixStageValue = mixed; // what the Mixer node's output actually is, before any envelope/filter shaping
-        auto value = normalizer * envelope * (float) gainMotion * outputGain * mixed;
-        value += transient * juce::jmap(hardnessMotion, 0.0f, 1.0f, 0.0f, 0.45f);
-        value = std::tanh(value * gritDrive) / std::tanh(gritDrive);
-        auto bodyCutoff = juce::jmap(weightMotion, 0.0f, 1.0f, 120.0f, 520.0f);
-        auto bodyComponent = applyOnePoleLowPassRuntime(value, bodyState, bodyCutoff, sampleRate);
-        value += bodyComponent * juce::jmap(weightMotion, 0.0f, 1.0f, 0.0f, 0.32f);
-        value *= juce::jmap(sizeMotion, 0.0f, 1.0f, 0.98f, 1.12f + 0.08f * std::sin(t * juce::MathConstants<float>::pi));
-        auto envelopeStageValue = value; // output of the Envelope stage, before filtering
-
-        // No Filter node placed -- pass the signal through unfiltered instead
-        // of always running a filter with fallback default settings.
-        float filteredValue = value;
-        if (hasFilterNode)
+        else
         {
+            for (int i = 0; i < patch.sources.size(); ++i)
+                if (! sourcesWithOutgoingWire.contains(patch.sources.getReference(i).id))
+                {
+                    feedIndices.add(i);
+                    feedWeights.add(1.0f);
+                }
+        }
+
+        float bodyState = 0.0f;
+        float previousEnvelope = 0.0f;
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
+            auto gainMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "outputGain", t, 1.0) : 1.0;
+            auto noiseMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "noiseLevel", t, noiseLevel) : (double) noiseLevel;
+            auto hardnessMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroHardness", t, macroHardness) : (double) macroHardness);
+            auto weightMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroWeight", t, macroWeight) : (double) macroWeight);
+            auto airMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroAir", t, macroAir) : (double) macroAir);
+            auto gritMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroGrit", t, macroGrit) : (double) macroGrit);
+            auto sizeMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroSize", t, macroSize) : (double) macroSize);
+
+            auto hashed = std::sin((float) sample * 12.9898f + 78.233f) * 43758.5453f;
+
+            float mixed = 0.0f;
+            for (int k = 0; k < feedIndices.size(); ++k)
+                mixed += sourceBuffers[feedIndices[k]]->getSample(0, sample) * feedWeights[k];
+
+            auto envelope = hasEnvelopeNode ? (float) sampleAutomationPoints(envelopePoints, envelopeCurveMode, t, 0.0) : 1.0f;
+            auto transient = juce::jmax(0.0f, envelope - previousEnvelope);
+            previousEnvelope = envelope;
+
+            auto gritDrive = 1.0f + gritMotion * 5.5f;
+            auto macroNoise = juce::jlimit(0.0f, 1.0f, (float) noiseMotion + airMotion * 0.18f + gritMotion * 0.12f);
+            mixed += macroNoise * (hashed - std::floor(hashed));
+            auto value = normalizer * envelope * (float) gainMotion * outputGain * mixed;
+            value += transient * juce::jmap(hardnessMotion, 0.0f, 1.0f, 0.0f, 0.45f);
+            value = std::tanh(value * gritDrive) / std::tanh(gritDrive);
+            auto bodyCutoff = juce::jmap(weightMotion, 0.0f, 1.0f, 120.0f, 520.0f);
+            auto bodyComponent = applyOnePoleLowPassRuntime(value, bodyState, bodyCutoff, sampleRate);
+            value += bodyComponent * juce::jmap(weightMotion, 0.0f, 1.0f, 0.0f, 0.32f);
+            value *= juce::jmap(sizeMotion, 0.0f, 1.0f, 0.98f, 1.12f + 0.08f * std::sin(t * juce::MathConstants<float>::pi));
+            // Matches the original's final air-motion blend for the no-filter
+            // case, where "filtered" and "pre-filter" were the same value --
+            // graphs with no Filter node (e.g. the tested Sine/Square/Triangle
+            // patch) still need this, not just ones that route through
+            // computeFilter().
+            value = juce::jmap(airMotion, value, juce::jlimit(-1.0f, 1.0f, value));
+
+            mixBuffer.setSample(0, sample, value);
+        }
+
+        mixReady = true;
+        mixComputing = false;
+        return &mixBuffer;
+    };
+
+    // Filter: processes whatever single buffer is actually wired into it --
+    // Mix's output in the common case, but just as validly a raw source
+    // wired directly, or nothing (silence) if it's placed but unwired. No
+    // Filter node at all means this is never called.
+    computeFilter = [&]() -> const juce::AudioBuffer<float>*
+    {
+        if (filterReady) return &filterBuffer;
+        if (filterId.isEmpty() || filterComputing) return nullptr;
+        filterComputing = true;
+        filterBuffer.clear();
+
+        auto* inputBuffer = resolveSingleInput(filterId);
+
+        juce::dsp::StateVariableTPTFilter<float> filterDsp;
+        juce::dsp::ProcessSpec spec;
+        spec.sampleRate = sampleRate;
+        spec.maximumBlockSize = (uint32) juce::jmax(1, maximumBlockSize);
+        spec.numChannels = 1;
+        filterDsp.prepare(spec);
+        filterDsp.reset();
+        filterDsp.setType(filterMode == "highpass" ? juce::dsp::StateVariableTPTFilterType::highpass
+                                                   : filterMode == "bandpass" ? juce::dsp::StateVariableTPTFilterType::bandpass
+                                                                              : juce::dsp::StateVariableTPTFilterType::lowpass);
+
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
+            auto filterMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "filterCutoff", t, 0.5) : 0.5;
+            auto resonanceMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "filterResonance", t, filterResonance) : (double) filterResonance;
+            auto filterEnvelopeMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "filterEnvelopeAmount", t, filterEnvelopeAmount) : (double) filterEnvelopeAmount);
+            auto hardnessMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroHardness", t, macroHardness) : (double) macroHardness);
+            auto weightMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroWeight", t, macroWeight) : (double) macroWeight);
+            auto airMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroAir", t, macroAir) : (double) macroAir);
+            auto sizeMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "macroSize", t, macroSize) : (double) macroSize);
+            auto envelope = hasEnvelopeNode ? (float) sampleAutomationPoints(envelopePoints, envelopeCurveMode, t, 0.0) : 1.0f;
+
+            float inputValue = inputBuffer != nullptr ? inputBuffer->getSample(0, sample) : 0.0f;
+
             auto envelopeContribution = hasEnvelopeNode ? (envelope - 0.5f) : 0.0f;
             auto filterNormalized = clamp01Runtime(cutoffToNormalized(filterCutoffHz)
                                                    + ((float) filterMotion - 0.5f) * 0.75f
@@ -481,30 +539,55 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
                                                    - weightMotion * 0.10f
                                                    - sizeMotion * 0.06f);
             auto cutoffHz = normalizedToCutoff(filterNormalized);
-            filter.setCutoffFrequency(juce::jlimit(kMinFilterCutoffHz, (float) (sampleRate * 0.45), cutoffHz));
-            filter.setResonance(juce::jlimit(0.30f, 8.0f, (float) resonanceMotion + hardnessMotion * 0.9f - weightMotion * 0.15f));
-            filteredValue = filter.processSample(0, value);
-        }
-        value = juce::jmap(airMotion, filteredValue, juce::jlimit(-1.0f, 1.0f, value));
-        destination.setSample(0, sample, value);
-        destination.setSample(1, sample, value);
+            filterDsp.setCutoffFrequency(juce::jlimit(kMinFilterCutoffHz, (float) (sampleRate * 0.45), cutoffHz));
+            filterDsp.setResonance(juce::jlimit(0.30f, 8.0f, (float) resonanceMotion + hardnessMotion * 0.9f - weightMotion * 0.15f));
+            auto filteredValue = filterDsp.processSample(0, inputValue);
+            auto outputValue = juce::jmap(airMotion, filteredValue, juce::jlimit(-1.0f, 1.0f, inputValue));
 
-        if (taps != nullptr)
+            filterBuffer.setSample(0, sample, outputValue);
+        }
+
+        filterReady = true;
+        filterComputing = false;
+        return &filterBuffer;
+    };
+
+    // --- Step 3: resolve the final output. ---
+    // Explicit wiring into the Sink is honored first. If nothing is wired
+    // there yet (e.g. a freshly-placed, not-yet-connected graph), fall back
+    // to whatever the natural end of the chain is -- Filter's output if a
+    // Filter exists, else Mix -- so a minimal "just place a couple
+    // oscillators" graph is still audible without forcing the user to wire
+    // all the way to Sink first.
+    const juce::AudioBuffer<float>* finalBuffer = nullptr;
+    if (! outputId.isEmpty())
+        finalBuffer = resolveSingleInput(outputId);
+    if (finalBuffer == nullptr)
+        finalBuffer = ! filterId.isEmpty() ? computeFilter() : computeMix();
+
+    if (finalBuffer != nullptr)
+    {
+        for (int sample = 0; sample < numSamples; ++sample)
         {
-            for (int tapIndex = 0; tapIndex < tapPlans.size(); ++tapIndex)
-            {
-                auto& plan = tapPlans.getReference(tapIndex);
-                float tapValue = value; // TapStage::Output (and the safe default)
-                if (plan.stage == TapStage::Source && plan.sourceIndex >= 0 && plan.sourceIndex < sourceTapValue.size())
-                    tapValue = sourceTapValue.getUnchecked(plan.sourceIndex);
-                else if (plan.stage == TapStage::Mix)
-                    tapValue = mixStageValue;
-                else if (plan.stage == TapStage::Envelope)
-                    tapValue = envelopeStageValue;
-                else if (plan.stage == TapStage::Filter)
-                    tapValue = filteredValue;
-                taps->getReference(tapIndex).buffer.setSample(0, sample, tapValue);
-            }
+            auto value = finalBuffer->getSample(0, sample);
+            destination.setSample(0, sample, value);
+            destination.setSample(1, sample, value);
+        }
+    }
+
+    // Scope/Analyzer taps: whatever's actually wired into each one --
+    // a specific source, the mix bus, post-filter, or nothing.
+    if (taps != nullptr)
+    {
+        for (auto& node : patch.nodes)
+        {
+            if (node.kind != "scope" && node.kind != "analyzer")
+                continue;
+            TapCapture capture { node.id, juce::AudioBuffer<float>(1, numSamples) };
+            capture.buffer.clear();
+            if (auto* tapSource = resolveSingleInput(node.id))
+                capture.buffer.copyFrom(0, 0, *tapSource, 0, 0, numSamples);
+            taps->add(std::move(capture));
         }
     }
 

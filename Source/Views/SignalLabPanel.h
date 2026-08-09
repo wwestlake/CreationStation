@@ -375,6 +375,7 @@ private:
     void noteInteraction();
     void rebuildNodeGraphFromRecipe();
     void seedOscillatorNodesFromRecipeLevels();
+    bool findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const;
     void updateInspectorForSelection();
     void layoutFloatingWindows();
     void showCanvasActionMenu(juce::Point<int> canvasPosition, bool anchorToButton = false);
