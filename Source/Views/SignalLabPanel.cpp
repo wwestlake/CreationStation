@@ -1235,8 +1235,8 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
         if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
             detail = "Level " + juce::String(node.oscillatorLevel, 2) + " • " + juce::String(juce::roundToInt(node.oscillatorFrequencyHz)) + " Hz";
         else if (node.type == "noise") detail = "Level " + juce::String(node.oscillatorLevel, 2);
-        else if (node.type == "filter") detail = owner.recipe.filterMode + " • " + juce::String(juce::roundToInt(owner.recipe.filterCutoffHz)) + " Hz";
-        else if (node.type == "envelope") detail = owner.recipe.envelopeCurveMode + " curve";
+        else if (node.type == "filter") detail = node.filterMode + " • " + juce::String(juce::roundToInt(node.filterCutoffHz)) + " Hz";
+        else if (node.type == "envelope") detail = node.envelopeCurveMode + " curve";
         else if (node.type == "output") detail = formatDurationText(owner.recipe.durationSeconds) + " • " + (owner.recipe.sinkMode == "wave" ? "Wave" : "Audio");
         else if (node.type == "value" || node.type == "valueGet" || node.type == "valueSet")
         {
@@ -2310,23 +2310,27 @@ SignalLabPanel::SignalLabPanel()
             return;
 
         captureUndoCheckpoint("Change filter type");
-        recipe.filterMode = filterModeSelector.getSelectedId() == 2 ? "bandpass"
-                          : filterModeSelector.getSelectedId() == 3 ? "highpass"
-                                                                    : "lowpass";
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterMode = filterModeSelector.getSelectedId() == 2 ? "bandpass"
+                                                                        : filterModeSelector.getSelectedId() == 3 ? "highpass"
+                                                                                                                   : "lowpass";
         regenerateSignal();
     };
     envelopeCurveSelector.onChange = [this]
     {
         if (suppressCallbacks)
             return;
+        if (selectedGraphNodeIndex < 0 || selectedGraphNodeIndex >= graphNodes.size())
+            return;
 
         captureUndoCheckpoint("Change envelope curve");
-        recipe.envelopeCurveMode = envelopeCurveSelector.getSelectedId() == 3 ? "stepped"
-                                  : envelopeCurveSelector.getSelectedId() == 1 ? "linear"
-                                                                               : "smooth";
-        ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
-        for (auto& point : recipe.envelopePoints)
-            point.curve = recipe.envelopeCurveMode;
+        auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
+        selectedNode.envelopeCurveMode = envelopeCurveSelector.getSelectedId() == 3 ? "stepped"
+                                        : envelopeCurveSelector.getSelectedId() == 1 ? "linear"
+                                                                                     : "smooth";
+        ensureEnvelopePoints(selectedNode.envelopePoints, selectedNode.envelopeCurveMode);
+        for (auto& point : selectedNode.envelopePoints)
+            point.curve = selectedNode.envelopeCurveMode;
         regenerateSignal();
     };
     automationCurveSelector.onChange = [this]
@@ -2346,9 +2350,30 @@ SignalLabPanel::SignalLabPanel()
         }
         regenerateSignal();
     };
-    filterCutoffSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterCutoffHz = (float) filterCutoffSlider.getValue(); regenerateSignal(); } };
-    filterResonanceSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterResonance = (float) filterResonanceSlider.getValue(); regenerateSignal(); } };
-    filterEnvelopeSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue(); regenerateSignal(); } };
+    filterCutoffSlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterCutoffHz = (float) filterCutoffSlider.getValue();
+        regenerateSignal();
+    };
+    filterResonanceSlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterResonance = (float) filterResonanceSlider.getValue();
+        regenerateSignal();
+    };
+    filterEnvelopeSlider.onValueChange = [this]
+    {
+        if (suppressCallbacks) return;
+        noteInteraction();
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+            graphNodes.getReference(selectedGraphNodeIndex).filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue();
+        regenerateSignal();
+    };
     macroHardnessSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroHardness = (float) macroHardnessSlider.getValue(); regenerateSignal(); } };
     macroWeightSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroWeight = (float) macroWeightSlider.getValue(); regenerateSignal(); } };
     macroAirSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroAir = (float) macroAirSlider.getValue(); regenerateSignal(); } };
@@ -2415,8 +2440,15 @@ SignalLabPanel::SignalLabPanel()
     envelopeEditor.onEnvelopeChanged = [this](const juce::Array<cw::PatchAutomationPoint>& points)
     {
         noteInteraction();
-        recipe.envelopePoints = points;
-        ensureEnvelopePoints(recipe.envelopePoints, recipe.envelopeCurveMode);
+        if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+        {
+            auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
+            if (selectedNode.type == "envelope")
+            {
+                selectedNode.envelopePoints = points;
+                ensureEnvelopePoints(selectedNode.envelopePoints, selectedNode.envelopeCurveMode);
+            }
+        }
         regenerateSignal();
     };
 
@@ -2541,6 +2573,7 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
     // read here.
     juce::Array<GraphNodeModel> preservedValueNodes;
     juce::Array<GraphNodeModel> preservedOscillatorNodes;
+    juce::Array<GraphNodeModel> preservedFilterEnvelopeNodes;
     juce::Array<float> preservedMixerInputVolumes { 1.0f, 1.0f };
     for (auto& node : graphNodes)
     {
@@ -2551,11 +2584,20 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
         else if (node.type == "sine" || node.type == "saw" || node.type == "square"
                  || node.type == "triangle" || node.type == "noise")
             preservedOscillatorNodes.add(node);
+        else if (node.type == "filter" || node.type == "envelope")
+            preservedFilterEnvelopeNodes.add(node);
     }
 
     graphNodes.clear();
 
     for (auto& preserved : preservedOscillatorNodes)
+        graphNodes.add(preserved);
+
+    // Filter/Envelope are real independent instances now too (multiple can
+    // exist, each with its own settings) -- preserved verbatim like
+    // oscillators, not re-derived from the old filterNodeEnabled/
+    // envelopeNodeEnabled singleton flags.
+    for (auto& preserved : preservedFilterEnvelopeNodes)
         graphNodes.add(preserved);
 
     for (auto& preserved : preservedValueNodes)
@@ -2573,10 +2615,6 @@ void SignalLabPanel::rebuildNodeGraphFromRecipe()
         addNode("mix", priorPositions.contains("mix") ? priorPositions["mix"] : juce::Point<int>(470, 180), false, false, "mix");
         graphNodes.getReference(graphNodes.size() - 1).mixerInputVolumes = preservedMixerInputVolumes;
     }
-    if (filterNodeEnabled)
-        addNode("filter", priorPositions.contains("filter") ? priorPositions["filter"] : juce::Point<int>(680, 180), false, false, "filter");
-    if (envelopeNodeEnabled)
-        addNode("envelope", priorPositions.contains("envelope") ? priorPositions["envelope"] : juce::Point<int>(890, 180), false, false, "envelope");
     addNode("output", priorPositions.contains("output") ? priorPositions["output"] : juce::Point<int>(1100, 180), false, true, "output");
     if (probeSettings.scopeEnabled)
         addNode("scope", priorPositions.contains("scope") ? priorPositions["scope"] : juce::Point<int>(890, 36), false, false, "scope");
@@ -2711,22 +2749,45 @@ void SignalLabPanel::updateInspectorForSelection()
     }
     else if (type == "filter")
     {
-        inspectorBodyLabel.setText("Tone-shaping stage after the source mixer.", juce::dontSendNotification);
-        auto filterNodeId = graphNodes.getReference(selectedGraphNodeIndex).id;
+        inspectorBodyLabel.setText("Tone-shaping stage. Position in the chain now comes from how it's wired, not a fixed slot.", juce::dontSendNotification);
+        auto& filterNode = graphNodes.getReference(selectedGraphNodeIndex);
         double wiredValue = 0.0;
+
+        suppressCallbacks = true;
         filterModeLabel.setVisible(true); filterModeSelector.setVisible(true);
+        filterModeSelector.setSelectedId(filterNode.filterMode == "bandpass" ? 2 : filterNode.filterMode == "highpass" ? 3 : 1, juce::dontSendNotification);
+
         filterCutoffLabel.setVisible(true); filterCutoffSlider.setVisible(true);
-        filterCutoffSlider.setEnabled(! findWiredParameterValue(filterNodeId, "param:filterCutoff", wiredValue));
+        auto cutoffWired = findWiredParameterValue(filterNode.id, "param:filterCutoff", wiredValue);
+        filterCutoffSlider.setValue(cutoffWired ? wiredValue : (double) filterNode.filterCutoffHz, juce::dontSendNotification);
+        filterCutoffSlider.setEnabled(! cutoffWired);
+
         filterResonanceLabel.setVisible(true); filterResonanceSlider.setVisible(true);
-        filterResonanceSlider.setEnabled(! findWiredParameterValue(filterNodeId, "param:filterResonance", wiredValue));
+        auto resonanceWired = findWiredParameterValue(filterNode.id, "param:filterResonance", wiredValue);
+        filterResonanceSlider.setValue(resonanceWired ? wiredValue : (double) filterNode.filterResonance, juce::dontSendNotification);
+        filterResonanceSlider.setEnabled(! resonanceWired);
+
         filterEnvelopeLabel.setVisible(true); filterEnvelopeSlider.setVisible(true);
-        filterEnvelopeSlider.setEnabled(! findWiredParameterValue(filterNodeId, "param:filterEnvelopeAmount", wiredValue));
+        auto envAmountWired = findWiredParameterValue(filterNode.id, "param:filterEnvelopeAmount", wiredValue);
+        filterEnvelopeSlider.setValue(envAmountWired ? wiredValue : (double) filterNode.filterEnvelopeAmount, juce::dontSendNotification);
+        filterEnvelopeSlider.setEnabled(! envAmountWired);
+        suppressCallbacks = false;
     }
     else if (type == "envelope")
     {
         inspectorBodyLabel.setText("Amplitude contour for the rendered sound. Drag points directly in the envelope view.", juce::dontSendNotification);
+        auto& envelopeNode = graphNodes.getReference(selectedGraphNodeIndex);
+
+        suppressCallbacks = true;
         envelopeCurveLabel.setVisible(true); envelopeCurveSelector.setVisible(true);
+        envelopeCurveSelector.setSelectedId(envelopeNode.envelopeCurveMode == "stepped" ? 3 : envelopeNode.envelopeCurveMode == "linear" ? 1 : 2, juce::dontSendNotification);
+        suppressCallbacks = false;
+
         envelopeEditor.setVisible(true);
+        SignalRecipe envelopeView;
+        envelopeView.envelopeCurveMode = envelopeNode.envelopeCurveMode;
+        envelopeView.envelopePoints = envelopeNode.envelopePoints;
+        envelopeEditor.setRecipe(envelopeView);
     }
     else if (type == "output")
     {
@@ -2987,14 +3048,33 @@ void SignalLabPanel::addGraphNode(const juce::String& type, juce::Point<int> can
         return;
     }
 
+    // Filter/Envelope: same reasoning as oscillators -- each placement
+    // creates a new, independent instance with its own settings, so
+    // multiple Filters (or Envelopes) in different chain positions don't
+    // fight over one shared slot.
+    if (type == "filter" || type == "envelope")
+    {
+        captureUndoCheckpoint("Add " + graphNodeTitle(type));
+        GraphNodeModel node;
+        node.id = type + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        node.type = type;
+        node.title = graphNodeTitle(type);
+        node.position = canvasToGraph(canvasPosition);
+        node.accent = graphNodeAccent(type);
+        if (type == "envelope")
+            node.envelopePoints = makeDefaultEnvelopePoints(node.envelopeCurveMode);
+        graphNodes.add(node);
+        setSelectedGraphNodeIndex(graphNodes.size() - 1);
+        regenerateSignal();
+        return;
+    }
+
     if (hasGraphNodeType(type) && type != "mix")
         return;
 
     captureUndoCheckpoint("Add " + graphNodeTitle(type));
 
     if (type == "mix") mixNodeEnabled = true;
-    else if (type == "filter") filterNodeEnabled = true;
-    else if (type == "envelope") envelopeNodeEnabled = true;
     else if (type == "scope") probeSettings.scopeEnabled = true;
     else if (type == "analyzer") probeSettings.analyzerEnabled = true;
 
@@ -3027,11 +3107,10 @@ void SignalLabPanel::removeSelectedGraphNode()
     // recipe.XLevel slot to clear) -- rebuildNodeGraphFromRecipe() preserves
     // whatever's already in graphNodes for these types, so this one has to
     // be removed from the array directly rather than gated off by a flag.
-    if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
+    if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise"
+        || type == "filter" || type == "envelope")
         graphNodes.remove(selectedGraphNodeIndex);
     else if (type == "mix") mixNodeEnabled = false;
-    else if (type == "filter") filterNodeEnabled = false;
-    else if (type == "envelope") envelopeNodeEnabled = false;
     else if (type == "scope") probeSettings.scopeEnabled = false;
     else if (type == "analyzer") probeSettings.analyzerEnabled = false;
 
@@ -3241,13 +3320,25 @@ void SignalLabPanel::openNodeEditorForSelection()
     }
     else if (node.type == "filter")
     {
-        auto& mode = content->addComboRow("Filter Type", { "Low-pass", "Band-pass", "High-pass" });
-        mode.setSelectedId(recipe.filterMode == "bandpass" ? 2 : recipe.filterMode == "highpass" ? 3 : 1, juce::dontSendNotification);
-        mode.onChange = [this, &mode]
+        // Each Filter instance owns its own mode/cutoff/resonance now --
+        // same reasoning and pattern as oscillators above.
+        auto nodeId = node.id;
+        auto findFilterNode = [this, nodeId]() -> GraphNodeModel*
         {
-            recipe.filterMode = mode.getSelectedId() == 2 ? "bandpass"
-                              : mode.getSelectedId() == 3 ? "highpass"
-                                                          : "lowpass";
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                    return &candidate;
+            return nullptr;
+        };
+
+        auto& mode = content->addComboRow("Filter Type", { "Low-pass", "Band-pass", "High-pass" });
+        mode.setSelectedId(node.filterMode == "bandpass" ? 2 : node.filterMode == "highpass" ? 3 : 1, juce::dontSendNotification);
+        mode.onChange = [this, &mode, findFilterNode]
+        {
+            if (auto* target = findFilterNode())
+                target->filterMode = mode.getSelectedId() == 2 ? "bandpass"
+                                    : mode.getSelectedId() == 3 ? "highpass"
+                                                                : "lowpass";
             regenerateSignal();
         };
 
@@ -3260,8 +3351,13 @@ void SignalLabPanel::openNodeEditorForSelection()
         }
         else
         {
-            cutoff.setValue(recipe.filterCutoffHz, juce::dontSendNotification);
-            cutoff.onValueChange = [this, &cutoff] { recipe.filterCutoffHz = (float) cutoff.getValue(); regenerateSignal(); };
+            cutoff.setValue(node.filterCutoffHz, juce::dontSendNotification);
+            cutoff.onValueChange = [this, &cutoff, findFilterNode]
+            {
+                if (auto* target = findFilterNode())
+                    target->filterCutoffHz = (float) cutoff.getValue();
+                regenerateSignal();
+            };
         }
 
         auto& resonance = content->addSliderRow("Resonance", 0.30, 8.0, 0.01);
@@ -3273,8 +3369,13 @@ void SignalLabPanel::openNodeEditorForSelection()
         }
         else
         {
-            resonance.setValue(recipe.filterResonance, juce::dontSendNotification);
-            resonance.onValueChange = [this, &resonance] { recipe.filterResonance = (float) resonance.getValue(); regenerateSignal(); };
+            resonance.setValue(node.filterResonance, juce::dontSendNotification);
+            resonance.onValueChange = [this, &resonance, findFilterNode]
+            {
+                if (auto* target = findFilterNode())
+                    target->filterResonance = (float) resonance.getValue();
+                regenerateSignal();
+            };
         }
     }
     else if (node.type == "output")
@@ -3314,11 +3415,25 @@ void SignalLabPanel::openNodeEditorForSelection()
     }
     else if (node.type == "envelope")
     {
+        // Each Envelope instance owns its own curve now. EnvelopeEditor only
+        // reads envelopePoints/envelopeCurveMode off whatever SignalRecipe
+        // it's given, so a throwaway recipe carrying just this node's curve
+        // is enough to point it at the right instance without changing the
+        // editor component itself.
+        auto nodeId = node.id;
         auto* editor = new EnvelopeEditor();
-        editor->setRecipe(recipe);
-        editor->onEnvelopeChanged = [this](const juce::Array<cw::PatchAutomationPoint>& points)
+        SignalRecipe envelopeView;
+        envelopeView.envelopeCurveMode = node.envelopeCurveMode;
+        envelopeView.envelopePoints = node.envelopePoints;
+        editor->setRecipe(envelopeView);
+        editor->onEnvelopeChanged = [this, nodeId](const juce::Array<cw::PatchAutomationPoint>& points)
         {
-            recipe.envelopePoints = points;
+            for (auto& candidate : graphNodes)
+                if (candidate.id == nodeId)
+                {
+                    candidate.envelopePoints = points;
+                    break;
+                }
             regenerateSignal();
         };
         content->addCustomComponent(*editor, 220);
@@ -4107,41 +4222,19 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
     recipe.envelopePoints.clear();
     probeSettings = {};
 
-    // Only enable a stage if a node of that kind is actually present in the
-    // file -- buildPatchDocument now only ever writes nodes that were
-    // really on the canvas, so "present in the file" correctly means
-    // "the user placed one", unlike the old always-emit-everything format.
+    // Filter/Envelope are real independent instances now (Phase 3) -- their
+    // config is read per-instance below, in the node-reconstruction loop,
+    // straight from each patchNode's own properties. This pass only handles
+    // the stages that are still singleton (Mix, Scope, Analyzer): only
+    // enable one if a node of that kind is actually present in the file --
+    // buildPatchDocument only ever writes nodes that were really on the
+    // canvas, so "present in the file" correctly means "the user placed
+    // one", unlike the old always-emit-everything format.
     for (const auto& node : document.nodes)
     {
         if (node.kind == "mix") mixNodeEnabled = true;
-        else if (node.kind == "filter") filterNodeEnabled = true;
-        else if (node.kind == "envelope") envelopeNodeEnabled = true;
         else if (node.kind == "scope") probeSettings.scopeEnabled = true;
         else if (node.kind == "analyzer") probeSettings.analyzerEnabled = true;
-
-        if (node.kind == "envelope")
-        {
-            recipe.envelopeCurveMode = node.properties.getWithDefault("curveMode", recipe.envelopeCurveMode).toString();
-            auto pointsJson = node.properties.getWithDefault("pointsJson", {}).toString();
-            if (pointsJson.isNotEmpty())
-                recipe.envelopePoints = parsePointsJson(pointsJson, recipe.envelopeCurveMode);
-
-            if (recipe.envelopePoints.isEmpty())
-            {
-                setEnvelopeFromLegacy(recipe,
-                                      (float) node.properties.getWithDefault("attackPosition", 0.12f),
-                                      (float) node.properties.getWithDefault("sustainPosition", 0.42f),
-                                      (float) node.properties.getWithDefault("releasePosition", 0.82f),
-                                      (float) node.properties.getWithDefault("sustainLevel", 0.48f));
-            }
-        }
-        else if (node.kind == "filter")
-        {
-            recipe.filterMode = node.properties.getWithDefault("mode", recipe.filterMode).toString();
-            recipe.filterCutoffHz = (float) node.properties.getWithDefault("cutoffHz", recipe.filterCutoffHz);
-            recipe.filterResonance = (float) node.properties.getWithDefault("resonance", recipe.filterResonance);
-            recipe.filterEnvelopeAmount = (float) node.properties.getWithDefault("envelopeAmount", recipe.filterEnvelopeAmount);
-        }
     }
 
     recipe.automationLanes = document.automationLanes;
@@ -4192,7 +4285,12 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             continue;
 
         GraphNodeModel node;
-        node.id = patchNode.kind; // singleton types always use their kind as id, matching rebuildNodeGraphFromRecipe()
+        // Mix/Output/Scope/Analyzer are still singleton, so their fixed
+        // kind-as-id keeps rebuildNodeGraphFromRecipe()'s prior-position
+        // lookup working. Filter/Envelope are real independent instances
+        // now (Phase 3) -- use the actual saved id so multiple instances
+        // round-trip correctly instead of collapsing onto one shared id.
+        node.id = (patchNode.kind == "filter" || patchNode.kind == "envelope") ? patchNode.id : patchNode.kind;
         node.type = patchNode.kind;
         node.title = graphNodeTitle(node.type);
         node.position = { patchNode.canvasX, patchNode.canvasY };
@@ -4210,6 +4308,22 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
                 if (! volumes.isEmpty())
                     node.mixerInputVolumes = volumes;
             }
+        }
+        else if (patchNode.kind == "filter")
+        {
+            node.filterMode = patchNode.properties.getWithDefault("mode", node.filterMode).toString();
+            node.filterCutoffHz = (float) patchNode.properties.getWithDefault("cutoffHz", node.filterCutoffHz);
+            node.filterResonance = (float) patchNode.properties.getWithDefault("resonance", node.filterResonance);
+            node.filterEnvelopeAmount = (float) patchNode.properties.getWithDefault("envelopeAmount", node.filterEnvelopeAmount);
+        }
+        else if (patchNode.kind == "envelope")
+        {
+            node.envelopeCurveMode = patchNode.properties.getWithDefault("curveMode", node.envelopeCurveMode).toString();
+            auto pointsJson = patchNode.properties.getWithDefault("pointsJson", {}).toString();
+            if (pointsJson.isNotEmpty())
+                node.envelopePoints = parsePointsJson(pointsJson, node.envelopeCurveMode);
+            if (node.envelopePoints.isEmpty())
+                node.envelopePoints = makeDefaultEnvelopePoints(node.envelopeCurveMode);
         }
 
         graphNodes.add(node);
@@ -4718,18 +4832,18 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
             else if (node.type == "filter")
             {
                 double wiredValue = 0.0;
-                patchNode.properties.set("mode", recipeCopy.filterMode);
+                patchNode.properties.set("mode", node.filterMode);
                 patchNode.properties.set("cutoffHz", findWiredParameterValue(node.id, "param:filterCutoff", wiredValue)
-                                                    ? wiredValue : (double) recipeCopy.filterCutoffHz);
+                                                    ? wiredValue : (double) node.filterCutoffHz);
                 patchNode.properties.set("resonance", findWiredParameterValue(node.id, "param:filterResonance", wiredValue)
-                                                     ? wiredValue : (double) recipeCopy.filterResonance);
+                                                     ? wiredValue : (double) node.filterResonance);
                 patchNode.properties.set("envelopeAmount", findWiredParameterValue(node.id, "param:filterEnvelopeAmount", wiredValue)
-                                                          ? wiredValue : (double) recipeCopy.filterEnvelopeAmount);
+                                                          ? wiredValue : (double) node.filterEnvelopeAmount);
             }
             else if (node.type == "envelope")
             {
-                patchNode.properties.set("curveMode", recipeCopy.envelopeCurveMode);
-                patchNode.properties.set("pointsJson", serialisePointsJson(recipeCopy.envelopePoints));
+                patchNode.properties.set("curveMode", node.envelopeCurveMode);
+                patchNode.properties.set("pointsJson", serialisePointsJson(node.envelopePoints));
             }
 
             document.nodes.add(patchNode);
@@ -4911,6 +5025,29 @@ void SignalLabPanel::applyTemplate(const juce::String& templateName)
     rebuildAutomationChrome();
     refreshControlsFromRecipe();
     seedOscillatorNodesFromRecipeLevels();
+
+    // Filter/Envelope are independent per-instance nodes now (Phase 3) --
+    // a template only sets the legacy recipe scalars above, so if any
+    // Filter/Envelope nodes are already on the canvas, push the template's
+    // values into them directly. This deliberately doesn't create new
+    // Filter/Envelope nodes -- templates tune character for whatever's
+    // already placed, they don't add structure to the graph.
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "filter")
+        {
+            node.filterMode = recipe.filterMode;
+            node.filterCutoffHz = recipe.filterCutoffHz;
+            node.filterResonance = recipe.filterResonance;
+            node.filterEnvelopeAmount = recipe.filterEnvelopeAmount;
+        }
+        else if (node.type == "envelope")
+        {
+            node.envelopeCurveMode = recipe.envelopeCurveMode;
+            node.envelopePoints = recipe.envelopePoints;
+        }
+    }
+
     regenerateSignal();
 }
 

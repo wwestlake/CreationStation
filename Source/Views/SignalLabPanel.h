@@ -84,6 +84,19 @@ private:
         // nodes edit the same value. frequencyHz is ignored for noise.
         float oscillatorLevel = 0.5f;
         float oscillatorFrequencyHz = 180.0f;
+
+        // Filter instances only: same reasoning as oscillators above -- each
+        // Filter node owns its own cutoff/resonance/mode instead of the
+        // recipe's old singleton fields, so multiple Filters in different
+        // chain positions can have different settings.
+        juce::String filterMode { "lowpass" };
+        float filterCutoffHz = 3600.0f;
+        float filterResonance = 0.90f;
+        float filterEnvelopeAmount = 0.35f;
+
+        // Envelope instances only: each Envelope node owns its own curve.
+        juce::String envelopeCurveMode { "smooth" };
+        juce::Array<cw::PatchAutomationPoint> envelopePoints;
     };
 
     enum class PortValueType { Float, Int, Bool };
