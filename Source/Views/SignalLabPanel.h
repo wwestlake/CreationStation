@@ -234,9 +234,6 @@ private:
     {
         bool scopeEnabled = false;
         bool analyzerEnabled = false;
-        double scopeTimebaseMs = 20.0;
-        double scopeGainA = 1.0;
-        double scopeGainB = 1.0;
         double analyzerMinHz = 20.0;
         double analyzerMaxHz = 20000.0;
         double analyzerDbFloor = -96.0;
@@ -270,14 +267,34 @@ private:
         int findPointAt(juce::Point<float> position) const;
     };
 
+    // Self-contained oscilloscope: owns its own timebase/start-time/level-zoom/
+    // trigger-level controls (like a real bench scope's front panel) so it
+    // works identically wherever it's dropped -- the inline inspector preview
+    // and the detachable tool window both just call setBuffer().
     class ScopePanel final : public juce::Component
     {
     public:
-        void setBuffer(const juce::AudioBuffer<float>& buffer);
+        ScopePanel();
+        void setBuffer(const juce::AudioBuffer<float>& buffer, double newSampleRate);
         void paint(juce::Graphics& g) override;
+        void resized() override;
 
     private:
         juce::AudioBuffer<float> displayBuffer;
+        double sampleRate = 44100.0;
+
+        juce::Slider timebaseSlider, startTimeSlider, levelZoomSlider, triggerSlider;
+        juce::Label timebaseLabel, startTimeLabel, levelZoomLabel, triggerLabel;
+
+        void configureControlSlider(juce::Slider& slider, juce::Label& label, const juce::String& text);
+        double getTotalDurationMs() const;
+        void refreshSliderRanges();
+        juce::Rectangle<int> getPlotArea() const;
+        // Rising-edge crossing of triggerSlider's value at or after
+        // fromSample, searched on channel 0 -- returns -1 (no trigger,
+        // caller free-runs from fromSample instead) if none found within
+        // the search window.
+        int findTriggerCrossing(int fromSample, int searchLimitSamples) const;
     };
 
     class SpectrumPanel final : public juce::Component

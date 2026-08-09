@@ -1122,10 +1122,110 @@ void SignalLabPanel::EnvelopeEditor::mouseDoubleClick(const juce::MouseEvent& ev
     repaint();
 }
 
-void SignalLabPanel::ScopePanel::setBuffer(const juce::AudioBuffer<float>& buffer)
+SignalLabPanel::ScopePanel::ScopePanel()
+{
+    configureControlSlider(timebaseSlider, timebaseLabel, "Time/Div");
+    configureControlSlider(startTimeSlider, startTimeLabel, "Start");
+    configureControlSlider(levelZoomSlider, levelZoomLabel, "Level");
+    configureControlSlider(triggerSlider, triggerLabel, "Trigger");
+
+    timebaseSlider.setRange(0.5, 50.0, 0.1);
+    timebaseSlider.setValue(20.0, juce::dontSendNotification);
+    timebaseSlider.setSkewFactorFromMidPoint(10.0);
+    timebaseSlider.setTextValueSuffix(" ms");
+
+    startTimeSlider.setRange(0.0, 0.0, 0.1);
+    startTimeSlider.setTextValueSuffix(" ms");
+
+    levelZoomSlider.setRange(0.1, 10.0, 0.01);
+    levelZoomSlider.setValue(1.0, juce::dontSendNotification);
+    levelZoomSlider.setSkewFactorFromMidPoint(1.0);
+    levelZoomSlider.setTextValueSuffix(" x");
+
+    triggerSlider.setRange(-1.0, 1.0, 0.01);
+    triggerSlider.setValue(0.0, juce::dontSendNotification);
+
+    timebaseSlider.onValueChange = [this] { refreshSliderRanges(); repaint(); };
+    startTimeSlider.onValueChange = [this] { repaint(); };
+    levelZoomSlider.onValueChange = [this] { repaint(); };
+    triggerSlider.onValueChange = [this] { repaint(); };
+}
+
+void SignalLabPanel::ScopePanel::configureControlSlider(juce::Slider& slider, juce::Label& label, const juce::String& text)
+{
+    label.setText(text, juce::dontSendNotification);
+    label.setFont(juce::Font(11.0f));
+    label.setColour(juce::Label::textColourId, juce::Colour(0xff9db0c8));
+    label.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(label);
+
+    slider.setSliderStyle(juce::Slider::LinearHorizontal);
+    slider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 18);
+    addAndMakeVisible(slider);
+}
+
+double SignalLabPanel::ScopePanel::getTotalDurationMs() const
+{
+    return sampleRate > 0.0 ? (double) displayBuffer.getNumSamples() / sampleRate * 1000.0 : 0.0;
+}
+
+void SignalLabPanel::ScopePanel::refreshSliderRanges()
+{
+    auto totalMs = getTotalDurationMs();
+
+    // Timebase can zoom out as far as the whole signal, however long it is,
+    // and in as far as a fraction of a millisecond to see individual cycles.
+    auto maxTimebase = juce::jmax(0.5, totalMs);
+    if (timebaseSlider.getMaximum() != maxTimebase)
+    {
+        auto current = timebaseSlider.getValue();
+        timebaseSlider.setRange(0.5, maxTimebase, maxTimebase > 50.0 ? 0.1 : 0.01);
+        timebaseSlider.setSkewFactorFromMidPoint(juce::jlimit(1.0, maxTimebase * 0.5, 10.0));
+        timebaseSlider.setValue(juce::jlimit(0.5, maxTimebase, current), juce::dontSendNotification);
+    }
+
+    // Start time (the window/pan control) can slide anywhere from the
+    // beginning of the signal up to "just enough room left for one more
+    // timebase-wide window" -- past that there'd be nothing left to draw.
+    auto maxStart = juce::jmax(0.0, totalMs - timebaseSlider.getValue());
+    auto currentStart = startTimeSlider.getValue();
+    startTimeSlider.setRange(0.0, maxStart, maxStart > 100.0 ? 0.5 : 0.05);
+    startTimeSlider.setValue(juce::jlimit(0.0, maxStart, currentStart), juce::dontSendNotification);
+}
+
+void SignalLabPanel::ScopePanel::setBuffer(const juce::AudioBuffer<float>& buffer, double newSampleRate)
 {
     displayBuffer = buffer;
+    sampleRate = newSampleRate > 0.0 ? newSampleRate : sampleRate;
+    refreshSliderRanges();
     repaint();
+}
+
+namespace
+{
+constexpr int kScopeControlStripHeight = 60;
+}
+
+juce::Rectangle<int> SignalLabPanel::ScopePanel::getPlotArea() const
+{
+    return getLocalBounds().reduced(12, 8).withTrimmedTop(16).withTrimmedBottom(kScopeControlStripHeight);
+}
+
+int SignalLabPanel::ScopePanel::findTriggerCrossing(int fromSample, int searchLimitSamples) const
+{
+    if (displayBuffer.getNumChannels() <= 0)
+        return -1;
+
+    auto* data = displayBuffer.getReadPointer(0);
+    auto numSamples = displayBuffer.getNumSamples();
+    auto triggerLevel = (float) triggerSlider.getValue();
+    auto searchEnd = juce::jmin(numSamples - 1, fromSample + juce::jmax(1, searchLimitSamples));
+
+    for (int i = juce::jmax(1, fromSample); i < searchEnd; ++i)
+        if (data[i - 1] < triggerLevel && data[i] >= triggerLevel)
+            return i;
+
+    return -1; // free-run: no crossing found, caller just starts at fromSample
 }
 
 void SignalLabPanel::ScopePanel::paint(juce::Graphics& g)
@@ -1136,34 +1236,100 @@ void SignalLabPanel::ScopePanel::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff2a3445));
     g.drawRoundedRectangle(bounds, 12.0f, 1.0f);
 
-    auto plot = getLocalBounds().reduced(12, 16);
-    g.setColour(juce::Colour(0xff263140));
-    g.drawHorizontalLine(plot.getCentreY(), (float) plot.getX(), (float) plot.getRight());
+    auto plot = getPlotArea();
+    g.setColour(juce::Colour(0xff0f141c));
+    g.fillRect(plot);
 
     g.setColour(juce::Colour(0xffcbd5e1));
     g.setFont(juce::Font(13.0f).boldened());
-    g.drawText("Oscilloscope", plot.removeFromTop(18), juce::Justification::centredLeft, false);
+    g.drawText("Oscilloscope", juce::Rectangle<int>(plot.getX(), plot.getY() - 16, plot.getWidth(), 16), juce::Justification::centredLeft, false);
 
-    if (displayBuffer.getNumSamples() <= 0)
-        return;
+    // Scope-style grid: a handful of light divisions plus a brighter
+    // centre/zero line, the way a real bench scope's graticule looks.
+    g.setColour(juce::Colour(0xff1b2430));
+    for (int division = 1; division < 8; ++division)
+        g.drawVerticalLine(plot.getX() + juce::roundToInt(plot.getWidth() * (division / 8.0f)), (float) plot.getY(), (float) plot.getBottom());
+    for (int division = 1; division < 4; ++division)
+        g.drawHorizontalLine(plot.getY() + juce::roundToInt(plot.getHeight() * (division / 4.0f)), (float) plot.getX(), (float) plot.getRight());
+    g.setColour(juce::Colour(0xff2a3745));
+    g.drawHorizontalLine(plot.getCentreY(), (float) plot.getX(), (float) plot.getRight());
 
-    auto waveformArea = plot.reduced(0, 8);
-    juce::Path path;
-    auto numSamples = juce::jmin(displayBuffer.getNumSamples(), 2048);
-    auto* channelData = displayBuffer.getReadPointer(0);
-
-    for (int index = 0; index < numSamples; ++index)
+    if (displayBuffer.getNumSamples() > 0 && sampleRate > 0.0)
     {
-        auto x = juce::jmap((float) index / (float) juce::jmax(1, numSamples - 1), (float) waveformArea.getX(), (float) waveformArea.getRight());
-        auto y = juce::jmap(channelData[index], 1.0f, -1.0f, (float) waveformArea.getY(), (float) waveformArea.getBottom());
-        if (index == 0)
-            path.startNewSubPath(x, y);
-        else
-            path.lineTo(x, y);
-    }
+        auto timebaseMs = timebaseSlider.getValue();
+        auto startMs = startTimeSlider.getValue();
+        auto windowSamples = juce::jmax(2, (int) std::llround(timebaseMs / 1000.0 * sampleRate));
+        auto startSample = (int) std::llround(startMs / 1000.0 * sampleRate);
 
-    g.setColour(signalAccentColour());
-    g.strokePath(path, juce::PathStrokeType(1.75f));
+        auto triggeredStart = findTriggerCrossing(startSample, windowSamples * 2);
+        auto plotStart = triggeredStart >= 0 ? triggeredStart : startSample;
+
+        // Trigger reference line, dashed, at the level the trigger is armed
+        // at -- only meaningful (and only drawn) once a crossing was
+        // actually found for this window.
+        if (triggeredStart >= 0)
+        {
+            auto triggerY = juce::jmap((float) triggerSlider.getValue(), 1.0f, -1.0f, (float) plot.getY(), (float) plot.getBottom());
+            float dashLengths[] = { 4.0f, 4.0f };
+            juce::Path dashPath;
+            dashPath.startNewSubPath((float) plot.getX(), triggerY);
+            dashPath.lineTo((float) plot.getRight(), triggerY);
+            juce::Path dashed;
+            juce::PathStrokeType(1.0f).createDashedStroke(dashed, dashPath, dashLengths, 2);
+            g.setColour(juce::Colours::orange.withAlpha(0.6f));
+            g.strokePath(dashed, juce::PathStrokeType(1.0f));
+        }
+
+        auto levelZoom = (float) levelZoomSlider.getValue();
+        auto drawChannel = [&](int channel, juce::Colour colour)
+        {
+            if (channel >= displayBuffer.getNumChannels())
+                return;
+
+            auto* data = displayBuffer.getReadPointer(channel);
+            auto numSamples = displayBuffer.getNumSamples();
+            juce::Path path;
+            bool started = false;
+
+            for (int x = 0; x <= plot.getWidth(); ++x)
+            {
+                auto sampleIndex = plotStart + (int) (((int64_t) x * windowSamples) / juce::jmax(1, plot.getWidth()));
+                if (sampleIndex < 0 || sampleIndex >= numSamples)
+                    continue;
+
+                auto value = juce::jlimit(-1.0f, 1.0f, data[sampleIndex] * levelZoom);
+                auto px = (float) (plot.getX() + x);
+                auto py = juce::jmap(value, 1.0f, -1.0f, (float) plot.getY(), (float) plot.getBottom());
+                if (! started) { path.startNewSubPath(px, py); started = true; }
+                else path.lineTo(px, py);
+            }
+
+            g.setColour(colour);
+            g.strokePath(path, juce::PathStrokeType(1.5f));
+        };
+
+        drawChannel(0, juce::Colour(0xff66e0ff));
+        drawChannel(1, juce::Colour(0xffff9ac9));
+    }
+}
+
+void SignalLabPanel::ScopePanel::resized()
+{
+    auto bounds = getLocalBounds().reduced(12, 8);
+    auto controls = bounds.removeFromBottom(kScopeControlStripHeight);
+    auto columnWidth = controls.getWidth() / 4;
+
+    auto layoutColumn = [&](juce::Label& label, juce::Slider& slider)
+    {
+        auto column = controls.removeFromLeft(columnWidth).reduced(4, 0);
+        label.setBounds(column.removeFromTop(14));
+        slider.setBounds(column.removeFromTop(24));
+    };
+
+    layoutColumn(timebaseLabel, timebaseSlider);
+    layoutColumn(startTimeLabel, startTimeSlider);
+    layoutColumn(levelZoomLabel, levelZoomSlider);
+    layoutColumn(triggerLabel, triggerSlider);
 }
 
 void SignalLabPanel::SpectrumPanel::setBuffer(const juce::AudioBuffer<float>& buffer, double)
@@ -1537,7 +1703,7 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
                     detail += node.midiButtonMode == "toggle" ? " (toggle)" : " (momentary)";
             }
         }
-        else if (node.type == "scope") detail = "2 traces • " + juce::String(owner.probeSettings.scopeTimebaseMs, 1) + " ms";
+        else if (node.type == "scope") detail = "2 traces";
         else if (node.type == "analyzer") detail = juce::String(juce::roundToInt(owner.probeSettings.analyzerMinHz)) + "-" + juce::String(juce::roundToInt(owner.probeSettings.analyzerMaxHz)) + " Hz";
         else if (node.type == "timeline")
         {
@@ -1585,8 +1751,8 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
                 g.setColour(colour);
                 g.strokePath(path, juce::PathStrokeType(1.2f));
             };
-            drawTrace(0, juce::Colour(0xff66e0ff), (float) owner.probeSettings.scopeGainA);
-            drawTrace(1, juce::Colour(0xffff9ac9), (float) owner.probeSettings.scopeGainB);
+            drawTrace(0, juce::Colour(0xff66e0ff), 1.0f);
+            drawTrace(1, juce::Colour(0xffff9ac9), 1.0f);
         }
         else if (node.type == "analyzer" && owner.getDisplayBufferForNode(node.id).getNumSamples() > 32)
         {
@@ -2714,30 +2880,21 @@ SignalLabPanel::SignalLabPanel()
     {
         if (suppressCallbacks) return;
         noteInteraction();
-        if (selectedGraphNodeIndex >= 0 && graphNodes.getReference(selectedGraphNodeIndex).type == "scope")
-            probeSettings.scopeTimebaseMs = probeControlASlider.getValue();
-        else
-            probeSettings.analyzerMinHz = probeControlASlider.getValue();
+        probeSettings.analyzerMinHz = probeControlASlider.getValue();
         nodeGraphCanvas.repaint();
     };
     probeControlBSlider.onValueChange = [this]
     {
         if (suppressCallbacks) return;
         noteInteraction();
-        if (selectedGraphNodeIndex >= 0 && graphNodes.getReference(selectedGraphNodeIndex).type == "scope")
-            probeSettings.scopeGainA = probeControlBSlider.getValue();
-        else
-            probeSettings.analyzerMaxHz = probeControlBSlider.getValue();
+        probeSettings.analyzerMaxHz = probeControlBSlider.getValue();
         nodeGraphCanvas.repaint();
     };
     probeControlCSlider.onValueChange = [this]
     {
         if (suppressCallbacks) return;
         noteInteraction();
-        if (selectedGraphNodeIndex >= 0 && graphNodes.getReference(selectedGraphNodeIndex).type == "scope")
-            probeSettings.scopeGainB = probeControlCSlider.getValue();
-        else
-            probeSettings.analyzerDbFloor = probeControlCSlider.getValue();
+        probeSettings.analyzerDbFloor = probeControlCSlider.getValue();
         nodeGraphCanvas.repaint();
     };
     probeControlDSlider.onValueChange = [this]
@@ -3143,22 +3300,7 @@ void SignalLabPanel::updateInspectorForSelection()
     }
     else if (type == "scope")
     {
-        inspectorBodyLabel.setText("Dual-trace oscilloscope probe node. For now it previews the current rendered stereo signal inline and here; next pass will add attachable probe targets and detachable full instrument windows.", juce::dontSendNotification);
-        probeControlALabel.setText("Timebase (ms)", juce::dontSendNotification);
-        probeControlBLabel.setText("Trace A Gain", juce::dontSendNotification);
-        probeControlCLabel.setText("Trace B Gain", juce::dontSendNotification);
-        probeControlDLabel.setText("Analyzer Smooth", juce::dontSendNotification);
-        probeControlASlider.setRange(0.5, 250.0, 0.1);
-        probeControlBSlider.setRange(0.1, 4.0, 0.01);
-        probeControlCSlider.setRange(0.1, 4.0, 0.01);
-        probeControlDSlider.setRange(0.0, 1.0, 0.01);
-        probeControlASlider.setValue(probeSettings.scopeTimebaseMs, juce::dontSendNotification);
-        probeControlBSlider.setValue(probeSettings.scopeGainA, juce::dontSendNotification);
-        probeControlCSlider.setValue(probeSettings.scopeGainB, juce::dontSendNotification);
-        probeControlDSlider.setValue(probeSettings.analyzerSmoothing, juce::dontSendNotification);
-        probeControlALabel.setVisible(true); probeControlASlider.setVisible(true);
-        probeControlBLabel.setVisible(true); probeControlBSlider.setVisible(true);
-        probeControlCLabel.setVisible(true); probeControlCSlider.setVisible(true);
+        inspectorBodyLabel.setText("Dual-trace oscilloscope probe node. Time/Div, Start, Level and Trigger are on the scope's own front panel below.", juce::dontSendNotification);
         scopePanel.setVisible(true);
     }
     else if (type == "analyzer")
@@ -4090,8 +4232,8 @@ void SignalLabPanel::openNodeEditorForSelection()
     {
         ensureAudioRendered();
         auto* scope = new ScopePanel();
-        scope->setBuffer(getDisplayBufferForNode(node.id));
-        content->addCustomComponent(scope, 220);
+        scope->setBuffer(getDisplayBufferForNode(node.id), recipe.sampleRate);
+        content->addCustomComponent(scope, 300);
     }
     else if (node.type == "analyzer")
     {
@@ -5784,7 +5926,7 @@ void SignalLabPanel::ensureAudioRendered()
         generatedBuffer = buildSignalBuffer(recipe);
 
     envelopeEditor.setRecipe(recipe);
-    scopePanel.setBuffer(generatedBuffer);
+    scopePanel.setBuffer(generatedBuffer, recipe.sampleRate);
     spectrumPanel.setBuffer(generatedBuffer, recipe.sampleRate);
     audioDirty = false;
 
