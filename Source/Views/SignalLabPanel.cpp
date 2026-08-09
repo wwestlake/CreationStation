@@ -453,15 +453,36 @@ float normalizedToCutoff(float normalized)
 // the target parameter's actual range first, same mapping PatchLiveVoice
 // applies for the live path (resolveMidiOrLinear/resolveMidiOrLog) -- kept
 // in sync deliberately, not by sharing code across the two files.
-double scaleNormalizedWiredValue(const juce::String& parameterId, double normalized)
+// Level's taper: a fader is felt in dB, not linear amplitude -- a plain
+// 0..1-to-amplitude mapping crams almost all the perceptible loudness
+// change into the last sliver near the top of the throw, so "full" barely
+// sounds louder than 80%. -48dB floor at normalized 0 (clamped to true
+// silence right at the bottom), 0dB/unity at normalized 1.
+constexpr double kMinLevelDb = -48.0;
+
+double normalizedLevelToAmplitude(double normalized)
+{
+    auto clamped = juce::jlimit(0.0, 1.0, normalized);
+    if (clamped <= 0.0001)
+        return 0.0;
+    auto db = juce::jmap(clamped, 0.0, 1.0, kMinLevelDb, 0.0);
+    return std::pow(10.0, db / 20.0);
+}
+
+double scaleNormalizedWiredValue(const juce::String& parameterId, double normalized, double sampleRate = 44100.0)
 {
     auto clamped = juce::jlimit(0.0, 1.0, normalized);
     if (parameterId == "filterCutoff" || parameterId.endsWith("Frequency"))
     {
         if (parameterId == "filterCutoff")
             return (double) normalizedToCutoff((float) clamped);
-        auto logMin = std::log(30.0);
-        auto logMax = std::log(2400.0);
+        // Oscillator frequency spans the full audible range up to Nyquist for
+        // whatever the project's actual sample rate is, not a fixed cap --
+        // a fixed 2400Hz ceiling made it impossible to dial in a bright/high
+        // pitch at all.
+        auto nyquist = juce::jmax(40.0, sampleRate * 0.5);
+        auto logMin = std::log(20.0);
+        auto logMax = std::log(nyquist);
         return std::exp(logMin + (logMax - logMin) * clamped);
     }
     if (parameterId == "filterResonance")
@@ -470,7 +491,45 @@ double scaleNormalizedWiredValue(const juce::String& parameterId, double normali
         return juce::jmap(clamped, 0.0, 1.0, -1.0, 1.0);
     if (parameterId.startsWith("mixWeight"))
         return juce::jmap(clamped, 0.0, 1.0, 0.0, 1.5);
-    return clamped; // Level and anything else already wants 0..1 as-is
+    if (parameterId.endsWith("Level"))
+        return normalizedLevelToAmplitude(clamped);
+    return clamped; // anything else already wants 0..1 as-is
+}
+
+// Inverse of scaleNormalizedWiredValue -- used when the on-screen slider for
+// a Fader-Control-wired parameter is dragged manually, to turn the real
+// value the slider now shows back into the raw 0..1 the driving MIDI node
+// stores (and echoes out to the physical fader's motor). Keeping the manual
+// slider live for a Fader Control binding, not just the physical fader, is
+// what makes "either control moves the slider" true here the same way it
+// already is for a Tracker channel strip.
+double normalizedFromRealValue(const juce::String& parameterId, double realValue, double sampleRate = 44100.0)
+{
+    if (parameterId == "filterCutoff")
+        return (double) cutoffToNormalized((float) realValue);
+    if (parameterId.endsWith("Frequency"))
+    {
+        auto nyquist = juce::jmax(40.0, sampleRate * 0.5);
+        auto logMin = std::log(20.0);
+        auto logMax = std::log(nyquist);
+        auto clampedHz = juce::jlimit(20.0, nyquist, realValue);
+        return juce::jlimit(0.0, 1.0, (std::log(clampedHz) - logMin) / (logMax - logMin));
+    }
+    if (parameterId == "filterResonance")
+        return juce::jlimit(0.0, 1.0, juce::jmap(realValue, 0.30, 8.0, 0.0, 1.0));
+    if (parameterId == "filterEnvelopeAmount")
+        return juce::jlimit(0.0, 1.0, juce::jmap(realValue, -1.0, 1.0, 0.0, 1.0));
+    if (parameterId.startsWith("mixWeight"))
+        return juce::jlimit(0.0, 1.0, juce::jmap(realValue, 0.0, 1.5, 0.0, 1.0));
+    if (parameterId.endsWith("Level"))
+    {
+        auto clampedAmp = juce::jmax(0.0, realValue);
+        if (clampedAmp <= 0.0001)
+            return 0.0;
+        auto db = 20.0 * std::log10(clampedAmp);
+        return juce::jlimit(0.0, 1.0, juce::jmap(db, kMinLevelDb, 0.0, 0.0, 1.0));
+    }
+    return juce::jlimit(0.0, 1.0, realValue);
 }
 
 juce::String formatDurationText(double seconds)
@@ -1433,7 +1492,7 @@ void SignalLabPanel::NodeGraphCanvas::paint(juce::Graphics& g)
             auto level = owner.findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel)
                        ? scaleNormalizedWiredValue(node.type + "Level", wiredLevel) : (double) node.oscillatorLevel;
             auto freq = owner.findWiredParameterValue(node.id, "param:" + node.type + "Frequency", wiredFreq)
-                      ? scaleNormalizedWiredValue(node.type + "Frequency", wiredFreq) : (double) node.oscillatorFrequencyHz;
+                      ? scaleNormalizedWiredValue(node.type + "Frequency", wiredFreq, owner.recipe.sampleRate) : (double) node.oscillatorFrequencyHz;
             detail = "Level " + juce::String(level, 2) + " • " + juce::String(juce::roundToInt(freq)) + " Hz";
         }
         else if (node.type == "noise")
@@ -2453,7 +2512,8 @@ SignalLabPanel::SignalLabPanel()
     setupLabel(probeControlCLabel, "Probe C");
     setupLabel(probeControlDLabel, "Probe D");
 
-    configureSlider(frequencySlider, 30.0, 2400.0, 1.0);
+    configureSlider(frequencySlider, 20.0, 20000.0, 1.0);
+    frequencySlider.setSkewFactorFromMidPoint(440.0);
     configureSlider(durationSlider, 0.1, 3600.0, 0.01);
     durationSlider.setSkewFactorFromMidPoint(8.0);
     durationSlider.setNumDecimalPlacesToDisplay(2);
@@ -2532,7 +2592,12 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks) return;
         noteInteraction();
         if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
-            graphNodes.getReference(selectedGraphNodeIndex).oscillatorFrequencyHz = (float) frequencySlider.getValue();
+        {
+            auto& node = graphNodes.getReference(selectedGraphNodeIndex);
+            auto portId = "param:" + node.type + "Frequency";
+            if (! tryPushFaderDrivenValue(node.id, portId, node.type + "Frequency", frequencySlider.getValue()))
+                node.oscillatorFrequencyHz = (float) frequencySlider.getValue();
+        }
         regenerateSignal();
     };
     durationSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.durationSeconds = durationSlider.getValue(); regenerateSignal(); } };
@@ -2588,7 +2653,11 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks) return;
         noteInteraction();
         if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
-            graphNodes.getReference(selectedGraphNodeIndex).filterCutoffHz = (float) filterCutoffSlider.getValue();
+        {
+            auto& node = graphNodes.getReference(selectedGraphNodeIndex);
+            if (! tryPushFaderDrivenValue(node.id, "param:filterCutoff", "filterCutoff", filterCutoffSlider.getValue()))
+                node.filterCutoffHz = (float) filterCutoffSlider.getValue();
+        }
         regenerateSignal();
     };
     filterResonanceSlider.onValueChange = [this]
@@ -2596,7 +2665,11 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks) return;
         noteInteraction();
         if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
-            graphNodes.getReference(selectedGraphNodeIndex).filterResonance = (float) filterResonanceSlider.getValue();
+        {
+            auto& node = graphNodes.getReference(selectedGraphNodeIndex);
+            if (! tryPushFaderDrivenValue(node.id, "param:filterResonance", "filterResonance", filterResonanceSlider.getValue()))
+                node.filterResonance = (float) filterResonanceSlider.getValue();
+        }
         regenerateSignal();
     };
     filterEnvelopeSlider.onValueChange = [this]
@@ -2604,7 +2677,11 @@ SignalLabPanel::SignalLabPanel()
         if (suppressCallbacks) return;
         noteInteraction();
         if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
-            graphNodes.getReference(selectedGraphNodeIndex).filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue();
+        {
+            auto& node = graphNodes.getReference(selectedGraphNodeIndex);
+            if (! tryPushFaderDrivenValue(node.id, "param:filterEnvelopeAmount", "filterEnvelopeAmount", filterEnvelopeSlider.getValue()))
+                node.filterEnvelopeAmount = (float) filterEnvelopeSlider.getValue();
+        }
         regenerateSignal();
     };
     macroHardnessSlider.onValueChange = [this] { if (! suppressCallbacks) { noteInteraction(); recipe.macroHardness = (float) macroHardnessSlider.getValue(); regenerateSignal(); } };
@@ -2619,7 +2696,12 @@ SignalLabPanel::SignalLabPanel()
             if (suppressCallbacks) return;
             noteInteraction();
             if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
-                graphNodes.getReference(selectedGraphNodeIndex).oscillatorLevel = (float) slider.getValue();
+            {
+                auto& node = graphNodes.getReference(selectedGraphNodeIndex);
+                auto portId = "param:" + node.type + "Level";
+                if (! tryPushFaderDrivenValue(node.id, portId, node.type + "Level", slider.getValue()))
+                    node.oscillatorLevel = (float) slider.getValue();
+            }
             regenerateSignal();
         };
     };
@@ -2979,9 +3061,11 @@ void SignalLabPanel::updateInspectorForSelection()
         if (type != "noise")
         {
             double wiredFrequency = 0.0;
-            auto isFrequencyWired = findWiredParameterValue(selectedNode.id, "param:" + type + "Frequency", wiredFrequency);
-            frequencySlider.setValue(isFrequencyWired ? scaleNormalizedWiredValue(type + "Frequency", wiredFrequency) : (double) selectedNode.oscillatorFrequencyHz, juce::dontSendNotification);
-            frequencySlider.setEnabled(! isFrequencyWired);
+            auto freqPortId = "param:" + type + "Frequency";
+            auto isFrequencyWired = findWiredParameterValue(selectedNode.id, freqPortId, wiredFrequency);
+            auto isFrequencyFaderDriven = isFrequencyWired && isPortFaderDriven(selectedNode.id, freqPortId);
+            frequencySlider.setValue(isFrequencyWired ? scaleNormalizedWiredValue(type + "Frequency", wiredFrequency, recipe.sampleRate) : (double) selectedNode.oscillatorFrequencyHz, juce::dontSendNotification);
+            frequencySlider.setEnabled(! isFrequencyWired || isFrequencyFaderDriven);
         }
         else
         {
@@ -2989,13 +3073,16 @@ void SignalLabPanel::updateInspectorForSelection()
         }
 
         double wiredLevel = 0.0;
-        auto isLevelWired = findWiredParameterValue(selectedNode.id, "param:" + type + "Level", wiredLevel);
-        auto levelToShow = isLevelWired ? (float) wiredLevel : selectedNode.oscillatorLevel;
-        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); sineSlider.setValue(levelToShow, juce::dontSendNotification); sineSlider.setEnabled(! isLevelWired); }
-        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); sawSlider.setValue(levelToShow, juce::dontSendNotification); sawSlider.setEnabled(! isLevelWired); }
-        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); squareSlider.setValue(levelToShow, juce::dontSendNotification); squareSlider.setEnabled(! isLevelWired); }
-        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); triangleSlider.setValue(levelToShow, juce::dontSendNotification); triangleSlider.setEnabled(! isLevelWired); }
-        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); noiseSlider.setValue(levelToShow, juce::dontSendNotification); noiseSlider.setEnabled(! isLevelWired); }
+        auto levelPortId = "param:" + type + "Level";
+        auto isLevelWired = findWiredParameterValue(selectedNode.id, levelPortId, wiredLevel);
+        auto isLevelFaderDriven = isLevelWired && isPortFaderDriven(selectedNode.id, levelPortId);
+        auto levelToShow = isLevelWired ? (float) scaleNormalizedWiredValue(type + "Level", wiredLevel) : selectedNode.oscillatorLevel;
+        auto levelEnabled = ! isLevelWired || isLevelFaderDriven;
+        if (type == "sine") { sineLabel.setVisible(true); sineSlider.setVisible(true); sineSlider.setValue(levelToShow, juce::dontSendNotification); sineSlider.setEnabled(levelEnabled); }
+        else if (type == "saw") { sawLabel.setVisible(true); sawSlider.setVisible(true); sawSlider.setValue(levelToShow, juce::dontSendNotification); sawSlider.setEnabled(levelEnabled); }
+        else if (type == "square") { squareLabel.setVisible(true); squareSlider.setVisible(true); squareSlider.setValue(levelToShow, juce::dontSendNotification); squareSlider.setEnabled(levelEnabled); }
+        else if (type == "triangle") { triangleLabel.setVisible(true); triangleSlider.setVisible(true); triangleSlider.setValue(levelToShow, juce::dontSendNotification); triangleSlider.setEnabled(levelEnabled); }
+        else if (type == "noise") { noiseLabel.setVisible(true); noiseSlider.setVisible(true); noiseSlider.setValue(levelToShow, juce::dontSendNotification); noiseSlider.setEnabled(levelEnabled); }
         suppressCallbacks = false;
     }
     else if (type == "filter")
@@ -3010,18 +3097,21 @@ void SignalLabPanel::updateInspectorForSelection()
 
         filterCutoffLabel.setVisible(true); filterCutoffSlider.setVisible(true);
         auto cutoffWired = findWiredParameterValue(filterNode.id, "param:filterCutoff", wiredValue);
+        auto cutoffFaderDriven = cutoffWired && isPortFaderDriven(filterNode.id, "param:filterCutoff");
         filterCutoffSlider.setValue(cutoffWired ? scaleNormalizedWiredValue("filterCutoff", wiredValue) : (double) filterNode.filterCutoffHz, juce::dontSendNotification);
-        filterCutoffSlider.setEnabled(! cutoffWired);
+        filterCutoffSlider.setEnabled(! cutoffWired || cutoffFaderDriven);
 
         filterResonanceLabel.setVisible(true); filterResonanceSlider.setVisible(true);
         auto resonanceWired = findWiredParameterValue(filterNode.id, "param:filterResonance", wiredValue);
+        auto resonanceFaderDriven = resonanceWired && isPortFaderDriven(filterNode.id, "param:filterResonance");
         filterResonanceSlider.setValue(resonanceWired ? scaleNormalizedWiredValue("filterResonance", wiredValue) : (double) filterNode.filterResonance, juce::dontSendNotification);
-        filterResonanceSlider.setEnabled(! resonanceWired);
+        filterResonanceSlider.setEnabled(! resonanceWired || resonanceFaderDriven);
 
         filterEnvelopeLabel.setVisible(true); filterEnvelopeSlider.setVisible(true);
         auto envAmountWired = findWiredParameterValue(filterNode.id, "param:filterEnvelopeAmount", wiredValue);
+        auto envAmountFaderDriven = envAmountWired && isPortFaderDriven(filterNode.id, "param:filterEnvelopeAmount");
         filterEnvelopeSlider.setValue(envAmountWired ? scaleNormalizedWiredValue("filterEnvelopeAmount", wiredValue) : (double) filterNode.filterEnvelopeAmount, juce::dontSendNotification);
-        filterEnvelopeSlider.setEnabled(! envAmountWired);
+        filterEnvelopeSlider.setEnabled(! envAmountWired || envAmountFaderDriven);
         suppressCallbacks = false;
     }
     else if (type == "envelope")
@@ -3541,6 +3631,19 @@ juce::String SignalLabPanel::findWiredMidiSourceNodeId(const juce::String& nodeI
     return {};
 }
 
+bool SignalLabPanel::isPortFaderDriven(const juce::String& nodeId, const juce::String& portId) const
+{
+    auto midiSourceId = findWiredMidiSourceNodeId(nodeId, portId);
+    if (midiSourceId.isEmpty())
+        return false;
+
+    for (auto& node : graphNodes)
+        if (node.id == midiSourceId)
+            return node.type == "midiFader";
+
+    return false;
+}
+
 namespace
 {
 juce::String formatPortNumber(double value)
@@ -3571,7 +3674,7 @@ SignalLabPanel::PortValueDisplay SignalLabPanel::describePortValue(int nodeIndex
         double value = 0.0;
         if (isWired)
         {
-            value = scaleNormalizedWiredValue(paramId, wired);
+            value = scaleNormalizedWiredValue(paramId, wired, recipe.sampleRate);
         }
         else if (paramId.endsWith("Level"))
         {
@@ -3679,13 +3782,14 @@ void SignalLabPanel::openNodeEditorForSelection()
             return nullptr;
         };
 
-        auto& freq = content->addSliderRow("Frequency", 30.0, 2400.0, 1.0);
+        auto& freq = content->addSliderRow("Frequency", 20.0, 20000.0, 1.0);
+        freq.setSkewFactorFromMidPoint(440.0);
         if (node.type != "noise")
         {
             double wiredFrequency = 0.0;
             if (findWiredParameterValue(node.id, "param:" + node.type + "Frequency", wiredFrequency))
             {
-                freq.setValue(scaleNormalizedWiredValue(node.type + "Frequency", wiredFrequency), juce::dontSendNotification);
+                freq.setValue(scaleNormalizedWiredValue(node.type + "Frequency", wiredFrequency, recipe.sampleRate), juce::dontSendNotification);
                 freq.setEnabled(false);
             }
             else
@@ -3922,6 +4026,8 @@ void SignalLabPanel::openNodeEditorForSelection()
                 target->midiChannel = channel;
                 target->midiNumber = number;
                 target->midiIsController = isController;
+
+                notifyFaderChannelClaims();
 
                 if (auto* label = statusLabelSafe.getComponent())
                     label->setText(describeBinding(*target), juce::dontSendNotification);
@@ -5504,6 +5610,49 @@ void SignalLabPanel::layoutFloatingWindows()
     controlPadCloseButton.setVisible(false);
 }
 
+void SignalLabPanel::notifyFaderChannelClaims() const
+{
+    if (! onFaderChannelClaimsChanged)
+        return;
+
+    juce::Array<int> channels;
+    for (auto& node : graphNodes)
+        if (node.type == "midiFader" && node.midiLearned && node.midiIsController && node.midiNumber == -1)
+            channels.addIfNotAlreadyThere(node.midiChannel);
+
+    onFaderChannelClaimsChanged(channels);
+}
+
+void SignalLabPanel::pushLiveMidiFaderValue(const juce::String& midiNodeId, float rawNormalizedValue)
+{
+    for (auto& node : graphNodes)
+    {
+        if (node.id != midiNodeId)
+            continue;
+
+        node.midiLiveValue = rawNormalizedValue;
+        audioDirty = true;
+
+        if (onLiveMidiValueChanged)
+            onLiveMidiValueChanged(node.id, node.midiLiveValue);
+
+        if (node.type == "midiFader" && node.midiIsController && node.midiNumber == -1 && onMidiFaderFeedbackRequested)
+            onMidiFaderFeedbackRequested(node.midiChannel, node.midiLiveValue);
+
+        break;
+    }
+}
+
+bool SignalLabPanel::tryPushFaderDrivenValue(const juce::String& nodeId, const juce::String& portId, const juce::String& parameterId, double realValue)
+{
+    auto midiSourceId = findWiredMidiSourceNodeId(nodeId, portId);
+    if (midiSourceId.isEmpty() || ! isPortFaderDriven(nodeId, portId))
+        return false;
+
+    pushLiveMidiFaderValue(midiSourceId, (float) normalizedFromRealValue(parameterId, realValue, recipe.sampleRate));
+    return true;
+}
+
 void SignalLabPanel::regenerateSignal()
 {
     // Cheap path only -- graph/UI bookkeeping so the node cards, status
@@ -5519,6 +5668,7 @@ void SignalLabPanel::regenerateSignal()
     updateStatusText();
     rebuildNodeGraphFromRecipe();
     updateInspectorForSelection();
+    notifyFaderChannelClaims();
 }
 
 void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes)
@@ -5796,7 +5946,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
                 continue;
             double wiredFrequency = 0.0;
             auto effectiveFrequency = findWiredParameterValue(node.id, "param:" + node.type + "Frequency", wiredFrequency)
-                                     ? (float) scaleNormalizedWiredValue(node.type + "Frequency", wiredFrequency) : node.oscillatorFrequencyHz;
+                                     ? (float) scaleNormalizedWiredValue(node.type + "Frequency", wiredFrequency, recipe.sampleRate) : node.oscillatorFrequencyHz;
             auto frequencyParamId = "frequency:" + node.id;
             document.parameters.add({ frequencyParamId, node.title + " Frequency", "float", effectiveFrequency, 30.0, 2400.0, "hz" });
             cw::PatchSource source { node.id, "oscillator", node.type, {}, effectiveLevel, frequencyParamId };

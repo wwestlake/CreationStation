@@ -195,6 +195,18 @@ float PatchLiveVoice::resolveMidiOrLog(int slot, float fallback, float rangeMin,
     return std::exp(logMin + (logMax - logMin) * normalized);
 }
 
+float PatchLiveVoice::resolveMidiOrLevelDb(int slot, float fallback) const noexcept
+{
+    if (slot == kNoSlot)
+        return fallback;
+    auto normalized = juce::jlimit(0.0f, 1.0f, liveMidiValues[(size_t) slot].load());
+    if (normalized <= 0.0001f)
+        return 0.0f;
+    constexpr float minDb = -48.0f;
+    auto db = juce::jmap(normalized, 0.0f, 1.0f, minDb, 0.0f);
+    return std::pow(10.0f, db / 20.0f);
+}
+
 void PatchLiveVoice::start(double durationSeconds)
 {
     if (currentGraph.load() == nullptr)
@@ -590,10 +602,11 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
 
             if (entity.kind == EntityKind::Source)
             {
-                auto level = resolveMidiOr(entity.levelMidiSlot, entity.level);
+                auto level = resolveMidiOrLevelDb(entity.levelMidiSlot, entity.level);
                 if (entity.sourceKind == "oscillator")
                 {
-                    auto liveBaseFrequency = (double) resolveMidiOrLog(entity.frequencyMidiSlot, (float) entity.baseFrequencyHz, 30.0f, 2400.0f);
+                    auto nyquist = (float) juce::jmax(40.0, sampleRate * 0.5);
+                    auto liveBaseFrequency = (double) resolveMidiOrLog(entity.frequencyMidiSlot, (float) entity.baseFrequencyHz, 20.0f, nyquist);
                     auto weightedBaseFrequency = liveBaseFrequency
                                                * (double) juce::jmap(weightMotion, 0.0f, 1.0f, 1.16f, 0.86f)
                                                * (double) juce::jmap(sizeMotion, 0.0f, 1.0f, 1.04f, 0.94f);

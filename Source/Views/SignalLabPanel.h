@@ -96,6 +96,13 @@ public:
     // of springing back to a stale position whenever it's released -- see
     // XTouchControlSurface::sendRawFaderFeedback.
     std::function<void(int channel, float value)> onMidiFaderFeedbackRequested;
+    // Fires with the full current set of MIDI channels bound to a learned
+    // Fader Control node, whenever that set changes (Learn completes, a
+    // node is deleted, a patch loads). Lets the control surface stop
+    // treating those channels as Tracker channel-strip faders -- otherwise
+    // both systems drive the same physical fader from the same incoming
+    // message.
+    std::function<void(const juce::Array<int>&)> onFaderChannelClaimsChanged;
     // Requests the app-level "Learn MIDI Binding" dialog (shared with the
     // transport buttons' MIDI learn -- see MainComponent::requestGenericMidiLearn).
     // onLearned fires once with the captured (deviceId, channel, number, isController).
@@ -471,6 +478,25 @@ private:
     void seedOscillatorNodesFromRecipeLevels();
     bool findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const;
     juce::String findWiredMidiSourceNodeId(const juce::String& nodeId, const juce::String& portId) const;
+    // True only when the port is wired to a Fader Control node specifically
+    // (not a Button Control, not a Get-variable) -- these are the only
+    // wired sources where the on-screen slider should stay live rather than
+    // being disabled, since the physical fader and the on-screen slider are
+    // meant to be two views of the same continuously-adjustable value.
+    bool isPortFaderDriven(const juce::String& nodeId, const juce::String& portId) const;
+    void notifyFaderChannelClaims() const;
+    // Writes a manual on-screen-slider drag straight through to the driving
+    // Fader Control node's live value (and echoes it to the node's bound
+    // physical fader, if any) instead of a now-ignored local field -- see
+    // normalizedFromRealValue() in the .cpp.
+    void pushLiveMidiFaderValue(const juce::String& midiNodeId, float rawNormalizedValue);
+    // If portId is currently wired to a Fader Control node, converts
+    // realValue back to raw 0..1 and pushes it through that node (and out
+    // to its physical fader) instead of the caller writing its own local
+    // manual field. Returns false (does nothing) when the port isn't
+    // Fader-Control-driven, so the caller falls back to its normal manual
+    // write.
+    bool tryPushFaderDrivenValue(const juce::String& nodeId, const juce::String& portId, const juce::String& parameterId, double realValue);
     PortValueDisplay describePortValue(int nodeIndex, const GraphPort& port) const;
     PatchLiveBindingMap buildLiveBindingMap() const;
     void updateInspectorForSelection();

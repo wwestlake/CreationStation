@@ -2117,6 +2117,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         midiSurface.sendRawFaderFeedback(channel, value);
     };
+    signalLabPanel.onFaderChannelClaimsChanged = [this](const juce::Array<int>& channels)
+    {
+        midiSurface.setClaimedFaderChannels(channels);
+    };
 
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
     {

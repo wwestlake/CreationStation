@@ -219,6 +219,10 @@ private:
     float resolveMidiOr(int slot, float fallback) const noexcept;
     float resolveMidiOrLinear(int slot, float fallback, float rangeMin, float rangeMax) const noexcept;
     float resolveMidiOrLog(int slot, float fallback, float rangeMin, float rangeMax) const noexcept;
+    // Level specifically: a fader is felt in dB, not linear amplitude -- see
+    // the matching comment on normalizedLevelToAmplitude() in
+    // SignalLabPanel.cpp, kept in sync deliberately rather than shared.
+    float resolveMidiOrLevelDb(int slot, float fallback) const noexcept;
 
     double sampleRate = 48000.0;
     int maxBlockSize = 512;
