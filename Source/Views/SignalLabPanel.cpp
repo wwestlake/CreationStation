@@ -4409,6 +4409,7 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
         graphConnection.fromPortId = connection.fromPort.isNotEmpty() ? connection.fromPort : "signalOut";
         graphConnection.toPortId = connection.toPort.isNotEmpty() ? connection.toPort : "signalIn";
         graphConnection.isExec = true;
+        graphConnection.waypoints = connection.waypoints;
         graphConnections.add(graphConnection);
     }
 
@@ -5120,6 +5121,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
         patchConnection.fromPort = connection.fromPortId;
         patchConnection.toPort = connection.toPortId;
         patchConnection.weight = 1.0;
+        patchConnection.waypoints = connection.waypoints;
 
         if (connection.toPortId.startsWith("signalIn:"))
         {

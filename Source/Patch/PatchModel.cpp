@@ -95,6 +95,20 @@ juce::var connectionToVar(const cw::PatchConnection& connection)
     if (connection.toPort.isNotEmpty())
         object->setProperty("toPort", connection.toPort);
     object->setProperty("weight", connection.weight);
+
+    if (! connection.waypoints.isEmpty())
+    {
+        juce::Array<juce::var> waypointVars;
+        for (const auto& waypoint : connection.waypoints)
+        {
+            auto* pointObject = new juce::DynamicObject();
+            pointObject->setProperty("x", waypoint.x);
+            pointObject->setProperty("y", waypoint.y);
+            waypointVars.add(juce::var(pointObject));
+        }
+        object->setProperty("waypoints", juce::var(waypointVars));
+    }
+
     return juce::var(object);
 }
 }
@@ -327,6 +341,16 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                     connection.fromPort = object->getProperty("fromPort").toString();
                     connection.toPort = object->getProperty("toPort").toString();
                     connection.weight = object->hasProperty("weight") ? (double) object->getProperty("weight") : 1.0;
+
+                    if (auto* waypoints = parseArray(object->getProperty("waypoints")))
+                    {
+                        for (const auto& waypointValue : *waypoints)
+                        {
+                            if (auto* waypointObject = waypointValue.getDynamicObject())
+                                connection.waypoints.add({ (int) waypointObject->getProperty("x"), (int) waypointObject->getProperty("y") });
+                        }
+                    }
+
                     document.connections.add(connection);
                 }
             }

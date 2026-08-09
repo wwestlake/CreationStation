@@ -59,6 +59,9 @@ struct PatchConnection
     // Signal-path gain for this specific connection (Mixer channel weight).
     // 1.0 for a plain unweighted pass-through connection.
     double weight = 1.0;
+    // Cosmetic reroute points along the wire, in canvas graph-space
+    // coordinates. Purely visual -- they don't affect rendering.
+    juce::Array<juce::Point<int>> waypoints;
 };
 
 struct PatchNode
