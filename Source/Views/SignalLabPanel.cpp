@@ -6604,7 +6604,16 @@ juce::Array<juce::String> SignalLabPanel::resolveScopeTapNodeIds(const cw::Patch
 
 void SignalLabPanel::refreshLiveScopeTaps()
 {
-    if (! onLiveScopeTapsChanged)
+    // A tap registration is only ever meaningful while PatchLiveVoice
+    // actually has a compiled graph to tag (rebuild() -- called only from
+    // Play -- is what first populates it; updateScopeTaps() is a no-op
+    // before that). Gating on "is anything actually playing" means this
+    // never runs buildPatchDocument() -- not cheap, and not something this
+    // codebase has ever called from ordinary editing/selection clicks --
+    // while just clicking around the canvas or opening/closing tool
+    // windows before Play, which is exactly when it doesn't need to run
+    // anyway.
+    if (! onLiveScopeTapsChanged || ! onLiveIsActiveRequested || ! onLiveIsActiveRequested())
         return;
     onLiveScopeTapsChanged(resolveScopeTapNodeIds(buildPatchDocument(recipe)));
 }
