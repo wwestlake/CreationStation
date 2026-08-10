@@ -1126,8 +1126,26 @@ SignalLabPanel::ScopePanel::ScopePanel()
 {
     configureControlSlider(timebaseSlider, timebaseLabel, "Time/Div", timebaseBinding, 0);
     configureControlSlider(startTimeSlider, startTimeLabel, "Start", startTimeBinding, 1);
-    configureControlSlider(levelZoomSlider, levelZoomLabel, "Level", levelZoomBinding, 2);
+    // "Zoom", not "Level" -- avoids colliding with Trigger's "Level" (the
+    // voltage the trigger watches for); this knob is the vertical/amplitude
+    // zoom, matching a real scope's Volts/Div.
+    configureControlSlider(levelZoomSlider, levelZoomLabel, "Zoom", levelZoomBinding, 2);
     configureControlSlider(triggerSlider, triggerLabel, "Trigger", triggerBinding, 3);
+
+    statusLabel.setFont(juce::Font(11.0f).boldened());
+    statusLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(statusLabel);
+
+    holdButton.setClickingTogglesState(true);
+    holdButton.onClick = [this]
+    {
+        isHeld = holdButton.getToggleState();
+        holdButton.setButtonText(isHeld ? "Run" : "Hold");
+    };
+    addAndMakeVisible(holdButton);
+
+    exportButton.onClick = [this] { exportCaptureToCsv(); };
+    addAndMakeVisible(exportButton);
 
     timebaseSlider.setRange(0.5, 50.0, 0.1);
     timebaseSlider.setValue(20.0, juce::dontSendNotification);
@@ -1149,6 +1167,10 @@ SignalLabPanel::ScopePanel::ScopePanel()
     startTimeSlider.onValueChange = [this] { repaint(); };
     levelZoomSlider.onValueChange = [this] { repaint(); };
     triggerSlider.onValueChange = [this] { repaint(); };
+
+    // Approximate real-time is fine (confirmed) -- a UI-thread poll, not a
+    // locked audio-thread path.
+    startTimerHz(30);
 }
 
 void SignalLabPanel::ScopePanel::configureControlSlider(LearnableKnob& slider, juce::Label& label, const juce::String& text, KnobBinding& binding, int knobIndex)
@@ -1294,8 +1316,12 @@ void SignalLabPanel::ScopePanel::refreshSliderRanges()
 
 void SignalLabPanel::ScopePanel::setBuffer(const juce::AudioBuffer<float>& buffer, double newSampleRate)
 {
+    if (isHeld)
+        return; // Held is a deliberate freeze -- a stray post-render refresh shouldn't overwrite it
+
     displayBuffer = buffer;
     sampleRate = newSampleRate > 0.0 ? newSampleRate : sampleRate;
+    isLive = false; // this is the static/offline path; timerCallback() is what sets isLive true
     refreshSliderRanges();
     repaint();
 }
@@ -1303,11 +1329,12 @@ void SignalLabPanel::ScopePanel::setBuffer(const juce::AudioBuffer<float>& buffe
 namespace
 {
 constexpr int kScopeControlStripHeight = 92;
+constexpr int kScopeHeaderHeight = 28;
 }
 
 juce::Rectangle<int> SignalLabPanel::ScopePanel::getPlotArea() const
 {
-    return getLocalBounds().reduced(12, 8).withTrimmedTop(16).withTrimmedBottom(kScopeControlStripHeight);
+    return getLocalBounds().reduced(12, 8).withTrimmedTop(kScopeHeaderHeight).withTrimmedBottom(kScopeControlStripHeight);
 }
 
 int SignalLabPanel::ScopePanel::findTriggerCrossing(int fromSample, int searchLimitSamples) const
@@ -1327,6 +1354,92 @@ int SignalLabPanel::ScopePanel::findTriggerCrossing(int fromSample, int searchLi
     return -1; // free-run: no crossing found, caller just starts at fromSample
 }
 
+int SignalLabPanel::ScopePanel::computeVisibleWindowStart(int& outWindowSamples) const
+{
+    auto timebaseMs = timebaseSlider.getValue();
+    auto startMs = startTimeSlider.getValue();
+    outWindowSamples = juce::jmax(2, (int) std::llround(timebaseMs / 1000.0 * sampleRate));
+    auto startSample = (int) std::llround(startMs / 1000.0 * sampleRate);
+
+    auto triggeredStart = findTriggerCrossing(startSample, outWindowSamples * 2);
+    return triggeredStart >= 0 ? triggeredStart : startSample;
+}
+
+namespace
+{
+constexpr int kLiveScopeRequestSamples = 1 << 17; // matches PatchLiveVoice's tap ring buffer capacity -- requesting more than that is harmless, just clamped
+}
+
+void SignalLabPanel::ScopePanel::timerCallback()
+{
+    if (isHeld)
+        return;
+
+    if (! onLiveIsActiveRequested || ! onLiveIsActiveRequested() || ! onLiveSnapshotRequested)
+        return; // nothing playing -- leave whatever's on screen (a static snapshot, or the last live frame) alone
+
+    juce::AudioBuffer<float> liveSnapshot;
+    auto copied = onLiveSnapshotRequested(nodeId, liveSnapshot, kLiveScopeRequestSamples);
+    if (copied <= 0)
+        return;
+
+    displayBuffer = std::move(liveSnapshot);
+    if (onLiveSampleRateRequested)
+        sampleRate = onLiveSampleRateRequested();
+    isLive = true;
+    refreshSliderRanges();
+    repaint();
+}
+
+void SignalLabPanel::ScopePanel::exportCaptureToCsv()
+{
+    if (displayBuffer.getNumSamples() <= 0 || sampleRate <= 0.0)
+        return;
+
+    int windowSamples = 0;
+    auto plotStart = computeVisibleWindowStart(windowSamples);
+    auto numSamples = displayBuffer.getNumSamples();
+    auto numChannels = juce::jmin(2, displayBuffer.getNumChannels());
+
+    juce::MemoryOutputStream csv;
+    csv << "Sample,Time (s)";
+    for (int channel = 0; channel < numChannels; ++channel)
+        csv << ",Channel " << (channel + 1);
+    csv << juce::newLine;
+
+    for (int i = 0; i < windowSamples; ++i)
+    {
+        auto sampleIndex = plotStart + i;
+        if (sampleIndex < 0 || sampleIndex >= numSamples)
+            continue;
+
+        csv << sampleIndex << "," << juce::String(sampleIndex / sampleRate, 6);
+        for (int channel = 0; channel < numChannels; ++channel)
+            csv << "," << juce::String(displayBuffer.getSample(channel, sampleIndex), 6);
+        csv << juce::newLine;
+    }
+
+    auto csvText = csv.toString();
+    auto chooser = std::make_shared<juce::FileChooser>("Export scope capture",
+                                                        juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+                                                            .getChildFile("scope-capture.csv"),
+                                                        "*.csv");
+    juce::Component::SafePointer<ScopePanel> safeThis(this);
+    chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                         [chooser, safeThis, csvText](const juce::FileChooser& result)
+    {
+        auto destination = result.getResult();
+        if (destination.getFullPathName().isEmpty())
+            return;
+
+        if (destination.getFileExtension().isEmpty())
+            destination = destination.withFileExtension(".csv");
+
+        destination.replaceWithText(csvText);
+        juce::ignoreUnused(safeThis);
+    });
+}
+
 void SignalLabPanel::ScopePanel::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
@@ -1339,9 +1452,10 @@ void SignalLabPanel::ScopePanel::paint(juce::Graphics& g)
     g.setColour(juce::Colour(0xff0f141c));
     g.fillRect(plot);
 
-    g.setColour(juce::Colour(0xffcbd5e1));
-    g.setFont(juce::Font(13.0f).boldened());
-    g.drawText("Oscilloscope", juce::Rectangle<int>(plot.getX(), plot.getY() - 16, plot.getWidth(), 16), juce::Justification::centredLeft, false);
+    statusLabel.setText(isHeld ? "HELD" : isLive ? "LIVE" : "STATIC", juce::dontSendNotification);
+    statusLabel.setColour(juce::Label::textColourId, isHeld ? juce::Colours::orange
+                                                    : isLive ? juce::Colour(0xff8fd978)
+                                                             : juce::Colour(0xff9db0c8));
 
     // Scope-style grid: a handful of light divisions plus a brighter
     // centre/zero line, the way a real bench scope's graticule looks.
@@ -1355,13 +1469,9 @@ void SignalLabPanel::ScopePanel::paint(juce::Graphics& g)
 
     if (displayBuffer.getNumSamples() > 0 && sampleRate > 0.0)
     {
-        auto timebaseMs = timebaseSlider.getValue();
-        auto startMs = startTimeSlider.getValue();
-        auto windowSamples = juce::jmax(2, (int) std::llround(timebaseMs / 1000.0 * sampleRate));
-        auto startSample = (int) std::llround(startMs / 1000.0 * sampleRate);
-
-        auto triggeredStart = findTriggerCrossing(startSample, windowSamples * 2);
-        auto plotStart = triggeredStart >= 0 ? triggeredStart : startSample;
+        int windowSamples = 0;
+        auto plotStart = computeVisibleWindowStart(windowSamples);
+        auto triggeredStart = findTriggerCrossing((int) std::llround(startTimeSlider.getValue() / 1000.0 * sampleRate), windowSamples * 2);
 
         // Trigger reference line, dashed, at the level the trigger is armed
         // at -- only meaningful (and only drawn) once a crossing was
@@ -1415,6 +1525,14 @@ void SignalLabPanel::ScopePanel::paint(juce::Graphics& g)
 void SignalLabPanel::ScopePanel::resized()
 {
     auto bounds = getLocalBounds().reduced(12, 8);
+
+    auto header = bounds.removeFromTop(kScopeHeaderHeight);
+    exportButton.setBounds(header.removeFromRight(100));
+    header.removeFromRight(6);
+    holdButton.setBounds(header.removeFromRight(60));
+    header.removeFromRight(6);
+    statusLabel.setBounds(header);
+
     auto controls = bounds.removeFromBottom(kScopeControlStripHeight);
     auto columnWidth = controls.getWidth() / 4;
 
@@ -3093,6 +3211,12 @@ SignalLabPanel::SignalLabPanel()
         if (onMidiLearnRequested)
             onMidiLearnRequested(displayLabel, wantsContinuousControl, std::move(onLearned));
     };
+    scopePanel.onLiveSnapshotRequested = [this](const juce::String& tapNodeId, juce::AudioBuffer<float>& dest, int numSamplesRequested)
+    {
+        return onLiveScopeSamplesRequested ? onLiveScopeSamplesRequested(tapNodeId, dest, numSamplesRequested) : 0;
+    };
+    scopePanel.onLiveIsActiveRequested = [this] { return onLiveIsActiveRequested && onLiveIsActiveRequested(); };
+    scopePanel.onLiveSampleRateRequested = [this] { return onLiveScopeSampleRateRequested ? onLiveScopeSampleRateRequested() : recipe.sampleRate; };
 
     previewButton.setVisible(false);
     renderButton.setVisible(false);
@@ -3304,6 +3428,11 @@ void SignalLabPanel::updateInspectorForSelection()
     {
         inspectorTitleLabel.setText("No node selected", juce::dontSendNotification);
         inspectorBodyLabel.setText("Right-click the canvas to add source nodes, then click a node to shape the sound.", juce::dontSendNotification);
+        if (scopePanel.getNodeId().isNotEmpty())
+        {
+            scopePanel.setNodeId({});
+            refreshLiveScopeTaps();
+        }
         resized();
         repaint();
         return;
@@ -3311,6 +3440,12 @@ void SignalLabPanel::updateInspectorForSelection()
 
     auto type = graphNodes.getReference(selectedGraphNodeIndex).type;
     inspectorTitleLabel.setText(graphNodes.getReference(selectedGraphNodeIndex).title, juce::dontSendNotification);
+
+    if (type != "scope" && scopePanel.getNodeId().isNotEmpty())
+    {
+        scopePanel.setNodeId({});
+        refreshLiveScopeTaps();
+    }
 
     if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
     {
@@ -3404,7 +3539,13 @@ void SignalLabPanel::updateInspectorForSelection()
     }
     else if (type == "scope")
     {
-        inspectorBodyLabel.setText("Dual-trace oscilloscope probe node. Time/Div, Start, Level and Trigger are on the scope's own front panel below.", juce::dontSendNotification);
+        inspectorBodyLabel.setText("Dual-trace oscilloscope probe node. Time/Div, Start, Zoom and Trigger are on the scope's own front panel below.", juce::dontSendNotification);
+        auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
+        if (scopePanel.getNodeId() != selectedNode.id)
+        {
+            scopePanel.setNodeId(selectedNode.id);
+            refreshLiveScopeTaps();
+        }
         scopePanel.setVisible(true);
     }
     else if (type == "analyzer")
@@ -4337,12 +4478,20 @@ void SignalLabPanel::openNodeEditorForSelection()
         ensureAudioRendered();
         auto* scope = new ScopePanel();
         scope->setBuffer(getDisplayBufferForNode(node.id), recipe.sampleRate);
+        scope->setNodeId(node.id);
         scope->onLearnRequested = [this](const juce::String& displayLabel, bool wantsContinuousControl, std::function<void(juce::String, int, int, bool)> onLearned)
         {
             if (onMidiLearnRequested)
                 onMidiLearnRequested(displayLabel, wantsContinuousControl, std::move(onLearned));
         };
-        liveScopePanels.add(juce::Component::SafePointer<ScopePanel>(scope));
+        scope->onLiveSnapshotRequested = [this](const juce::String& tapNodeId, juce::AudioBuffer<float>& dest, int numSamplesRequested)
+        {
+            return onLiveScopeSamplesRequested ? onLiveScopeSamplesRequested(tapNodeId, dest, numSamplesRequested) : 0;
+        };
+        scope->onLiveIsActiveRequested = [this] { return onLiveIsActiveRequested && onLiveIsActiveRequested(); };
+        scope->onLiveSampleRateRequested = [this] { return onLiveScopeSampleRateRequested ? onLiveScopeSampleRateRequested() : recipe.sampleRate; };
+        liveScopePanels.add({ node.id, juce::Component::SafePointer<ScopePanel>(scope) });
+        refreshLiveScopeTaps();
         content->addCustomComponent(scope, 300);
     }
     else if (node.type == "analyzer")
@@ -4447,6 +4596,7 @@ void SignalLabPanel::openNodeEditorForSelection()
                 break;
             }
         }
+        refreshLiveScopeTaps();
     });
     window->setContentOwned(content.release(), true);
     auto windowWidth = node.type == "scope" ? 640
@@ -5624,7 +5774,10 @@ void SignalLabPanel::triggerTransportPlay()
         showBusyStatus("Compiling...");
         compileGraph();
         if (onLiveGraphRebuildRequested)
-            onLiveGraphRebuildRequested(buildPatchDocument(recipe), buildLiveBindingMap());
+        {
+            auto patch = buildPatchDocument(recipe);
+            onLiveGraphRebuildRequested(patch, buildLiveBindingMap(patch));
+        }
         liveGraphDirty = false;
         showBusyStatus({});
         juce::MouseCursor::hideWaitCursor();
@@ -6026,7 +6179,7 @@ void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlCh
 
         for (int index = liveScopePanels.size(); --index >= 0;)
         {
-            auto* panel = liveScopePanels.getReference(index).getComponent();
+            auto* panel = liveScopePanels.getReference(index).panel.getComponent();
             if (panel == nullptr)
             {
                 liveScopePanels.remove(index);
@@ -6369,7 +6522,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
 // document is meant to be a portable, resolved format. PatchLiveVoice needs
 // that extra "which node" information to keep reading a parameter live
 // after the graph is compiled -- this is where it comes from.
-PatchLiveBindingMap SignalLabPanel::buildLiveBindingMap() const
+PatchLiveBindingMap SignalLabPanel::buildLiveBindingMap(const cw::PatchDocument& patch) const
 {
     PatchLiveBindingMap map;
 
@@ -6416,7 +6569,44 @@ PatchLiveBindingMap SignalLabPanel::buildLiveBindingMap() const
         }
     }
 
+    map.tapNodeIds = resolveScopeTapNodeIds(patch);
     return map;
+}
+
+juce::Array<juce::String> SignalLabPanel::resolveScopeTapNodeIds(const cw::PatchDocument& patch) const
+{
+    // Mirrors PatchRuntimePlayer's offline resolveSingleInput: whatever
+    // entity's connection.from feeds this Scope node's input is what it
+    // probes. Unwired resolves to the "__master__" sentinel -- PatchLiveVoice
+    // maps that to whatever it resolves as the final/output entity, same
+    // fallback SignalLabPanel::getDisplayBufferForNode() already uses for
+    // the offline/static path.
+    auto resolveTapEntityId = [&patch](const juce::String& scopeNodeId) -> juce::String
+    {
+        for (auto& connection : patch.connections)
+            if (connection.to == scopeNodeId)
+                return connection.from;
+        return "__master__";
+    };
+
+    juce::Array<juce::String> tapNodeIds;
+    if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+    {
+        auto& selected = graphNodes.getReference(selectedGraphNodeIndex);
+        if (selected.type == "scope")
+            tapNodeIds.addIfNotAlreadyThere(resolveTapEntityId(selected.id));
+    }
+    for (auto& entry : liveScopePanels)
+        if (entry.panel != nullptr)
+            tapNodeIds.addIfNotAlreadyThere(resolveTapEntityId(entry.nodeId));
+    return tapNodeIds;
+}
+
+void SignalLabPanel::refreshLiveScopeTaps()
+{
+    if (! onLiveScopeTapsChanged)
+        return;
+    onLiveScopeTapsChanged(resolveScopeTapNodeIds(buildPatchDocument(recipe)));
 }
 
 void SignalLabPanel::applyTemplate(const juce::String& templateName)

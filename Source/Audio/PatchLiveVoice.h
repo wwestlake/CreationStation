@@ -57,6 +57,12 @@ struct PatchLiveBindingMap
     };
     juce::Array<MidiNodeValue> midiNodeValues;
 
+    // Entity node ids that currently need a live scope tap -- resolved by
+    // SignalLabPanel::resolveScopeTapNodeIds() from which Scope nodes are
+    // currently open and what (if anything) their input is wired to; an
+    // unwired Scope resolves to the final/output entity's id (master tap).
+    juce::Array<juce::String> tapNodeIds;
+
     juce::String findMidiNodeId(const juce::String& targetNodeId, const juce::String& targetPort) const
     {
         for (auto& entry : entries)
@@ -117,6 +123,34 @@ public:
     // slots are keyed to the graph that owns them).
     void setLiveMidiValue(const juce::String& nodeId, float value);
 
+    // Live scope tap: up to maxTapSlots rolling ~2.7s mono histories, one per
+    // entity a currently-open Scope node is wired to (see
+    // PatchLiveBindingMap::tapNodeIds below) -- mirrors
+    // PatchRuntimePlayer::TapCapture's offline "sampled at whatever point in
+    // the chain it's wired to" behavior, just live. Written one block at a
+    // time on the audio thread (processOneBlock, right where each entity
+    // already computes its own outputValue) and read from the message
+    // thread by Signal Lab's ScopePanel while a playthrough is active.
+    // Lock-free single-producer/single-consumer: plain atomic per-sample
+    // stores/loads with relaxed ordering, no mutex -- a reader that catches
+    // the writer mid-block sees at most a few stale samples, which is
+    // imperceptible on a scope display and an accepted trade-off the user
+    // confirmed is fine (the scope only needs to approximate real-time, not
+    // be sample-accurate).
+    //
+    // Message-thread: copies up to numSamplesRequested of the most recent
+    // history for the entity currently wired to nodeId into dest (mono,
+    // resized to fit), oldest sample first. Returns how many samples were
+    // actually available (0 if nodeId has no active tap slot, or nothing
+    // has played yet).
+    int copyRecentScopeSamples(const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamplesRequested) const;
+    // Message-thread: re-resolves which entities need a live tap without a
+    // full topology rebuild -- for when a Scope tool window opens/closes
+    // mid-playthrough and the DSP topology itself hasn't changed. No-op if
+    // rebuild() hasn't been called yet (nothing to re-tap).
+    void updateScopeTaps(const juce::Array<juce::String>& tapNodeIds);
+    double getSampleRate() const noexcept { return sampleRate; }
+
 private:
     static constexpr int maxLiveMidiSlots = 64;
     static constexpr int kNoSlot = -1;
@@ -133,6 +167,20 @@ private:
     std::array<juce::String, maxLiveMidiSlots> liveMidiSlotNodeIds;
     int liveMidiSlotCount = 0;
     int registerOrReuseSlot(const juce::String& midiNodeId, const PatchLiveBindingMap& liveBindings);
+
+    // Live scope tap ring buffers -- see copyRecentScopeSamples() above.
+    // Message-thread-owned bookkeeping (tapSlotNodeIds/tapSlotCount, only
+    // touched by rebuild()/updateScopeTaps()/registerOrReuseTapSlot(), all
+    // message-thread-only); the audio thread only ever writes
+    // tapBuffers[slot] by index and bumps tapWritePos, both plain relaxed
+    // atomics, same shape as the liveMidiValues table above.
+    static constexpr int maxTapSlots = 16;
+    static constexpr int kScopeTapCapacity = 1 << 17; // ~2.7s @ 48kHz
+    std::array<std::array<std::atomic<float>, kScopeTapCapacity>, maxTapSlots> tapBuffers {};
+    std::array<juce::String, maxTapSlots> tapSlotNodeIds;
+    int tapSlotCount = 0;
+    std::atomic<int64> tapWritePos { 0 };
+    int registerOrReuseTapSlot(const juce::String& entityId, const juce::Array<juce::String>& tapNodeIds);
 
     enum class EntityKind { Source, Mix, Filter, Envelope };
 
@@ -151,6 +199,7 @@ private:
         EntityKind kind = EntityKind::Source;
         juce::String id;
         int inputEntityIndex = -1; // Filter/Envelope only; -1 = silence
+        int tapSlot = kNoSlot;     // live scope tap, kNoSlot = nothing currently probing this entity
 
         // Source only
         juce::String sourceKind; // "oscillator" | "noise"

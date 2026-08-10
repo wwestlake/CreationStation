@@ -181,6 +181,9 @@ public:
     bool isSignalLabLivePlaybackActive() const noexcept { return patchLiveVoice.isActive(); }
     bool takeSignalLabLivePlaybackFinishedFlag() noexcept { return patchLiveVoice.takeFinishedFlag(); }
     void setSignalLabLiveMidiValue(const juce::String& nodeId, float value) { patchLiveVoice.setLiveMidiValue(nodeId, value); }
+    int copySignalLabLiveScopeSamples(const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamples) { return patchLiveVoice.copyRecentScopeSamples(nodeId, dest, numSamples); }
+    void updateSignalLabLiveScopeTaps(const juce::Array<juce::String>& tapNodeIds) { patchLiveVoice.updateScopeTaps(tapNodeIds); }
+    double getSignalLabLiveSampleRate() const noexcept { return patchLiveVoice.getSampleRate(); }
 
     // A single captured MIDI event during live recording, timestamped as an absolute sample
     // position on the engine's running audio clock (not clip-relative) - paired up into notes and

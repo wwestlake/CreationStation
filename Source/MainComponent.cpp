@@ -2121,6 +2121,18 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         midiSurface.setClaimedFaderChannels(channels);
     };
+    signalLabPanel.onLiveScopeSamplesRequested = [this](const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamples)
+    {
+        return engine.copySignalLabLiveScopeSamples(nodeId, dest, numSamples);
+    };
+    signalLabPanel.onLiveScopeTapsChanged = [this](const juce::Array<juce::String>& tapNodeIds)
+    {
+        engine.updateSignalLabLiveScopeTaps(tapNodeIds);
+    };
+    signalLabPanel.onLiveScopeSampleRateRequested = [this]
+    {
+        return engine.getSignalLabLiveSampleRate();
+    };
 
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
     {

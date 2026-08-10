@@ -239,6 +239,45 @@ void PatchLiveVoice::setLiveMidiValue(const juce::String& nodeId, float value)
     // seeds its slot whenever the next rebuild() does register it.
 }
 
+int PatchLiveVoice::copyRecentScopeSamples(const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamplesRequested) const
+{
+    int slot = kNoSlot;
+    for (int i = 0; i < tapSlotCount; ++i)
+    {
+        if (tapSlotNodeIds[(size_t) i] == nodeId)
+        {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot == kNoSlot)
+    {
+        dest.setSize(1, 0, false, false, true);
+        return 0;
+    }
+
+    auto writePos = tapWritePos.load(std::memory_order_relaxed);
+    auto available = (int) juce::jmin<int64_t>(writePos, juce::jmin(numSamplesRequested, kScopeTapCapacity));
+    if (available <= 0)
+    {
+        dest.setSize(1, 0, false, false, true);
+        return 0;
+    }
+
+    dest.setSize(1, available, false, false, true);
+    auto& ring = tapBuffers[(size_t) slot];
+    for (int i = 0; i < available; ++i)
+    {
+        // i=0 is the oldest sample in the requested window, i=available-1
+        // is the most recently written one.
+        int64_t samplePos = writePos - available + i;
+        auto idx = (size_t) (((samplePos % kScopeTapCapacity) + kScopeTapCapacity) % kScopeTapCapacity);
+        dest.setSample(0, i, ring[idx].load(std::memory_order_relaxed));
+    }
+    return available;
+}
+
 int PatchLiveVoice::registerOrReuseSlot(const juce::String& midiNodeId, const PatchLiveBindingMap& liveBindings)
 {
     if (midiNodeId.isEmpty())
@@ -254,6 +293,23 @@ int PatchLiveVoice::registerOrReuseSlot(const juce::String& midiNodeId, const Pa
     int slot = liveMidiSlotCount++;
     liveMidiSlotNodeIds[(size_t) slot] = midiNodeId;
     liveMidiValues[(size_t) slot].store(liveBindings.findCurrentValue(midiNodeId));
+    return slot;
+}
+
+int PatchLiveVoice::registerOrReuseTapSlot(const juce::String& entityId, const juce::Array<juce::String>& tapNodeIds)
+{
+    if (! tapNodeIds.contains(entityId))
+        return kNoSlot;
+
+    for (int i = 0; i < tapSlotCount; ++i)
+        if (tapSlotNodeIds[(size_t) i] == entityId)
+            return i; // reuse -- keeps whatever history is already in this slot's ring buffer
+
+    if (tapSlotCount >= maxTapSlots)
+        return kNoSlot; // extremely unlikely (16 simultaneously-tapped points) -- that scope just shows no live data
+
+    int slot = tapSlotCount++;
+    tapSlotNodeIds[(size_t) slot] = entityId;
     return slot;
 }
 
@@ -540,7 +596,28 @@ void PatchLiveVoice::rebuild(const cw::PatchDocument& patch, const PatchLiveBind
     if (graph->finalEntityIndex < 0)
         graph->finalEntityIndex = entityIndexById[resolvedMixEntityId];
 
+    for (auto& entity : graph->entities)
+        entity.tapSlot = registerOrReuseTapSlot(entity.id, liveBindings.tapNodeIds);
+
     currentGraph.store(std::move(graph));
+}
+
+void PatchLiveVoice::updateScopeTaps(const juce::Array<juce::String>& tapNodeIds)
+{
+    auto graph = currentGraph.load();
+    if (graph == nullptr)
+        return;
+
+    // Same-topology copy -- only tap slot assignment changes, nothing about
+    // the DSP itself, so this skips all of rebuild()'s connection/parameter
+    // resolution work. Published the same way (atomic swap); the audio
+    // thread just sees a new snapshot on its next block, same as any other
+    // rebuild.
+    auto updated = std::make_shared<EntityGraph>(*graph);
+    for (auto& entity : updated->entities)
+        entity.tapSlot = registerOrReuseTapSlot(entity.id, tapNodeIds);
+
+    currentGraph.store(std::move(updated));
 }
 
 void PatchLiveVoice::adoptGraphIfChanged(const std::shared_ptr<const EntityGraph>& graph)
@@ -576,6 +653,7 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
 {
     auto totalSamples = totalDurationSamples.load();
     auto startElapsed = elapsedSamples.load();
+    auto tapBlockStart = tapWritePos.load(std::memory_order_relaxed);
     bool hasAutomationLanes = ! graph.automationLanes.isEmpty();
 
     for (int localSample = 0; localSample < numSamples; ++localSample)
@@ -693,6 +771,12 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
             }
 
             runtime.scratch.setSample(0, localSample, outputValue);
+
+            if (entity.tapSlot != kNoSlot)
+            {
+                auto tapIndex = (size_t) ((tapBlockStart + localSample) % kScopeTapCapacity);
+                tapBuffers[(size_t) entity.tapSlot][tapIndex].store(outputValue, std::memory_order_relaxed);
+            }
         }
     }
 
@@ -704,6 +788,7 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
     }
 
     elapsedSamples.store(startElapsed + numSamples);
+    tapWritePos.store(tapBlockStart + numSamples, std::memory_order_relaxed);
 }
 
 void PatchLiveVoice::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
