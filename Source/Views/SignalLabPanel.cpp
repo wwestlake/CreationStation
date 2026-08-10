@@ -4435,6 +4435,16 @@ void SignalLabPanel::openNodeEditorForSelection()
                 target->midiNumber = number;
                 target->midiIsController = isController;
 
+                // The Learn capture reports which control moved, not the
+                // value it was at -- so a just-learned Fader Control would
+                // otherwise sit at midiLiveValue's 0.0f default (silence,
+                // if wired to Level) until the physical fader sends its
+                // next message. Same reasoning as loadPatchDocument()'s
+                // equivalent fix: unity/full is the least surprising
+                // assumption for an unknown position, not mute.
+                if (target->type == "midiFader")
+                    target->midiLiveValue = 1.0f;
+
                 panelSafe->notifyFaderChannelClaims();
 
                 if (auto* label = statusLabelSafe.getComponent())
@@ -5552,6 +5562,19 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
             node.midiNumber = (int) patchNode.properties.getWithDefault("midiNumber", node.midiNumber);
             node.midiIsController = (bool) patchNode.properties.getWithDefault("midiIsController", node.midiIsController);
             node.midiButtonMode = patchNode.properties.getWithDefault("midiButtonMode", node.midiButtonMode).toString();
+
+            // midiLiveValue is deliberately never saved into the patch
+            // document -- it's a live, transient hardware reading, not
+            // something to freeze into a portable file. But defaulting a
+            // learned-and-wired Fader Control to 0 on every load meant
+            // "wired to Level" silenced that source completely
+            // (buildPatchDocument skips a source whose effective level is
+            // <= 0) until the user physically touched the fader again --
+            // full/unity is the least surprising assumption for an unknown
+            // fader position, not mute. Doesn't apply to midiButton: a
+            // fresh toggle/momentary should still start released.
+            if (patchNode.kind == "midiFader" && node.midiLearned)
+                node.midiLiveValue = 1.0f;
         }
 
         graphNodes.add(node);
@@ -6447,9 +6470,20 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
         if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
         {
             double wiredLevel = 0.0;
-            auto effectiveLevel = findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel)
-                                 ? (float) wiredLevel : node.oscillatorLevel;
-            if (effectiveLevel <= 0.0f)
+            auto isLevelWired = findWiredParameterValue(node.id, "param:" + node.type + "Level", wiredLevel);
+            auto effectiveLevel = isLevelWired ? (float) scaleNormalizedWiredValue(node.type + "Level", wiredLevel) : node.oscillatorLevel;
+            // A wired level can change after this document is compiled --
+            // PatchLiveVoice reads it fresh every block once the source
+            // exists as an entity. Skipping the source here based on
+            // whatever it happens to read at compile time would exclude it
+            // from the live graph until the next full rebuild, which
+            // applyLiveMidiControlChanges() deliberately never triggers on
+            // its own -- a Fader Control's Level starting at/near 0 (or
+            // simply sitting there when Play was pressed) silenced that
+            // oscillator permanently for the rest of the playthrough, even
+            // after physically moving the fader to a real value. Only skip
+            // a genuinely unwired, manually-silenced source.
+            if (! isLevelWired && effectiveLevel <= 0.0f)
                 continue;
             double wiredFrequency = 0.0;
             auto effectiveFrequency = findWiredParameterValue(node.id, "param:" + node.type + "Frequency", wiredFrequency)
@@ -6464,9 +6498,12 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
         else if (node.type == "noise")
         {
             double wiredLevel = 0.0;
-            auto effectiveLevel = findWiredParameterValue(node.id, "param:noiseLevel", wiredLevel)
-                                 ? (float) wiredLevel : node.oscillatorLevel;
-            if (effectiveLevel <= 0.0f)
+            auto isNoiseLevelWired = findWiredParameterValue(node.id, "param:noiseLevel", wiredLevel);
+            auto effectiveLevel = isNoiseLevelWired ? (float) scaleNormalizedWiredValue("noiseLevel", wiredLevel) : node.oscillatorLevel;
+            // Same reasoning as the oscillator branch above -- don't
+            // exclude a wired source from the live graph based on a
+            // momentary value.
+            if (! isNoiseLevelWired && effectiveLevel <= 0.0f)
                 continue;
             cw::PatchSource source { node.id, "noise", {}, "white", effectiveLevel, {} };
             source.canvasX = node.position.x;
