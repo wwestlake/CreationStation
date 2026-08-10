@@ -149,6 +149,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Audio/StudioIOModel.h
     Source/Audio/PatchRuntimePlayer.cpp
     Source/Audio/PatchRuntimePlayer.h
+    Source/Audio/PatchLiveVoice.cpp
+    Source/Audio/PatchLiveVoice.h
     Source/Audio/SignalGraphRuntime.cpp
     Source/Audio/SignalGraphRuntime.h
     Source/Audio/VstPluginCatalog.cpp

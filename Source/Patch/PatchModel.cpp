@@ -95,6 +95,8 @@ juce::var connectionToVar(const cw::PatchConnection& connection)
     if (connection.toPort.isNotEmpty())
         object->setProperty("toPort", connection.toPort);
     object->setProperty("weight", connection.weight);
+    if (connection.isValueWire)
+        object->setProperty("isValueWire", true);
 
     if (! connection.waypoints.isEmpty())
     {
@@ -341,6 +343,7 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
                     connection.fromPort = object->getProperty("fromPort").toString();
                     connection.toPort = object->getProperty("toPort").toString();
                     connection.weight = object->hasProperty("weight") ? (double) object->getProperty("weight") : 1.0;
+                    connection.isValueWire = (bool) object->getProperty("isValueWire");
 
                     if (auto* waypoints = parseArray(object->getProperty("waypoints")))
                     {

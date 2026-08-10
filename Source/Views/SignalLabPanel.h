@@ -2,7 +2,30 @@
 
 #include <JuceHeader.h>
 #include "../Audio/PatchRuntimePlayer.h"
+#include "../Audio/PatchLiveVoice.h"
 #include "../Patch/PatchModel.h"
+
+// A juce::Slider that also reports a right-click -- used for the Scope
+// panel's front-panel knobs, which need a "Learn MIDI..." context menu the
+// way a real bench scope's knobs would just be knobs (no menu at all, but
+// this is the closest UI-only equivalent to "point a hardware controller at
+// this and turn it").
+class LearnableKnob final : public juce::Slider
+{
+public:
+    std::function<void()> onRightClick;
+
+    void mouseDown(const juce::MouseEvent& event) override
+    {
+        if (event.mods.isRightButtonDown() && onRightClick)
+        {
+            onRightClick();
+            return;
+        }
+        juce::Slider::mouseDown(event);
+    }
+};
+
 class SignalLabPanel final : public juce::Component,
                              private juce::Timer
 {
@@ -61,8 +84,12 @@ public:
     // Called at UI-timer rate (see MainComponent::timerCallback) with any
     // MIDI control values that changed since the last call. Updates every
     // placed midiFader/midiButton node whose learned binding matches one of
-    // these changes, and marks the graph dirty so the new value reaches the
-    // next render -- this does not trigger a render itself.
+    // these changes -- if a PatchLiveVoice playthrough is currently active,
+    // pushes the new value straight into it via onLiveMidiValueChanged so
+    // the already-playing sound updates immediately, no rebuild/recompile
+    // involved. Also marks the graph dirty so the offline Preview/
+    // Render-to-Project path (unrelated to live playback) picks up the new
+    // value whenever it's next used.
     void applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes);
 
     std::function<void(const juce::ValueTree& stateBeforeEdit, const juce::String& label)> onUndoCheckpointRequested;
@@ -74,10 +101,48 @@ public:
     std::function<void()> onPatchLoadRequested;
     std::function<void()> onStopRequested;
     std::function<void()> onAudioSettingsRequested;
+    // Signal Lab live playback -- see PatchLiveVoice.h. Wired by
+    // MainComponent to the matching WorkstationAudioEngine wrapper methods
+    // (engine.rebuildSignalLabLiveGraph, etc.), same callback-injection
+    // pattern as onPreviewRequested/onRenderRequested above rather than
+    // holding a direct engine reference.
+    std::function<void(const cw::PatchDocument&, const PatchLiveBindingMap&)> onLiveGraphRebuildRequested;
+    std::function<void(double durationSeconds)> onLiveStartRequested;
+    std::function<void()> onLiveStopRequested;
+    std::function<bool()> onLiveIsActiveRequested;
+    std::function<bool()> onLiveFinishedFlagRequested;
+    std::function<void(const juce::String& nodeId, float value)> onLiveMidiValueChanged;
+    // Fires whenever a Fader Control node's live value changes and it was
+    // learned from a real motorized fader (pitch-wheel binding). Lets the
+    // physical fader's motor track the software value in real time instead
+    // of springing back to a stale position whenever it's released -- see
+    // XTouchControlSurface::sendRawFaderFeedback.
+    std::function<void(int channel, float value)> onMidiFaderFeedbackRequested;
+    // Fires with the full current set of MIDI channels bound to a learned
+    // Fader Control node, whenever that set changes (Learn completes, a
+    // node is deleted, a patch loads). Lets the control surface stop
+    // treating those channels as Tracker channel-strip faders -- otherwise
+    // both systems drive the same physical fader from the same incoming
+    // message.
+    std::function<void(const juce::Array<int>&)> onFaderChannelClaimsChanged;
+    // Live scope: pulls up to numSamplesRequested of live samples for
+    // nodeId's tap into dest, returns how many were actually copied.
+    std::function<int(const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamplesRequested)> onLiveScopeSamplesRequested;
+    // Pushes the current set of entity node ids that need a live tap --
+    // see resolveScopeTapNodeIds()/refreshLiveScopeTaps().
+    std::function<void(const juce::Array<juce::String>&)> onLiveScopeTapsChanged;
+    std::function<double()> onLiveScopeSampleRateRequested;
     // Requests the app-level "Learn MIDI Binding" dialog (shared with the
-    // transport buttons' MIDI learn -- see MainComponent::requestSignalLabMidiLearn).
+    // transport buttons' MIDI learn -- see MainComponent::requestGenericMidiLearn).
     // onLearned fires once with the captured (deviceId, channel, number, isController).
-    std::function<void(const juce::String& displayLabel,
+    // wantsContinuousControl tells the capture step what kind of message to
+    // actually wait for (true = a fader/knob's CC or pitch-wheel data,
+    // false = a button's Note/CC) so it doesn't grab the wrong thing --
+    // e.g. a motorized fader's touch-sensor Note firing before its real
+    // pitch-wheel position data. See WorkstationAudioEngine::MidiLearnKind
+    // for the full reasoning; kept as a plain bool here rather than pulling
+    // that engine-level enum into this UI header.
+    std::function<void(const juce::String& displayLabel, bool wantsContinuousControl,
                        std::function<void(juce::String deviceId, int channel, int number, bool isController)> onLearned)> onMidiLearnRequested;
 
     void paint(juce::Graphics&) override;
@@ -155,6 +220,15 @@ private:
         GraphPort port;
     };
 
+    // What a port is actually carrying right now -- the default, a
+    // manually-set value, or a live-fed-in one -- so the canvas can show
+    // real data next to each port instead of just a static label.
+    struct PortValueDisplay
+    {
+        juce::String text;
+        bool isLive = false; // wired to a Get-variable or MIDI Control node
+    };
+
     struct GraphConnection
     {
         juce::String id;
@@ -189,9 +263,6 @@ private:
     {
         bool scopeEnabled = false;
         bool analyzerEnabled = false;
-        double scopeTimebaseMs = 20.0;
-        double scopeGainA = 1.0;
-        double scopeGainB = 1.0;
         double analyzerMinHz = 20.0;
         double analyzerMaxHz = 20000.0;
         double analyzerDbFloor = -96.0;
@@ -225,14 +296,106 @@ private:
         int findPointAt(juce::Point<float> position) const;
     };
 
-    class ScopePanel final : public juce::Component
+    // Self-contained oscilloscope: owns its own timebase/start-time/level-zoom/
+    // trigger-level controls (like a real bench scope's front panel) so it
+    // works identically wherever it's dropped -- the inline inspector preview
+    // and the detachable tool window both just call setBuffer().
+    class ScopePanel final : public juce::Component,
+                              private juce::Timer
     {
     public:
-        void setBuffer(const juce::AudioBuffer<float>& buffer);
+        ScopePanel();
+        // Static/offline path: a post-render snapshot, shown when nothing
+        // is playing (or before Play has ever been pressed). Live playback
+        // supersedes this via the timer below, which repaints from fresh
+        // engine data instead.
+        void setBuffer(const juce::AudioBuffer<float>& buffer, double newSampleRate);
+        // Which entity this scope probes -- its own node id if wired to a
+        // specific point in the graph, resolved by SignalLabPanel; needed
+        // to ask the live engine for the right tap. Safe to call at any
+        // time, including before the first live snapshot request.
+        void setNodeId(const juce::String& newNodeId) { nodeId = newNodeId; }
+        const juce::String& getNodeId() const noexcept { return nodeId; }
+        // Which entity id to actually ask the live engine for -- NOT the
+        // same as nodeId (this scope's own graph-node id). A Scope node's
+        // id identifies the probe itself; the tap ring buffer it reads
+        // from is keyed by whatever entity that probe's input wire
+        // resolves to (or "__master__"'s resolved id when unwired). Pushed
+        // down by SignalLabPanel::applyResolvedScopeTapIds() whenever the
+        // wiring is (re-)resolved.
+        void setResolvedTapEntityId(const juce::String& entityId) { resolvedTapEntityId = entityId; }
         void paint(juce::Graphics& g) override;
+        void resized() override;
+
+        // Same shape as SignalLabPanel::onMidiLearnRequested -- wired by
+        // SignalLabPanel to the same app-level Learn dialog every MIDI
+        // Control node already uses, so a BCR2000-style knob controller can
+        // bind straight to the scope's own front-panel knobs.
+        std::function<void(const juce::String& displayLabel, bool wantsContinuousControl, std::function<void(juce::String, int, int, bool)> onLearned)> onLearnRequested;
+
+        // Polled at ~30Hz while a playthrough is active and the scope isn't
+        // Held: asks the live engine for a fresh snapshot of whatever this
+        // scope's nodeId is tapping. Returns samples actually copied (0 if
+        // nothing to show yet).
+        std::function<int(const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamplesRequested)> onLiveSnapshotRequested;
+        std::function<bool()> onLiveIsActiveRequested;
+        std::function<double()> onLiveSampleRateRequested;
+
+        // Checks the change against all four knob bindings; applies and
+        // returns true on the first match. Safe to call for every open
+        // scope (inline or tool window) on every polled MIDI change --
+        // a change that matches nothing here is just a no-op.
+        bool tryApplyMidiChange(const MidiControlChange& change);
 
     private:
+        void timerCallback() override;
+        void exportCaptureToCsv();
+        struct KnobBinding
+        {
+            bool learned = false;
+            juce::String deviceId;
+            int channel = 1;
+            int number = 0;
+            bool isController = true;
+        };
+
         juce::AudioBuffer<float> displayBuffer;
+        double sampleRate = 44100.0;
+        juce::String nodeId;
+        juce::String resolvedTapEntityId;
+        bool isHeld = false;
+        bool isLive = false; // true once the first live snapshot has landed; drives the LIVE/HELD/STATIC status text
+
+        juce::TextButton holdButton { "Hold" };
+        juce::TextButton exportButton { "Export CSV..." };
+        juce::Label statusLabel;
+
+        LearnableKnob timebaseSlider, startTimeSlider, levelZoomSlider, triggerSlider;
+        juce::Label timebaseLabel, startTimeLabel, levelZoomLabel, triggerLabel;
+        KnobBinding timebaseBinding, startTimeBinding, levelZoomBinding, triggerBinding;
+
+        void configureControlSlider(LearnableKnob& slider, juce::Label& label, const juce::String& text, KnobBinding& binding, int knobIndex);
+        void showLearnMenu(int knobIndex);
+        // Knob 0=timebase, 1=start, 2=level, 3=trigger -- looked up fresh
+        // by index rather than captured by reference, so async Learn
+        // callbacks (which can outlive a while) never hold a stale
+        // reference into a ScopePanel that's since been destroyed; pair
+        // with a SafePointer<ScopePanel> null-check before calling this.
+        juce::Label& knobLabel(int knobIndex);
+        KnobBinding& knobBinding(int knobIndex);
+        LearnableKnob& knobSlider(int knobIndex);
+        double getTotalDurationMs() const;
+        void refreshSliderRanges();
+        juce::Rectangle<int> getPlotArea() const;
+        // Rising-edge crossing of triggerSlider's value at or after
+        // fromSample, searched on channel 0 -- returns -1 (no trigger,
+        // caller free-runs from fromSample instead) if none found within
+        // the search window.
+        int findTriggerCrossing(int fromSample, int searchLimitSamples) const;
+        // The window currently on screen -- Time/Div + Start + trigger
+        // lock, resolved once and shared by paint() and CSV export so
+        // "what you see is what you export" is actually true.
+        int computeVisibleWindowStart(int& outWindowSamples) const;
     };
 
     class SpectrumPanel final : public juce::Component
@@ -432,6 +595,47 @@ private:
     void rebuildNodeGraphFromRecipe();
     void seedOscillatorNodesFromRecipeLevels();
     bool findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const;
+    juce::String findWiredMidiSourceNodeId(const juce::String& nodeId, const juce::String& portId) const;
+    // True only when the port is wired to a Fader Control node specifically
+    // (not a Button Control, not a Get-variable) -- these are the only
+    // wired sources where the on-screen slider should stay live rather than
+    // being disabled, since the physical fader and the on-screen slider are
+    // meant to be two views of the same continuously-adjustable value.
+    bool isPortFaderDriven(const juce::String& nodeId, const juce::String& portId) const;
+    void notifyFaderChannelClaims() const;
+    // Writes a manual on-screen-slider drag straight through to the driving
+    // Fader Control node's live value (and echoes it to the node's bound
+    // physical fader, if any) instead of a now-ignored local field -- see
+    // normalizedFromRealValue() in the .cpp.
+    void pushLiveMidiFaderValue(const juce::String& midiNodeId, float rawNormalizedValue);
+    // If portId is currently wired to a Fader Control node, converts
+    // realValue back to raw 0..1 and pushes it through that node (and out
+    // to its physical fader) instead of the caller writing its own local
+    // manual field. Returns false (does nothing) when the port isn't
+    // Fader-Control-driven, so the caller falls back to its normal manual
+    // write.
+    bool tryPushFaderDrivenValue(const juce::String& nodeId, const juce::String& portId, const juce::String& parameterId, double realValue);
+    PortValueDisplay describePortValue(int nodeIndex, const GraphPort& port) const;
+    PatchLiveBindingMap buildLiveBindingMap(const cw::PatchDocument& patch) const;
+    // Which entity node ids currently need a live scope tap -- one per
+    // currently-open Scope (the inline one, if selected, plus every
+    // tool-window instance), resolved from patch.connections the same way
+    // PatchRuntimePlayer's offline resolveSingleInput does (an unwired
+    // Scope resolves to the sentinel "__master__", which PatchLiveVoice
+    // maps to whatever it resolves as the final/output entity).
+    juce::Array<juce::String> resolveScopeTapNodeIds(const cw::PatchDocument& patch) const;
+    // Re-resolves and pushes the current tap set without a full graph
+    // rebuild -- for when a Scope tool window opens/closes, or the inline
+    // scope's selection changes, while the DSP topology itself hasn't.
+    void refreshLiveScopeTaps();
+    // Pushes each open scope's resolved entity id (see
+    // ScopePanel::setResolvedTapEntityId) so it asks the live engine for
+    // the right tap -- a scope's own node id and the entity id it probes
+    // are different things, and only the latter is what tap slots are
+    // keyed by. Must be called (via refreshLiveScopeTaps() or directly
+    // from Play, both already do) any time tapNodeIds is recomputed, or
+    // the two stay out of sync.
+    void applyResolvedScopeTapIds(const cw::PatchDocument& patch);
     void updateInspectorForSelection();
     void layoutFloatingWindows();
     void showCanvasActionMenu(juce::Point<int> canvasPosition, bool anchorToButton = false);
@@ -448,6 +652,16 @@ private:
     void addMixerInput(int nodeIndex);
     void openNodeEditorForSelection();
     void closeNodeEditor();
+    // Closes a node's SignalLabNodeWindow tool window (the openNodeWindows/
+    // SimpleNodeEditorContent kind, not the legacy inline nodeEditorWindow
+    // closeNodeEditor() above) programmatically -- e.g. auto-closing a MIDI
+    // Control node's window once Learn succeeds, since there's nothing left
+    // to do in it. Always defer the call to this via
+    // juce::MessageManager::callAsync if it's invoked from inside a
+    // callback owned by the window being closed (or anything that outlives
+    // it, like the shared Learn dialog) -- destroying the window is not
+    // safe as a continuation of one of its own callbacks.
+    void closeToolWindowForNode(const juce::String& nodeId);
     void toggleControlPad();
     void ensureDefaultLocalControls();
     void rebuildLocalControlChrome();
@@ -488,6 +702,13 @@ private:
     juce::AudioBuffer<float> generatedBuffer;
     juce::Array<PatchRuntimePlayer::TapCapture> nodeTapBuffers; // per Scope/Analyzer node id, its real tapped signal
     bool audioDirty = true; // set by regenerateSignal() on every graph/recipe edit; only ensureAudioRendered() clears it, and only actual playback/render/export call that -- rendering happens on demand, not on every edit
+    // Separate from audioDirty on purpose: audioDirty exclusively governs the offline
+    // Preview/Render-to-Project path (ensureAudioRendered()) and must not be touched by the live
+    // engine, or Render-to-Project would silently use a stale buffer after a live-only Play.
+    // liveGraphDirty governs PatchLiveVoice's topology instead -- set alongside audioDirty by
+    // regenerateSignal(), cleared only by triggerTransportPlay() after a live rebuild succeeds. A
+    // MIDI Control node's value changing does NOT set this -- see applyLiveMidiControlChanges().
+    bool liveGraphDirty = true;
     bool variableDragActive = false;
     juce::String draggedVariableId;
     juce::Point<int> draggedVariableScreenPoint;
@@ -527,6 +748,8 @@ private:
     juce::TextButton compileButton { "Compile" };
     juce::TextButton playButton { "Play" };
     juce::TextButton stopButton { "Stop" };
+    juce::TextButton repeatButton { "Repeat" };
+    juce::Slider repeatDelaySlider; // seconds between repeats -- 0 = back to back
     juce::Label propertiesHeaderLabel;
     juce::Label signalSectionLabel;
     juce::Label variablesSectionLabel;
@@ -629,6 +852,21 @@ private:
     juce::OwnedArray<juce::Slider> localControlValueSliders;
     juce::OwnedArray<juce::TextButton> removeLocalControlButtons;
     ScopePanel scopePanel;
+    // Tool-window Scope instances are created fresh (new ScopePanel()) each
+    // time a scope node's window is opened and owned by that window's
+    // content -- tracked here (SafePointer, so a closed window just drops
+    // out) purely so applyLiveMidiControlChanges()/resolveScopeTapNodeIds()
+    // can also reach their knob bindings and tap requests, not just the
+    // inline scopePanel above. nodeId is which graph node this instance
+    // represents (set once at creation, never changes for a tool-window
+    // scope -- unlike the inline scopePanel, which is a single shared
+    // instance whose represented node changes with selection).
+    struct LiveScopeEntry
+    {
+        juce::String nodeId;
+        juce::Component::SafePointer<ScopePanel> panel;
+    };
+    juce::Array<LiveScopeEntry> liveScopePanels;
     SpectrumPanel spectrumPanel;
     int selectedLocalControlIndex = -1;
 };
