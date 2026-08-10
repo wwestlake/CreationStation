@@ -4,6 +4,28 @@
 #include "../Audio/PatchRuntimePlayer.h"
 #include "../Audio/PatchLiveVoice.h"
 #include "../Patch/PatchModel.h"
+
+// A juce::Slider that also reports a right-click -- used for the Scope
+// panel's front-panel knobs, which need a "Learn MIDI..." context menu the
+// way a real bench scope's knobs would just be knobs (no menu at all, but
+// this is the closest UI-only equivalent to "point a hardware controller at
+// this and turn it").
+class LearnableKnob final : public juce::Slider
+{
+public:
+    std::function<void()> onRightClick;
+
+    void mouseDown(const juce::MouseEvent& event) override
+    {
+        if (event.mods.isRightButtonDown() && onRightClick)
+        {
+            onRightClick();
+            return;
+        }
+        juce::Slider::mouseDown(event);
+    }
+};
+
 class SignalLabPanel final : public juce::Component,
                              private juce::Timer
 {
@@ -279,14 +301,45 @@ private:
         void paint(juce::Graphics& g) override;
         void resized() override;
 
+        // Same shape as SignalLabPanel::onMidiLearnRequested -- wired by
+        // SignalLabPanel to the same app-level Learn dialog every MIDI
+        // Control node already uses, so a BCR2000-style knob controller can
+        // bind straight to the scope's own front-panel knobs.
+        std::function<void(const juce::String& displayLabel, bool wantsContinuousControl, std::function<void(juce::String, int, int, bool)> onLearned)> onLearnRequested;
+
+        // Checks the change against all four knob bindings; applies and
+        // returns true on the first match. Safe to call for every open
+        // scope (inline or tool window) on every polled MIDI change --
+        // a change that matches nothing here is just a no-op.
+        bool tryApplyMidiChange(const MidiControlChange& change);
+
     private:
+        struct KnobBinding
+        {
+            bool learned = false;
+            juce::String deviceId;
+            int channel = 1;
+            int number = 0;
+            bool isController = true;
+        };
+
         juce::AudioBuffer<float> displayBuffer;
         double sampleRate = 44100.0;
 
-        juce::Slider timebaseSlider, startTimeSlider, levelZoomSlider, triggerSlider;
+        LearnableKnob timebaseSlider, startTimeSlider, levelZoomSlider, triggerSlider;
         juce::Label timebaseLabel, startTimeLabel, levelZoomLabel, triggerLabel;
+        KnobBinding timebaseBinding, startTimeBinding, levelZoomBinding, triggerBinding;
 
-        void configureControlSlider(juce::Slider& slider, juce::Label& label, const juce::String& text);
+        void configureControlSlider(LearnableKnob& slider, juce::Label& label, const juce::String& text, KnobBinding& binding, int knobIndex);
+        void showLearnMenu(int knobIndex);
+        // Knob 0=timebase, 1=start, 2=level, 3=trigger -- looked up fresh
+        // by index rather than captured by reference, so async Learn
+        // callbacks (which can outlive a while) never hold a stale
+        // reference into a ScopePanel that's since been destroyed; pair
+        // with a SafePointer<ScopePanel> null-check before calling this.
+        juce::Label& knobLabel(int knobIndex);
+        KnobBinding& knobBinding(int knobIndex);
+        LearnableKnob& knobSlider(int knobIndex);
         double getTotalDurationMs() const;
         void refreshSliderRanges();
         juce::Rectangle<int> getPlotArea() const;
@@ -722,6 +775,12 @@ private:
     juce::OwnedArray<juce::Slider> localControlValueSliders;
     juce::OwnedArray<juce::TextButton> removeLocalControlButtons;
     ScopePanel scopePanel;
+    // Tool-window Scope instances are created fresh (new ScopePanel()) each
+    // time a scope node's window is opened and owned by that window's
+    // content -- tracked here (SafePointer, so a closed window just drops
+    // out) purely so applyLiveMidiControlChanges() can also reach their
+    // knob bindings, not just the inline scopePanel above.
+    juce::Array<juce::Component::SafePointer<ScopePanel>> liveScopePanels;
     SpectrumPanel spectrumPanel;
     int selectedLocalControlIndex = -1;
 };

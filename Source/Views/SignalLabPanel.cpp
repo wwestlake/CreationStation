@@ -1124,10 +1124,10 @@ void SignalLabPanel::EnvelopeEditor::mouseDoubleClick(const juce::MouseEvent& ev
 
 SignalLabPanel::ScopePanel::ScopePanel()
 {
-    configureControlSlider(timebaseSlider, timebaseLabel, "Time/Div");
-    configureControlSlider(startTimeSlider, startTimeLabel, "Start");
-    configureControlSlider(levelZoomSlider, levelZoomLabel, "Level");
-    configureControlSlider(triggerSlider, triggerLabel, "Trigger");
+    configureControlSlider(timebaseSlider, timebaseLabel, "Time/Div", timebaseBinding, 0);
+    configureControlSlider(startTimeSlider, startTimeLabel, "Start", startTimeBinding, 1);
+    configureControlSlider(levelZoomSlider, levelZoomLabel, "Level", levelZoomBinding, 2);
+    configureControlSlider(triggerSlider, triggerLabel, "Trigger", triggerBinding, 3);
 
     timebaseSlider.setRange(0.5, 50.0, 0.1);
     timebaseSlider.setValue(20.0, juce::dontSendNotification);
@@ -1151,17 +1151,116 @@ SignalLabPanel::ScopePanel::ScopePanel()
     triggerSlider.onValueChange = [this] { repaint(); };
 }
 
-void SignalLabPanel::ScopePanel::configureControlSlider(juce::Slider& slider, juce::Label& label, const juce::String& text)
+void SignalLabPanel::ScopePanel::configureControlSlider(LearnableKnob& slider, juce::Label& label, const juce::String& text, KnobBinding& binding, int knobIndex)
 {
     label.setText(text, juce::dontSendNotification);
     label.setFont(juce::Font(11.0f));
     label.setColour(juce::Label::textColourId, juce::Colour(0xff9db0c8));
-    label.setJustificationType(juce::Justification::centredLeft);
+    label.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(label);
 
-    slider.setSliderStyle(juce::Slider::LinearHorizontal);
-    slider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 18);
+    // Rotary knobs, not linear faders -- these are meant to feel like a real
+    // bench scope's front panel (Time/Div, Position, Volts/Div, Trigger are
+    // all turn-knobs on a real unit), not a mixer strip.
+    slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    slider.setRotaryParameters(juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
+    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 16);
+    slider.setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xff66e0ff));
+    slider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff2a3445));
+    slider.onRightClick = [this, knobIndex] { showLearnMenu(knobIndex); };
     addAndMakeVisible(slider);
+}
+
+juce::Label& SignalLabPanel::ScopePanel::knobLabel(int knobIndex)
+{
+    switch (knobIndex)
+    {
+        case 0: return timebaseLabel;
+        case 1: return startTimeLabel;
+        case 2: return levelZoomLabel;
+        default: return triggerLabel;
+    }
+}
+
+SignalLabPanel::ScopePanel::KnobBinding& SignalLabPanel::ScopePanel::knobBinding(int knobIndex)
+{
+    switch (knobIndex)
+    {
+        case 0: return timebaseBinding;
+        case 1: return startTimeBinding;
+        case 2: return levelZoomBinding;
+        default: return triggerBinding;
+    }
+}
+
+LearnableKnob& SignalLabPanel::ScopePanel::knobSlider(int knobIndex)
+{
+    switch (knobIndex)
+    {
+        case 0: return timebaseSlider;
+        case 1: return startTimeSlider;
+        case 2: return levelZoomSlider;
+        default: return triggerSlider;
+    }
+}
+
+void SignalLabPanel::ScopePanel::showLearnMenu(int knobIndex)
+{
+    auto& binding = knobBinding(knobIndex);
+
+    juce::PopupMenu menu;
+    menu.addItem(1, binding.learned ? "Re-learn MIDI..." : "Learn MIDI...");
+    if (binding.learned)
+        menu.addItem(2, "Clear binding");
+
+    juce::Component::SafePointer<ScopePanel> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, knobIndex](int result)
+    {
+        if (safeThis == nullptr)
+            return;
+
+        if (result == 2)
+        {
+            safeThis->knobBinding(knobIndex) = KnobBinding();
+            safeThis->knobLabel(knobIndex).setColour(juce::Label::textColourId, juce::Colour(0xff9db0c8));
+            return;
+        }
+
+        if (result != 1 || ! safeThis->onLearnRequested)
+            return;
+
+        safeThis->onLearnRequested(safeThis->knobLabel(knobIndex).getText() + " knob", true, [safeThis, knobIndex]
+                          (juce::String deviceId, int channel, int number, bool isController)
+        {
+            if (safeThis == nullptr)
+                return;
+
+            auto& binding = safeThis->knobBinding(knobIndex);
+            binding.learned = true;
+            binding.deviceId = deviceId;
+            binding.channel = channel;
+            binding.number = number;
+            binding.isController = isController;
+            safeThis->knobLabel(knobIndex).setColour(juce::Label::textColourId, juce::Colour(0xff66e0ff));
+        });
+    });
+}
+
+bool SignalLabPanel::ScopePanel::tryApplyMidiChange(const MidiControlChange& change)
+{
+    for (int knobIndex = 0; knobIndex < 4; ++knobIndex)
+    {
+        auto& binding = knobBinding(knobIndex);
+        if (! binding.learned || change.channel != binding.channel || change.number != binding.number
+            || change.isController != binding.isController
+            || (binding.deviceId.isNotEmpty() && change.deviceId != binding.deviceId))
+            continue;
+
+        auto& slider = knobSlider(knobIndex);
+        slider.setValue(juce::jmap(change.value, 0.0f, 1.0f, (float) slider.getMinimum(), (float) slider.getMaximum()), juce::sendNotificationSync);
+        return true;
+    }
+    return false;
 }
 
 double SignalLabPanel::ScopePanel::getTotalDurationMs() const
@@ -1203,7 +1302,7 @@ void SignalLabPanel::ScopePanel::setBuffer(const juce::AudioBuffer<float>& buffe
 
 namespace
 {
-constexpr int kScopeControlStripHeight = 60;
+constexpr int kScopeControlStripHeight = 92;
 }
 
 juce::Rectangle<int> SignalLabPanel::ScopePanel::getPlotArea() const
@@ -1323,7 +1422,7 @@ void SignalLabPanel::ScopePanel::resized()
     {
         auto column = controls.removeFromLeft(columnWidth).reduced(4, 0);
         label.setBounds(column.removeFromTop(14));
-        slider.setBounds(column.removeFromTop(24));
+        slider.setBounds(column);
     };
 
     layoutColumn(timebaseLabel, timebaseSlider);
@@ -2989,6 +3088,11 @@ SignalLabPanel::SignalLabPanel()
     addAndMakeVisible(automationViewport);
     addAndMakeVisible(scopePanel);
     addAndMakeVisible(spectrumPanel);
+    scopePanel.onLearnRequested = [this](const juce::String& displayLabel, bool wantsContinuousControl, std::function<void(juce::String, int, int, bool)> onLearned)
+    {
+        if (onMidiLearnRequested)
+            onMidiLearnRequested(displayLabel, wantsContinuousControl, std::move(onLearned));
+    };
 
     previewButton.setVisible(false);
     renderButton.setVisible(false);
@@ -4233,6 +4337,12 @@ void SignalLabPanel::openNodeEditorForSelection()
         ensureAudioRendered();
         auto* scope = new ScopePanel();
         scope->setBuffer(getDisplayBufferForNode(node.id), recipe.sampleRate);
+        scope->onLearnRequested = [this](const juce::String& displayLabel, bool wantsContinuousControl, std::function<void(juce::String, int, int, bool)> onLearned)
+        {
+            if (onMidiLearnRequested)
+                onMidiLearnRequested(displayLabel, wantsContinuousControl, std::move(onLearned));
+        };
+        liveScopePanels.add(juce::Component::SafePointer<ScopePanel>(scope));
         content->addCustomComponent(scope, 300);
     }
     else if (node.type == "analyzer")
@@ -5903,6 +6013,27 @@ void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlCh
                 onMidiFaderFeedbackRequested(node.midiChannel, node.midiLiveValue);
 
             anyApplied = true;
+        }
+    }
+
+    // Scope knob bindings are independent of the graph-node loop above --
+    // check every open scope (the inline one plus any tool-window
+    // instances still alive) against every change in this batch.
+    for (auto& change : changes)
+    {
+        if (scopePanel.tryApplyMidiChange(change))
+            continue;
+
+        for (int index = liveScopePanels.size(); --index >= 0;)
+        {
+            auto* panel = liveScopePanels.getReference(index).getComponent();
+            if (panel == nullptr)
+            {
+                liveScopePanels.remove(index);
+                continue;
+            }
+            if (panel->tryApplyMidiChange(change))
+                break;
         }
     }
 
