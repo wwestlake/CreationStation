@@ -4139,6 +4139,17 @@ void SignalLabPanel::openNodeEditorForSelection()
 
     auto node = graphNodes.getReference(selectedGraphNodeIndex);
 
+    // Constructed here, not inside any of the callbacks below, deliberately:
+    // a crash dump showed the *construction* of a SafePointer<SignalLabPanel>
+    // itself faulting when done lazily inside a deferred callback -- by that
+    // point `this` could already be gone, and building a SafePointer from an
+    // already-dangling raw pointer is exactly as unsafe as using the raw
+    // pointer directly (it still has to read the target's own WeakReference
+    // master). Constructing it here, while `this` is definitely valid, and
+    // only ever reading (never re-constructing) it later is what actually
+    // makes the deferred callbacks below safe.
+    juce::Component::SafePointer<SignalLabPanel> panelSafe(this);
+
     for (int index = 0; index < openNodeWindows.size(); ++index)
     {
         auto* entry = openNodeWindows[index];
@@ -4382,14 +4393,24 @@ void SignalLabPanel::openNodeEditorForSelection()
         juce::Component::SafePointer<juce::Label> statusLabelSafe(statusLabelForNode);
 
         auto& learnButton = content->addButtonRow(node.midiLearned ? "Re-learn..." : "Learn...");
-        learnButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title, wantsContinuousControl = node.type == "midiFader", nodeId]
+        learnButton.onClick = [panelSafe, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title, wantsContinuousControl = node.type == "midiFader", nodeId]
         {
-            if (! onMidiLearnRequested)
+            if (panelSafe == nullptr || ! panelSafe->onMidiLearnRequested)
                 return;
 
-            onMidiLearnRequested(nodeTitle, wantsContinuousControl, [this, findMidiNode, statusLabelSafe, describeBinding, nodeId]
+            panelSafe->onMidiLearnRequested(nodeTitle, wantsContinuousControl, [panelSafe, findMidiNode, statusLabelSafe, describeBinding, nodeId]
                                  (juce::String deviceId, int channel, int number, bool isController)
             {
+                // panelSafe, not a fresh SafePointer built here: constructing
+                // a SafePointer<SignalLabPanel> itself requires reading the
+                // target's own WeakReference master, which is exactly as
+                // unsafe as using a raw `this` if the panel is already gone
+                // by the time this fires (a crash dump caught this exact
+                // failure mode) -- panelSafe was built once, up in
+                // openNodeEditorForSelection(), while `this` was known good.
+                if (panelSafe == nullptr)
+                    return;
+
                 auto* target = findMidiNode();
                 if (target == nullptr)
                     return;
@@ -4414,11 +4435,11 @@ void SignalLabPanel::openNodeEditorForSelection()
                 target->midiNumber = number;
                 target->midiIsController = isController;
 
-                notifyFaderChannelClaims();
+                panelSafe->notifyFaderChannelClaims();
 
                 if (auto* label = statusLabelSafe.getComponent())
                     label->setText(describeBinding(*target), juce::dontSendNotification);
-                nodeGraphCanvas.repaint();
+                panelSafe->nodeGraphCanvas.repaint();
 
                 // Once it's learned there's nothing left to do in this
                 // tool window -- close it automatically instead of making
@@ -4427,16 +4448,10 @@ void SignalLabPanel::openNodeEditorForSelection()
                 // timer, but closing this window while still inside any
                 // callback chain is safer done on a fresh call stack, same
                 // reasoning as the window's own close-button handler.
-                // SafePointer, not raw `this`: by the time this fires on
-                // the next message-loop tick, SignalLabPanel itself could
-                // conceivably no longer exist (e.g. the workspace view
-                // changed) -- a crash dump caught exactly this shape of
-                // bug from a raw-`this` capture elsewhere in this file.
-                juce::Component::SafePointer<SignalLabPanel> safeThis(this);
-                juce::MessageManager::callAsync([safeThis, nodeId]
+                juce::MessageManager::callAsync([panelSafe, nodeId]
                 {
-                    if (safeThis != nullptr)
-                        safeThis->closeToolWindowForNode(nodeId);
+                    if (panelSafe != nullptr)
+                        panelSafe->closeToolWindowForNode(nodeId);
                 });
             });
         };
@@ -4604,29 +4619,34 @@ void SignalLabPanel::openNodeEditorForSelection()
     auto* entry = openNodeWindows.add(new OpenNodeWindow());
     entry->nodeId = node.id;
 
-    auto window = std::make_unique<SignalLabNodeWindow>(node.title, [this, nodeId = node.id]
+    auto window = std::make_unique<SignalLabNodeWindow>(node.title, [panelSafe, nodeId = node.id]
     {
+        // panelSafe (built once, early, in openNodeEditorForSelection() --
+        // see the comment there) rather than a fresh SafePointer built here:
+        // a crash dump showed *constructing* a SafePointer<SignalLabPanel>
+        // itself faulting inside this exact lambda, which means `this` was
+        // already gone by the point this callback runs, not just by the
+        // time a later deferred call fires. Constructing a new SafePointer
+        // from an already-dangling raw pointer is exactly as unsafe as
+        // using the raw pointer -- it still has to read the target's own
+        // WeakReference master to register.
+        if (panelSafe == nullptr)
+            return;
+
         // closeToolWindowForNode() deletes this OpenNodeWindow's
         // unique_ptr<SignalLabNodeWindow> -- i.e. the very window object
-        // whose closeButtonPressed() is currently running this lambda.
-        // Nothing may run after that call as more code belonging to that
-        // now-destroyed object (its captured `this`/nodeId live inside the
-        // just-freed std::function storage) -- refreshLiveScopeTaps()
-        // below is deferred via callAsync specifically so it executes on a
-        // fresh call stack after this one has fully unwound, not as a
-        // continuation of it.
-        //
-        // SafePointer, not raw `this`: a crash dump caught this exact spot
-        // with SignalLabPanel itself already gone by the time the deferred
-        // call fired (0xDD-filled freed-heap memory read through `this`) --
-        // deferring to the next message-loop tick isn't enough on its own
-        // if the panel can be torn down in the meantime.
-        closeToolWindowForNode(nodeId);
-        juce::Component::SafePointer<SignalLabPanel> safeThis(this);
-        juce::MessageManager::callAsync([safeThis]
+        // whose closeButtonPressed() is currently running this lambda, and
+        // (per the crash dump above) something about that cascades into
+        // SignalLabPanel itself becoming invalid very shortly after, not
+        // just this window. refreshLiveScopeTaps() below is deferred via
+        // callAsync so it runs on a fresh call stack once whatever that
+        // cascade is has fully settled, re-checking panelSafe again before
+        // touching anything.
+        panelSafe->closeToolWindowForNode(nodeId);
+        juce::MessageManager::callAsync([panelSafe]
         {
-            if (safeThis != nullptr)
-                safeThis->refreshLiveScopeTaps();
+            if (panelSafe != nullptr)
+                panelSafe->refreshLiveScopeTaps();
         });
     });
     window->setContentOwned(content.release(), true);
