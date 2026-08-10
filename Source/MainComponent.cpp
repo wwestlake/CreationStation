@@ -230,8 +230,9 @@ public:
     };
 
     MidiLearnPanel(WorkstationAudioEngine& engineRef, juce::String targetIdIn, const juce::String& displayLabel,
-                   const ExistingBinding& existing)
-        : engine(engineRef), targetId(std::move(targetIdIn))
+                   const ExistingBinding& existing,
+                   WorkstationAudioEngine::MidiLearnKind expectedKindIn = WorkstationAudioEngine::MidiLearnKind::Any)
+        : engine(engineRef), targetId(std::move(targetIdIn)), expectedKind(expectedKindIn)
     {
         titleLabel.setText("Learn MIDI Binding: " + displayLabel, juce::dontSendNotification);
         titleLabel.setFont(juce::Font(16.0f).boldened());
@@ -251,7 +252,7 @@ public:
         {
             currentBindingLabel.setText("Currently bound to: " + existing.deviceLabel + ", channel "
                                         + juce::String(existing.channel) + ", "
-                                        + (existing.isController ? "CC " : "Note ") + juce::String(existing.number),
+                                        + (existing.number < 0 ? juce::String("Fader") : (existing.isController ? juce::String("CC ") : juce::String("Note ")) + juce::String(existing.number)),
                                         juce::dontSendNotification);
             currentBindingLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
             addAndMakeVisible(currentBindingLabel);
@@ -386,7 +387,7 @@ private:
             if (it != deviceIdsByItemId.end())
                 deviceIdFilter = it->second;
         }
-        engine.armMidiLearn(deviceIdFilter);
+        engine.armMidiLearn(deviceIdFilter, expectedKind);
         statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff5f93ff));
         statusLabel.setText("Listening - move or press the control now...", juce::dontSendNotification);
     }
@@ -420,9 +421,12 @@ private:
             numberEditor.setText(juce::String(result.number), juce::dontSendNotification);
             isCCToggle.setToggleState(result.isController, juce::dontSendNotification);
 
+            // number == -1 marks a captured fader (pitch wheel) rather than a CC/Note -- see
+            // WorkstationAudioEngine::handleIncomingMidiMessage. "CC -1" would be a nonsensical
+            // readout for what a user just physically moved.
             statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xff7fe8a0));
             statusLabel.setText("Captured & saved: channel " + juce::String(result.channel) + ", "
-                                + (result.isController ? "CC " : "Note ") + juce::String(result.number),
+                                + (result.number < 0 ? juce::String("Fader") : (result.isController ? juce::String("CC ") : juce::String("Note ")) + juce::String(result.number)),
                                 juce::dontSendNotification);
 
             if (onLearned)
@@ -432,6 +436,7 @@ private:
 
     WorkstationAudioEngine& engine;
     juce::String targetId;
+    WorkstationAudioEngine::MidiLearnKind expectedKind = WorkstationAudioEngine::MidiLearnKind::Any;
     std::map<int, juce::String> deviceIdsByItemId;
 
     juce::Label titleLabel, instructionsLabel, currentBindingLabel, deviceLabel, statusLabel,
@@ -2072,10 +2077,61 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         showAudioSettings();
     };
 
-    signalLabPanel.onMidiLearnRequested = [this](const juce::String& displayLabel,
+    signalLabPanel.onMidiLearnRequested = [this](const juce::String& displayLabel, bool wantsContinuousControl,
                                                  std::function<void(juce::String, int, int, bool)> onLearned)
     {
-        requestGenericMidiLearn(displayLabel, std::move(onLearned));
+        auto expectedKind = wantsContinuousControl ? WorkstationAudioEngine::MidiLearnKind::Continuous
+                                                    : WorkstationAudioEngine::MidiLearnKind::Discrete;
+        requestGenericMidiLearn(displayLabel, std::move(onLearned), expectedKind);
+    };
+
+    // Signal Lab live playback -- thin passthrough to the matching
+    // WorkstationAudioEngine wrapper methods (see PatchLiveVoice.h for the
+    // actual design). Same callback-injection pattern as
+    // onPreviewRequested/onRenderRequested above.
+    signalLabPanel.onLiveGraphRebuildRequested = [this](const cw::PatchDocument& patch, const PatchLiveBindingMap& liveBindings)
+    {
+        engine.rebuildSignalLabLiveGraph(patch, liveBindings);
+    };
+    signalLabPanel.onLiveStartRequested = [this](double durationSeconds)
+    {
+        engine.startSignalLabLivePlayback(durationSeconds);
+    };
+    signalLabPanel.onLiveStopRequested = [this]
+    {
+        engine.stopSignalLabLivePlayback();
+    };
+    signalLabPanel.onLiveIsActiveRequested = [this]
+    {
+        return engine.isSignalLabLivePlaybackActive();
+    };
+    signalLabPanel.onLiveFinishedFlagRequested = [this]
+    {
+        return engine.takeSignalLabLivePlaybackFinishedFlag();
+    };
+    signalLabPanel.onLiveMidiValueChanged = [this](const juce::String& nodeId, float value)
+    {
+        engine.setSignalLabLiveMidiValue(nodeId, value);
+    };
+    signalLabPanel.onMidiFaderFeedbackRequested = [this](int channel, float value)
+    {
+        midiSurface.sendRawFaderFeedback(channel, value);
+    };
+    signalLabPanel.onFaderChannelClaimsChanged = [this](const juce::Array<int>& channels)
+    {
+        midiSurface.setClaimedFaderChannels(channels);
+    };
+    signalLabPanel.onLiveScopeSamplesRequested = [this](const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamples)
+    {
+        return engine.copySignalLabLiveScopeSamples(nodeId, dest, numSamples);
+    };
+    signalLabPanel.onLiveScopeTapsChanged = [this](const juce::Array<juce::String>& tapNodeIds)
+    {
+        engine.updateSignalLabLiveScopeTaps(tapNodeIds);
+    };
+    signalLabPanel.onLiveScopeSampleRateRequested = [this]
+    {
+        return engine.getSignalLabLiveSampleRate();
     };
 
     signalLabPanel.onUndoCheckpointRequested = [this](const juce::ValueTree& stateBeforeEdit, const juce::String& label)
@@ -4936,7 +4992,8 @@ void MainComponent::showMidiLearnDialog(const juce::String& targetId, const juce
 }
 
 void MainComponent::requestGenericMidiLearn(const juce::String& displayLabel,
-                                            std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned)
+                                            std::function<void(juce::String deviceId, int channel, int number, bool isCC)> onLearned,
+                                            WorkstationAudioEngine::MidiLearnKind expectedKind)
 {
     // Shares the single app-wide learn dialog with showMidiLearnDialog above (only one binding
     // can sensibly be learned at a time) - but the result goes straight back to the caller instead
@@ -4948,7 +5005,7 @@ void MainComponent::requestGenericMidiLearn(const juce::String& displayLabel,
         return;
     }
 
-    auto panel = std::make_unique<MidiLearnPanel>(engine, juce::String(), displayLabel, MidiLearnPanel::ExistingBinding {});
+    auto panel = std::make_unique<MidiLearnPanel>(engine, juce::String(), displayLabel, MidiLearnPanel::ExistingBinding {}, expectedKind);
     auto* panelPtr = panel.get();
 
     auto window = std::make_unique<ManagedDocumentWindow>("Learn MIDI Binding",
@@ -4961,7 +5018,25 @@ void MainComponent::requestGenericMidiLearn(const juce::String& displayLabel,
     window->setUsingNativeTitleBar(true);
     window->setResizable(false, false);
 
-    panelPtr->onLearned = std::move(onLearned);
+    // Auto-close after a successful capture -- once it's learned there's
+    // nothing left to do in this dialog, so don't make the user close it
+    // by hand. Deferred via callAsync: onLearned fires from inside this
+    // same MidiLearnPanel's own timerCallback(), so resetting
+    // midiLearnWindow (which destroys that panel) must not happen as a
+    // continuation of that call, same reasoning as the Signal Lab scope
+    // tool-window close fix.
+    panelPtr->onLearned = [this, onLearned = std::move(onLearned)](juce::String deviceId, int channel, int number, bool isCC)
+    {
+        if (onLearned)
+            onLearned(deviceId, channel, number, isCC);
+
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->midiLearnWindow.reset();
+        });
+    };
     panelPtr->onCancelled = [this]
     {
         juce::Component::SafePointer<MainComponent> safeThis(this);

@@ -57,6 +57,24 @@ public:
     void setTransportState(bool playing, bool recording);
     void refreshVisibleWindow();
 
+    // Motorized-fader position echo for MIDI Control (Fader Control) nodes: these are bound
+    // directly to a raw MIDI channel via Learn, not to a Tracker track/bank slot, so this skips
+    // the trackIndex/bankOffset remap sendFaderValue() does and writes the channel straight
+    // through. Without this, a motorized fader's motor never learns where the software value
+    // moved to, so on touch-release it snaps back to whatever position it last held.
+    void sendRawFaderFeedback(int channel, float unitValue);
+
+    // Channels bound to a Signal Lab Fader Control node via Learn must NOT
+    // also be dispatched as a Tracker channel-strip fader move -- without
+    // this, both systems drive the same physical motor from the same
+    // incoming pitch-wheel message (Tracker synchronously, Signal Lab via
+    // its own poll), which is what made the fader feel like it was
+    // fighting the user's hand. Pass the full current set of learned
+    // Fader Control channels each time it changes (Learn completes, a node
+    // is deleted, a patch loads) -- this replaces the previous set, it
+    // doesn't merge into it.
+    void setClaimedFaderChannels(const juce::Array<int>& channels);
+
     void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage&) override;
 
 private:
@@ -90,6 +108,7 @@ private:
     juce::StringArray channelNames;
     juce::Array<int> pendingScribbleTracks;
     std::unique_ptr<juce::MidiOutput> midiOutput;
+    bool claimedFaderChannel[17] = { false };
     int bankOffset = 0;
     int pendingScribbleBankOffset = 0;
     int pendingScribbleIndex = 0;
