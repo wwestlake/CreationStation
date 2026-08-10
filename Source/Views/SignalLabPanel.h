@@ -316,6 +316,14 @@ private:
         // time, including before the first live snapshot request.
         void setNodeId(const juce::String& newNodeId) { nodeId = newNodeId; }
         const juce::String& getNodeId() const noexcept { return nodeId; }
+        // Which entity id to actually ask the live engine for -- NOT the
+        // same as nodeId (this scope's own graph-node id). A Scope node's
+        // id identifies the probe itself; the tap ring buffer it reads
+        // from is keyed by whatever entity that probe's input wire
+        // resolves to (or "__master__"'s resolved id when unwired). Pushed
+        // down by SignalLabPanel::applyResolvedScopeTapIds() whenever the
+        // wiring is (re-)resolved.
+        void setResolvedTapEntityId(const juce::String& entityId) { resolvedTapEntityId = entityId; }
         void paint(juce::Graphics& g) override;
         void resized() override;
 
@@ -354,6 +362,7 @@ private:
         juce::AudioBuffer<float> displayBuffer;
         double sampleRate = 44100.0;
         juce::String nodeId;
+        juce::String resolvedTapEntityId;
         bool isHeld = false;
         bool isLive = false; // true once the first live snapshot has landed; drives the LIVE/HELD/STATIC status text
 
@@ -619,6 +628,14 @@ private:
     // rebuild -- for when a Scope tool window opens/closes, or the inline
     // scope's selection changes, while the DSP topology itself hasn't.
     void refreshLiveScopeTaps();
+    // Pushes each open scope's resolved entity id (see
+    // ScopePanel::setResolvedTapEntityId) so it asks the live engine for
+    // the right tap -- a scope's own node id and the entity id it probes
+    // are different things, and only the latter is what tap slots are
+    // keyed by. Must be called (via refreshLiveScopeTaps() or directly
+    // from Play, both already do) any time tapNodeIds is recomputed, or
+    // the two stay out of sync.
+    void applyResolvedScopeTapIds(const cw::PatchDocument& patch);
     void updateInspectorForSelection();
     void layoutFloatingWindows();
     void showCanvasActionMenu(juce::Point<int> canvasPosition, bool anchorToButton = false);

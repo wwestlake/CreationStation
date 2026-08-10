@@ -1379,7 +1379,7 @@ void SignalLabPanel::ScopePanel::timerCallback()
         return; // nothing playing -- leave whatever's on screen (a static snapshot, or the last live frame) alone
 
     juce::AudioBuffer<float> liveSnapshot;
-    auto copied = onLiveSnapshotRequested(nodeId, liveSnapshot, kLiveScopeRequestSamples);
+    auto copied = onLiveSnapshotRequested(resolvedTapEntityId, liveSnapshot, kLiveScopeRequestSamples);
     if (copied <= 0)
         return;
 
@@ -4592,11 +4592,21 @@ void SignalLabPanel::openNodeEditorForSelection()
             auto* candidate = openNodeWindows[index];
             if (candidate != nullptr && candidate->nodeId == nodeId)
             {
+                // openNodeWindows.remove() deletes this OpenNodeWindow's
+                // unique_ptr<SignalLabNodeWindow> -- i.e. the very window
+                // object whose closeButtonPressed() is currently running
+                // this lambda. Nothing may run after this line as more code
+                // belonging to that now-destroyed object (its captured
+                // `this`/nodeId live inside the just-freed std::function
+                // storage) -- refreshLiveScopeTaps() below is deferred via
+                // callAsync specifically so it executes on a fresh call
+                // stack after this one has fully unwound, not as a
+                // continuation of it.
                 openNodeWindows.remove(index);
                 break;
             }
         }
-        refreshLiveScopeTaps();
+        juce::MessageManager::callAsync([this] { refreshLiveScopeTaps(); });
     });
     window->setContentOwned(content.release(), true);
     auto windowWidth = node.type == "scope" ? 640
@@ -5776,11 +5786,26 @@ void SignalLabPanel::triggerTransportPlay()
         if (onLiveGraphRebuildRequested)
         {
             auto patch = buildPatchDocument(recipe);
+            applyResolvedScopeTapIds(patch);
             onLiveGraphRebuildRequested(patch, buildLiveBindingMap(patch));
         }
         liveGraphDirty = false;
         showBusyStatus({});
         juce::MouseCursor::hideWaitCursor();
+    }
+    else if (onLiveScopeTapsChanged)
+    {
+        // Topology hasn't changed since the last rebuild (so a full
+        // rebuild isn't needed), but a Scope tool window may have been
+        // opened or closed since then -- re-resolve taps against the
+        // already-compiled graph every time Play starts, not just when
+        // something structural changed. This is exactly the case a Scope
+        // opened before the very first Play needs: liveGraphDirty may
+        // already be false from an earlier compile, so without this its
+        // tap would never get registered.
+        auto patch = buildPatchDocument(recipe);
+        applyResolvedScopeTapIds(patch);
+        onLiveScopeTapsChanged(resolveScopeTapNodeIds(patch));
     }
 
     if (onLiveStartRequested)
@@ -6602,6 +6627,32 @@ juce::Array<juce::String> SignalLabPanel::resolveScopeTapNodeIds(const cw::Patch
     return tapNodeIds;
 }
 
+void SignalLabPanel::applyResolvedScopeTapIds(const cw::PatchDocument& patch)
+{
+    // Deliberately not shared with resolveScopeTapNodeIds() above -- same
+    // "kept in sync deliberately" tradeoff already used elsewhere in this
+    // file, since it's one small lambda and this needs a non-const path
+    // (pushing into scopePanel/liveScopePanels) that a const method can't
+    // take.
+    auto resolveTapEntityId = [&patch](const juce::String& scopeNodeId) -> juce::String
+    {
+        for (auto& connection : patch.connections)
+            if (connection.to == scopeNodeId)
+                return connection.from;
+        return "__master__";
+    };
+
+    if (selectedGraphNodeIndex >= 0 && selectedGraphNodeIndex < graphNodes.size())
+    {
+        auto& selected = graphNodes.getReference(selectedGraphNodeIndex);
+        if (selected.type == "scope")
+            scopePanel.setResolvedTapEntityId(resolveTapEntityId(selected.id));
+    }
+    for (auto& entry : liveScopePanels)
+        if (entry.panel != nullptr)
+            entry.panel->setResolvedTapEntityId(resolveTapEntityId(entry.nodeId));
+}
+
 void SignalLabPanel::refreshLiveScopeTaps()
 {
     // A tap registration is only ever meaningful while PatchLiveVoice
@@ -6615,7 +6666,9 @@ void SignalLabPanel::refreshLiveScopeTaps()
     // anyway.
     if (! onLiveScopeTapsChanged || ! onLiveIsActiveRequested || ! onLiveIsActiveRequested())
         return;
-    onLiveScopeTapsChanged(resolveScopeTapNodeIds(buildPatchDocument(recipe)));
+    auto patch = buildPatchDocument(recipe);
+    applyResolvedScopeTapIds(patch);
+    onLiveScopeTapsChanged(resolveScopeTapNodeIds(patch));
 }
 
 void SignalLabPanel::applyTemplate(const juce::String& templateName)
