@@ -4621,32 +4621,29 @@ void SignalLabPanel::openNodeEditorForSelection()
 
     auto window = std::make_unique<SignalLabNodeWindow>(node.title, [panelSafe, nodeId = node.id]
     {
-        // panelSafe (built once, early, in openNodeEditorForSelection() --
-        // see the comment there) rather than a fresh SafePointer built here:
-        // a crash dump showed *constructing* a SafePointer<SignalLabPanel>
-        // itself faulting inside this exact lambda, which means `this` was
-        // already gone by the point this callback runs, not just by the
-        // time a later deferred call fires. Constructing a new SafePointer
-        // from an already-dangling raw pointer is exactly as unsafe as
-        // using the raw pointer -- it still has to read the target's own
-        // WeakReference master to register.
-        if (panelSafe == nullptr)
-            return;
-
-        // closeToolWindowForNode() deletes this OpenNodeWindow's
-        // unique_ptr<SignalLabNodeWindow> -- i.e. the very window object
-        // whose closeButtonPressed() is currently running this lambda, and
-        // (per the crash dump above) something about that cascades into
-        // SignalLabPanel itself becoming invalid very shortly after, not
-        // just this window. refreshLiveScopeTaps() below is deferred via
-        // callAsync so it runs on a fresh call stack once whatever that
-        // cascade is has fully settled, re-checking panelSafe again before
-        // touching anything.
-        panelSafe->closeToolWindowForNode(nodeId);
-        juce::MessageManager::callAsync([panelSafe]
+        // Everything is deferred -- including the actual window removal --
+        // not just the tap refresh. Two crash dumps in a row pinned this
+        // down: closeToolWindowForNode() calls openNodeWindows.remove(),
+        // which deletes this very SignalLabNodeWindow, i.e. the object
+        // that owns the std::function currently executing this lambda.
+        // The first dump showed a crash from more code running after that
+        // deletion; after deferring the extra work, the second dump showed
+        // the crash had just moved one step earlier -- to copy-constructing
+        // panelSafe *into* that deferred lambda, which still has to read
+        // this closure's own (about-to-be-freed) captured storage. There is
+        // no way to safely read anything captured by this outer lambda
+        // once the removal has happened, including just to copy it
+        // elsewhere -- so the removal itself must not happen on this call
+        // stack at all. Scheduling the whole body via callAsync means this
+        // lambda's own closure survives untouched (nothing here destroys
+        // it), and the real work runs afterward from an entirely separate
+        // closure that callAsync owns, not the window being closed.
+        juce::MessageManager::callAsync([panelSafe, nodeId]
         {
-            if (panelSafe != nullptr)
-                panelSafe->refreshLiveScopeTaps();
+            if (panelSafe == nullptr)
+                return;
+            panelSafe->closeToolWindowForNode(nodeId);
+            panelSafe->refreshLiveScopeTaps();
         });
     });
     window->setContentOwned(content.release(), true);
