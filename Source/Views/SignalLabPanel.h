@@ -652,6 +652,16 @@ private:
     void addMixerInput(int nodeIndex);
     void openNodeEditorForSelection();
     void closeNodeEditor();
+    // Closes a node's SignalLabNodeWindow tool window (the openNodeWindows/
+    // SimpleNodeEditorContent kind, not the legacy inline nodeEditorWindow
+    // closeNodeEditor() above) programmatically -- e.g. auto-closing a MIDI
+    // Control node's window once Learn succeeds, since there's nothing left
+    // to do in it. Always defer the call to this via
+    // juce::MessageManager::callAsync if it's invoked from inside a
+    // callback owned by the window being closed (or anything that outlives
+    // it, like the shared Learn dialog) -- destroying the window is not
+    // safe as a continuation of one of its own callbacks.
+    void closeToolWindowForNode(const juce::String& nodeId);
     void toggleControlPad();
     void ensureDefaultLocalControls();
     void rebuildLocalControlChrome();

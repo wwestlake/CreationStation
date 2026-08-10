@@ -3428,11 +3428,13 @@ void SignalLabPanel::updateInspectorForSelection()
     {
         inspectorTitleLabel.setText("No node selected", juce::dontSendNotification);
         inspectorBodyLabel.setText("Right-click the canvas to add source nodes, then click a node to shape the sound.", juce::dontSendNotification);
-        if (scopePanel.getNodeId().isNotEmpty())
-        {
-            scopePanel.setNodeId({});
-            refreshLiveScopeTaps();
-        }
+        // Deliberately NOT calling refreshLiveScopeTaps() here -- this runs
+        // on every deselect, far too often to risk a buildPatchDocument()
+        // call over. Tap registration is fully covered by Play (always
+        // re-resolves) and the scope tool window open/close hooks below;
+        // clearing nodeId alone is enough to stop the inline scope
+        // asking for stale data next poll.
+        scopePanel.setNodeId({});
         resized();
         repaint();
         return;
@@ -3441,11 +3443,8 @@ void SignalLabPanel::updateInspectorForSelection()
     auto type = graphNodes.getReference(selectedGraphNodeIndex).type;
     inspectorTitleLabel.setText(graphNodes.getReference(selectedGraphNodeIndex).title, juce::dontSendNotification);
 
-    if (type != "scope" && scopePanel.getNodeId().isNotEmpty())
-    {
+    if (type != "scope")
         scopePanel.setNodeId({});
-        refreshLiveScopeTaps();
-    }
 
     if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise")
     {
@@ -3541,11 +3540,12 @@ void SignalLabPanel::updateInspectorForSelection()
     {
         inspectorBodyLabel.setText("Dual-trace oscilloscope probe node. Time/Div, Start, Zoom and Trigger are on the scope's own front panel below.", juce::dontSendNotification);
         auto& selectedNode = graphNodes.getReference(selectedGraphNodeIndex);
-        if (scopePanel.getNodeId() != selectedNode.id)
-        {
-            scopePanel.setNodeId(selectedNode.id);
-            refreshLiveScopeTaps();
-        }
+        // Not calling refreshLiveScopeTaps() here either -- same reasoning
+        // as the deselect path above. If playback is already running when
+        // you switch which scope the inline panel shows, its tap catches
+        // up on the next Play; not calling buildPatchDocument() from a
+        // plain selection-change click is worth that small tradeoff.
+        scopePanel.setNodeId(selectedNode.id);
         scopePanel.setVisible(true);
     }
     else if (type == "analyzer")
@@ -4382,12 +4382,12 @@ void SignalLabPanel::openNodeEditorForSelection()
         juce::Component::SafePointer<juce::Label> statusLabelSafe(statusLabelForNode);
 
         auto& learnButton = content->addButtonRow(node.midiLearned ? "Re-learn..." : "Learn...");
-        learnButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title, wantsContinuousControl = node.type == "midiFader"]
+        learnButton.onClick = [this, findMidiNode, statusLabelSafe, describeBinding, nodeTitle = node.title, wantsContinuousControl = node.type == "midiFader", nodeId]
         {
             if (! onMidiLearnRequested)
                 return;
 
-            onMidiLearnRequested(nodeTitle, wantsContinuousControl, [this, findMidiNode, statusLabelSafe, describeBinding]
+            onMidiLearnRequested(nodeTitle, wantsContinuousControl, [this, findMidiNode, statusLabelSafe, describeBinding, nodeId]
                                  (juce::String deviceId, int channel, int number, bool isController)
             {
                 auto* target = findMidiNode();
@@ -4419,6 +4419,15 @@ void SignalLabPanel::openNodeEditorForSelection()
                 if (auto* label = statusLabelSafe.getComponent())
                     label->setText(describeBinding(*target), juce::dontSendNotification);
                 nodeGraphCanvas.repaint();
+
+                // Once it's learned there's nothing left to do in this
+                // tool window -- close it automatically instead of making
+                // the user do it by hand. Deferred: this callback is
+                // running from inside the (separate) Learn dialog's own
+                // timer, but closing this window while still inside any
+                // callback chain is safer done on a fresh call stack, same
+                // reasoning as the window's own close-button handler.
+                juce::MessageManager::callAsync([this, nodeId] { closeToolWindowForNode(nodeId); });
             });
         };
 
@@ -4587,25 +4596,16 @@ void SignalLabPanel::openNodeEditorForSelection()
 
     auto window = std::make_unique<SignalLabNodeWindow>(node.title, [this, nodeId = node.id]
     {
-        for (int index = openNodeWindows.size(); --index >= 0;)
-        {
-            auto* candidate = openNodeWindows[index];
-            if (candidate != nullptr && candidate->nodeId == nodeId)
-            {
-                // openNodeWindows.remove() deletes this OpenNodeWindow's
-                // unique_ptr<SignalLabNodeWindow> -- i.e. the very window
-                // object whose closeButtonPressed() is currently running
-                // this lambda. Nothing may run after this line as more code
-                // belonging to that now-destroyed object (its captured
-                // `this`/nodeId live inside the just-freed std::function
-                // storage) -- refreshLiveScopeTaps() below is deferred via
-                // callAsync specifically so it executes on a fresh call
-                // stack after this one has fully unwound, not as a
-                // continuation of it.
-                openNodeWindows.remove(index);
-                break;
-            }
-        }
+        // closeToolWindowForNode() deletes this OpenNodeWindow's
+        // unique_ptr<SignalLabNodeWindow> -- i.e. the very window object
+        // whose closeButtonPressed() is currently running this lambda.
+        // Nothing may run after that call as more code belonging to that
+        // now-destroyed object (its captured `this`/nodeId live inside the
+        // just-freed std::function storage) -- refreshLiveScopeTaps()
+        // below is deferred via callAsync specifically so it executes on a
+        // fresh call stack after this one has fully unwound, not as a
+        // continuation of it.
+        closeToolWindowForNode(nodeId);
         juce::MessageManager::callAsync([this] { refreshLiveScopeTaps(); });
     });
     window->setContentOwned(content.release(), true);
@@ -4631,6 +4631,19 @@ void SignalLabPanel::closeNodeEditor()
     nodeEditorVisible = false;
     editingNodeIndex = -1;
     layoutFloatingWindows();
+}
+
+void SignalLabPanel::closeToolWindowForNode(const juce::String& nodeId)
+{
+    for (int index = openNodeWindows.size(); --index >= 0;)
+    {
+        auto* candidate = openNodeWindows[index];
+        if (candidate != nullptr && candidate->nodeId == nodeId)
+        {
+            openNodeWindows.remove(index);
+            break;
+        }
+    }
 }
 
 void SignalLabPanel::toggleControlPad()

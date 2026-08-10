@@ -5018,7 +5018,25 @@ void MainComponent::requestGenericMidiLearn(const juce::String& displayLabel,
     window->setUsingNativeTitleBar(true);
     window->setResizable(false, false);
 
-    panelPtr->onLearned = std::move(onLearned);
+    // Auto-close after a successful capture -- once it's learned there's
+    // nothing left to do in this dialog, so don't make the user close it
+    // by hand. Deferred via callAsync: onLearned fires from inside this
+    // same MidiLearnPanel's own timerCallback(), so resetting
+    // midiLearnWindow (which destroys that panel) must not happen as a
+    // continuation of that call, same reasoning as the Signal Lab scope
+    // tool-window close fix.
+    panelPtr->onLearned = [this, onLearned = std::move(onLearned)](juce::String deviceId, int channel, int number, bool isCC)
+    {
+        if (onLearned)
+            onLearned(deviceId, channel, number, isCC);
+
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->midiLearnWindow.reset();
+        });
+    };
     panelPtr->onCancelled = [this]
     {
         juce::Component::SafePointer<MainComponent> safeThis(this);
