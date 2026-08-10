@@ -4427,7 +4427,17 @@ void SignalLabPanel::openNodeEditorForSelection()
                 // timer, but closing this window while still inside any
                 // callback chain is safer done on a fresh call stack, same
                 // reasoning as the window's own close-button handler.
-                juce::MessageManager::callAsync([this, nodeId] { closeToolWindowForNode(nodeId); });
+                // SafePointer, not raw `this`: by the time this fires on
+                // the next message-loop tick, SignalLabPanel itself could
+                // conceivably no longer exist (e.g. the workspace view
+                // changed) -- a crash dump caught exactly this shape of
+                // bug from a raw-`this` capture elsewhere in this file.
+                juce::Component::SafePointer<SignalLabPanel> safeThis(this);
+                juce::MessageManager::callAsync([safeThis, nodeId]
+                {
+                    if (safeThis != nullptr)
+                        safeThis->closeToolWindowForNode(nodeId);
+                });
             });
         };
 
@@ -4605,8 +4615,19 @@ void SignalLabPanel::openNodeEditorForSelection()
         // below is deferred via callAsync specifically so it executes on a
         // fresh call stack after this one has fully unwound, not as a
         // continuation of it.
+        //
+        // SafePointer, not raw `this`: a crash dump caught this exact spot
+        // with SignalLabPanel itself already gone by the time the deferred
+        // call fired (0xDD-filled freed-heap memory read through `this`) --
+        // deferring to the next message-loop tick isn't enough on its own
+        // if the panel can be torn down in the meantime.
         closeToolWindowForNode(nodeId);
-        juce::MessageManager::callAsync([this] { refreshLiveScopeTaps(); });
+        juce::Component::SafePointer<SignalLabPanel> safeThis(this);
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->refreshLiveScopeTaps();
+        });
     });
     window->setContentOwned(content.release(), true);
     auto windowWidth = node.type == "scope" ? 640
