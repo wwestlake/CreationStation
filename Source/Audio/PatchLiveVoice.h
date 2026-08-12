@@ -182,7 +182,7 @@ private:
     std::atomic<int64> tapWritePos { 0 };
     int registerOrReuseTapSlot(const juce::String& entityId, const juce::Array<juce::String>& tapNodeIds);
 
-    enum class EntityKind { Source, Mix, Filter, Envelope };
+    enum class EntityKind { Source, Mix, Filter, Envelope, CrossFader, Router, SampleHold };
 
     struct MixFeed
     {
@@ -220,6 +220,25 @@ private:
         // Envelope only
         juce::String curveMode;
         juce::Array<cw::PatchAutomationPoint> points;
+
+        // CrossFader only -- two named inputs instead of the single
+        // inputEntityIndex above, since A and B must stay distinguishable
+        // (unlike Mix, which just accumulates a weighted sum).
+        int inputAEntityIndex = -1, inputBEntityIndex = -1;
+        float blend = 0.5f;
+        int blendMidiSlot = kNoSlot;
+
+        // Router only -- variable-arity named inputs (like Mix's mixFeeds,
+        // but no weight -- it hard-switches to exactly one, never blends).
+        // -1 entries mean that input port simply wasn't wired.
+        juce::Array<int> routerInputEntityIndices;
+        float routerSelect = 0.0f;
+        int routerSelectMidiSlot = kNoSlot;
+
+        // SampleHold only -- reuses inputEntityIndex above (single input,
+        // same as Filter/Envelope).
+        float sampleHoldTrigger = 0.0f;
+        int sampleHoldTriggerMidiSlot = kNoSlot;
     };
 
     // Everything rebuild() produces, published to the audio thread as one
@@ -251,6 +270,8 @@ private:
         juce::dsp::StateVariableTPTFilter<float> filterDsp; // Filter entities only
         float bodyState = 0.0f;           // Mix entity only: persistent one-pole lowpass state
         float previousEnvelope = 0.0f;    // Mix entity only: persistent, for the transient (rate-of-change) term
+        float sampleHoldValue = 0.0f;     // SampleHold entity only: the currently-latched value
+        float sampleHoldPreviousTrigger = 0.0f; // SampleHold entity only: for rising-edge detection across blocks
     };
     juce::OwnedArray<RuntimeEntityState> runtimeStates; // audio-thread only
     std::shared_ptr<const EntityGraph> activeGraphForAudioThread; // audio-thread only: last graph this thread adopted
