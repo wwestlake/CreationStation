@@ -27,7 +27,6 @@
 #include "Timeline/TimelineModel.h"
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
-#include "Views/ArrangeView.h"
 #include "Views/ContentPanel.h"
 #include "Views/DslPanel.h"
 #include "Views/GraphPanel.h"
@@ -37,6 +36,7 @@
 #include "Views/PluginsPanel.h"
 #include "Views/SamplePackBuilderPanel.h"
 #include "Views/RecordView.h"
+#include "Views/FoleyPanel.h"
 #include "Views/SettingsPanel.h"
 #include "Views/ScorePanel.h"
 #include "Views/SignalLabPanel.h"
@@ -52,7 +52,6 @@ public:
     enum class WorkspaceMode
     {
         tracker,
-        arrange,
         signal,
         library,
         mix,
@@ -66,7 +65,10 @@ public:
         // layout/session's saved integer mode value keeps meaning what it always meant - the
         // button itself is still positioned right after Tracker in ViewModeBar, since that's a
         // purely visual layout choice independent of this enum's declaration order.
-        sampler
+        sampler,
+        // Same reasoning as sampler above - appended, not inserted, to preserve ordinal
+        // stability for already-persisted layouts.
+        foley
     };
 
     using StartupProgressCallback = std::function<void(const juce::String& statusText, float progress)>;
@@ -97,7 +99,6 @@ private:
         juce::Label titleLabel;
         juce::TextButton trackerButton { "Tracker" };
         juce::TextButton samplerButton { "Sampler" };
-        juce::TextButton arrangeButton { "Foley" };
         juce::TextButton signalButton { "Signal" };
         juce::TextButton mixButton { "Layers" };
         juce::TextButton pluginsButton { "Plugins" };
@@ -106,6 +107,7 @@ private:
         juce::TextButton recordButton { "Capture" };
         juce::TextButton scoreButton { "Score" };
         juce::TextButton settingsButton { "Settings" };
+        juce::TextButton foleyButton { "Foley" };
         juce::TextButton popOutButton { "Pop Out" };
     };
 
@@ -227,7 +229,6 @@ private:
     PluginRackBar pluginRackBar;
     TrackerPanel trackerPanel;
     SamplePackBuilderPanel samplePackBuilderPanel;
-    ArrangeView arrangeView;
     SignalLabPanel signalLabPanel;
     ContentPanel contentPanel;
     MixerPanel mixerPanel;
@@ -235,6 +236,7 @@ private:
     GraphPanel graphPanel;
     DslPanel dslPanel;
     RecordView recordView;
+    FoleyPanel foleyPanel;
     ScorePanel scorePanel;
     AiPanel aiPanel;
     SettingsPanel settingsPanel;
@@ -362,7 +364,6 @@ private:
     void duplicateClip(int clipIndex);
     void deleteClip(int clipIndex);
     void renameClip(int clipIndex);
-    juce::File getAppSettingsFile() const;
     void saveAppSettings();
     void loadAppSettings();
     void applySelectedAudioDeviceSettings();
@@ -430,7 +431,7 @@ private:
     void createProjectFromTemplate();
     void beginCreateProjectFromTemplate();
     void openProject();
-    void openProject(const juce::File& containerFile);
+    void openProject(const juce::String& projectId);
     void beginOpenProject();
     void saveProject();
     void saveProjectAs();
@@ -474,7 +475,6 @@ private:
     void showTour();
     void importProjectSounds();
     void refreshProjectAssets();
-    void refreshFoleyArrangement();
     void refreshContentLibrary();
     void refreshTutorialLibrary();
     void refreshAiContextStore();

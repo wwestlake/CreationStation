@@ -42,8 +42,8 @@ public:
     juce::Array<Profile> findProfilesForDevice(const juce::String& deviceName,
                                                const juce::String& usageName = {}) const;
 
-    bool loadFromFile(const juce::File& file, juce::String& errorMessage);
-    bool saveToFile(const juce::File& file, juce::String& errorMessage) const;
+    bool loadFromVar(const juce::var& parsed, juce::String& errorMessage);
+    juce::var toVar() const;
 
     static ControlSurfaceMappingStore createDefaultLibrary();
 

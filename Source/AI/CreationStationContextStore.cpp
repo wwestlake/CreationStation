@@ -87,8 +87,8 @@ bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession
         projectDocument.title = manifest.projectName;
         projectDocument.category = "project";
         projectDocument.body = "Project: " + manifest.projectName
-                             + "\nContainer: " + session.getContainerFile().getFullPathName();
-        projectDocument.sourcePath = session.getContainerFile().getFullPathName();
+                             + "\nProject ID: " + session.getProjectId();
+        projectDocument.sourcePath = session.getProjectId();
         projectDocument.tags.addArray({ "project", "session" });
         projectDocument.updatedAt = juce::Time::getCurrentTime();
         documents.add(projectDocument);

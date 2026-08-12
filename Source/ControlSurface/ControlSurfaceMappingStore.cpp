@@ -179,24 +179,23 @@ bool ControlSurfaceMappingStore::matchPattern(const juce::String& pattern, const
     return false;
 }
 
-bool ControlSurfaceMappingStore::loadFromFile(const juce::File& file, juce::String& errorMessage)
+bool ControlSurfaceMappingStore::loadFromVar(const juce::var& parsed, juce::String& errorMessage)
 {
     clear();
 
-    if (! file.existsAsFile())
-        return true;
+    if (parsed.isVoid())
+        return true; // no entry yet -- "nothing saved," not an error.
 
-    auto parsed = juce::JSON::parse(file.loadFileAsString());
     if (! parsed.isObject())
     {
-        errorMessage = "The control surface mappings file is not valid JSON.";
+        errorMessage = "The control surface mappings entry is not valid JSON.";
         return false;
     }
 
     auto* root = parsed.getDynamicObject();
     if (root == nullptr)
     {
-        errorMessage = "The control surface mappings file could not be read.";
+        errorMessage = "The control surface mappings entry could not be read.";
         return false;
     }
 
@@ -223,15 +222,8 @@ bool ControlSurfaceMappingStore::loadFromFile(const juce::File& file, juce::Stri
     return true;
 }
 
-bool ControlSurfaceMappingStore::saveToFile(const juce::File& file, juce::String& errorMessage) const
+juce::var ControlSurfaceMappingStore::toVar() const
 {
-    auto parent = file.getParentDirectory();
-    if (! parent.exists() && ! parent.createDirectory())
-    {
-        errorMessage = "Could not create the control surface mappings folder.";
-        return false;
-    }
-
     auto* root = new juce::DynamicObject();
     root->setProperty("version", 1);
     root->setProperty("activePresetId", activePresetId);
@@ -241,14 +233,7 @@ bool ControlSurfaceMappingStore::saveToFile(const juce::File& file, juce::String
         profileValues.add(profileToVar(profile));
 
     root->setProperty("profiles", juce::var(profileValues));
-
-    if (! file.replaceWithText(juce::JSON::toString(juce::var(root), true)))
-    {
-        errorMessage = "Could not save the control surface mappings file.";
-        return false;
-    }
-
-    return true;
+    return juce::var(root);
 }
 
 ControlSurfaceMappingStore ControlSurfaceMappingStore::createDefaultLibrary()

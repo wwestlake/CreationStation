@@ -145,6 +145,22 @@ Always use GitHub Issues and the official GitHub Project Board (**Creation Suite
 - **Status Sync Rule**: Every time an agent completes a task, fixes an issue, or changes work status, the agent MUST immediately update the corresponding GitHub Issue and Project Board item on **Creation Suite Road Map** (Project #19), adding completion comments (`gh issue comment`) and explicitly setting the project board item Status field to **Ready for Testing** (`gh project item-edit --id <item-id> --project-id PVT_kwHOADBc_84Bet07 --field-id PVTSSF_lAHOADBc_84Bet07zhZF9co --single-select-option-id a822205a`).
 - Do not use temporary local `.md` task files as the primary task tracker.
 
+## C: Drive Rule
+
+**Under no circumstances write, download, build, or install anything on the C: drive. Period.** No exceptions for size or a tool's default location — redirect to a D:-drive path instead. See the root `AGENTS.md`'s C: Drive Rule for the full incident.
+
+## LLVM / vcpkg Build Rule
+
+**Never build, rebuild, or touch LLVM (`apps/CreationEngine/vcpkg_installed/x64-windows/`, which CreationStation's CEL scripting layer also depends on via `shared/CMake/CreationSharedLLVM.cmake`) — directly or as a side effect of any `vcpkg` command — without an explicit, in-the-moment yes from the user.** Running `vcpkg install` in manifest mode anywhere reconciles the whole dependency list and can silently trigger a full rebuild even when adding something unrelated. See the root `AGENTS.md`'s LLVM / vcpkg Build Rule for the full incident and what to do instead. If blocked, stop and ask — never act.
+
+## No OS Dialogs Except Asset Import/Export Rule
+
+**The app never opens a native OS file/folder dialog except for explicit asset import/export** (importing a WAV, exporting a render, saving/loading a project-level file the user explicitly asked to save/load). Anything that is "pick a thing the framework already knows about" — plugin selection being the concrete case — must be selected from the framework's own pre-scanned/registered catalog only, never via `juce::FileChooser` browse-for-file/folder.
+
+This was violated on 2026-08-11: the Signal Graph's "VST Host" node's `showPluginLoadMenu()` (`MainComponent.cpp`) fell back to (and always additionally offered, via a "Browse manually..." item) a raw OS file dialog to browse for a `.vst3` DLL directly, instead of exclusively listing `vstPluginCatalog`'s scanned entries. Fixed by removing both OS-dialog escape hatches — the menu now only ever lists catalog entries, plus "Rescan" and "Manage VST folders..." (which configure *where* the framework scans, not which plugin to load). See the root `AGENTS.md`'s equivalent entry and [memory: feedback-no-os-dialogs-except-asset-io] for the full incident.
+
+Before wiring any "choose an X" UI, check whether the framework already has a scanned/registered list for X. If it does, the picker must be a menu/list over that catalog only.
+
 ## Required Reference
 
 For the full concurrency and handoff process, read:
