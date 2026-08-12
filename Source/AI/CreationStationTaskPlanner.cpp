@@ -238,7 +238,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
         case WorkflowKind::captureSession:
             plan.workflow = "Capture Session";
             plan.summary = "Prepare the source, record clean takes, and turn them into organized assets ready for shaping or reuse.";
-            plan.suggestedTools.addArray({ "Capture", "Foley", "Content Library", "Layers" });
+            plan.suggestedTools.addArray({ "Capture", "Tracker", "Content Library", "Layers" });
             plan.verificationNote = "The recorded take should be clean, named well, and immediately reusable in a patch or content pack.";
             plan.dataSchema.add({ "capture.sourceType", "Type of source being recorded", {}, 0.0, false });
             plan.dataSchema.add({ "capture.takeName", "Best captured take name", {}, 0.0, false });
@@ -265,7 +265,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
                                     { "takes", "session" }));
             plan.steps.add(makeStep("capture-material", StepType::act,
                                     "Record and store the material",
-                                    "Record the take, write it into the project storage root, and tag it so it can feed Signal Lab, Foley, or Library views.",
+                                    "Record the take, write it into the project storage root, and tag it so it can feed Signal Lab, Tracker, or Library views.",
                                     "The source material is stored locally and organized.",
                                     "If the take is close but flawed, keep it and mark the flaw instead of discarding the context.",
                                     { "asset", "storage" }));

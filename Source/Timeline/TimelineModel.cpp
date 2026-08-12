@@ -1,5 +1,6 @@
 #include "TimelineModel.h"
 #include <algorithm>
+#include <cmath>
 
 namespace cs
 {
@@ -276,7 +277,7 @@ int TimelineModel::addClip(ClipKind kind,
         return -1;
     }
 
-    if ((kind == ClipKind::audio || kind == ClipKind::foley) && ! file.existsAsFile())
+    if ((kind == ClipKind::audio || kind == ClipKind::foley || kind == ClipKind::video) && ! file.existsAsFile())
     {
         errorMessage = "The rendered sound file was not found.";
         return -1;
@@ -293,9 +294,9 @@ int TimelineModel::addClip(ClipKind kind,
     clip.trackIndex = trackIndex;
     clip.file = file;
     clip.startSeconds = juce::jmax(0.0, startSeconds);
-    const auto isFileBackedAudioClip = (kind == ClipKind::audio || kind == ClipKind::foley) && file.existsAsFile();
-    clip.durationSeconds = isFileBackedAudioClip ? juce::jmax(0.0, durationSeconds)
-                                                 : juce::jmax(0.05, durationSeconds);
+    const auto isFileBackedClip = (kind == ClipKind::audio || kind == ClipKind::foley || kind == ClipKind::video) && file.existsAsFile();
+    clip.durationSeconds = isFileBackedClip ? juce::jmax(0.0, durationSeconds)
+                                            : juce::jmax(0.05, durationSeconds);
     clip.sourceStartSeconds = 0.0;
     clip.sourceDurationSeconds = clip.durationSeconds;
     clip.recording = false;
@@ -303,7 +304,9 @@ int TimelineModel::addClip(ClipKind kind,
     clips.push_back(std::move(clip));
     const auto clipIndex = static_cast<int>(clips.size()) - 1;
 
-    if (file.existsAsFile() && ! analyzeClipWaveform(clipIndex, errorMessage))
+    // Waveform peaks come from juce::AudioFormatManager, which won't open a video container -
+    // video gets its own thumbnail-strip generation later (Phase 1's decode service), not this.
+    if (kind != ClipKind::video && file.existsAsFile() && ! analyzeClipWaveform(clipIndex, errorMessage))
     {
         clips.erase(clips.begin() + clipIndex);
         return -1;
@@ -349,81 +352,75 @@ void TimelineModel::setClipDuration(int clipIndex, double newDurationSeconds)
     clips[(size_t) clipIndex].durationSeconds = juce::jmax(0.05, newDurationSeconds);
 }
 
-bool TimelineModel::moveClip(int clipIndex, int trackIndex, double startSeconds)
+bool TimelineModel::trimClipStart(int clipIndex, double newStartSeconds)
 {
-    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())) || ! juce::isPositiveAndBelow(trackIndex, getTrackCount()))
+    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
 
     auto& clip = clips[(size_t) clipIndex];
     if (clip.recording)
         return false;
 
-    if (! canTrackContainClip(getTrackKind(trackIndex), clip.kind))
+    constexpr auto minimumClipSeconds = 0.05;
+    const auto clipEndSeconds = clip.startSeconds + clip.durationSeconds;
+
+    auto clampedStart = juce::jmin(newStartSeconds, clipEndSeconds - minimumClipSeconds);
+    // Can't pull the in-point earlier than the source material this clip already starts at.
+    clampedStart = juce::jmax(clampedStart, clip.startSeconds - clip.sourceStartSeconds);
+    clampedStart = juce::jmax(0.0, clampedStart);
+
+    const auto deltaSeconds = clampedStart - clip.startSeconds;
+    if (std::abs(deltaSeconds) < 1.0e-6)
         return false;
 
-    clip.trackIndex = trackIndex;
-    clip.startSeconds = juce::jmax(0.0, startSeconds);
+    clip.startSeconds = clampedStart;
+    clip.sourceStartSeconds = juce::jmax(0.0, clip.sourceStartSeconds + deltaSeconds);
+    clip.durationSeconds = juce::jmax(minimumClipSeconds, clipEndSeconds - clampedStart);
     return true;
+}
+
+bool TimelineModel::trimClipEnd(int clipIndex, double newEndSeconds)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
+        return false;
+
+    auto& clip = clips[(size_t) clipIndex];
+    if (clip.recording)
+        return false;
+
+    constexpr auto minimumClipSeconds = 0.05;
+    auto clampedEnd = juce::jmax(newEndSeconds, clip.startSeconds + minimumClipSeconds);
+
+    // Can't extend past the end of the source material, when the source duration is known.
+    if (clip.sourceDurationSeconds > 0.0)
+        clampedEnd = juce::jmin(clampedEnd, clip.startSeconds + (clip.sourceDurationSeconds - clip.sourceStartSeconds));
+
+    const auto newDuration = juce::jmax(minimumClipSeconds, clampedEnd - clip.startSeconds);
+    if (std::abs(newDuration - clip.durationSeconds) < 1.0e-6)
+        return false;
+
+    clip.durationSeconds = newDuration;
+    return true;
+}
+
+bool TimelineModel::moveClip(int clipIndex, int trackIndex, double startSeconds)
+{
+    return creation::timeline::moveClip(clips, tracks, clipIndex, trackIndex, startSeconds);
 }
 
 bool TimelineModel::duplicateClip(int clipIndex, double startOffsetSeconds)
 {
-    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
-        return false;
-
-    auto duplicate = clips[(size_t) clipIndex];
-    if (duplicate.recording)
-        return false;
-
-    duplicate.id = juce::Uuid().toString();
-    duplicate.displayName = duplicate.displayName.isNotEmpty() ? duplicate.displayName + " copy"
-                                                               : duplicate.file.getFileNameWithoutExtension() + " copy";
-    duplicate.startSeconds += juce::jmax(0.0, startOffsetSeconds);
-    duplicate.recording = false;
-    clips.push_back(std::move(duplicate));
-    return true;
+    return creation::timeline::duplicateClip(clips, clipIndex, startOffsetSeconds);
 }
 
 bool TimelineModel::deleteClip(int clipIndex)
 {
-    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
-        return false;
-
-    if (clips[(size_t) clipIndex].recording)
-        return false;
-
-    clips.erase(clips.begin() + clipIndex);
-    return true;
+    return creation::timeline::deleteClip(clips, clipIndex);
 }
 
 bool TimelineModel::splitClip(int clipIndex, double splitSeconds)
 {
-    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
-        return false;
-
-    auto& clip = clips[(size_t) clipIndex];
-    if (clip.recording)
-        return false;
-
-    constexpr auto minimumClipSeconds = 0.02;
-    auto localSplitSeconds = splitSeconds - clip.startSeconds;
-    if (localSplitSeconds <= minimumClipSeconds || localSplitSeconds >= clip.durationSeconds - minimumClipSeconds)
-        return false;
-
-    auto rightClip = clip;
-    rightClip.id = juce::Uuid().toString();
-    rightClip.startSeconds = splitSeconds;
-    rightClip.sourceStartSeconds = clip.sourceStartSeconds + localSplitSeconds;
-    rightClip.durationSeconds = clip.durationSeconds - localSplitSeconds;
-    rightClip.displayName = clip.displayName.isNotEmpty() ? clip.displayName + " B"
-                                                          : clip.file.getFileNameWithoutExtension() + " B";
-
-    clip.durationSeconds = localSplitSeconds;
-    if (clip.displayName.isNotEmpty())
-        clip.displayName += " A";
-
-    clips.insert(clips.begin() + clipIndex + 1, std::move(rightClip));
-    return true;
+    return creation::timeline::splitClip(clips, clipIndex, splitSeconds);
 }
 
 void TimelineModel::setTrackCount(int count)

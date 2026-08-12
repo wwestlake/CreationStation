@@ -99,8 +99,6 @@ juce::String createDefaultTrackName(int trackIndex)
     return "Tk-" + juce::String(trackIndex + 1).paddedLeft('0', 4);
 }
 
-constexpr double foleySecondsPerBeat = 0.5;
-
 // Enables only the main input/output bus, explicitly disabling any others - e.g. the per-piece
 // multi-out buses a drum sampler like SSD5 exposes (confirmed: 48 output channels). Reaper only
 // activates the main stereo pair by default; enabling every bus can cause a multi-out instrument
@@ -1003,8 +1001,7 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
     if (sampleRate > 0.0)
         owner.applyAutomationForBlock((double) blockStart / sampleRate);
 
-    // Mixes every clip on `trackIndex` overlapping this block into `destination`. Shared between
-    // the -1 (Foley/master-level) pseudo-track and every real track below.
+    // Mixes every clip on `trackIndex` overlapping this block into `destination`.
     auto mixClipsInto = [&](int trackIndex, juce::AudioBuffer<float>& destination)
     {
         auto renderedAnyClip = false;
@@ -1046,23 +1043,6 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
 
         return renderedAnyClip;
     };
-
-    // The -1 pseudo-track (Foley/master-level clips not tied to a real track) has no
-    // TrackChannelSource and can't be a folder-routing participant - always straight to master,
-    // exactly as before.
-    {
-        trackRenderBuffer.setSize(juce::jmax(2, outputChannels), bufferToFill.numSamples, false, false, true);
-        trackRenderBuffer.clear();
-
-        if (mixClipsInto(-1, trackRenderBuffer))
-        {
-            for (int channel = 0; channel < outputChannels; ++channel)
-            {
-                auto sourceChannel = juce::jmin(channel, trackRenderBuffer.getNumChannels() - 1);
-                bufferToFill.buffer->addFrom(channel, bufferToFill.startSample, trackRenderBuffer, sourceChannel, 0, bufferToFill.numSamples, 1.0f);
-            }
-        }
-    }
 
     if (trackCount <= 0)
     {
@@ -2212,124 +2192,6 @@ bool WorkstationAudioEngine::previewGeneratedBuffer(const juce::AudioBuffer<floa
     juce::ignoreUnused(sampleRate);
     auto loaded = assetPreviewSource.loadBuffer(buffer, sampleRate, errorMessage);
     return loaded;
-}
-
-bool WorkstationAudioEngine::setFoleyArrangement(const juce::ValueTree& arrangementState,
-                                                 const juce::StringPairArray& assetIdToFilePath,
-                                                 juce::String& errorMessage)
-{
-    juce::AudioFormatManager formatManager;
-    formatManager.registerBasicFormats();
-
-    juce::Array<ArrangementSource::Clip> clips;
-
-    for (int childIndex = 0; childIndex < arrangementState.getNumChildren(); ++childIndex)
-    {
-        auto clipState = arrangementState.getChild(childIndex);
-        if (! clipState.hasType("Clip"))
-            continue;
-
-        PreviewSettings settings;
-        settings.startNormalized = (double) clipState.getProperty("trimStart", 0.0);
-        settings.endNormalized = (double) clipState.getProperty("trimEnd", 1.0);
-        settings.gainDecibels = (float) clipState.getProperty("gainDecibels", 0.0f);
-        settings.fadeInNormalized = (float) clipState.getProperty("fadeInNormalized", 0.0f);
-        settings.fadeOutNormalized = (float) clipState.getProperty("fadeOutNormalized", 0.0f);
-        settings.reverse = (bool) clipState.getProperty("reverse", false);
-        settings.normalize = (bool) clipState.getProperty("normalize", false);
-
-        juce::File assetFile;
-        auto requestedAssetId = clipState.getProperty("projectAssetId").toString();
-        auto requestedAssetName = clipState.getProperty("assetFileName").toString();
-
-        if (requestedAssetId.isNotEmpty())
-        {
-            auto path = assetIdToFilePath[requestedAssetId];
-            if (path.isNotEmpty())
-                assetFile = juce::File(path);
-        }
-
-        if (! assetFile.existsAsFile() && requestedAssetName.isNotEmpty())
-        {
-            // Fallback: search by filename
-            for (int i = 0; i < assetIdToFilePath.size(); ++i)
-            {
-                auto path = assetIdToFilePath.getAllValues()[i];
-                if (juce::File(path).getFileName() == requestedAssetName)
-                {
-                    assetFile = juce::File(path);
-                    break;
-                }
-            }
-        }
-
-        if (! assetFile.existsAsFile())
-            continue;
-
-        auto* reader = formatManager.createReaderFor(assetFile);
-        if (reader == nullptr)
-        {
-            errorMessage = "Could not open Foley asset: " + assetFile.getFileName();
-            continue;
-        }
-
-        auto totalSamples = (int) reader->lengthInSamples;
-        if (totalSamples <= 0)
-        {
-            delete reader;
-            continue;
-        }
-
-        auto safeStart = juce::jlimit(0.0, 1.0, settings.startNormalized);
-        auto safeEnd = juce::jlimit(safeStart + 0.001, 1.0, settings.endNormalized);
-        auto startSample = juce::jlimit(0, totalSamples - 1, juce::roundToInt((double) totalSamples * safeStart));
-        auto endSample = juce::jlimit(startSample + 1, totalSamples, juce::roundToInt((double) totalSamples * safeEnd));
-        auto sliceSamples = juce::jmax(1, endSample - startSample);
-        auto numChannels = juce::jmax(2, (int) reader->numChannels);
-
-        ArrangementSource::Clip clip;
-        clip.buffer.setSize(numChannels, sliceSamples, false, false, true);
-        clip.buffer.clear();
-        reader->read(&clip.buffer, 0, sliceSamples, startSample, true, true);
-        delete reader;
-
-        if (settings.normalize)
-        {
-            auto peak = clip.buffer.getMagnitude(0, sliceSamples);
-            if (peak > 0.0f)
-                clip.buffer.applyGain(0.95f / peak);
-        }
-
-        clip.buffer.applyGain(juce::Decibels::decibelsToGain(settings.gainDecibels));
-
-        auto fadeInSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeInNormalized));
-        auto fadeOutSamples = juce::jlimit(0, sliceSamples, juce::roundToInt((float) sliceSamples * settings.fadeOutNormalized));
-
-        for (int channel = 0; channel < clip.buffer.getNumChannels(); ++channel)
-        {
-            if (fadeInSamples > 0)
-                clip.buffer.applyGainRamp(channel, 0, fadeInSamples, 0.0f, 1.0f);
-            if (fadeOutSamples > 0)
-                clip.buffer.applyGainRamp(channel, sliceSamples - fadeOutSamples, fadeOutSamples, 1.0f, 0.0f);
-        }
-
-        if (settings.reverse)
-        {
-            for (int channel = 0; channel < clip.buffer.getNumChannels(); ++channel)
-            {
-                auto* data = clip.buffer.getWritePointer(channel);
-                std::reverse(data, data + sliceSamples);
-            }
-        }
-
-        auto startBeat = (int) clipState.getProperty("startBeat", 0);
-        clip.startSample = (int64) std::llround(startBeat * foleySecondsPerBeat * graphSampleRate);
-        clip.trackIndex = -1;
-        clips.add(std::move(clip));
-    }
-
-    arrangementSource.setClips(std::move(clips));
-    return true;
 }
 
 bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets,

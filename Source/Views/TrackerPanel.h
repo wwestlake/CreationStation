@@ -3,6 +3,9 @@
 #include <JuceHeader.h>
 #include <functional>
 #include "../Timeline/TimelineModel.h"
+#include "../Video/VideoThumbnailCache.h"
+#include "../Video/VideoScrubPreview.h"
+#include "../Video/VideoPreviewComponent.h"
 
 class TrackerPanel final : public juce::Component,
                            public juce::FileDragAndDropTarget,
@@ -39,6 +42,11 @@ public:
     std::function<void(const juce::String&)> onMarkerClicked;
     std::function<void(int, int, double)> onClipMoved;
     std::function<void()> onClipMoveCommitted;
+    // Non-destructive edge trim: leftEdge selects which boundary moved, boundarySeconds is its
+    // new absolute timeline position. Fires on every drag tick like onClipMoved; onClipTrimCommitted
+    // fires once on release, mirroring onClipMoveCommitted.
+    std::function<void(int clipIndex, bool leftEdge, double boundarySeconds)> onClipTrimmed;
+    std::function<void()> onClipTrimCommitted;
     std::function<void(int)> onClipSelected;
     std::function<void(int)> onClipRenameRequested;
     std::function<void(int, double)> onClipSplitRequested;
@@ -80,6 +88,11 @@ public:
     void setTimelineModel(cs::TimelineModel* model);
     void refreshTimelineView();
     void centerTransportInView();
+    // Drives the scrub preview overlay: finds whichever video clip covers timelineSeconds (if
+    // any) and requests a decode of the matching source-relative frame. Called every playback
+    // tick from MainComponent::timerCallback - see VideoScrubPreview for how it stays cheap
+    // under a fast, continuously-moving call rate.
+    void updateVideoPreview(double timelineSeconds);
     int getSelectedTrack() const noexcept { return selectedTrack; }
     void setAutomationTargetLabel(int trackIndex, const juce::String& label);
     void setAutomationRecordMode(int trackIndex, cs::AutomationRecordMode mode);
@@ -128,6 +141,8 @@ private:
         std::function<void(const juce::String&)> onMarkerClicked;
         std::function<void(int, int, double)> onClipMoved;
         std::function<void()> onClipMoveCommitted;
+        std::function<void(int, bool, double)> onClipTrimmed;
+        std::function<void()> onClipTrimCommitted;
         std::function<void(int)> onClipSelected;
         std::function<void(int)> onClipRenameRequested;
         std::function<void(int, double)> onClipSplitRequested;
@@ -166,6 +181,7 @@ private:
         void setTrackIndented(int trackIndex, bool indented);
         void setTrackAccentColour(int trackIndex, juce::Colour colour);
         void setScrollSeconds(double seconds);
+        void updateVideoPreview(double timelineSeconds);
         double getTransportSeconds() const noexcept;
         double getVisibleDurationSeconds() const noexcept;
         double getTotalDurationSeconds() const noexcept;
@@ -184,11 +200,18 @@ private:
 
     private:
         enum class LoopEdge { none, left, right };
+        // Which boundary of a clip a trim-drag is grabbing - deliberately separate from LoopEdge
+        // even though the shape is identical, since they gate unrelated drag gestures.
+        enum class ClipEdge { none, left, right };
 
         double xToTimelineSeconds(int x) const noexcept;
         int xForTimelineSeconds(double seconds) const noexcept;
         int yToTrackIndex(int y) const noexcept;
         int hitTestClip(juce::Point<int> position) const;
+        // Only reports a hit within a few pixels of a clip's left/right edge (outClipIndex is set
+        // only when the result isn't ClipEdge::none) - checked before hitTestClip in mouseDown so
+        // grabbing near a border trims instead of moving the whole clip.
+        ClipEdge hitTestClipEdge(juce::Point<int> position, int& outClipIndex) const;
         juce::String hitTestMarker(int x) const;
         LoopEdge hitTestLoopEdge(int x) const noexcept;
         bool hitTestLoopClose(juce::Point<int> position) const noexcept;
@@ -198,6 +221,10 @@ private:
         juce::String hitTestAutomationPoint(int trackIndex, juce::Point<int> position) const;
         juce::String hitTestAutomationTensionHandle(int trackIndex, juce::Point<int> position) const;
         void drawAutomationLane(juce::Graphics& g, const cs::TimelineClip& clip, juce::Rectangle<int> lane) const;
+        // Placeholder film-strip rendering until the video decode service (Phase 1's own
+        // sub-phase) can hand back real per-frame thumbnails - draws sprocket-hole ticks and the
+        // source filename so a video clip reads as unmistakably different from an audio one.
+        void drawVideoThumbnailStrip(juce::Graphics& g, const cs::TimelineClip& clip, juce::Rectangle<int> area) const;
         void showAutomationSegmentMenu(int trackIndex, const juce::String& pointId, juce::Point<int> screenAnchor);
         double autoScrollWhileDragging(int x);
 
@@ -297,6 +324,15 @@ private:
         int draggingOriginalTrack = -1;
         double draggingOriginalStartSeconds = 0.0;
         bool draggingClipMoved = false;
+        int trimmingClipIndex = -1;
+        ClipEdge trimmingClipEdge = ClipEdge::none;
+        double trimOriginalStartSeconds = 0.0;
+        double trimOriginalDurationSeconds = 0.0;
+        // mutable: populated lazily from drawVideoThumbnailStrip, a const paint helper (matching
+        // drawAutomationLane's own const-ness, since neither touches this component's layout).
+        mutable cs::VideoThumbnailCache videoThumbnailCache;
+        cs::VideoScrubPreview scrubPreview;
+        cs::VideoPreviewComponent videoPreview;
         bool draggingLoopRegion = false;
         bool loopRegionMoved = false;
         double loopDragStartSeconds = 0.0;

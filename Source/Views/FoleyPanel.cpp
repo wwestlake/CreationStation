@@ -1,0 +1,95 @@
+#include "FoleyPanel.h"
+
+#include <lang/nodegen/foley_graph_to_source.h>
+
+FoleyPanel::FoleyPanel()
+{
+    titleLabel_.setFont(juce::Font(juce::FontOptions(18.0f)).boldened());
+    titleLabel_.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(titleLabel_);
+
+    hintLabel_.setFont(juce::Font(juce::FontOptions(12.0f)));
+    hintLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(hintLabel_);
+
+    generateButton_.onClick = [this] { generateSource(); };
+    addAndMakeVisible(generateButton_);
+
+    statusLabel_.setFont(juce::Font(juce::FontOptions(12.0f)));
+    statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+    addAndMakeVisible(statusLabel_);
+
+    sourceView_.setMultiLine(true);
+    sourceView_.setReadOnly(true);
+    sourceView_.setFont(juce::Font(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain)));
+    sourceView_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff0e1218));
+    sourceView_.setColour(juce::TextEditor::textColourId, juce::Colour(0xffd7e3f0));
+    sourceView_.setText("Generated CEL source will appear here.", juce::dontSendNotification);
+    addAndMakeVisible(sourceView_);
+
+    addAndMakeVisible(palette_);
+
+    graphComponent_.onSelectionChanged = [this](ce::node_system::NodeId id)
+    {
+        inspector_.SetSelectedNode(id);
+    };
+    addAndMakeVisible(graphComponent_);
+
+    addAndMakeVisible(inspector_);
+}
+
+void FoleyPanel::generateSource()
+{
+    auto result = ce::lang::nodegen::foley::GenerateFoleySource(graph_, registry_);
+    if (result.ok)
+    {
+        sourceView_.setText(result.source, juce::dontSendNotification);
+        statusLabel_.setText("Generated OK.", juce::dontSendNotification);
+        statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff67e8a5));
+    }
+    else
+    {
+        juce::String combined;
+        for (const auto& error : result.errors)
+            combined << error << "\n";
+        sourceView_.setText(combined, juce::dontSendNotification);
+        statusLabel_.setText("Generation failed - see errors below.", juce::dontSendNotification);
+        statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffff6b6b));
+    }
+}
+
+void FoleyPanel::resized()
+{
+    auto area = getLocalBounds().reduced(16, 12);
+
+    auto header = area.removeFromTop(48);
+    titleLabel_.setBounds(header.removeFromTop(24));
+    hintLabel_.setBounds(header);
+
+    area.removeFromTop(8);
+
+    auto footer = area.removeFromBottom(160);
+    auto footerHeader = footer.removeFromTop(24);
+    generateButton_.setBounds(footerHeader.removeFromLeft(130));
+    footerHeader.removeFromLeft(8);
+    statusLabel_.setBounds(footerHeader);
+    footer.removeFromTop(4);
+    sourceView_.setBounds(footer);
+
+    area.removeFromBottom(8);
+
+    auto paletteArea = area.removeFromLeft(180);
+    palette_.setBounds(paletteArea);
+    area.removeFromLeft(8);
+
+    auto inspectorArea = area.removeFromRight(220);
+    inspector_.setBounds(inspectorArea);
+    area.removeFromRight(8);
+
+    graphComponent_.setBounds(area);
+}
+
+void FoleyPanel::paint(juce::Graphics& g)
+{
+    g.fillAll(juce::Colour(0xff10141a));
+}
