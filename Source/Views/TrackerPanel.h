@@ -375,7 +375,9 @@ private:
     juce::TextButton tallButton { "Tall" };
     juce::TextButton addMarkerButton { "+ Marker" };
     juce::TextButton arrangementMenuButton { "Arrangement" };
-    juce::TextButton pitchPipeButton { "Pitch Pipe" };
+    juce::ComboBox pitchPipeNoteCombo;
+    juce::ComboBox pitchPipeOctaveCombo;
+    juce::TextButton pitchPipePlayButton { "Play" };
     juce::TextButton snapToggleButton { "Snap" };
     juce::ComboBox gridResolutionCombo;
     juce::ScrollBar timelineScrollBar { false };
