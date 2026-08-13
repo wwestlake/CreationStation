@@ -272,6 +272,7 @@ private:
     // Which saved arrangement/patch/foley-setup (project asset id) is currently active in each
     // tool tab -- used to auto-restore the right one when the project reopens.
     juce::String currentArrangementAssetId;
+    juce::String currentSignalLabAssetId;
     VstPluginCatalog vstPluginCatalog;
     ContentLibrary contentLibrary;
     ContentApiClient contentApiClient;

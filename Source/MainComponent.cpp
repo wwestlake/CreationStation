@@ -2321,46 +2321,26 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
         }
 
-        juce::String errorMessage;
         juce::MemoryBlock patchData(patchJson.toRawUTF8(), (size_t) patchJson.getNumBytesAsUTF8());
-        auto assetSlug = slugForProjectAssetName(suggestedName);
-        auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + assetSlug + ".cspatch";
 
-        if (! projectSession.writeEntry(logicalPath, patchData, juce::Time::getCurrentTime()))
+        creation::assets::ProjectAssetService::ImportOptions options;
+        options.kind = creation::assets::AssetKind::patch;
+        options.displayName = suggestedName.isNotEmpty() ? suggestedName : "Signal Design";
+        options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(suggestedName) + ".cspatch";
+        options.mediaType = "application/x-creation-station-patch";
+        options.sourceApp = "Creation Station";
+        options.sourceTool = "Signal Lab";
+        options.description = "Editable Signal Lab sound design object.";
+
+        creation::assets::AssetDescriptor patchAsset;
+        juce::String errorMessage;
+        if (! creation::assets::ProjectAssetService::saveGeneratedAsset(projectSession, patchData, options, patchAsset, errorMessage))
         {
-            transportBar.setStatusText("Could not write the Signal Lab design into the project.");
+            transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the Signal Lab design asset.");
             return;
         }
 
-        creation::assets::AssetDescriptor patchAsset;
-        auto existingAssets = projectSession.getManifest().assetCatalog.query({});
-        for (const auto& asset : existingAssets)
-        {
-            if (asset.logicalPath == logicalPath)
-            {
-                patchAsset = asset;
-                break;
-            }
-        }
-
-        if (patchAsset.id.isEmpty())
-        {
-            patchAsset.id = "asset:" + juce::Uuid().toString();
-            patchAsset.version = "1";
-        }
-        patchAsset.versionId = patchAsset.id + "@" + patchAsset.version;
-        patchAsset.displayName = suggestedName.isNotEmpty() ? suggestedName : "Signal Design";
-        patchAsset.logicalPath = logicalPath;
-        patchAsset.kind = creation::assets::AssetKind::patch;
-        patchAsset.mediaType = "application/x-creation-station-patch";
-        patchAsset.fileSizeBytes = (int64) patchData.getSize();
-        patchAsset.modifiedAt = juce::Time::getCurrentTime();
-        if (patchAsset.createdAt == juce::Time())
-            patchAsset.createdAt = patchAsset.modifiedAt;
-        patchAsset.sourceApp = "Creation Station";
-        patchAsset.description = "Editable Signal Lab sound design object.";
-        patchAsset.revision = juce::jmax(1, patchAsset.revision + 1);
-        projectSession.upsertAssetDescriptor(patchAsset);
+        currentSignalLabAssetId = patchAsset.id;
 
         if (! projectSession.commit(errorMessage))
         {
@@ -2382,12 +2362,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
         }
 
-        juce::Array<creation::assets::AssetDescriptor> patchAssets;
-        for (const auto& asset : projectSession.getManifest().assetCatalog.query({}))
-        {
-            if (asset.kind == creation::assets::AssetKind::patch)
-                patchAssets.add(asset);
-        }
+        auto patchAssets = projectSession.getManifest().assetCatalog.query({ creation::assets::AssetKind::patch });
 
         if (patchAssets.isEmpty())
         {
@@ -6186,6 +6161,7 @@ void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& as
             return;
         }
 
+        currentSignalLabAssetId = asset.id;
         setWorkspaceMode(WorkspaceMode::signal);
         transportBar.setStatusText("Opened project sound: " + asset.displayName);
         return;
