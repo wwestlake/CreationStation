@@ -76,6 +76,7 @@ public:
     juce::String addMarker(double seconds, const juce::String& name = {});
     void removeMarker(const juce::String& id);
     void renameMarker(const juce::String& id, const juce::String& name);
+    void moveMarker(const juce::String& id, double seconds);
     const std::vector<TimelineMarker>& getMarkers() const noexcept { return markers; }
 
     void setLoopRegion(double startSeconds, double endSeconds);

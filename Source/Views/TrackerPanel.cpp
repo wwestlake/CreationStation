@@ -213,21 +213,14 @@ TrackerPanel::TrackerPanel()
     compactButton.onClick = [this] { canvas.setLaneHeight(72); };
     comfortButton.onClick = [this] { canvas.setLaneHeight(100); };
     tallButton.onClick = [this] { canvas.setLaneHeight(132); };
-    addMarkerButton.onClick = [this]
-    {
-        if (onMarkerAddRequested)
-            onMarkerAddRequested();
-    };
     arrangementMenuButton.onClick = [this] { showArrangementMenu(); };
     compactButton.setTooltip("Compact track height");
     comfortButton.setTooltip("Comfortable track height");
     tallButton.setTooltip("Tall track height");
-    addMarkerButton.setTooltip("Add a marker at the playhead");
     arrangementMenuButton.setTooltip("Save or load this set of tracks as a named project asset");
     addAndMakeVisible(compactButton);
     addAndMakeVisible(comfortButton);
     addAndMakeVisible(tallButton);
-    addAndMakeVisible(addMarkerButton);
     addAndMakeVisible(arrangementMenuButton);
 
     snapToggleButton.setClickingTogglesState(true);
@@ -384,6 +377,26 @@ TrackerPanel::TrackerPanel()
     {
         if (onMarkerClicked)
             onMarkerClicked(markerId);
+    };
+    canvas.onMarkerAddAtRequested = [this](double seconds)
+    {
+        if (onMarkerAddAtRequested)
+            onMarkerAddAtRequested(seconds);
+    };
+    canvas.onMarkerMoved = [this](const juce::String& id, double seconds)
+    {
+        if (onMarkerMoved)
+            onMarkerMoved(id, seconds);
+    };
+    canvas.onMarkerMoveCommitted = [this](const juce::String& id)
+    {
+        if (onMarkerMoveCommitted)
+            onMarkerMoveCommitted(id);
+    };
+    canvas.onMarkerDeleteRequested = [this](const juce::String& id)
+    {
+        if (onMarkerDeleteRequested)
+            onMarkerDeleteRequested(id);
     };
     canvas.onClipMoved = [this](int clipIndex, int trackIndex, double startSeconds)
     {
@@ -702,8 +715,6 @@ void TrackerPanel::resized()
     comfortButton.setBounds(heightButtons.removeFromLeft(96));
     heightButtons.removeFromLeft(6);
     tallButton.setBounds(heightButtons.removeFromLeft(80));
-    heightButtons.removeFromLeft(6);
-    addMarkerButton.setBounds(heightButtons.removeFromLeft(90));
 
     controls.removeFromTop(8);
     auto snapRow = controls.removeFromTop(28);
@@ -1801,10 +1812,36 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
         }
 
         auto markerId = hitTestMarker(event.x);
+
+        if (event.mods.isPopupMenu())
+        {
+            juce::PopupMenu menu;
+            if (markerId.isNotEmpty())
+            {
+                menu.addItem(1, "Delete Marker");
+                menu.showMenuAsync(juce::PopupMenu::Options(), [this, markerId](int result)
+                {
+                    if (result == 1 && onMarkerDeleteRequested)
+                        onMarkerDeleteRequested(markerId);
+                });
+            }
+            else
+            {
+                auto seconds = timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x));
+                menu.addItem(1, "Add Marker Here");
+                menu.showMenuAsync(juce::PopupMenu::Options(), [this, seconds](int result)
+                {
+                    if (result == 1 && onMarkerAddAtRequested)
+                        onMarkerAddAtRequested(seconds);
+                });
+            }
+            return;
+        }
+
         if (markerId.isNotEmpty())
         {
-            if (onMarkerClicked)
-                onMarkerClicked(markerId);
+            pendingMarkerId = markerId;
+            draggingMarkerActive = false;
             return;
         }
 
@@ -2000,6 +2037,20 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
         return;
     }
 
+    if (pendingMarkerId.isNotEmpty())
+    {
+        constexpr int dragThresholdPixels = 6;
+        if (! draggingMarkerActive && std::abs(event.getDistanceFromDragStartX()) < dragThresholdPixels)
+            return;
+
+        draggingMarkerActive = true;
+        auto seconds = timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x));
+        if (onMarkerMoved)
+            onMarkerMoved(pendingMarkerId, seconds);
+        repaint();
+        return;
+    }
+
     if (trimmingClipIndex >= 0)
     {
         const auto pixelsPerSecond = juce::jmax(1.0, timelineModel->getPixelsPerSecond());
@@ -2128,6 +2179,27 @@ void TrackerPanel::TimelineCanvas::mouseUp(const juce::MouseEvent&)
 
         draggingLoopRegion = false;
         loopRegionMoved = false;
+        repaint();
+        return;
+    }
+
+    if (pendingMarkerId.isNotEmpty())
+    {
+        auto markerId = pendingMarkerId;
+        auto wasDragging = draggingMarkerActive;
+        pendingMarkerId.clear();
+        draggingMarkerActive = false;
+
+        if (wasDragging)
+        {
+            if (onMarkerMoveCommitted)
+                onMarkerMoveCommitted(markerId);
+        }
+        else if (onMarkerClicked)
+        {
+            onMarkerClicked(markerId);
+        }
+
         repaint();
         return;
     }

@@ -37,8 +37,12 @@ public:
     std::function<void()> onLoopRegionCleared;
     std::function<void(bool)> onTimelineSnapChanged;
     std::function<void(double)> onTimelineGridChanged;
-    std::function<void()> onMarkerAddRequested;
     std::function<void(const juce::String&)> onMarkerClicked;
+    // Right-click-to-place, drag-to-move, and delete - see the ruler's mouseDown/mouseDrag/mouseUp.
+    std::function<void(double seconds)> onMarkerAddAtRequested;
+    std::function<void(const juce::String& id, double seconds)> onMarkerMoved;
+    std::function<void(const juce::String& id)> onMarkerMoveCommitted;
+    std::function<void(const juce::String& id)> onMarkerDeleteRequested;
     std::function<void(int, int, double)> onClipMoved;
     std::function<void()> onClipMoveCommitted;
     // Non-destructive edge trim: leftEdge selects which boundary moved, boundarySeconds is its
@@ -142,6 +146,10 @@ private:
         std::function<void(double, double)> onLoopRegionChanged;
         std::function<void()> onLoopRegionCleared;
         std::function<void(const juce::String&)> onMarkerClicked;
+        std::function<void(double seconds)> onMarkerAddAtRequested;
+        std::function<void(const juce::String& id, double seconds)> onMarkerMoved;
+        std::function<void(const juce::String& id)> onMarkerMoveCommitted;
+        std::function<void(const juce::String& id)> onMarkerDeleteRequested;
         std::function<void(int, int, double)> onClipMoved;
         std::function<void()> onClipMoveCommitted;
         std::function<void(int, bool, double)> onClipTrimmed;
@@ -343,6 +351,11 @@ private:
         LoopEdge resizingLoopEdge = LoopEdge::none;
         double loopEdgeOtherSeconds = 0.0; // the edge NOT being dragged, held fixed during a resize
         double loopEdgeLiveSeconds = 0.0;  // live (unsnapped-preview) position of the edge being dragged
+        // Marker interaction: a plain click on a marker still jumps the playhead
+        // (onMarkerClicked), but dragging past the threshold moves it instead - mirrors
+        // TrackHeader's own reorderDragActive click-vs-drag disambiguation pattern.
+        juce::String pendingMarkerId;
+        bool draggingMarkerActive = false;
         double scrollSeconds = 0.0;
         cs::TimelineModel* timelineModel = nullptr;
         int draggingAutomationTrackIndex = -1;
@@ -374,7 +387,6 @@ private:
     juce::TextButton compactButton { "Compact" };
     juce::TextButton comfortButton { "Comfort" };
     juce::TextButton tallButton { "Tall" };
-    juce::TextButton addMarkerButton { "+ Marker" };
     juce::TextButton arrangementMenuButton { "Save/Load" };
     juce::ComboBox pitchPipeNoteCombo;
     juce::ComboBox pitchPipeOctaveCombo;

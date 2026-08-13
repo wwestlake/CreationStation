@@ -1795,9 +1795,27 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         saveSessionToDisk();
     };
 
-    trackerPanel.onMarkerAddRequested = [this]
+    trackerPanel.onMarkerAddAtRequested = [this](double seconds)
     {
-        timelineModel.addMarker(timelineModel.getTransportSeconds());
+        timelineModel.addMarker(seconds);
+        trackerPanel.refreshTimelineView();
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onMarkerMoved = [this](const juce::String& markerId, double seconds)
+    {
+        timelineModel.moveMarker(markerId, seconds);
+        trackerPanel.refreshTimelineView();
+    };
+
+    trackerPanel.onMarkerMoveCommitted = [this](const juce::String&)
+    {
+        saveSessionToDisk();
+    };
+
+    trackerPanel.onMarkerDeleteRequested = [this](const juce::String& markerId)
+    {
+        timelineModel.removeMarker(markerId);
         trackerPanel.refreshTimelineView();
         saveSessionToDisk();
     };

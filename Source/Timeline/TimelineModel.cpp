@@ -689,6 +689,23 @@ void TimelineModel::renameMarker(const juce::String& id, const juce::String& nam
     }
 }
 
+void TimelineModel::moveMarker(const juce::String& id, double seconds)
+{
+    for (auto& marker : markers)
+    {
+        if (marker.id == id)
+        {
+            marker.seconds = juce::jmax(0.0, seconds);
+            break;
+        }
+    }
+
+    std::sort(markers.begin(), markers.end(), [](const TimelineMarker& a, const TimelineMarker& b)
+    {
+        return a.seconds < b.seconds;
+    });
+}
+
 void TimelineModel::setLoopRegion(double startSeconds, double endSeconds)
 {
     loopStartSeconds = juce::jmax(0.0, juce::jmin(startSeconds, endSeconds));
