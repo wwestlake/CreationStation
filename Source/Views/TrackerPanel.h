@@ -31,8 +31,6 @@ public:
     std::function<void(int, int)> onTrackInputChanged;
     std::function<void(int)> onTrackFxRequested;
     std::function<void(int)> onMoveToFolderRequested;
-    std::function<void()> onZoomOutRequested;
-    std::function<void()> onZoomInRequested;
     std::function<void(double)> onPlayheadPositionChanged;
     std::function<void(double, double)> onLoopRegionChanged;
     std::function<void()> onLoopRegionCleared;
@@ -375,8 +373,6 @@ private:
     juce::TextButton compactButton { "Compact" };
     juce::TextButton comfortButton { "Comfort" };
     juce::TextButton tallButton { "Tall" };
-    juce::TextButton zoomOutButton { "Zoom -" };
-    juce::TextButton zoomInButton { "Zoom +" };
     juce::TextButton addMarkerButton { "+ Marker" };
     juce::TextButton arrangementMenuButton { "Arrangement" };
     juce::TextButton pitchPipeButton { "Pitch Pipe" };

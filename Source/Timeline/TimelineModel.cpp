@@ -30,16 +30,6 @@ void TimelineModel::setPixelsPerSecond(double newPixelsPerSecond)
     pixelsPerSecond = juce::jlimit(6.0, 3600.0, newPixelsPerSecond);
 }
 
-void TimelineModel::zoomIn()
-{
-    setPixelsPerSecond(pixelsPerSecond * 1.8);
-}
-
-void TimelineModel::zoomOut()
-{
-    setPixelsPerSecond(pixelsPerSecond / 1.8);
-}
-
 void TimelineModel::setTransportSeconds(double seconds)
 {
     transportSeconds = juce::jmax(0.0, seconds);

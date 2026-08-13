@@ -213,16 +213,6 @@ TrackerPanel::TrackerPanel()
     compactButton.onClick = [this] { canvas.setLaneHeight(72); };
     comfortButton.onClick = [this] { canvas.setLaneHeight(100); };
     tallButton.onClick = [this] { canvas.setLaneHeight(132); };
-    zoomOutButton.onClick = [this]
-    {
-        if (onZoomOutRequested)
-            onZoomOutRequested();
-    };
-    zoomInButton.onClick = [this]
-    {
-        if (onZoomInRequested)
-            onZoomInRequested();
-    };
     addMarkerButton.onClick = [this]
     {
         if (onMarkerAddRequested)
@@ -232,15 +222,11 @@ TrackerPanel::TrackerPanel()
     compactButton.setTooltip("Compact track height");
     comfortButton.setTooltip("Comfortable track height");
     tallButton.setTooltip("Tall track height");
-    zoomOutButton.setTooltip("Zoom out on the timeline");
-    zoomInButton.setTooltip("Zoom in on the timeline");
     addMarkerButton.setTooltip("Add a marker at the playhead");
     arrangementMenuButton.setTooltip("Save or load this set of tracks as a named project asset");
     addAndMakeVisible(compactButton);
     addAndMakeVisible(comfortButton);
     addAndMakeVisible(tallButton);
-    addAndMakeVisible(zoomOutButton);
-    addAndMakeVisible(zoomInButton);
     addAndMakeVisible(addMarkerButton);
     addAndMakeVisible(arrangementMenuButton);
 
@@ -710,10 +696,6 @@ void TrackerPanel::resized()
     // matching the clip context-menu pattern so no destructive/structural action sits adjacent
     // to frequently-clicked buttons and gets mis-hit.
     auto trackButtons = controls.removeFromTop(32);
-    zoomOutButton.setBounds(trackButtons.removeFromLeft(78));
-    trackButtons.removeFromLeft(6);
-    zoomInButton.setBounds(trackButtons.removeFromLeft(78));
-    trackButtons.removeFromLeft(6);
     arrangementMenuButton.setBounds(trackButtons.removeFromLeft(110));
 
     controls.removeFromTop(8);

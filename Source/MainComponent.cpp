@@ -1758,18 +1758,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         saveSessionToDisk();
     };
 
-    trackerPanel.onZoomOutRequested = [this]
-    {
-        timelineModel.zoomOut();
-        trackerPanel.refreshTimelineView();
-    };
-
-    trackerPanel.onZoomInRequested = [this]
-    {
-        timelineModel.zoomIn();
-        trackerPanel.refreshTimelineView();
-    };
-
     trackerPanel.onPlayheadPositionChanged = [this](double seconds)
     {
         timelineModel.setTransportSeconds(seconds);

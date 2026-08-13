@@ -28,8 +28,6 @@ public:
 
     void setPixelsPerSecond(double newPixelsPerSecond);
     double getPixelsPerSecond() const noexcept { return pixelsPerSecond; }
-    void zoomIn();
-    void zoomOut();
 
     void setTransportSeconds(double seconds);
     double getTransportSeconds() const noexcept { return transportSeconds; }
