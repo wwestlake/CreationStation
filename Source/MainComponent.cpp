@@ -1901,24 +1901,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                    return;
 
                                const auto& asset = arrangementAssets.getReference(result - 1);
-                               juce::MemoryBlock data;
-                               if (! projectSession.readEntry(asset.logicalPath, data))
+                               if (! restoreArrangementAsset(asset))
                                {
-                                   transportBar.setStatusText("Could not read saved arrangement: " + asset.displayName);
+                                   transportBar.setStatusText("Could not load saved arrangement: " + asset.displayName);
                                    return;
                                }
 
-                               auto xmlString = juce::String::createStringFromData(data.getData(), (int) data.getSize());
-                               auto state = juce::ValueTree::fromXml(xmlString);
-                               if (! state.isValid())
-                               {
-                                   transportBar.setStatusText("Saved arrangement data is not valid: " + asset.displayName);
-                                   return;
-                               }
-
-                               timelineModel.restoreState(state);
-                               currentArrangementAssetId = asset.id;
-                               trackerPanel.refreshTimelineView();
                                saveSessionToDisk(true);
                                transportBar.setStatusText("Loaded arrangement: " + asset.displayName);
                            });
@@ -2482,22 +2470,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                    return;
 
                                const auto& asset = setupAssets.getReference(result - 1);
-                               juce::MemoryBlock data;
-                               if (! projectSession.readEntry(asset.logicalPath, data))
+                               if (! restoreFoleyAsset(asset))
                                {
-                                   transportBar.setStatusText("Could not read saved Foley setup: " + asset.displayName);
+                                   transportBar.setStatusText("Could not load Foley setup: " + asset.displayName);
                                    return;
                                }
 
-                               auto celgText = juce::String::createStringFromData(data.getData(), (int) data.getSize());
-                               juce::String errorMessage;
-                               if (! foleyPanel.loadGraph(celgText, errorMessage))
-                               {
-                                   transportBar.setStatusText("Could not load Foley setup: " + errorMessage);
-                                   return;
-                               }
-
-                               currentFoleyAssetId = asset.id;
                                saveSessionToDisk(true);
                                transportBar.setStatusText("Loaded Foley setup: " + asset.displayName);
                            });
@@ -6286,6 +6264,78 @@ void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& as
     transportBar.setStatusText("Revealed project asset: " + asset.displayName);
 }
 
+bool MainComponent::restoreArrangementAsset(const creation::assets::AssetDescriptor& asset)
+{
+    juce::MemoryBlock data;
+    if (! projectSession.readEntry(asset.logicalPath, data))
+        return false;
+
+    auto xmlString = juce::String::createStringFromData(data.getData(), (int) data.getSize());
+    auto state = juce::ValueTree::fromXml(xmlString);
+    if (! state.isValid())
+        return false;
+
+    timelineModel.restoreState(state);
+    currentArrangementAssetId = asset.id;
+    trackerPanel.refreshTimelineView();
+    return true;
+}
+
+bool MainComponent::restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset)
+{
+    juce::String errorMessage;
+    creation::assets::MaterializedAssetLease lease;
+    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                          creation::assets::MaterializationAccess::readOnly,
+                                          lease, errorMessage))
+        return false;
+
+    cw::PatchDocument document;
+    if (! cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), document, errorMessage))
+        return false;
+
+    if (! signalLabPanel.loadPatchDocument(document, errorMessage))
+        return false;
+
+    currentSignalLabAssetId = asset.id;
+    return true;
+}
+
+bool MainComponent::restoreFoleyAsset(const creation::assets::AssetDescriptor& asset)
+{
+    juce::MemoryBlock data;
+    if (! projectSession.readEntry(asset.logicalPath, data))
+        return false;
+
+    auto celgText = juce::String::createStringFromData(data.getData(), (int) data.getSize());
+    juce::String errorMessage;
+    if (! foleyPanel.loadGraph(celgText, errorMessage))
+        return false;
+
+    currentFoleyAssetId = asset.id;
+    return true;
+}
+
+void MainComponent::restoreLastActiveAssets(const juce::ValueTree& lastActiveAssetsState)
+{
+    if (! lastActiveAssetsState.isValid())
+        return;
+
+    const auto& catalog = projectSession.getManifest().assetCatalog;
+
+    if (auto id = lastActiveAssetsState.getProperty("trackerAssetId").toString(); id.isNotEmpty())
+        if (auto* asset = catalog.findById(id))
+            restoreArrangementAsset(*asset);
+
+    if (auto id = lastActiveAssetsState.getProperty("signalLabAssetId").toString(); id.isNotEmpty())
+        if (auto* asset = catalog.findById(id))
+            restoreSignalLabAsset(*asset);
+
+    if (auto id = lastActiveAssetsState.getProperty("foleyAssetId").toString(); id.isNotEmpty())
+        if (auto* asset = catalog.findById(id))
+            restoreFoleyAsset(*asset);
+}
+
 void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset)
 {
     if (asset.kind != creation::assets::AssetKind::audio
@@ -7708,6 +7758,12 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     auto& signalUndoContext = undoService.getOrCreateContext(signalUndoContextId, 100);
     state.addChild(signalUndoContext.serialise("SignalUndoContext"), -1, nullptr);
 
+    juce::ValueTree lastActiveAssets("LastActiveAssets");
+    lastActiveAssets.setProperty("trackerAssetId", currentArrangementAssetId, nullptr);
+    lastActiveAssets.setProperty("signalLabAssetId", currentSignalLabAssetId, nullptr);
+    lastActiveAssets.setProperty("foleyAssetId", currentFoleyAssetId, nullptr);
+    state.addChild(lastActiveAssets, -1, nullptr);
+
     return state;
 }
 
@@ -8379,6 +8435,7 @@ void MainComponent::loadSessionFromDisk()
         dslPanel.setSourceText(dslSource);
 
     refreshProjectAssets();
+    restoreLastActiveAssets(state.getChildWithName("LastActiveAssets"));
 
     if (auto graphState = state.getChildWithName("NodeGraph"); graphState.isValid())
         graphPanel.restoreState(graphState);

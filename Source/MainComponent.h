@@ -487,6 +487,13 @@ private:
     void downloadContentItem(const ContentLibrary::Item& item);
     void activateContentItem(const ContentLibrary::Item& item);
     void openProjectAsset(const creation::assets::AssetDescriptor& asset);
+    // Silent restores (no workspace-mode switch, no undo entry) for the "last active" named
+    // asset in each tool tab, used both by the auto-restore-on-project-open path and by each
+    // tool's own interactive Load menu.
+    bool restoreArrangementAsset(const creation::assets::AssetDescriptor& asset);
+    bool restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset);
+    bool restoreFoleyAsset(const creation::assets::AssetDescriptor& asset);
+    void restoreLastActiveAssets(const juce::ValueTree& lastActiveAssetsState);
     void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset);
     void exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset);
     int placeAudioAssetOnTracker(const creation::assets::AssetDescriptor& asset,
