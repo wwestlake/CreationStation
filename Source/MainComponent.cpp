@@ -3747,7 +3747,6 @@ void MainComponent::timerCallback()
         }
 
         timelineModel.setTransportSeconds(timelineSeconds);
-        trackerPanel.updateVideoPreview(timelineSeconds);
 
         if (engine.isRecording())
         {
@@ -3760,6 +3759,11 @@ void MainComponent::timerCallback()
         trackerPanel.centerTransportInView();
         trackerPanel.refreshTimelineView();
     }
+
+    // Runs every tick regardless of transport state -- it must hide itself when the playhead
+    // isn't over a video clip (including "no clips at all"), not just while playing, or it's
+    // stuck showing its "Decoding..." placeholder forever once shown.
+    trackerPanel.updateVideoPreview(timelineModel.getTransportSeconds());
 
     if (midiEditorPanel != nullptr)
     {
