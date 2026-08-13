@@ -228,18 +228,21 @@ TrackerPanel::TrackerPanel()
         if (onMarkerAddRequested)
             onMarkerAddRequested();
     };
+    arrangementMenuButton.onClick = [this] { showArrangementMenu(); };
     compactButton.setTooltip("Compact track height");
     comfortButton.setTooltip("Comfortable track height");
     tallButton.setTooltip("Tall track height");
     zoomOutButton.setTooltip("Zoom out on the timeline");
     zoomInButton.setTooltip("Zoom in on the timeline");
     addMarkerButton.setTooltip("Add a marker at the playhead");
+    arrangementMenuButton.setTooltip("Save or load this set of tracks as a named project asset");
     addAndMakeVisible(compactButton);
     addAndMakeVisible(comfortButton);
     addAndMakeVisible(tallButton);
     addAndMakeVisible(zoomOutButton);
     addAndMakeVisible(zoomInButton);
     addAndMakeVisible(addMarkerButton);
+    addAndMakeVisible(arrangementMenuButton);
 
     snapToggleButton.setClickingTogglesState(true);
     snapToggleButton.setToggleState(true, juce::dontSendNotification);
@@ -710,6 +713,8 @@ void TrackerPanel::resized()
     zoomOutButton.setBounds(trackButtons.removeFromLeft(78));
     trackButtons.removeFromLeft(6);
     zoomInButton.setBounds(trackButtons.removeFromLeft(78));
+    trackButtons.removeFromLeft(6);
+    arrangementMenuButton.setBounds(trackButtons.removeFromLeft(110));
 
     controls.removeFromTop(8);
     auto heightButtons = controls.removeFromTop(30);
@@ -1067,6 +1072,48 @@ void TrackerPanel::commitTimingEdits()
 
     if (onKeyChanged)
         onKeyChanged(keySelector.getText());
+}
+
+void TrackerPanel::showArrangementMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem(1, "Save Arrangement...");
+    menu.addItem(2, "Load Arrangement...");
+
+    auto area = arrangementMenuButton.getScreenBounds();
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
+                       [this](int result)
+                       {
+                           if (result == 1)
+                           {
+                               auto* prompt = new juce::AlertWindow("Save Arrangement",
+                                                                    "Enter a name for this set of tracks:",
+                                                                    juce::MessageBoxIconType::QuestionIcon);
+                               prompt->addTextEditor("arrangementName", "Arrangement");
+                               prompt->addButton("Save", 1);
+                               prompt->addButton("Cancel", 0);
+
+                               auto options = juce::Component::SafePointer<TrackerPanel>(this);
+                               prompt->enterModalState(true, juce::ModalCallbackFunction::create([options, prompt](int promptResult) mutable
+                               {
+                                   std::unique_ptr<juce::AlertWindow> dialog(prompt);
+                                   if (promptResult != 1 || options == nullptr)
+                                       return;
+
+                                   auto name = dialog->getTextEditorContents("arrangementName").trim();
+                                   if (name.isEmpty())
+                                       return;
+
+                                   if (options->onArrangementSaveRequested)
+                                       options->onArrangementSaveRequested(name);
+                               }), true);
+                           }
+                           else if (result == 2)
+                           {
+                               if (onArrangementLoadRequested)
+                                   onArrangementLoadRequested();
+                           }
+                       });
 }
 
 void TrackerPanel::TimelineCanvas::setTrackKind(int trackIndex, cs::TrackKind kind)

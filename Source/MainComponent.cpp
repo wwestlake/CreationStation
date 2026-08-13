@@ -1813,6 +1813,117 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         saveSessionToDisk();
     };
 
+    trackerPanel.onArrangementSaveRequested = [this](const juce::String& name)
+    {
+        if (! projectSession.isValid())
+        {
+            transportBar.setStatusText("Open or create a project first so Tracker can save arrangements into it.");
+            return;
+        }
+
+        auto arrangementState = timelineModel.createState();
+        auto xml = arrangementState.createXml();
+        if (xml == nullptr)
+        {
+            transportBar.setStatusText("Could not serialize the arrangement.");
+            return;
+        }
+        auto xmlString = xml->toString();
+        juce::MemoryBlock data(xmlString.toRawUTF8(), xmlString.getNumBytesAsUTF8());
+
+        creation::assets::ProjectAssetService::ImportOptions options;
+        options.kind = creation::assets::AssetKind::trackerArrangement;
+        options.displayName = name;
+        options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(name) + ".csarrangement";
+        options.mediaType = "application/x-creation-station-arrangement";
+        options.sourceApp = "Creation Station";
+        options.sourceTool = "Tracker";
+        options.description = "Saved set of Tracker tracks/clips.";
+
+        creation::assets::AssetDescriptor savedAsset;
+        juce::String errorMessage;
+        if (! creation::assets::ProjectAssetService::saveGeneratedAsset(projectSession, data, options, savedAsset, errorMessage))
+        {
+            transportBar.setStatusText("Could not save arrangement: " + errorMessage);
+            return;
+        }
+
+        currentArrangementAssetId = savedAsset.id;
+
+        if (! projectSession.commit(errorMessage))
+        {
+            transportBar.setStatusText("Arrangement saved but project commit failed: " + errorMessage);
+            return;
+        }
+
+        refreshProjectAssets();
+        saveSessionToDisk(true);
+        transportBar.setStatusText("Saved arrangement: " + savedAsset.displayName);
+    };
+
+    trackerPanel.onArrangementLoadRequested = [this]
+    {
+        if (! projectSession.isValid())
+        {
+            transportBar.setStatusText("Open or create a project first so Tracker can load saved arrangements from it.");
+            return;
+        }
+
+        auto arrangementAssets = projectSession.getManifest().assetCatalog.query({ creation::assets::AssetKind::trackerArrangement });
+        if (arrangementAssets.isEmpty())
+        {
+            transportBar.setStatusText("This project does not have any saved arrangements yet.");
+            return;
+        }
+
+        std::sort(arrangementAssets.begin(), arrangementAssets.end(), [](const auto& left, const auto& right)
+        {
+            if (left.modifiedAt != right.modifiedAt)
+                return left.modifiedAt > right.modifiedAt;
+            return left.displayName.compareIgnoreCase(right.displayName) < 0;
+        });
+
+        juce::PopupMenu menu;
+        menu.addSectionHeader("Load Arrangement From Project");
+        for (int index = 0; index < arrangementAssets.size(); ++index)
+        {
+            const auto& asset = arrangementAssets.getReference(index);
+            auto label = asset.displayName.isNotEmpty() ? asset.displayName : asset.logicalPath;
+            auto detail = asset.modifiedAt != juce::Time() ? "  •  " + asset.modifiedAt.toString(true, true) : juce::String{};
+            menu.addItem(index + 1, label + detail);
+        }
+
+        auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }),
+                           [this, arrangementAssets](int result)
+                           {
+                               if (result <= 0 || result > arrangementAssets.size())
+                                   return;
+
+                               const auto& asset = arrangementAssets.getReference(result - 1);
+                               juce::MemoryBlock data;
+                               if (! projectSession.readEntry(asset.logicalPath, data))
+                               {
+                                   transportBar.setStatusText("Could not read saved arrangement: " + asset.displayName);
+                                   return;
+                               }
+
+                               auto xmlString = juce::String::createStringFromData(data.getData(), (int) data.getSize());
+                               auto state = juce::ValueTree::fromXml(xmlString);
+                               if (! state.isValid())
+                               {
+                                   transportBar.setStatusText("Saved arrangement data is not valid: " + asset.displayName);
+                                   return;
+                               }
+
+                               timelineModel.restoreState(state);
+                               currentArrangementAssetId = asset.id;
+                               trackerPanel.refreshTimelineView();
+                               saveSessionToDisk(true);
+                               transportBar.setStatusText("Loaded arrangement: " + asset.displayName);
+                           });
+    };
+
     trackerPanel.onMarkerClicked = [this](const juce::String& markerId)
     {
         for (const auto& marker : timelineModel.getMarkers())

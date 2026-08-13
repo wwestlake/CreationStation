@@ -68,6 +68,10 @@ public:
     std::function<void(double noteHz)> onPitchPipeTriggered;
     std::function<void(const juce::String& targetId, const juce::String& displayLabel)> onLearnMidiRequested;
     std::function<void(const juce::StringArray&, int, double)> onAudioFilesDropped;
+    // Save/load the current set of tracks/clips as one named project asset, via the shared
+    // ProjectAssetService::saveGeneratedAsset mechanism -- see the Arrangement toolbar button.
+    std::function<void(const juce::String& name)> onArrangementSaveRequested;
+    std::function<void()> onArrangementLoadRequested;
 
     void setTrackCount(int newTrackCount);
     void setTrackName(int trackIndex, const juce::String& name);
@@ -374,6 +378,7 @@ private:
     juce::TextButton zoomOutButton { "Zoom -" };
     juce::TextButton zoomInButton { "Zoom +" };
     juce::TextButton addMarkerButton { "+ Marker" };
+    juce::TextButton arrangementMenuButton { "Arrangement" };
     juce::TextButton pitchPipeButton { "Pitch Pipe" };
     juce::TextButton snapToggleButton { "Snap" };
     juce::ComboBox gridResolutionCombo;
@@ -388,4 +393,5 @@ private:
     void refreshSelectionLabel();
     void refreshTimelineScrollBar();
     void commitTimingEdits();
+    void showArrangementMenu();
 };

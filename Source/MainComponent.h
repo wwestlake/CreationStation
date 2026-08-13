@@ -19,6 +19,7 @@
 #include "ControlSurface/ControlSurfaceMappingStore.h"
 #include "Content/ContentLibrary.h"
 #include "Content/ContentApiClient.h"
+#include <creation/assets/ProjectAssetService.h>
 #include <creation/assets/ProjectSession.h>
 #include <creation/ui/CreationSuiteHeaderBar.h>
 #include <creation/ui/SuiteShellController.h>
@@ -268,6 +269,9 @@ private:
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     creation::assets::ProjectSession projectSession;
+    // Which saved arrangement/patch/foley-setup (project asset id) is currently active in each
+    // tool tab -- used to auto-restore the right one when the project reopens.
+    juce::String currentArrangementAssetId;
     VstPluginCatalog vstPluginCatalog;
     ContentLibrary contentLibrary;
     ContentApiClient contentApiClient;
