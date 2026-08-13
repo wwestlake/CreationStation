@@ -451,6 +451,22 @@ juce::String TimelineModel::getTrackName(int trackIndex) const
     return tracks[(size_t) trackIndex].name;
 }
 
+void TimelineModel::setTrackHeight(int trackIndex, int heightPixels)
+{
+    if (! juce::isPositiveAndBelow(trackIndex, getTrackCount()))
+        return;
+
+    tracks[(size_t) trackIndex].heightPixels = juce::jlimit(64, 156, heightPixels);
+}
+
+int TimelineModel::getTrackHeight(int trackIndex) const
+{
+    if (! juce::isPositiveAndBelow(trackIndex, getTrackCount()))
+        return 100;
+
+    return tracks[(size_t) trackIndex].heightPixels;
+}
+
 juce::String TimelineModel::getTrackId(int trackIndex) const
 {
     if (! juce::isPositiveAndBelow(trackIndex, getTrackCount()))
@@ -1339,6 +1355,7 @@ juce::ValueTree TimelineModel::createState() const
         trackState.setProperty("channelMode", toStorageToken(track.channelMode), nullptr);
         trackState.setProperty("parentTrackIndex", track.parentTrackIndex, nullptr);
         trackState.setProperty("folded", track.folded, nullptr);
+        trackState.setProperty("heightPixels", track.heightPixels, nullptr);
         trackState.setProperty("automationTargetKind", toStorageToken(track.automationTarget.kind), nullptr);
         trackState.setProperty("automationTargetTrackIndex", track.automationTarget.targetTrackIndex, nullptr);
         trackState.setProperty("automationTargetPluginSlot", track.automationTarget.pluginSlotIndex, nullptr);
@@ -1482,6 +1499,7 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
             track.channelMode = trackChannelModeFromStorageToken(child.getProperty("channelMode", "mono").toString());
             track.parentTrackIndex = (int) child.getProperty("parentTrackIndex", -1);
             track.folded = (bool) child.getProperty("folded", false);
+            track.heightPixels = juce::jlimit(64, 156, (int) child.getProperty("heightPixels", 100));
             track.automationTarget.kind = automationTargetKindFromStorageToken(child.getProperty("automationTargetKind", "none").toString());
             track.automationTarget.targetTrackIndex = (int) child.getProperty("automationTargetTrackIndex", -1);
             track.automationTarget.pluginSlotIndex = (int) child.getProperty("automationTargetPluginSlot", -1);

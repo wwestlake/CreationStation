@@ -50,6 +50,10 @@ public:
     // fires once on release, mirroring onClipMoveCommitted.
     std::function<void(int clipIndex, bool leftEdge, double boundarySeconds)> onClipTrimmed;
     std::function<void()> onClipTrimCommitted;
+    // Drag-to-resize a track's height (Reaper-style, TrackHeader's bottom-edge hotzone). The
+    // model is already updated live during the drag; this fires once on release so callers can
+    // persist, mirroring onMarkerMoveCommitted/onClipMoveCommitted.
+    std::function<void(int trackIndex)> onTrackHeightCommitted;
     std::function<void(int)> onClipSelected;
     std::function<void(int)> onClipRenameRequested;
     std::function<void(int, double)> onClipSplitRequested;
@@ -154,6 +158,7 @@ private:
         std::function<void()> onClipMoveCommitted;
         std::function<void(int, bool, double)> onClipTrimmed;
         std::function<void()> onClipTrimCommitted;
+        std::function<void(int trackIndex)> onTrackHeightCommitted;
         std::function<void(int)> onClipSelected;
         std::function<void(int)> onClipRenameRequested;
         std::function<void(int, double)> onClipSplitRequested;
@@ -184,7 +189,6 @@ private:
         void setTrackFxSummary(int trackIndex, int pluginCount);
         void setSelectedTrack(int trackIndex);
         void setSelectedClip(int clipIndex);
-        void setLaneHeight(int newLaneHeight);
         void setTimelineModel(cs::TimelineModel* model);
         void setAutomationTargetLabel(int trackIndex, const juce::String& label);
         void setAutomationRecordMode(int trackIndex, cs::AutomationRecordMode mode);
@@ -197,8 +201,11 @@ private:
         double getVisibleDurationSeconds() const noexcept;
         double getTotalDurationSeconds() const noexcept;
         int getTrackCount() const noexcept { return trackCount; }
-        int getLaneHeight() const noexcept { return laneHeight; }
         int getSelectedTrack() const noexcept { return selectedTrack; }
+        // Cumulative Y offset of trackIndex's top edge, accounting for each track's own
+        // (drag-resizable) height rather than a uniform lane height.
+        int trackTopY(int trackIndex) const noexcept;
+        int trackIndexAtY(int y) const noexcept { return yToTrackIndex(y); }
 
         void paint(juce::Graphics& g) override;
         void resized() override;
@@ -218,6 +225,7 @@ private:
         double xToTimelineSeconds(int x) const noexcept;
         int xForTimelineSeconds(double seconds) const noexcept;
         int yToTrackIndex(int y) const noexcept;
+        int getTrackHeightAt(int trackIndex) const noexcept;
         int hitTestClip(juce::Point<int> position) const;
         // Only reports a hit within a few pixels of a clip's left/right edge (outClipIndex is set
         // only when the result isn't ClipEdge::none) - checked before hitTestClip in mouseDown so
@@ -265,6 +273,11 @@ private:
             // the canvas is what knows how to turn a y position into a target track index.
             std::function<void(int, int)> onReorderDragged;
             std::function<void(int, int)> onReorderCommitted;
+            // Bottom-edge drag-to-resize (Reaper-style). int argument is the proposed new
+            // height in pixels for this header's own track - fires live on every drag tick,
+            // mirroring onClipMoved/onMarkerMoved; onResizeCommitted fires once on release.
+            std::function<void(int, int)> onResizeDragged;
+            std::function<void(int, int)> onResizeCommitted;
 
             void setTrackIndex(int newTrackIndex);
             void setTrackName(const juce::String& name);
@@ -296,10 +309,12 @@ private:
             void mouseDown(const juce::MouseEvent&) override;
             void mouseDrag(const juce::MouseEvent&) override;
             void mouseUp(const juce::MouseEvent&) override;
+            void mouseMove(const juce::MouseEvent&) override;
 
         private:
             void refreshInputSelectorForKind();
             void populateMidiChannelOptions();
+            bool isInResizeHotzone(juce::Point<float> position) const noexcept;
 
             int trackIndex = 0;
             float inputLevel = 0.0f;
@@ -325,12 +340,14 @@ private:
             bool indented = false;
             juce::Colour accentColour = juce::Colour();
             bool reorderDragActive = false;
+            bool startedInResizeHotzone = false;
+            bool resizeDragActive = false;
+            int resizeStartHeight = 0;
         };
 
         int trackCount = 0;
         int selectedTrack = -1;
         int selectedClipIndex = -1;
-        int laneHeight = 100;
         int draggingClipIndex = -1;
         int draggingOriginalTrack = -1;
         double draggingOriginalStartSeconds = 0.0;
@@ -384,9 +401,6 @@ private:
     juce::TextEditor bpmEditor;
     juce::TextEditor timeSignatureEditor;
     juce::ComboBox keySelector;
-    juce::TextButton compactButton { "Compact" };
-    juce::TextButton comfortButton { "Comfort" };
-    juce::TextButton tallButton { "Tall" };
     juce::TextButton arrangementMenuButton { "Save/Load" };
     juce::ComboBox pitchPipeNoteCombo;
     juce::ComboBox pitchPipeOctaveCombo;

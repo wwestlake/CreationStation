@@ -1813,6 +1813,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         saveSessionToDisk();
     };
 
+    trackerPanel.onTrackHeightCommitted = [this](int)
+    {
+        saveSessionToDisk();
+    };
+
     trackerPanel.onMarkerDeleteRequested = [this](const juce::String& markerId)
     {
         timelineModel.removeMarker(markerId);

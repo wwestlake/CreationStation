@@ -105,6 +105,8 @@ public:
     void addTrack(TrackKind kind = TrackKind::audio, const juce::String& name = {});
     void setTrackName(int trackIndex, const juce::String& name);
     juce::String getTrackName(int trackIndex) const;
+    void setTrackHeight(int trackIndex, int heightPixels);
+    int getTrackHeight(int trackIndex) const;
     // Stable across reorders (unlike the index itself) - useful for anything that needs to key
     // off "this specific track" rather than "whatever's currently at this position" (e.g. a
     // folder's derived accent colour, which shouldn't change just because tracks got reordered).

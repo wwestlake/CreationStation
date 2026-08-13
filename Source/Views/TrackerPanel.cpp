@@ -210,17 +210,8 @@ TrackerPanel::TrackerPanel()
     };
     addAndMakeVisible(keySelector);
 
-    compactButton.onClick = [this] { canvas.setLaneHeight(72); };
-    comfortButton.onClick = [this] { canvas.setLaneHeight(100); };
-    tallButton.onClick = [this] { canvas.setLaneHeight(132); };
     arrangementMenuButton.onClick = [this] { showArrangementMenu(); };
-    compactButton.setTooltip("Compact track height");
-    comfortButton.setTooltip("Comfortable track height");
-    tallButton.setTooltip("Tall track height");
     arrangementMenuButton.setTooltip("Save or load this set of tracks as a named project asset");
-    addAndMakeVisible(compactButton);
-    addAndMakeVisible(comfortButton);
-    addAndMakeVisible(tallButton);
     addAndMakeVisible(arrangementMenuButton);
 
     snapToggleButton.setClickingTogglesState(true);
@@ -407,6 +398,11 @@ TrackerPanel::TrackerPanel()
     {
         if (onClipMoveCommitted)
             onClipMoveCommitted();
+    };
+    canvas.onTrackHeightCommitted = [this](int trackIndex)
+    {
+        if (onTrackHeightCommitted)
+            onTrackHeightCommitted(trackIndex);
     };
     canvas.onClipTrimmed = [this](int clipIndex, bool leftEdge, double boundarySeconds)
     {
@@ -709,14 +705,6 @@ void TrackerPanel::resized()
     arrangementMenuButton.setBounds(trackButtons.removeFromLeft(110));
 
     controls.removeFromTop(8);
-    auto heightButtons = controls.removeFromTop(30);
-    compactButton.setBounds(heightButtons.removeFromLeft(96));
-    heightButtons.removeFromLeft(6);
-    comfortButton.setBounds(heightButtons.removeFromLeft(96));
-    heightButtons.removeFromLeft(6);
-    tallButton.setBounds(heightButtons.removeFromLeft(80));
-
-    controls.removeFromTop(8);
     auto snapRow = controls.removeFromTop(28);
     snapToggleButton.setBounds(snapRow.removeFromLeft(70));
     snapRow.removeFromLeft(6);
@@ -797,9 +785,7 @@ int TrackerPanel::trackIndexForDropY(int y) const noexcept
     if (trackCount <= 0)
         return selectedTrack;
 
-    auto laneHeight = juce::jmax(1, canvas.getLaneHeight());
-    auto trackIndex = (localY - laneStart) / laneHeight;
-    return juce::jlimit(0, trackCount - 1, trackIndex);
+    return juce::jlimit(0, trackCount - 1, canvas.trackIndexAtY(localY));
 }
 
 double TrackerPanel::timelineSecondsForDropX(int x) const noexcept
@@ -1026,6 +1012,26 @@ void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
             if (destinationIndex != index && onTrackReorderRequested)
                 onTrackReorderRequested(index, destinationIndex);
         };
+        header->onResizeDragged = [this](int index, int newHeightPixels)
+        {
+            if (timelineModel == nullptr)
+                return;
+
+            timelineModel->setTrackHeight(index, newHeightPixels);
+            resized();
+            repaint();
+        };
+        header->onResizeCommitted = [this](int index, int newHeightPixels)
+        {
+            if (timelineModel == nullptr)
+                return;
+
+            timelineModel->setTrackHeight(index, newHeightPixels);
+            resized();
+            repaint();
+            if (onTrackHeightCommitted)
+                onTrackHeightCommitted(index);
+        };
         addAndMakeVisible(header);
         header->setInputSources(inputSourceNames);
         trackHeaders.add(header);
@@ -1201,13 +1207,6 @@ void TrackerPanel::TimelineCanvas::setSelectedTrack(int trackIndex)
 void TrackerPanel::TimelineCanvas::setSelectedClip(int clipIndex)
 {
     selectedClipIndex = clipIndex;
-    repaint();
-}
-
-void TrackerPanel::TimelineCanvas::setLaneHeight(int newLaneHeight)
-{
-    laneHeight = juce::jlimit(64, 156, newLaneHeight);
-    resized();
     repaint();
 }
 
@@ -1395,7 +1394,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
 
     for (int trackIndex = 0; trackIndex < trackCount; ++trackIndex)
     {
-        auto lane = juce::Rectangle<int>(0, rulerHeight + trackIndex * laneHeight, getWidth(), laneHeight);
+        auto lane = juce::Rectangle<int>(0, trackTopY(trackIndex), getWidth(), getTrackHeightAt(trackIndex));
         if (lane.getY() > getHeight())
             break;
 
@@ -1634,9 +1633,8 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
 
     if (reorderDragTrackIndex >= 0)
     {
-        constexpr int dragRulerHeight = 56;
-        auto dropY = dragRulerHeight + reorderDragTargetIndex * laneHeight
-                   + (reorderDragTargetIndex > reorderDragTrackIndex ? laneHeight : 0);
+        auto dropY = trackTopY(reorderDragTargetIndex)
+                   + (reorderDragTargetIndex > reorderDragTrackIndex ? getTrackHeightAt(reorderDragTargetIndex) : 0);
         g.setColour(juce::Colour(0xffffd166));
         g.drawHorizontalLine(dropY, 0.0f, static_cast<float>(getWidth()));
         g.fillEllipse(2.0f, (float) dropY - 4.0f, 8.0f, 8.0f);
@@ -1682,13 +1680,12 @@ void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
 
 void TrackerPanel::TimelineCanvas::resized()
 {
-    constexpr int rulerHeight = 56;
     auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
 
     for (int trackIndex = 0; trackIndex < trackHeaders.size(); ++trackIndex)
     {
         if (auto* header = trackHeaders[trackIndex])
-            header->setBounds(0, rulerHeight + trackIndex * laneHeight, labelWidth, laneHeight);
+            header->setBounds(0, trackTopY(trackIndex), labelWidth, getTrackHeightAt(trackIndex));
     }
 
     // Floating scrub-preview overlay, top-right corner - only shown while the playhead is over
@@ -1943,7 +1940,7 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
     if (event.y < laneStart)
         return;
 
-    auto trackIndex = (event.y - laneStart) / laneHeight;
+    auto trackIndex = yToTrackIndex(event.y);
     if (! juce::isPositiveAndBelow(trackIndex, trackCount))
         return;
 
@@ -2246,10 +2243,46 @@ int TrackerPanel::TimelineCanvas::xForTimelineSeconds(double seconds) const noex
     return timelineOriginX + juce::roundToInt((seconds - scrollSeconds) * pixelsPerSecond);
 }
 
+int TrackerPanel::TimelineCanvas::trackTopY(int trackIndex) const noexcept
+{
+    constexpr int rulerHeight = 56;
+    int y = rulerHeight;
+
+    if (timelineModel == nullptr)
+        return y + trackIndex * 100;
+
+    auto count = timelineModel->getTrackCount();
+    for (int i = 0; i < trackIndex && i < count; ++i)
+        y += juce::jmax(1, timelineModel->getTrackHeight(i));
+    return y;
+}
+
+int TrackerPanel::TimelineCanvas::getTrackHeightAt(int trackIndex) const noexcept
+{
+    return timelineModel != nullptr ? juce::jmax(1, timelineModel->getTrackHeight(trackIndex)) : 100;
+}
+
 int TrackerPanel::TimelineCanvas::yToTrackIndex(int y) const noexcept
 {
     constexpr int laneStart = 56;
-    return (y - laneStart) / juce::jmax(1, laneHeight);
+
+    if (timelineModel == nullptr || timelineModel->getTrackCount() <= 0)
+        return (y - laneStart) / 100;
+
+    if (y < laneStart)
+        return (y - laneStart) / getTrackHeightAt(0);
+
+    auto count = timelineModel->getTrackCount();
+    int cursor = laneStart;
+    for (int i = 0; i < count; ++i)
+    {
+        auto h = getTrackHeightAt(i);
+        if (y < cursor + h)
+            return i;
+        cursor += h;
+    }
+
+    return count + (y - cursor) / getTrackHeightAt(count - 1);
 }
 
 int TrackerPanel::TimelineCanvas::hitTestClip(juce::Point<int> position) const
@@ -2270,9 +2303,9 @@ int TrackerPanel::TimelineCanvas::hitTestClip(juce::Point<int> position) const
             continue;
 
         auto lane = juce::Rectangle<int>(labelWidth,
-                                         rulerHeight + clip.trackIndex * laneHeight,
+                                         trackTopY(clip.trackIndex),
                                          getWidth() - labelWidth - 4,
-                                         laneHeight).reduced(0, 6);
+                                         getTrackHeightAt(clip.trackIndex)).reduced(0, 6);
         auto timelineLane = lane.withTrimmedLeft(12);
         auto clipX = timelineOriginX + juce::roundToInt((clip.startSeconds - scrollSeconds) * pixelsPerSecond);
         auto clipWidth = juce::jmax(8, juce::roundToInt(clip.durationSeconds * pixelsPerSecond));
@@ -2305,9 +2338,9 @@ TrackerPanel::TimelineCanvas::ClipEdge TrackerPanel::TimelineCanvas::hitTestClip
             continue;
 
         auto lane = juce::Rectangle<int>(labelWidth,
-                                         rulerHeight + clip.trackIndex * laneHeight,
+                                         trackTopY(clip.trackIndex),
                                          getWidth() - labelWidth - 4,
-                                         laneHeight).reduced(0, 6);
+                                         getTrackHeightAt(clip.trackIndex)).reduced(0, 6);
         auto timelineLane = lane.withTrimmedLeft(12);
         auto clipX = timelineOriginX + juce::roundToInt((clip.startSeconds - scrollSeconds) * pixelsPerSecond);
         auto clipWidth = juce::jmax(8, juce::roundToInt(clip.durationSeconds * pixelsPerSecond));
@@ -2406,8 +2439,7 @@ bool TrackerPanel::TimelineCanvas::hitTestLoopClose(juce::Point<int> position) c
 
 juce::Rectangle<int> TrackerPanel::TimelineCanvas::getAutomationLaneBounds(int trackIndex) const
 {
-    constexpr int rulerHeight = 56;
-    auto lane = juce::Rectangle<int>(0, rulerHeight + trackIndex * laneHeight, getWidth(), laneHeight);
+    auto lane = juce::Rectangle<int>(0, trackTopY(trackIndex), getWidth(), getTrackHeightAt(trackIndex));
     return lane.reduced(12, 14);
 }
 
@@ -3151,18 +3183,34 @@ void TrackerPanel::TimelineCanvas::TrackHeader::resized()
     }
 }
 
-void TrackerPanel::TimelineCanvas::TrackHeader::mouseDown(const juce::MouseEvent&)
+void TrackerPanel::TimelineCanvas::TrackHeader::mouseDown(const juce::MouseEvent& event)
 {
     // Track-level actions (Remove Track, etc.) live behind the explicit menu button next to
     // the channel-mode toggle rather than a right-click - right-click is reserved for dynamic,
     // context-specific things like clips.
     reorderDragActive = false;
-    if (onSelected)
+    resizeDragActive = false;
+    startedInResizeHotzone = isInResizeHotzone(event.position);
+    resizeStartHeight = getHeight();
+
+    if (! startedInResizeHotzone && onSelected)
         onSelected(trackIndex);
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseDrag(const juce::MouseEvent& event)
 {
+    if (startedInResizeHotzone)
+    {
+        constexpr int resizeThresholdPixels = 3;
+        if (! resizeDragActive && std::abs(event.getDistanceFromDragStartY()) < resizeThresholdPixels)
+            return;
+
+        resizeDragActive = true;
+        if (onResizeDragged)
+            onResizeDragged(trackIndex, resizeStartHeight + event.getDistanceFromDragStartY());
+        return;
+    }
+
     constexpr int reorderThresholdPixels = 6;
     if (! reorderDragActive && std::abs(event.getDistanceFromDragStartY()) < reorderThresholdPixels)
         return;
@@ -3174,10 +3222,34 @@ void TrackerPanel::TimelineCanvas::TrackHeader::mouseDrag(const juce::MouseEvent
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseUp(const juce::MouseEvent& event)
 {
+    if (startedInResizeHotzone)
+    {
+        startedInResizeHotzone = false;
+        if (resizeDragActive)
+        {
+            resizeDragActive = false;
+            if (onResizeCommitted)
+                onResizeCommitted(trackIndex, resizeStartHeight + event.getDistanceFromDragStartY());
+        }
+        return;
+    }
+
     if (! reorderDragActive)
         return;
 
     reorderDragActive = false;
     if (onReorderCommitted)
         onReorderCommitted(trackIndex, getY() + event.position.roundToInt().y);
+}
+
+void TrackerPanel::TimelineCanvas::TrackHeader::mouseMove(const juce::MouseEvent& event)
+{
+    setMouseCursor(isInResizeHotzone(event.position) ? juce::MouseCursor::UpDownResizeCursor
+                                                       : juce::MouseCursor::NormalCursor);
+}
+
+bool TrackerPanel::TimelineCanvas::TrackHeader::isInResizeHotzone(juce::Point<float> position) const noexcept
+{
+    constexpr int resizeHotzonePixels = 6;
+    return position.y >= (float) (getHeight() - resizeHotzonePixels);
 }
