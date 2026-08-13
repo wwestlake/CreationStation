@@ -1061,44 +1061,17 @@ void TrackerPanel::commitTimingEdits()
 
 void TrackerPanel::showArrangementMenu()
 {
-    juce::PopupMenu menu;
-    menu.addItem(1, "Save Arrangement...");
-    menu.addItem(2, "Load Arrangement...");
-
-    auto area = arrangementMenuButton.getScreenBounds();
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
-                       [this](int result)
-                       {
-                           if (result == 1)
-                           {
-                               auto* prompt = new juce::AlertWindow("Save Arrangement",
-                                                                    "Enter a name for this set of tracks:",
-                                                                    juce::MessageBoxIconType::QuestionIcon);
-                               prompt->addTextEditor("arrangementName", "Arrangement");
-                               prompt->addButton("Save", 1);
-                               prompt->addButton("Cancel", 0);
-
-                               auto options = juce::Component::SafePointer<TrackerPanel>(this);
-                               prompt->enterModalState(true, juce::ModalCallbackFunction::create([options, prompt](int promptResult) mutable
-                               {
-                                   std::unique_ptr<juce::AlertWindow> dialog(prompt);
-                                   if (promptResult != 1 || options == nullptr)
-                                       return;
-
-                                   auto name = dialog->getTextEditorContents("arrangementName").trim();
-                                   if (name.isEmpty())
-                                       return;
-
-                                   if (options->onArrangementSaveRequested)
-                                       options->onArrangementSaveRequested(name);
-                               }), true);
-                           }
-                           else if (result == 2)
-                           {
-                               if (onArrangementLoadRequested)
-                                   onArrangementLoadRequested();
-                           }
-                       });
+    creation::ui::showNamedAssetSaveLoadMenu(arrangementMenuButton, "Arrangement", "Arrangement",
+        [this](const juce::String& name)
+        {
+            if (onArrangementSaveRequested)
+                onArrangementSaveRequested(name);
+        },
+        [this]
+        {
+            if (onArrangementLoadRequested)
+                onArrangementLoadRequested();
+        });
 }
 
 void TrackerPanel::TimelineCanvas::setTrackKind(int trackIndex, cs::TrackKind kind)

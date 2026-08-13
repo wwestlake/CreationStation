@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <functional>
+#include <creation/ui/NamedAssetSaveLoadMenu.h>
 #include "../Timeline/TimelineModel.h"
 #include "../Video/VideoThumbnailCache.h"
 #include "../Video/VideoScrubPreview.h"
@@ -374,7 +375,7 @@ private:
     juce::TextButton comfortButton { "Comfort" };
     juce::TextButton tallButton { "Tall" };
     juce::TextButton addMarkerButton { "+ Marker" };
-    juce::TextButton arrangementMenuButton { "Arrangement" };
+    juce::TextButton arrangementMenuButton { "Save/Load" };
     juce::ComboBox pitchPipeNoteCombo;
     juce::ComboBox pitchPipeOctaveCombo;
     juce::TextButton pitchPipePlayButton { "Play" };
