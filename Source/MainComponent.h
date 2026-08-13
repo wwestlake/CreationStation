@@ -273,6 +273,7 @@ private:
     // tool tab -- used to auto-restore the right one when the project reopens.
     juce::String currentArrangementAssetId;
     juce::String currentSignalLabAssetId;
+    juce::String currentFoleyAssetId;
     VstPluginCatalog vstPluginCatalog;
     ContentLibrary contentLibrary;
     ContentApiClient contentApiClient;

@@ -2401,6 +2401,108 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                            });
     };
 
+    foleyPanel.onSetupSaveRequested = [this](const juce::String& name)
+    {
+        if (! projectSession.isValid())
+        {
+            transportBar.setStatusText("Open or create a project first so Foley can save setups into it.");
+            return;
+        }
+
+        auto celgText = foleyPanel.serializeGraph();
+        juce::MemoryBlock data(celgText.toRawUTF8(), celgText.getNumBytesAsUTF8());
+
+        creation::assets::ProjectAssetService::ImportOptions options;
+        options.kind = creation::assets::AssetKind::foleyPatch;
+        options.displayName = name;
+        options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(name) + ".celg";
+        options.mediaType = "application/x-creation-node-graph";
+        options.sourceApp = "Creation Station";
+        options.sourceTool = "Foley";
+        options.description = "Saved Foley node-graph setup.";
+
+        creation::assets::AssetDescriptor savedAsset;
+        juce::String errorMessage;
+        if (! creation::assets::ProjectAssetService::saveGeneratedAsset(projectSession, data, options, savedAsset, errorMessage))
+        {
+            transportBar.setStatusText("Could not save Foley setup: " + errorMessage);
+            return;
+        }
+
+        currentFoleyAssetId = savedAsset.id;
+
+        if (! projectSession.commit(errorMessage))
+        {
+            transportBar.setStatusText("Foley setup saved but project commit failed: " + errorMessage);
+            return;
+        }
+
+        refreshProjectAssets();
+        saveSessionToDisk(true);
+        transportBar.setStatusText("Saved Foley setup: " + savedAsset.displayName);
+    };
+
+    foleyPanel.onSetupLoadRequested = [this]
+    {
+        if (! projectSession.isValid())
+        {
+            transportBar.setStatusText("Open or create a project first so Foley can load saved setups from it.");
+            return;
+        }
+
+        auto setupAssets = projectSession.getManifest().assetCatalog.query({ creation::assets::AssetKind::foleyPatch });
+        if (setupAssets.isEmpty())
+        {
+            transportBar.setStatusText("This project does not have any saved Foley setups yet.");
+            return;
+        }
+
+        std::sort(setupAssets.begin(), setupAssets.end(), [](const auto& left, const auto& right)
+        {
+            if (left.modifiedAt != right.modifiedAt)
+                return left.modifiedAt > right.modifiedAt;
+            return left.displayName.compareIgnoreCase(right.displayName) < 0;
+        });
+
+        juce::PopupMenu menu;
+        menu.addSectionHeader("Load Setup From Project");
+        for (int index = 0; index < setupAssets.size(); ++index)
+        {
+            const auto& asset = setupAssets.getReference(index);
+            auto label = asset.displayName.isNotEmpty() ? asset.displayName : asset.logicalPath;
+            auto detail = asset.modifiedAt != juce::Time() ? "  •  " + asset.modifiedAt.toString(true, true) : juce::String{};
+            menu.addItem(index + 1, label + detail);
+        }
+
+        auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }),
+                           [this, setupAssets](int result)
+                           {
+                               if (result <= 0 || result > setupAssets.size())
+                                   return;
+
+                               const auto& asset = setupAssets.getReference(result - 1);
+                               juce::MemoryBlock data;
+                               if (! projectSession.readEntry(asset.logicalPath, data))
+                               {
+                                   transportBar.setStatusText("Could not read saved Foley setup: " + asset.displayName);
+                                   return;
+                               }
+
+                               auto celgText = juce::String::createStringFromData(data.getData(), (int) data.getSize());
+                               juce::String errorMessage;
+                               if (! foleyPanel.loadGraph(celgText, errorMessage))
+                               {
+                                   transportBar.setStatusText("Could not load Foley setup: " + errorMessage);
+                                   return;
+                               }
+
+                               currentFoleyAssetId = asset.id;
+                               saveSessionToDisk(true);
+                               transportBar.setStatusText("Loaded Foley setup: " + asset.displayName);
+                           });
+    };
+
     dslPanel.onSourceExportRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
     {
         auto startDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);

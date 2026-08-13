@@ -15,6 +15,10 @@ FoleyPanel::FoleyPanel()
     generateButton_.onClick = [this] { generateSource(); };
     addAndMakeVisible(generateButton_);
 
+    setupMenuButton_.onClick = [this] { showSetupMenu(); };
+    setupMenuButton_.setTooltip("Save or load this node setup as a named project asset");
+    addAndMakeVisible(setupMenuButton_);
+
     statusLabel_.setFont(juce::Font(juce::FontOptions(12.0f)));
     statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
     addAndMakeVisible(statusLabel_);
@@ -58,6 +62,68 @@ void FoleyPanel::generateSource()
     }
 }
 
+juce::String FoleyPanel::serializeGraph() const
+{
+    return ce::node_system::SerializeGraph(graph_);
+}
+
+bool FoleyPanel::loadGraph(const juce::String& celgText, juce::String& errorMessage)
+{
+    std::string errorOut;
+    auto loaded = ce::node_system::DeserializeGraph(celgText.toStdString(), errorOut);
+    if (loaded == nullptr)
+    {
+        errorMessage = juce::String(errorOut);
+        return false;
+    }
+
+    graph_ = std::move(*loaded);
+    graphComponent_.GraphReplaced();
+    return true;
+}
+
+void FoleyPanel::showSetupMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem(1, "Save Setup...");
+    menu.addItem(2, "Load Setup...");
+
+    auto area = setupMenuButton_.getScreenBounds();
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
+                       [this](int result)
+                       {
+                           if (result == 1)
+                           {
+                               auto* prompt = new juce::AlertWindow("Save Foley Setup",
+                                                                    "Enter a name for this node setup:",
+                                                                    juce::MessageBoxIconType::QuestionIcon);
+                               prompt->addTextEditor("setupName", "Foley Setup");
+                               prompt->addButton("Save", 1);
+                               prompt->addButton("Cancel", 0);
+
+                               auto options = juce::Component::SafePointer<FoleyPanel>(this);
+                               prompt->enterModalState(true, juce::ModalCallbackFunction::create([options, prompt](int promptResult) mutable
+                               {
+                                   std::unique_ptr<juce::AlertWindow> dialog(prompt);
+                                   if (promptResult != 1 || options == nullptr)
+                                       return;
+
+                                   auto name = dialog->getTextEditorContents("setupName").trim();
+                                   if (name.isEmpty())
+                                       return;
+
+                                   if (options->onSetupSaveRequested)
+                                       options->onSetupSaveRequested(name);
+                               }), true);
+                           }
+                           else if (result == 2)
+                           {
+                               if (onSetupLoadRequested)
+                                   onSetupLoadRequested();
+                           }
+                       });
+}
+
 void FoleyPanel::resized()
 {
     auto area = getLocalBounds().reduced(16, 12);
@@ -71,6 +137,8 @@ void FoleyPanel::resized()
     auto footer = area.removeFromBottom(160);
     auto footerHeader = footer.removeFromTop(24);
     generateButton_.setBounds(footerHeader.removeFromLeft(130));
+    footerHeader.removeFromLeft(8);
+    setupMenuButton_.setBounds(footerHeader.removeFromLeft(90));
     footerHeader.removeFromLeft(8);
     statusLabel_.setBounds(footerHeader);
     footer.removeFromTop(4);
