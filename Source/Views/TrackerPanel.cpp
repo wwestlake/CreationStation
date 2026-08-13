@@ -1371,6 +1371,31 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                    true);
     }
 
+    // Grid-resolution subdivision ticks (Snap dropdown) - separate from the per-beat/measure
+    // lines above, which always draw regardless of the selected resolution. Only drawn finer
+    // than a beat (1/8, 1/16, 1/32) since coarser-than-beat selections (1 Bar, 1/2) are already
+    // represented by the existing measure/beat lines.
+    auto gridBeats = timelineModel != nullptr ? timelineModel->getTimelineGridBeats() : 1.0;
+    if (gridBeats > 0.0 && gridBeats < 1.0)
+    {
+        g.setColour(juce::Colour(0xff2a3548));
+        auto startGridStep = (juce::int64) std::floor(scrollSeconds / secondsPerBeat / gridBeats);
+        auto endGridStep = startGridStep + (juce::int64) ((visibleBeats + 2) / gridBeats) + 1;
+        for (auto step = startGridStep; step <= endGridStep; ++step)
+        {
+            auto stepBeats = (double) step * gridBeats;
+            if (std::abs(stepBeats - std::round(stepBeats)) < 1.0e-6)
+                continue;   // whole beats already drawn above, brighter
+
+            auto stepSeconds = stepBeats * secondsPerBeat;
+            auto x = labelWidth + juce::roundToInt((stepSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
+            if (x < labelWidth || x > getWidth())
+                continue;
+
+            g.drawVerticalLine(x, static_cast<float>(rulerHeight) - 8.0f, static_cast<float>(rulerHeight));
+        }
+    }
+
     if (trackCount == 0)
     {
         g.setColour(juce::Colour(0xff9fb0c8));
@@ -1413,6 +1438,26 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                 continue;
 
             g.drawVerticalLine(x, static_cast<float>(lane.getY() + 10), static_cast<float>(lane.getBottom() - 10));
+        }
+
+        if (gridBeats > 0.0 && gridBeats < 1.0)
+        {
+            g.setColour(juce::Colour(0xff1c2436));
+            auto startGridStep = (juce::int64) std::floor(scrollSeconds / secondsPerBeat / gridBeats);
+            auto endGridStep = startGridStep + (juce::int64) ((visibleBeats + 2) / gridBeats) + 1;
+            for (auto step = startGridStep; step <= endGridStep; ++step)
+            {
+                auto stepBeats = (double) step * gridBeats;
+                if (std::abs(stepBeats - std::round(stepBeats)) < 1.0e-6)
+                    continue;
+
+                auto stepSeconds = stepBeats * secondsPerBeat;
+                auto x = labelWidth + juce::roundToInt((stepSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
+                if (x < labelWidth || x > getWidth())
+                    continue;
+
+                g.drawVerticalLine(x, static_cast<float>(lane.getY() + 14), static_cast<float>(lane.getBottom() - 14));
+            }
         }
 
         if (timelineModel != nullptr)
@@ -2006,7 +2051,8 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
         auto scrolledSeconds = autoScrollWhileDragging(event.x);
         const auto pixelsPerSecond = juce::jmax(1.0, timelineModel->getPixelsPerSecond());
         const auto deltaSeconds = static_cast<double>(event.getDistanceFromDragStartX()) / pixelsPerSecond;
-        const auto newStartSeconds = juce::jmax(0.0, draggingOriginalStartSeconds + deltaSeconds + scrolledSeconds);
+        const auto rawStartSeconds = juce::jmax(0.0, draggingOriginalStartSeconds + deltaSeconds + scrolledSeconds);
+        const auto newStartSeconds = timelineModel->snapTimelineSeconds(rawStartSeconds);
         const auto newTrackIndex = yToTrackIndex(event.y);
 
         if (juce::isPositiveAndBelow(newTrackIndex, trackCount))

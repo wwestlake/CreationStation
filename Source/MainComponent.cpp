@@ -1791,6 +1791,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     trackerPanel.onTimelineGridChanged = [this](double gridBeats)
     {
         timelineModel.setTimelineGridBeats(gridBeats);
+        trackerPanel.refreshTimelineView();
         saveSessionToDisk();
     };
 
