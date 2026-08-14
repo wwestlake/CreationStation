@@ -1455,6 +1455,30 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         saveSessionToDisk();
         transportBar.setStatusText("Transport: next boundary");
     };
+    transportBar.onRewindToStart = [this]
+    {
+        constexpr double startSeconds = 0.0;
+        timelineModel.setTransportSeconds(startSeconds);
+        transportStartTimelineSeconds = startSeconds;
+        transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        engine.setPlaybackPositionSeconds(startSeconds);
+        trackerPanel.centerTransportInView();
+        trackerPanel.refreshTimelineView();
+        saveSessionToDisk();
+        transportBar.setStatusText("Transport: start");
+    };
+    transportBar.onFastForwardToEnd = [this]
+    {
+        auto endSeconds = timelineModel.getTotalDurationSeconds();
+        timelineModel.setTransportSeconds(endSeconds);
+        transportStartTimelineSeconds = endSeconds;
+        transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        engine.setPlaybackPositionSeconds(endSeconds);
+        trackerPanel.centerTransportInView();
+        trackerPanel.refreshTimelineView();
+        saveSessionToDisk();
+        transportBar.setStatusText("Transport: end");
+    };
     transportBar.onLoopChanged = [this](bool loopEnabled)
     {
         timelineModel.setLoopEnabled(loopEnabled);
@@ -3731,6 +3755,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         engine.setPlaybackPositionSeconds(newSeconds);
         transportStartTimelineSeconds = newSeconds;
         transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        trackerPanel.centerTransportInView();
         trackerPanel.refreshTimelineView();
         previewScrubAudioAt(newSeconds);
     };
