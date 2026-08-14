@@ -7,10 +7,10 @@
 #include "AI/CreationStationAppManifest.h"
 #include "AI/CreationStationContextStore.h"
 #include "AI/CreationStationTaskPlanner.h"
+#include "AI/AiProviderSettings.h"
 #include <creation/services/SuiteAiChatClient.h>
 #include <creation/services/SuiteUndoService.h>
 #include "AI/LiteSemRagApiClient.h"
-#include "AI/OpenAiModelCatalogClient.h"
 #include <creation/ui/SuiteDesktopAuthSession.h>
 #include "Audio/StudioIOModel.h"
 #include "Audio/VstPluginCatalog.h"
@@ -221,7 +221,6 @@ private:
     CreationStationAppManifest appManifest;
     LiteSemRagApiClient semanticApiClient;
     creation::services::SuiteAiChatClient openAiChatClient;
-    OpenAiModelCatalogClient modelCatalogClient;
     WorkstationAudioEngine engine;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
@@ -296,6 +295,9 @@ private:
     bool authenticated = false;
     WorkspaceMode activeMode = WorkspaceMode::tracker;
     AiProviderSettings aiProviderSettings;
+    // Full suite AI account/routing state (Settings -> Suite AI Accounts) - CreationStation only
+    // ever selects among these named accounts, it never creates or edits one itself.
+    creation::services::SuiteAiSettings suiteAiSettings;
     bool autoloadLastProject = false;
     bool aiSidebarCollapsed = false;
     bool layoutDirty = false;
@@ -518,8 +520,8 @@ private:
     void setAiSidebarCollapsed(bool shouldCollapse);
     void syncSemanticAppContext();
     bool loadSuiteAiProviderSettings();
-    bool saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage);
-    void refreshAiModelCatalog();
+    void refreshAiPanelAccountsAndModels();
+    void selectAiAccountForStation(const juce::String& accountId, const juce::String& modelNameOverride = {});
     WorkspaceMode workspaceModeFromString(const juce::String& modeName) const;
     void configureTutorialOverlay();
     std::vector<TourGuideOverlay::Step> buildTutorialSteps(const cw::tutorial::Script& script);

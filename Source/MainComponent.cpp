@@ -1305,10 +1305,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     if (projectSession.isValid())
         settingsPanel.setProjectMetadata(projectSession.getManifest());
     settingsPanel.setAutoloadEnabled(true);
-    settingsPanel.setAiProviderSettings(aiProviderSettings);
-    aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
-    aiPanel.setSelectedModel(aiProviderSettings.modelName);
-    refreshAiModelCatalog();
+    loadSuiteAiProviderSettings();
 
     if (! suiteSettings.suiteVfsRoot.isNotEmpty() && storageError.isEmpty())
         contentPanel.setStatusText("Storage is not configured yet. You can keep using the studio and set up saving/content later.");
@@ -2699,27 +2696,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     aiPanel.onModelChanged = [this](const juce::String& modelName)
     {
-        aiProviderSettings.modelName = modelName.trim();
-        settingsPanel.setAiProviderSettings(aiProviderSettings);
-        saveAppSettings();
+        selectAiAccountForStation(aiPanel.getSelectedAccountId(), modelName.trim());
     };
 
-    aiPanel.onProviderChanged = [this](const juce::String& providerName)
+    aiPanel.onAccountChanged = [this](const juce::String& accountId)
     {
-        const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(providerName);
-        aiProviderSettings.providerDisplayName = profile.displayName;
-        aiProviderSettings.providerId = profile.providerId;
-        if (creation::services::SuiteAiProviderRuntime::shouldReplaceBaseUrlOnProviderSwitch(aiProviderSettings.baseUrl, profile))
-            aiProviderSettings.baseUrl = profile.defaultBaseUrl;
-        aiProviderSettings.modelName = creation::services::SuiteAiProviderRuntime::defaultModelName(profile);
-        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
-        aiPanel.setSelectedModel(aiProviderSettings.modelName);
-        settingsPanel.setAiProviderSettings(aiProviderSettings);
-
-        saveAppSettings();
-
-        refreshAiModelCatalog();
-        transportBar.setStatusText("AI provider: " + aiProviderSettings.providerDisplayName + ".");
+        selectAiAccountForStation(accountId);
+        transportBar.setStatusText("AI account: " + aiProviderSettings.providerDisplayName + ".");
     };
 
     aiPanel.onPromptSubmitted = [this](const juce::String& submittedPrompt)
@@ -2867,24 +2850,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         settingsPanel.setAutoloadEnabled(true);
         saveAppSettings();
     };
-    settingsPanel.onAiProviderSettingsChanged = [this](const AiProviderSettings& settings)
-    {
-        aiProviderSettings = settings;
-        aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
-        aiPanel.setSelectedModel(aiProviderSettings.modelName);
-
-        juce::String errorMessage;
-        if (! saveSuiteAiProviderSettings(aiProviderSettings, errorMessage))
-            transportBar.setStatusText(errorMessage);
-
-        saveAppSettings();
-        refreshAiModelCatalog();
-    };
-    settingsPanel.onRefreshAiModelsRequested = [this]
-    {
-        refreshAiModelCatalog();
-    };
-
     contentPanel.onRefreshRequested = [this]
     {
         refreshContentLibrary();
@@ -6053,82 +6018,70 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     }).detach();
 }
 
-void MainComponent::refreshAiModelCatalog()
+void MainComponent::refreshAiPanelAccountsAndModels()
 {
-    if (! suiteSettings.suiteVfsRoot.isNotEmpty())
+    juce::Array<AiPanel::AccountEntry> accountEntries;
+    for (const auto& account : suiteAiSettings.accounts)
     {
-        settingsPanel.setAvailableAiModels({}, "Choose a storage folder first.");
-        aiPanel.setAvailableModels({}, "Choose a storage folder first.");
+        AiPanel::AccountEntry entry;
+        entry.accountId = account.accountId;
+        entry.displayName = account.accountLabel.isNotEmpty() ? account.accountLabel : account.accountId;
+        accountEntries.add(entry);
+    }
+
+    const auto* selectedAccount = creation::services::SuiteAiSettingsResolver::resolveAccountForApp(
+        suiteAiSettings, creation::assets::SuiteAppDomain::station);
+    aiPanel.setAvailableAccounts(accountEntries, selectedAccount != nullptr ? selectedAccount->accountId : juce::String());
+
+    if (selectedAccount == nullptr)
+    {
+        aiPanel.setAvailableModels({}, "Add a suite AI account in Settings -> Suite AI Accounts to use the Virtual Engineer.");
         return;
     }
 
-    const auto profile = creation::services::SuiteAiProviderRuntime::resolveProfile(aiProviderSettings.providerId);
-    if (creation::services::SuiteAiProviderRuntime::requiresApiKey(profile, aiProviderSettings.apiKey))
-    {
-        settingsPanel.setAvailableAiModels({}, "Enter your provider API key, then refresh the list.");
-        aiPanel.setAvailableModels({}, "Enter your provider API key, then refresh the list.");
-        return;
-    }
-
-    juce::StringArray modelIds;
-    juce::String errorMessage;
-    if (! modelCatalogClient.fetchModelIds(aiProviderSettings.baseUrl,
-                                           aiProviderSettings.providerId,
-                                           aiProviderSettings.apiKey,
-                                           modelIds,
-                                           errorMessage))
-    {
-        settingsPanel.setAvailableAiModels({}, errorMessage);
-        aiPanel.setAvailableModels({}, errorMessage);
-        transportBar.setStatusText(errorMessage);
-        return;
-    }
-
-    auto statusText = "Loaded " + juce::String(modelIds.size()) + " model(s) from your provider.";
-    settingsPanel.setAvailableAiModels(modelIds, statusText);
-    aiPanel.setAvailableModels(modelIds, statusText);
-    transportBar.setStatusText(statusText);
+    const auto modelName = creation::services::SuiteAiSettingsResolver::resolveModelNameForApp(
+        suiteAiSettings, creation::assets::SuiteAppDomain::station);
+    const auto statusText = selectedAccount->cachedModelIds.isEmpty()
+        ? juce::String("No cached models for this account yet - refresh it from Settings -> Suite AI Accounts.")
+        : juce::String(selectedAccount->cachedModelIds.size()) + " model(s) available.";
+    aiPanel.setAvailableModels(selectedAccount->cachedModelIds, statusText);
+    aiPanel.setSelectedModel(modelName);
 }
 
 bool MainComponent::loadSuiteAiProviderSettings()
 {
     creation::services::SuiteAiSettingsStore store;
     juce::String errorMessage;
-    auto suiteAiSettings = store.load(errorMessage);
+    suiteAiSettings = store.load(errorMessage);
 
     const auto runtimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
         suiteAiSettings, creation::assets::SuiteAppDomain::station);
-    if (! runtimeSettings.isValid())
-        return false;
-
     aiProviderSettings = makeAiProviderSettings(runtimeSettings);
-    settingsPanel.setAiProviderSettings(aiProviderSettings);
-    aiPanel.setSelectedProvider(aiProviderSettings.providerDisplayName);
-    aiPanel.setSelectedModel(aiProviderSettings.modelName);
-    return true;
+
+    refreshAiPanelAccountsAndModels();
+    return runtimeSettings.isValid();
 }
 
-bool MainComponent::saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage)
+void MainComponent::selectAiAccountForStation(const juce::String& accountId, const juce::String& modelNameOverride)
 {
+    if (accountId.isEmpty())
+        return;
+
     creation::services::SuiteAiSettingsStore store;
-    auto suiteAiSettings = store.load(errorMessage);
+    juce::String errorMessage;
+    suiteAiSettings = store.load(errorMessage);
 
-    auto resolvedRuntimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
+    creation::services::SuiteAiSettingsResolver::selectAccountForApp(
+        suiteAiSettings, creation::assets::SuiteAppDomain::station, accountId, modelNameOverride);
+
+    if (! store.save(suiteAiSettings, errorMessage))
+        transportBar.setStatusText(errorMessage);
+
+    const auto runtimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
         suiteAiSettings, creation::assets::SuiteAppDomain::station);
-    resolvedRuntimeSettings.providerDisplayName = settings.providerDisplayName.trim();
-    resolvedRuntimeSettings.providerId = creation::services::SuiteAiProviderRuntime::normalizeProviderId(
-        settings.providerId.isNotEmpty() ? settings.providerId : settings.providerDisplayName);
-    resolvedRuntimeSettings.baseUrl = settings.baseUrl.trim();
-    resolvedRuntimeSettings.modelName = settings.modelName.trim();
-    resolvedRuntimeSettings.apiKey = settings.apiKey;
+    aiProviderSettings = makeAiProviderSettings(runtimeSettings);
 
-    creation::services::SuiteAiSettingsResolver::upsertRuntimeSettingsForApp(
-        suiteAiSettings,
-        creation::assets::SuiteAppDomain::station,
-        resolvedRuntimeSettings,
-        "Creation Station");
-
-    return store.save(suiteAiSettings, errorMessage);
+    refreshAiPanelAccountsAndModels();
 }
 
 void MainComponent::syncSemanticAppContext()
@@ -7793,7 +7746,6 @@ void MainComponent::loadAppSettings()
             disabledMidiInputDeviceIds.add(deviceId.toString());
 
     loadSuiteAiProviderSettings();
-    settingsPanel.setAiProviderSettings(aiProviderSettings);
     engine.setMetronomeTempo(timelineModel.getTempoBpm(), timelineModel.getTimeSignatureNumerator());
 }
 

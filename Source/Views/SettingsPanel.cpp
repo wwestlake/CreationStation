@@ -1,31 +1,10 @@
 #include "SettingsPanel.h"
-#include <creation/services/SuiteAiProviderRuntime.h>
 
 namespace
 {
 juce::Colour sectionAccent()
 {
     return juce::Colour(0xff5f93ff);
-}
-
-const juce::Array<creation::services::SuiteAiProviderRuntimeProfile>& availableAiProviders()
-{
-    static const auto providers = creation::services::SuiteAiProviderRuntime::createChatCapableProfiles();
-    return providers;
-}
-
-juce::String normalizedProviderId(const juce::String& providerName)
-{
-    return creation::services::SuiteAiProviderRuntime::normalizeProviderId(providerName);
-}
-
-const creation::services::SuiteAiProviderRuntimeProfile* findProviderPreset(const juce::String& providerName)
-{
-    const auto providerId = normalizedProviderId(providerName);
-    for (const auto& provider : availableAiProviders())
-        if (provider.providerId == providerId)
-            return std::addressof(provider);
-    return nullptr;
 }
 }
 
@@ -166,85 +145,6 @@ SettingsPanel::ContentView::ContentView(SettingsPanel& ownerRef)
     audioDriverControlPanelButton.setTooltip("Open your audio driver's own control panel");
     content.addAndMakeVisible(audioDriverControlPanelButton);
 
-    aiSectionLabel.setText("AI Provider");
-    aiSectionLabel.onToggled = [this] { layoutContent(); };
-    content.addAndMakeVisible(aiSectionLabel);
-
-    aiProviderLabel.setText("Provider", juce::dontSendNotification);
-    aiProviderLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
-    content.addAndMakeVisible(aiProviderLabel);
-
-    for (int index = 0; index < availableAiProviders().size(); ++index)
-        aiProviderComboBox.addItem(availableAiProviders()[index].displayName, index + 1);
-    aiProviderComboBox.setSelectedId(1, juce::dontSendNotification);
-    aiProviderComboBox.onChange = [this]
-    {
-        const auto* provider = findProviderPreset(aiProviderComboBox.getText());
-        auto isOllama = provider != nullptr && provider->providerId == "ollama";
-        aiKeyLabel.setText("API key / token", juce::dontSendNotification);
-        aiModelStatusLabel.setText(isOllama
-                                   ? "Ollama usually does not need a key. Refresh models after setting the local server."
-                                   : "Refresh the model list after entering your key.",
-                                   juce::dontSendNotification);
-
-        auto endpointText = aiEndpointEditor.getText().trim();
-        if (provider != nullptr
-            && creation::services::SuiteAiProviderRuntime::shouldReplaceBaseUrlOnProviderSwitch(endpointText, *provider))
-        {
-            aiEndpointEditor.setText(provider->defaultBaseUrl, juce::dontSendNotification);
-        }
-
-        applyAiSettings();
-    };
-    content.addAndMakeVisible(aiProviderComboBox);
-
-    aiHintLabel.setText("This is separate from your LagDaemon login. Enter your own model API key or local provider token here.",
-                        juce::dontSendNotification);
-    aiHintLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
-    content.addAndMakeVisible(aiHintLabel);
-
-    aiModelLabel.setText("Model", juce::dontSendNotification);
-    aiModelLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
-    content.addAndMakeVisible(aiModelLabel);
-
-    aiModelComboBox.setEditableText(true);
-    aiModelComboBox.setTextWhenNothingSelected("gpt-4.1-mini");
-    aiModelComboBox.onChange = [this]
-    {
-        applyAiSettings();
-    };
-    content.addAndMakeVisible(aiModelComboBox);
-
-    aiEndpointLabel.setText("OpenAI endpoint", juce::dontSendNotification);
-    aiEndpointLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
-    content.addAndMakeVisible(aiEndpointLabel);
-
-    aiEndpointEditor.setTextToShowWhenEmpty("https://api.openai.com/v1", juce::Colour(0xff6e7e94));
-    aiEndpointEditor.setText("https://api.openai.com/v1", juce::dontSendNotification);
-    aiEndpointEditor.onTextChange = [this] { applyAiSettings(); };
-    content.addAndMakeVisible(aiEndpointEditor);
-
-    aiKeyLabel.setText("API key / token", juce::dontSendNotification);
-    aiKeyLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
-    content.addAndMakeVisible(aiKeyLabel);
-
-    aiKeyEditor.setTextToShowWhenEmpty("sk-...", juce::Colour(0xff6e7e94));
-    aiKeyEditor.setPasswordCharacter('*');
-    aiKeyEditor.onTextChange = [this] { applyAiSettings(); };
-    content.addAndMakeVisible(aiKeyEditor);
-
-    aiModelStatusLabel.setText("Refresh the model list after entering your key.", juce::dontSendNotification);
-    aiModelStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
-    content.addAndMakeVisible(aiModelStatusLabel);
-
-    aiRefreshModelsButton.onClick = [this]
-    {
-        if (owner.onRefreshAiModelsRequested != nullptr)
-            owner.onRefreshAiModelsRequested();
-    };
-    aiRefreshModelsButton.setTooltip("Fetch the list of available models from the AI provider");
-    content.addAndMakeVisible(aiRefreshModelsButton);
-
     storageLabel.setText("Storage folder", juce::dontSendNotification);
     storageLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
     content.addAndMakeVisible(storageLabel);
@@ -317,12 +217,6 @@ void SettingsPanel::ContentView::setSearchText(const juce::String& text)
     applyFilter();
 }
 
-void SettingsPanel::ContentView::applyAiSettings()
-{
-    if (owner.onAiProviderSettingsChanged != nullptr)
-        owner.onAiProviderSettingsChanged(owner.getAiProviderSettings());
-}
-
 void SettingsPanel::ContentView::applyProjectMetadata()
 {
     if (owner.onProjectMetadataChanged == nullptr)
@@ -363,15 +257,6 @@ void SettingsPanel::ContentView::applyFilter()
     projectSectionVisible = newProjectRow.visible || openProjectRow.visible || saveProjectRow.visible || revealProjectRow.visible;
     startupSectionVisible = storageRow.visible;
     toolsSectionVisible = studioInputsRow.visible || audioRow.visible || vstRow.visible || controlSurfaceRow.visible;
-    aiSectionVisible = query.isEmpty()
-                       || aiSectionLabel.getText().toLowerCase().contains(query)
-                       || aiProviderLabel.getText().toLowerCase().contains(query)
-                       || aiHintLabel.getText().toLowerCase().contains(query)
-                       || aiModelLabel.getText().toLowerCase().contains(query)
-                       || aiEndpointLabel.getText().toLowerCase().contains(query)
-                       || aiKeyLabel.getText().toLowerCase().contains(query)
-                       || aiModelComboBox.getText().toLowerCase().contains(query)
-                       || aiEndpointEditor.getText().toLowerCase().contains(query);
 
     midiSectionVisible = query.isEmpty()
                          || midiSectionLabel.getText().toLowerCase().contains(query)
@@ -388,14 +273,12 @@ void SettingsPanel::ContentView::applyFilter()
         if (projectSectionVisible) projectSectionLabel.setExpanded(true);
         if (startupSectionVisible) startupSectionLabel.setExpanded(true);
         if (toolsSectionVisible) toolsSectionLabel.setExpanded(true);
-        if (aiSectionVisible) aiSectionLabel.setExpanded(true);
         if (midiSectionVisible) midiSectionLabel.setExpanded(true);
     }
 
     projectSectionLabel.setVisible(projectSectionVisible);
     startupSectionLabel.setVisible(startupSectionVisible);
     toolsSectionLabel.setVisible(toolsSectionVisible);
-    aiSectionLabel.setVisible(aiSectionVisible);
     midiSectionLabel.setVisible(midiSectionVisible);
 
     for (auto* row : { &newProjectRow, &openProjectRow, &saveProjectRow, &revealProjectRow, &storageRow, &studioInputsRow, &audioRow, &vstRow, &controlSurfaceRow })
@@ -621,55 +504,6 @@ void SettingsPanel::ContentView::layoutContent()
         y += 8;
     }
 
-    aiSectionLabel.setVisible(aiSectionVisible);
-    auto aiExpanded = aiSectionVisible && aiSectionLabel.isExpanded();
-
-    aiProviderLabel.setVisible(aiExpanded);
-    aiProviderComboBox.setVisible(aiExpanded);
-    aiHintLabel.setVisible(aiExpanded);
-    aiModelLabel.setVisible(aiExpanded);
-    aiModelComboBox.setVisible(aiExpanded);
-    aiEndpointLabel.setVisible(aiExpanded);
-    aiEndpointEditor.setVisible(aiExpanded);
-    aiKeyLabel.setVisible(aiExpanded);
-    aiKeyEditor.setVisible(aiExpanded);
-    aiModelStatusLabel.setVisible(aiExpanded);
-    aiRefreshModelsButton.setVisible(aiExpanded);
-
-    if (aiSectionVisible)
-    {
-        aiSectionLabel.setBounds(x, y, width, sectionHeight);
-        y += sectionHeight + 6;
-    }
-
-    if (aiExpanded)
-    {
-        aiProviderLabel.setBounds(x, y, 100, 24);
-        aiProviderComboBox.setBounds(x + 110, y, juce::jmax(180, width - 110), 24);
-        y += 28;
-
-        aiHintLabel.setBounds(x, y, width, 28);
-        y += 32;
-
-        aiModelLabel.setBounds(x, y, 100, 24);
-        aiModelComboBox.setBounds(x + 110, y - 2, juce::jmax(240, width - 110), 28);
-        y += 36;
-
-        aiEndpointLabel.setBounds(x, y, 140, 24);
-        aiEndpointEditor.setBounds(x + 150, y - 2, juce::jmax(240, width - 150), 28);
-        y += 36;
-
-        aiKeyLabel.setBounds(x, y, 140, 24);
-        aiKeyEditor.setBounds(x + 150, y - 2, juce::jmax(240, width - 150), 28);
-        y += 40;
-
-        aiModelStatusLabel.setBounds(x, y, width, 22);
-        y += 26;
-
-        aiRefreshModelsButton.setBounds(x, y, 160, 32);
-        y += 44;
-    }
-
     y += 24;
     content.setSize(contentWidth, juce::jmax(y, viewport.getHeight()));
 }
@@ -861,49 +695,6 @@ void SettingsPanel::setAutoloadEnabled(bool enabled)
     contentView.autoloadToggle.setToggleState(enabled, juce::dontSendNotification);
 }
 
-void SettingsPanel::setAiProviderSettings(const AiProviderSettings& settings)
-{
-    const auto providerId = normalizedProviderId(settings.providerId.isNotEmpty()
-                                                     ? settings.providerId
-                                                     : settings.providerDisplayName);
-    auto selectedIndex = 0;
-    for (int index = 0; index < availableAiProviders().size(); ++index)
-        if (availableAiProviders()[index].providerId == providerId)
-            selectedIndex = index;
-    const auto* provider = findProviderPreset(providerId);
-    auto isOllama = provider != nullptr && provider->providerId == "ollama";
-    contentView.aiProviderComboBox.setSelectedId(selectedIndex + 1, juce::dontSendNotification);
-    contentView.aiKeyLabel.setText("API key / token", juce::dontSendNotification);
-    contentView.aiModelStatusLabel.setText(isOllama
-                                           ? "Ollama usually does not need a key. Refresh models after setting the local server."
-                                           : "Refresh the model list after entering your key.",
-                                           juce::dontSendNotification);
-    contentView.aiModelComboBox.setText(settings.modelName.isNotEmpty()
-                                            ? settings.modelName
-                                            : creation::services::SuiteAiProviderRuntime::defaultModelName(*provider),
-                                        juce::dontSendNotification);
-    auto endpointDefault = provider != nullptr ? provider->defaultBaseUrl
-                                               : (isOllama ? "http://localhost:11434" : "https://api.openai.com/v1");
-    contentView.aiEndpointEditor.setText(settings.baseUrl.isNotEmpty() ? settings.baseUrl : endpointDefault,
-                                         juce::dontSendNotification);
-    contentView.aiKeyEditor.setText(settings.apiKey, juce::dontSendNotification);
-}
-
-void SettingsPanel::setAvailableAiModels(const juce::StringArray& modelIds, const juce::String& statusText)
-{
-    contentView.aiModelComboBox.clear(juce::dontSendNotification);
-    for (int index = 0; index < modelIds.size(); ++index)
-        contentView.aiModelComboBox.addItem(modelIds[index], index + 1);
-
-    auto current = contentView.aiModelComboBox.getText().trim();
-    if (current.isNotEmpty())
-        contentView.aiModelComboBox.setText(current, juce::dontSendNotification);
-    else if (modelIds.size() > 0)
-        contentView.aiModelComboBox.setText(modelIds[0], juce::dontSendNotification);
-
-    contentView.aiModelStatusLabel.setText(statusText, juce::dontSendNotification);
-}
-
 void SettingsPanel::setAudioDeviceLists(const juce::StringArray& audioSystems,
                                         const juce::StringArray& inputDevices,
                                         const juce::StringArray& outputDevices,
@@ -958,17 +749,6 @@ void SettingsPanel::setStudioInputRows(const juce::StringArray& names,
 void SettingsPanel::setMidiInputDevices(const juce::Array<MidiDeviceInfo>& devices, const juce::StringArray& midiTrackNames)
 {
     contentView.setMidiInputDevices(devices, midiTrackNames);
-}
-
-AiProviderSettings SettingsPanel::getAiProviderSettings() const
-{
-    AiProviderSettings settings;
-    settings.providerDisplayName = contentView.aiProviderComboBox.getText().trim();
-    settings.providerId = normalizedProviderId(settings.providerDisplayName);
-    settings.modelName = contentView.aiModelComboBox.getText().trim();
-    settings.baseUrl = contentView.aiEndpointEditor.getText().trim();
-    settings.apiKey = contentView.aiKeyEditor.getText();
-    return settings;
 }
 
 void SettingsPanel::setSearchText(const juce::String& text)

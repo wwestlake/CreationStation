@@ -1,19 +1,7 @@
 #include "AiPanel.h"
-#include <creation/services/SuiteAiProviderRuntime.h>
 
 namespace
 {
-    const juce::Array<creation::services::SuiteAiProviderRuntimeProfile>& availableAiProviders()
-    {
-        static const auto providers = creation::services::SuiteAiProviderRuntime::createChatCapableProfiles();
-        return providers;
-    }
-
-    juce::String normalizedProviderId(const juce::String& providerName)
-    {
-        return creation::services::SuiteAiProviderRuntime::normalizeProviderId(providerName);
-    }
-
     struct MarkdownRenderStyle
     {
         juce::Font bodyFont { 14.0f };
@@ -359,14 +347,13 @@ AiPanel::AiPanel()
     learnModeButton.setTooltip("Learn mode - guided, teaching-style answers");
     researchModeButton.setTooltip("Research mode - deeper, more thorough answers");
 
-    providerLabel.setText("Provider", juce::dontSendNotification);
-    providerLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
-    addAndMakeVisible(providerLabel);
+    accountLabel.setText("Account", juce::dontSendNotification);
+    accountLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
+    addAndMakeVisible(accountLabel);
 
-    for (int index = 0; index < availableAiProviders().size(); ++index)
-        providerComboBox.addItem(availableAiProviders()[index].displayName, index + 1);
-    providerComboBox.addListener(this);
-    addAndMakeVisible(providerComboBox);
+    accountComboBox.setTextWhenNoChoicesAvailable("No suite AI accounts configured");
+    accountComboBox.addListener(this);
+    addAndMakeVisible(accountComboBox);
 
     modelLabel.setText("Model", juce::dontSendNotification);
     modelLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
@@ -587,22 +574,32 @@ void AiPanel::setAvailableModels(const juce::StringArray& modelIds, const juce::
     refreshPromptHeight();
 }
 
-void AiPanel::setSelectedProvider(const juce::String& providerName)
+void AiPanel::setAvailableAccounts(const juce::Array<AccountEntry>& accounts, const juce::String& selectedAccountId)
 {
     updatingComboBoxes = true;
-    const auto providerId = normalizedProviderId(providerName);
-    auto selectedIndex = 0;
-    for (int index = 0; index < availableAiProviders().size(); ++index)
-        if (availableAiProviders()[index].providerId == providerId)
+
+    availableAccounts = accounts;
+    accountComboBox.clear(juce::dontSendNotification);
+    for (int index = 0; index < availableAccounts.size(); ++index)
+        accountComboBox.addItem(availableAccounts[index].displayName, index + 1);
+
+    auto selectedIndex = -1;
+    for (int index = 0; index < availableAccounts.size(); ++index)
+        if (availableAccounts[index].accountId == selectedAccountId)
             selectedIndex = index;
-    providerComboBox.setSelectedId(selectedIndex + 1, juce::dontSendNotification);
+    if (selectedIndex < 0 && availableAccounts.size() > 0)
+        selectedIndex = 0;
+
+    accountComboBox.setSelectedItemIndex(selectedIndex, juce::dontSendNotification);
     updatingComboBoxes = false;
 }
 
-juce::String AiPanel::getSelectedProvider() const
+juce::String AiPanel::getSelectedAccountId() const
 {
-    auto providerName = providerComboBox.getText().trim();
-    return providerName.isNotEmpty() ? providerName : "OpenAI";
+    const auto index = accountComboBox.getSelectedItemIndex();
+    if (! juce::isPositiveAndBelow(index, availableAccounts.size()))
+        return {};
+    return availableAccounts[index].accountId;
 }
 
 void AiPanel::setSelectedModel(const juce::String& modelName)
@@ -694,8 +691,8 @@ void AiPanel::setCollapsed(bool shouldCollapse)
     normalModeButton.setVisible(! collapsed);
     learnModeButton.setVisible(! collapsed);
     researchModeButton.setVisible(! collapsed);
-    providerLabel.setVisible(! collapsed);
-    providerComboBox.setVisible(! collapsed);
+    accountLabel.setVisible(! collapsed);
+    accountComboBox.setVisible(! collapsed);
     modelLabel.setVisible(! collapsed);
     modelComboBox.setVisible(! collapsed);
     accessLabelTitle.setVisible(! collapsed);
@@ -770,10 +767,10 @@ void AiPanel::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
         if (onModelChanged)
             onModelChanged(modelComboBox.getText().trim());
     }
-    else if (comboBoxThatHasChanged == &providerComboBox)
+    else if (comboBoxThatHasChanged == &accountComboBox)
     {
-        if (onProviderChanged)
-            onProviderChanged(getSelectedProvider());
+        if (onAccountChanged)
+            onAccountChanged(getSelectedAccountId());
     }
     else if (comboBoxThatHasChanged == &accessComboBox)
     {
@@ -820,9 +817,9 @@ void AiPanel::resized()
     modeButtons.removeFromLeft(8);
     researchModeButton.setBounds(modeButtons.removeFromLeft(120));
 
-    auto providerArea = controlsRow.removeFromLeft(110);
-    providerLabel.setBounds(providerArea.removeFromTop(16));
-    providerComboBox.setBounds(providerArea.reduced(0, 2));
+    auto accountArea = controlsRow.removeFromLeft(150);
+    accountLabel.setBounds(accountArea.removeFromTop(16));
+    accountComboBox.setBounds(accountArea.reduced(0, 2));
     controlsRow.removeFromLeft(10);
 
     auto modelArea = controlsRow.removeFromLeft(170);
