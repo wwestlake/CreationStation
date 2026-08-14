@@ -1861,6 +1861,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
 
         currentArrangementAssetId = savedAsset.id;
+        trackerPanel.setCurrentArrangementName(savedAsset.displayName);
 
         if (! projectSession.commit(errorMessage))
         {
@@ -6289,6 +6290,7 @@ bool MainComponent::restoreArrangementAsset(const creation::assets::AssetDescrip
 
     timelineModel.restoreState(state);
     currentArrangementAssetId = asset.id;
+    trackerPanel.setCurrentArrangementName(asset.displayName);
     trackerPanel.refreshTimelineView();
     return true;
 }

@@ -679,6 +679,10 @@ void TrackerPanel::paint(juce::Graphics& g)
         g.setColour(juce::Colour(0xff67e8a5).withAlpha(0.70f));
         g.drawRoundedRectangle(canvas.getBounds().toFloat(), 10.0f, 2.0f);
     }
+
+    // Pitch pipe group box, so it reads as one instrument rather than three loose controls.
+    g.setColour(juce::Colour(0xff3a4f68));
+    g.drawRoundedRectangle(pitchPipeGroupBounds.toFloat(), 6.0f, 1.0f);
 }
 
 void TrackerPanel::resized()
@@ -703,15 +707,16 @@ void TrackerPanel::resized()
     // to frequently-clicked buttons and gets mis-hit.
     auto trackButtons = controls.removeFromTop(32);
     arrangementMenuButton.setBounds(trackButtons.removeFromLeft(110));
+    trackButtons.removeFromLeft(10);
+    snapToggleButton.setBounds(trackButtons.removeFromLeft(70));
+    trackButtons.removeFromLeft(6);
+    gridResolutionCombo.setBounds(trackButtons.removeFromLeft(90));
 
     controls.removeFromTop(8);
-    auto snapRow = controls.removeFromTop(28);
-    snapToggleButton.setBounds(snapRow.removeFromLeft(70));
-    snapRow.removeFromLeft(6);
-    gridResolutionCombo.setBounds(snapRow.removeFromLeft(90));
-
-    controls.removeFromTop(8);
-    auto pitchPipeRow = controls.removeFromTop(28);
+    constexpr int pitchPipePadding = 8;
+    auto pitchPipeOuter = controls.removeFromTop(28 + pitchPipePadding * 2);
+    pitchPipeGroupBounds = pitchPipeOuter;
+    auto pitchPipeRow = pitchPipeOuter.reduced(pitchPipePadding, pitchPipePadding);
     pitchPipeNoteCombo.setBounds(pitchPipeRow.removeFromLeft(70));
     pitchPipeRow.removeFromLeft(6);
     pitchPipeOctaveCombo.setBounds(pitchPipeRow.removeFromLeft(60));
@@ -880,9 +885,13 @@ void TrackerPanel::applyWheelNavigation(const juce::MouseEvent& event, const juc
     if (std::abs(horizontalIntent) < 0.0001f)
         return;
 
+    // Small per-notch step, not a fraction of the whole visible window - a plain mouse wheel
+    // delivers one full-magnitude notch per click, so the old visibleSeconds*0.16*8.0 formula
+    // panned most of the visible timeline on a single click and read as a jarring jump rather
+    // than a smooth scroll, especially distracting while eye-tracking a moving playhead.
     auto visibleSeconds = canvas.getVisibleDurationSeconds();
-    auto scrollStepSeconds = juce::jmax(0.25, visibleSeconds * 0.16);
-    scrollTimelineTo(timelineScrollBar.getCurrentRangeStart() - (double) horizontalIntent * scrollStepSeconds * 8.0);
+    auto scrollStepSeconds = juce::jmax(0.1, visibleSeconds * 0.04);
+    scrollTimelineTo(timelineScrollBar.getCurrentRangeStart() - (double) horizontalIntent * scrollStepSeconds);
 }
 
 void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
@@ -1078,7 +1087,8 @@ void TrackerPanel::commitTimingEdits()
 
 void TrackerPanel::showArrangementMenu()
 {
-    creation::ui::showNamedAssetSaveLoadMenu(arrangementMenuButton, "Arrangement", "Arrangement",
+    auto defaultName = currentArrangementName.isNotEmpty() ? currentArrangementName : juce::String("Arrangement");
+    creation::ui::showNamedAssetSaveLoadMenu(arrangementMenuButton, "Arrangement", defaultName,
         [this](const juce::String& name)
         {
             if (onArrangementSaveRequested)
@@ -1089,6 +1099,11 @@ void TrackerPanel::showArrangementMenu()
             if (onArrangementLoadRequested)
                 onArrangementLoadRequested();
         });
+}
+
+void TrackerPanel::setCurrentArrangementName(const juce::String& name)
+{
+    currentArrangementName = name;
 }
 
 void TrackerPanel::TimelineCanvas::setTrackKind(int trackIndex, cs::TrackKind kind)

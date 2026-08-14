@@ -456,7 +456,7 @@ void TimelineModel::setTrackHeight(int trackIndex, int heightPixels)
     if (! juce::isPositiveAndBelow(trackIndex, getTrackCount()))
         return;
 
-    tracks[(size_t) trackIndex].heightPixels = juce::jlimit(64, 156, heightPixels);
+    tracks[(size_t) trackIndex].heightPixels = juce::jmax(64, heightPixels);
 }
 
 int TimelineModel::getTrackHeight(int trackIndex) const

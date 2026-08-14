@@ -80,6 +80,10 @@ public:
     std::function<void(const juce::String& name)> onArrangementSaveRequested;
     std::function<void()> onArrangementLoadRequested;
 
+    // The display name of whichever arrangement is currently active in this project (last
+    // saved or loaded), so re-saving defaults to that name instead of always prompting fresh.
+    void setCurrentArrangementName(const juce::String& name);
+
     void setTrackCount(int newTrackCount);
     void setTrackName(int trackIndex, const juce::String& name);
     void setTrackKind(int trackIndex, cs::TrackKind kind);
@@ -411,6 +415,9 @@ private:
     TimelineCanvas canvas;
     cs::TimelineModel* timelineModel = nullptr;
     bool fileDragActive = false;
+    // Set in resized(), drawn in paint() - the outlined group box around the pitch pipe controls.
+    juce::Rectangle<int> pitchPipeGroupBounds;
+    juce::String currentArrangementName;
 
     int selectedTrack = -1;
     int selectedClipIndex = -1;
