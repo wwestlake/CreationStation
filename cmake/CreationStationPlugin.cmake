@@ -53,7 +53,12 @@ endfunction()
 # zero configuration. Whole-directory copy (not a single file) because JUCE's VST3 output shape
 # (single binary vs. a Contents/<arch> bundle folder) isn't this function's business to know.
 function(creation_station_copy_plugin_to_scanned_folder TARGET_NAME)
-    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+    # Must attach to the VST3-format sub-target (${TARGET_NAME}_VST3), not ${TARGET_NAME} itself
+    # -- ${TARGET_NAME} is only the shared-code library JUCE builds the format targets from; the
+    # actual .vst3 output doesn't exist in the VST3/ folder until the _VST3 target finishes.
+    # Confirmed by a real failed build: attaching to ${TARGET_NAME} tried to copy_directory from
+    # a VST3/ folder that didn't exist yet and the build broke.
+    add_custom_command(TARGET ${TARGET_NAME}_VST3 POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
         COMMAND ${CMAKE_COMMAND} -E copy_directory

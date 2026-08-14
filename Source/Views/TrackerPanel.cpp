@@ -1328,7 +1328,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
     for (int beat = startBeat; beat <= endBeat; ++beat)
     {
         auto beatSeconds = (double) beat * secondsPerBeat;
-        auto x = labelWidth + juce::roundToInt((beatSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
+        auto x = labelWidth + 12 + juce::roundToInt((beatSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
         if (x < labelWidth - 80 || x > getWidth() + 80)
             continue;
 
@@ -1389,7 +1389,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                 continue;   // whole beats already drawn above, brighter
 
             auto stepSeconds = stepBeats * secondsPerBeat;
-            auto x = labelWidth + juce::roundToInt((stepSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
+            auto x = labelWidth + 12 + juce::roundToInt((stepSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
             if (x < labelWidth || x > getWidth())
                 continue;
 
@@ -1434,7 +1434,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
         for (int beat = startBeat; beat <= endBeat; ++beat)
         {
             auto beatSeconds = (double) beat * secondsPerBeat;
-            auto x = labelWidth + juce::roundToInt((beatSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
+            auto x = labelWidth + 12 + juce::roundToInt((beatSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
             if (x < labelWidth || x > getWidth())
                 continue;
 
@@ -1453,7 +1453,7 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                     continue;
 
                 auto stepSeconds = stepBeats * secondsPerBeat;
-                auto x = labelWidth + juce::roundToInt((stepSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
+                auto x = labelWidth + 12 + juce::roundToInt((stepSeconds - scrollSeconds) * (timelineModel != nullptr ? timelineModel->getPixelsPerSecond() : 120.0));
                 if (x < labelWidth || x > getWidth())
                     continue;
 

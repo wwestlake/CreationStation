@@ -383,6 +383,11 @@ target_link_libraries(CreationStationPluginKit PUBLIC
 
 include(cmake/CreationStationPlugin.cmake)
 
+# CreationStationInstrument is declared above via a standalone juce_add_plugin(...) call, not
+# through either add_creation_station_*_plugin wrapper, so it needs this call made explicitly
+# (the wrappers make it automatically for every other in-house plugin).
+creation_station_copy_plugin_to_scanned_folder(CreationStationInstrument)
+
 add_creation_station_effect_plugin(CreationStationCompressor "Creation Station Compressor" CSCp "Fx")
 target_sources(CreationStationCompressor PRIVATE
     Source/Plugins/Compressor/CreationStationCompressorProcessor.cpp
