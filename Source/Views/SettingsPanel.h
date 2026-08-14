@@ -3,7 +3,6 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "../AI/AiProviderSettings.h"
 
 class SettingsPanel final : public juce::Component
 {
@@ -33,8 +32,6 @@ public:
     std::function<void()> onManageVstPathsRequested;
     std::function<void()> onManageControlSurfaceMappingsRequested;
     std::function<void(bool)> onAutoloadChanged;
-    std::function<void()> onRefreshAiModelsRequested;
-    std::function<void(const AiProviderSettings&)> onAiProviderSettingsChanged;
     std::function<void(const creation::assets::ProjectManifest&)> onProjectMetadataChanged;
     std::function<void()> onRefreshMidiDevicesRequested;
     std::function<void(const juce::String& deviceId, bool enabled)> onMidiInputDeviceEnabledChanged;
@@ -45,8 +42,6 @@ public:
     void setProjectMetadata(const creation::assets::ProjectManifest& metadata);
     void setStoragePath(const juce::String& path);
     void setAutoloadEnabled(bool enabled);
-    void setAiProviderSettings(const AiProviderSettings& settings);
-    void setAvailableAiModels(const juce::StringArray& modelIds, const juce::String& statusText);
     void setStudioInputSummary(const juce::StringArray& inputSummaries);
     void setStudioInputRows(const juce::StringArray& names,
                             const juce::StringArray& hardwareNames,
@@ -58,7 +53,6 @@ public:
                              const juce::String& selectedInput,
                              const juce::String& selectedOutput);
     void setAudioDiagnostics(const juce::String& diagnosticsText, bool canOpenDriverControlPanel);
-    AiProviderSettings getAiProviderSettings() const;
     void setSearchText(const juce::String& text);
     juce::String getSearchText() const;
 
@@ -145,7 +139,6 @@ private:
         bool projectSectionVisible = true;
         bool startupSectionVisible = true;
         bool toolsSectionVisible = true;
-        bool aiSectionVisible = true;
         bool midiSectionVisible = true;
 
         juce::Label headerLabel;
@@ -169,7 +162,6 @@ private:
         juce::TextButton projectMetadataSaveButton { "Apply Metadata" };
         CollapsibleHeader startupSectionLabel;
         CollapsibleHeader toolsSectionLabel;
-        CollapsibleHeader aiSectionLabel;
         CollapsibleHeader midiSectionLabel;
         juce::Label midiHintLabel;
         juce::TextButton refreshMidiDevicesButton { "Refresh Devices" };
@@ -187,17 +179,6 @@ private:
         juce::ComboBox audioOutputComboBox;
         juce::Label audioDiagnosticsLabel;
         juce::TextButton audioDriverControlPanelButton { "Open Driver Panel" };
-        juce::Label aiProviderLabel;
-        juce::Label aiHintLabel;
-        juce::Label aiModelLabel;
-        juce::Label aiEndpointLabel;
-        juce::Label aiKeyLabel;
-        juce::ComboBox aiProviderComboBox;
-        juce::ComboBox aiModelComboBox;
-        juce::TextEditor aiEndpointEditor;
-        juce::TextEditor aiKeyEditor;
-        juce::Label aiModelStatusLabel;
-        juce::TextButton aiRefreshModelsButton { "Refresh Models" };
 
         ActionRow newProjectRow { "New Project", "project create new", "New Project" };
         ActionRow openProjectRow { "Open Project", "project open load", "Open Project" };
@@ -214,7 +195,6 @@ private:
         juce::Viewport viewport;
         juce::Component content;
 
-        void applyAiSettings();
         void applyProjectMetadata();
         void applyFilter();
         void layoutContent();

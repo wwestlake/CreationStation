@@ -36,9 +36,17 @@ public:
     void setAccessLevel(AccessLevel newLevel);
     AccessLevel getAccessLevel() const noexcept { return accessLevel; }
 
+    // A user-named suite AI account (Settings -> Suite AI Accounts). The Virtual Engineer picks
+    // among these by name - it never configures a provider itself.
+    struct AccountEntry
+    {
+        juce::String accountId;
+        juce::String displayName;
+    };
+
+    void setAvailableAccounts(const juce::Array<AccountEntry>& accounts, const juce::String& selectedAccountId);
+    juce::String getSelectedAccountId() const;
     void setAvailableModels(const juce::StringArray& modelIds, const juce::String& statusText);
-    void setSelectedProvider(const juce::String& providerName);
-    juce::String getSelectedProvider() const;
     void setSelectedModel(const juce::String& modelName);
     juce::String getSelectedModel() const;
 
@@ -54,7 +62,7 @@ public:
 
     std::function<void(GuidanceMode mode)> onModeChanged;
     std::function<void(AccessLevel level)> onAccessChanged;
-    std::function<void(const juce::String& providerName)> onProviderChanged;
+    std::function<void(const juce::String& accountId)> onAccountChanged;
     std::function<void(const juce::String& modelName)> onModelChanged;
     std::function<void(const juce::String& prompt)> onPromptSubmitted;
     std::function<void(const CreationStationTaskPlanner::TaskStep& step)> onExecuteNextStep;
@@ -85,8 +93,8 @@ private:
     juce::TextButton normalModeButton { "Normal" };
     juce::TextButton learnModeButton { "Learn" };
     juce::TextButton researchModeButton { "Research" };
-    juce::Label providerLabel;
-    juce::ComboBox providerComboBox;
+    juce::Label accountLabel;
+    juce::ComboBox accountComboBox;
     juce::Label modelLabel;
     juce::ComboBox modelComboBox;
     juce::Label accessLabelTitle;
@@ -104,6 +112,7 @@ private:
     bool collapsed = false;
     int promptEditorHeight = 0;
     bool updatingComboBoxes = false;
+    juce::Array<AccountEntry> availableAccounts;
     juce::StringArray availableModels;
     juce::String latestContextSummary;
     juce::String latestPlanSummary;

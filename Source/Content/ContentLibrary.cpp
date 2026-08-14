@@ -112,9 +112,10 @@ void ContentLibrary::appendFilesFromDirectory(juce::Array<Item>& destination, co
 bool ContentLibrary::loadFromStorage(const juce::File& builtInDirectory,
                                      const juce::File& downloadedDirectory,
                                      const juce::File& userDirectory,
-                                     const juce::File& manifestFile,
                                      juce::String& errorMessage)
 {
+    juce::ignoreUnused(errorMessage);
+
     struct ItemSorter
     {
         static int compareElements(const Item& a, const Item& b)
@@ -134,7 +135,7 @@ bool ContentLibrary::loadFromStorage(const juce::File& builtInDirectory,
     ItemSorter sorter;
     items.sort(sorter);
 
-    return writeManifestSnapshot(manifestFile, errorMessage);
+    return true;
 }
 
 juce::String ContentLibrary::createSummaryText() const
@@ -160,37 +161,3 @@ juce::String ContentLibrary::createSummaryText() const
          + "  |  Mine " + juce::String(userCount);
 }
 
-bool ContentLibrary::writeManifestSnapshot(const juce::File& manifestFile, juce::String& errorMessage) const
-{
-    auto* root = new juce::DynamicObject();
-    juce::Array<juce::var> manifestItems;
-
-    for (const auto& item : items)
-    {
-        auto* object = new juce::DynamicObject();
-        object->setProperty("id", item.id);
-        object->setProperty("name", item.name);
-        object->setProperty("type", item.type);
-        object->setProperty("category", item.category);
-        object->setProperty("description", item.description);
-        object->setProperty("requiredTier", item.requiredTier);
-        object->setProperty("version", item.version);
-        object->setProperty("origin", originName(item.origin));
-        object->setProperty("accessState", accessName(item.accessState));
-        object->setProperty("path", item.file.getFullPathName());
-        object->setProperty("size", (double) item.fileSizeBytes);
-        manifestItems.add(juce::var(object));
-    }
-
-    root->setProperty("generatedAt", juce::Time::getCurrentTime().toISO8601(true));
-    root->setProperty("items", juce::var(manifestItems));
-
-    manifestFile.getParentDirectory().createDirectory();
-    if (! manifestFile.replaceWithText(juce::JSON::toString(juce::var(root), true)))
-    {
-        errorMessage = "Could not write the local content manifest.";
-        return false;
-    }
-
-    return true;
-}

@@ -37,6 +37,7 @@ private:
     private:
         juce::String path;
         int index = -1;
+        bool missing = false;
         juce::TextButton removeButton { "Remove" };
     };
 

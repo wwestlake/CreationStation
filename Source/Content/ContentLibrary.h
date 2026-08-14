@@ -38,7 +38,6 @@ public:
     bool loadFromStorage(const juce::File& builtInDirectory,
                          const juce::File& downloadedDirectory,
                          const juce::File& userDirectory,
-                         const juce::File& manifestFile,
                          juce::String& errorMessage);
 
     const juce::Array<Item>& getItems() const noexcept { return items; }
@@ -52,7 +51,6 @@ private:
     static juce::String inferTypeFromFile(const juce::File& file);
     static juce::String inferCategoryFromFile(const juce::File& file);
     static void appendFilesFromDirectory(juce::Array<Item>& destination, const juce::File& directory, Origin origin);
-    bool writeManifestSnapshot(const juce::File& manifestFile, juce::String& errorMessage) const;
 
     juce::Array<Item> items;
 };

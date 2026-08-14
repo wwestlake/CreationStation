@@ -95,9 +95,6 @@ public:
     bool previewAssetFile(const juce::File& file, juce::String& errorMessage);
     bool previewAssetFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
     bool previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer, double sampleRate, juce::String& errorMessage);
-    bool setFoleyArrangement(const juce::ValueTree& arrangementState,
-                             const juce::StringPairArray& assetIdToFilePath,
-                             juce::String& errorMessage);
     bool setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets, juce::String& errorMessage);
     void setTrackerMidiClips(const juce::Array<MidiPlaybackClip>& clips);
 
@@ -688,7 +685,6 @@ private:
         WorkstationAudioEngine& owner;
         juce::CriticalSection lock;
         juce::Array<Clip> clips;
-        juce::AudioBuffer<float> trackRenderBuffer; // scratch for the -1 (Foley/master-level) pseudo-track only
         std::vector<juce::AudioBuffer<float>> perTrackBuffers; // one per real track, persists for the whole block so children can sum into a parent's buffer before it's finalized
         int64 playbackSamplePosition = 0;
         double sampleRate = 44100.0;

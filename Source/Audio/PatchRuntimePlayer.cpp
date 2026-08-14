@@ -361,9 +361,34 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         juce::AudioBuffer<float> buffer;
         bool ready = false, computing = false;
     };
+    struct CrossFaderEntity
+    {
+        juce::String id;
+        float blend = 0.5f;
+        juce::AudioBuffer<float> buffer;
+        bool ready = false, computing = false;
+    };
+    struct RouterEntity
+    {
+        juce::String id;
+        int inputCount = 2;
+        float select = 0.0f;
+        juce::AudioBuffer<float> buffer;
+        bool ready = false, computing = false;
+    };
+    struct SampleHoldEntity
+    {
+        juce::String id;
+        float trigger = 0.0f;
+        juce::AudioBuffer<float> buffer;
+        bool ready = false, computing = false;
+    };
 
     juce::OwnedArray<FilterEntity> filterEntities;
     juce::OwnedArray<EnvelopeEntity> envelopeEntities;
+    juce::OwnedArray<CrossFaderEntity> crossFaderEntities;
+    juce::OwnedArray<RouterEntity> routerEntities;
+    juce::OwnedArray<SampleHoldEntity> sampleHoldEntities;
     for (auto& node : patch.nodes)
     {
         if (node.kind == "filter")
@@ -390,6 +415,31 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
             entity->buffer.setSize(1, numSamples);
             entity->buffer.clear();
         }
+        else if (node.kind == "crossfade")
+        {
+            auto* entity = crossFaderEntities.add(new CrossFaderEntity());
+            entity->id = node.id;
+            entity->blend = getNumericProperty(node.properties, "blend", entity->blend);
+            entity->buffer.setSize(1, numSamples);
+            entity->buffer.clear();
+        }
+        else if (node.kind == "router")
+        {
+            auto* entity = routerEntities.add(new RouterEntity());
+            entity->id = node.id;
+            entity->inputCount = juce::jmax(1, (int) getNumericProperty(node.properties, "inputCount", (float) entity->inputCount));
+            entity->select = getNumericProperty(node.properties, "select", entity->select);
+            entity->buffer.setSize(1, numSamples);
+            entity->buffer.clear();
+        }
+        else if (node.kind == "sampleHold")
+        {
+            auto* entity = sampleHoldEntities.add(new SampleHoldEntity());
+            entity->id = node.id;
+            entity->trigger = getNumericProperty(node.properties, "trigger", entity->trigger);
+            entity->buffer.setSize(1, numSamples);
+            entity->buffer.clear();
+        }
     }
 
     auto findFilterEntity = [&](const juce::String& id) -> FilterEntity*
@@ -400,6 +450,21 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     auto findEnvelopeEntity = [&](const juce::String& id) -> EnvelopeEntity*
     {
         for (auto* entity : envelopeEntities) if (entity->id == id) return entity;
+        return nullptr;
+    };
+    auto findCrossFaderEntity = [&](const juce::String& id) -> CrossFaderEntity*
+    {
+        for (auto* entity : crossFaderEntities) if (entity->id == id) return entity;
+        return nullptr;
+    };
+    auto findRouterEntity = [&](const juce::String& id) -> RouterEntity*
+    {
+        for (auto* entity : routerEntities) if (entity->id == id) return entity;
+        return nullptr;
+    };
+    auto findSampleHoldEntity = [&](const juce::String& id) -> SampleHoldEntity*
+    {
+        for (auto* entity : sampleHoldEntities) if (entity->id == id) return entity;
         return nullptr;
     };
     auto hasOutgoingConnection = [&](const juce::String& id)
@@ -422,11 +487,15 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     std::function<const juce::AudioBuffer<float>*()> computeMix;
     std::function<const juce::AudioBuffer<float>*(FilterEntity&)> computeFilter;
     std::function<const juce::AudioBuffer<float>*(EnvelopeEntity&)> computeEnvelope;
+    std::function<const juce::AudioBuffer<float>*(CrossFaderEntity&)> computeCrossFader;
+    std::function<const juce::AudioBuffer<float>*(RouterEntity&)> computeRouter;
+    std::function<const juce::AudioBuffer<float>*(SampleHoldEntity&)> computeSampleHold;
 
     // What feeds a plain single-input node (Filter, Envelope, Output, Scope,
     // Analyzer) -- a specific source, the Mix bus, or another Filter/
-    // Envelope's own output if it's wired to feed something downstream of
-    // itself. Returns null if nothing is actually wired in.
+    // Envelope/Cross Fader/Router/Sample & Hold's own output if it's wired
+    // to feed something downstream of itself. Returns null if nothing is
+    // actually wired in.
     auto resolveSingleInput = [&](const juce::String& nodeId) -> const juce::AudioBuffer<float>*
     {
         for (auto& connection : patch.connections)
@@ -442,6 +511,41 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
                 return computeFilter(*filterEntity);
             if (auto* envelopeEntity = findEnvelopeEntity(connection.from))
                 return computeEnvelope(*envelopeEntity);
+            if (auto* crossFaderEntity = findCrossFaderEntity(connection.from))
+                return computeCrossFader(*crossFaderEntity);
+            if (auto* routerEntity = findRouterEntity(connection.from))
+                return computeRouter(*routerEntity);
+            if (auto* sampleHoldEntity = findSampleHoldEntity(connection.from))
+                return computeSampleHold(*sampleHoldEntity);
+        }
+        return nullptr;
+    };
+
+    // Same as resolveSingleInput, but filtered to a specific named toPort --
+    // needed for Cross Fader/Router, which have distinct named signal
+    // inputs ("signalIn:0"/"signalIn:1"/...) that must not be conflated the
+    // way Mix conflates all its signalIn:N feeds into one weighted sum.
+    auto resolveInputAtPort = [&](const juce::String& nodeId, const juce::String& portId) -> const juce::AudioBuffer<float>*
+    {
+        for (auto& connection : patch.connections)
+        {
+            if (connection.to != nodeId || connection.toPort != portId)
+                continue;
+            for (int i = 0; i < patch.sources.size(); ++i)
+                if (patch.sources.getReference(i).id == connection.from)
+                    return sourceBuffers[i];
+            if (! mixId.isEmpty() && connection.from == mixId)
+                return computeMix();
+            if (auto* filterEntity = findFilterEntity(connection.from))
+                return computeFilter(*filterEntity);
+            if (auto* envelopeEntity = findEnvelopeEntity(connection.from))
+                return computeEnvelope(*envelopeEntity);
+            if (auto* crossFaderEntity = findCrossFaderEntity(connection.from))
+                return computeCrossFader(*crossFaderEntity);
+            if (auto* routerEntity = findRouterEntity(connection.from))
+                return computeRouter(*routerEntity);
+            if (auto* sampleHoldEntity = findSampleHoldEntity(connection.from))
+                return computeSampleHold(*sampleHoldEntity);
         }
         return nullptr;
     };
@@ -621,6 +725,98 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
         return &entity.buffer;
     };
 
+    // Cross Fader: equal-power blend (not linear -- a linear crossfade dips
+    // audibly in perceived loudness at the midpoint) between whatever's
+    // wired into its two named inputs, driven by its own blend value (or an
+    // automation lane targeting "crossfadeBlend", same mechanism as every
+    // other automatable parameter here).
+    computeCrossFader = [&](CrossFaderEntity& entity) -> const juce::AudioBuffer<float>*
+    {
+        if (entity.ready) return &entity.buffer;
+        if (entity.computing) return nullptr;
+        entity.computing = true;
+
+        auto* inputA = resolveInputAtPort(entity.id, "signalIn:0");
+        auto* inputB = resolveInputAtPort(entity.id, "signalIn:1");
+
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
+            auto blendMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "crossfadeBlend", t, entity.blend) : (double) entity.blend;
+            auto blend = juce::jlimit(0.0f, 1.0f, (float) blendMotion);
+            auto gainA = std::cos(blend * juce::MathConstants<float>::halfPi);
+            auto gainB = std::sin(blend * juce::MathConstants<float>::halfPi);
+
+            float a = inputA != nullptr ? inputA->getSample(0, sample) : 0.0f;
+            float b = inputB != nullptr ? inputB->getSample(0, sample) : 0.0f;
+            entity.buffer.setSample(0, sample, a * gainA + b * gainB);
+        }
+
+        entity.ready = true;
+        entity.computing = false;
+        return &entity.buffer;
+    };
+
+    // Router: hard-switch to exactly one of N named inputs, chosen by
+    // floor(select * inputCount). Not a blend -- no declick applied here,
+    // matching the v1 scope in the plan (a follow-up can add a short
+    // crossfade on index change if switching pops audibly).
+    computeRouter = [&](RouterEntity& entity) -> const juce::AudioBuffer<float>*
+    {
+        if (entity.ready) return &entity.buffer;
+        if (entity.computing) return nullptr;
+        entity.computing = true;
+
+        juce::Array<const juce::AudioBuffer<float>*> inputs;
+        for (int i = 0; i < entity.inputCount; ++i)
+            inputs.add(resolveInputAtPort(entity.id, "signalIn:" + juce::String(i)));
+
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
+            auto selectMotion = hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "routerSelect", t, entity.select) : (double) entity.select;
+            auto selectClamped = juce::jlimit(0.0, 0.999, selectMotion);
+            auto activeIndex = juce::jlimit(0, entity.inputCount - 1, (int) std::floor(selectClamped * entity.inputCount));
+            auto* activeBuffer = inputs.getReference(activeIndex);
+            entity.buffer.setSample(0, sample, activeBuffer != nullptr ? activeBuffer->getSample(0, sample) : 0.0f);
+        }
+
+        entity.ready = true;
+        entity.computing = false;
+        return &entity.buffer;
+    };
+
+    // Sample & Hold: latches the input signal's current sample on every
+    // rising edge of the trigger (fixed 0.5 threshold -- Button Control's
+    // own 0/1 output already crosses that cleanly, no per-instance
+    // threshold setting needed), holds it steady otherwise.
+    computeSampleHold = [&](SampleHoldEntity& entity) -> const juce::AudioBuffer<float>*
+    {
+        if (entity.ready) return &entity.buffer;
+        if (entity.computing) return nullptr;
+        entity.computing = true;
+
+        auto* inputBuffer = resolveSingleInput(entity.id);
+
+        constexpr float kTriggerThreshold = 0.5f;
+        float heldValue = 0.0f;
+        float previousTrigger = 0.0f;
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
+            auto triggerMotion = (float) (hasAutomationLanes ? sampleTargetLanesRuntime(patch.automationLanes, "sampleHoldTrigger", t, (double) entity.trigger) : (double) entity.trigger);
+            if (triggerMotion >= kTriggerThreshold && previousTrigger < kTriggerThreshold)
+                heldValue = inputBuffer != nullptr ? inputBuffer->getSample(0, sample) : 0.0f;
+            previousTrigger = triggerMotion;
+
+            entity.buffer.setSample(0, sample, heldValue);
+        }
+
+        entity.ready = true;
+        entity.computing = false;
+        return &entity.buffer;
+    };
+
     // --- Step 3: resolve the final output. ---
     // Explicit wiring into the Sink is honored first. If nothing is wired
     // there yet (e.g. a freshly-placed, not-yet-connected graph), fall back
@@ -640,6 +836,21 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     {
         for (auto* entity : envelopeEntities)
             if (! hasOutgoingConnection(entity->id)) { finalBuffer = computeEnvelope(*entity); break; }
+    }
+    if (finalBuffer == nullptr)
+    {
+        for (auto* entity : crossFaderEntities)
+            if (! hasOutgoingConnection(entity->id)) { finalBuffer = computeCrossFader(*entity); break; }
+    }
+    if (finalBuffer == nullptr)
+    {
+        for (auto* entity : routerEntities)
+            if (! hasOutgoingConnection(entity->id)) { finalBuffer = computeRouter(*entity); break; }
+    }
+    if (finalBuffer == nullptr)
+    {
+        for (auto* entity : sampleHoldEntities)
+            if (! hasOutgoingConnection(entity->id)) { finalBuffer = computeSampleHold(*entity); break; }
     }
     if (finalBuffer == nullptr)
         finalBuffer = computeMix();

@@ -145,6 +145,18 @@ juce::String resolveSingleInputId(const cw::PatchDocument& patch, const juce::St
     return {};
 }
 
+// Same as resolveSingleInputId, but filtered to a specific named toPort --
+// needed for Cross Fader's two distinct signal inputs ("signalIn:0"/
+// "signalIn:1"), which must not be conflated the way Mix conflates all its
+// signalIn:N feeds into one weighted sum.
+juce::String resolveInputIdAtPort(const cw::PatchDocument& patch, const juce::String& nodeId, const juce::String& portId)
+{
+    for (auto& connection : patch.connections)
+        if (connection.to == nodeId && connection.toPort == portId)
+            return connection.from;
+    return {};
+}
+
 bool hasOutgoingConnection(const cw::PatchDocument& patch, const juce::String& id)
 {
     for (auto& connection : patch.connections)
@@ -485,43 +497,68 @@ void PatchLiveVoice::rebuild(const cw::PatchDocument& patch, const PatchLiveBind
     struct PendingNode
     {
         juce::String id;
-        bool isFilter = false;
-        juce::String rawInputId; // may reference a source (already placed), mix (already placed), or another pending filter/envelope
+        EntityKind kind = EntityKind::Filter;
+        juce::String rawInputId; // Filter/Envelope/SampleHold: may reference a source (already placed), mix (already placed), or another pending entity
+        juce::String rawInputAId, rawInputBId; // CrossFader only -- its two named inputs
+        juce::Array<juce::String> rawRouterInputIds; // Router only -- its N named inputs
         const cw::PatchNode* node = nullptr;
     };
     juce::Array<PendingNode> pending;
     for (auto& node : patch.nodes)
     {
-        if (node.kind != "filter" && node.kind != "envelope")
+        if (node.kind != "filter" && node.kind != "envelope" && node.kind != "crossfade"
+            && node.kind != "router" && node.kind != "sampleHold")
             continue;
         PendingNode entry;
         entry.id = node.id;
-        entry.isFilter = node.kind == "filter";
-        entry.rawInputId = resolveSingleInputId(patch, node.id);
+        entry.kind = node.kind == "filter" ? EntityKind::Filter
+                   : node.kind == "envelope" ? EntityKind::Envelope
+                   : node.kind == "crossfade" ? EntityKind::CrossFader
+                   : node.kind == "router" ? EntityKind::Router
+                                            : EntityKind::SampleHold;
+        if (entry.kind == EntityKind::CrossFader)
+        {
+            entry.rawInputAId = resolveInputIdAtPort(patch, node.id, "signalIn:0");
+            entry.rawInputBId = resolveInputIdAtPort(patch, node.id, "signalIn:1");
+        }
+        else if (entry.kind == EntityKind::Router)
+        {
+            auto inputCount = juce::jmax(1, (int) getNumericProperty(node.properties, "inputCount", 2.0f));
+            for (int i = 0; i < inputCount; ++i)
+                entry.rawRouterInputIds.add(resolveInputIdAtPort(patch, node.id, "signalIn:" + juce::String(i)));
+        }
+        else
+        {
+            entry.rawInputId = resolveSingleInputId(patch, node.id);
+        }
         entry.node = &node;
         pending.add(entry);
     }
 
-    bool progressed = true;
-    while (! pending.isEmpty() && progressed)
+    auto placeEntity = [&](const PendingNode& candidate)
     {
-        progressed = false;
-        for (int i = pending.size(); --i >= 0;)
+        LiveEntity entity;
+        entity.kind = candidate.kind;
+        entity.id = candidate.id;
+
+        if (candidate.kind == EntityKind::CrossFader)
         {
-            auto& candidate = pending.getReference(i);
-            // Placeable once its input is either unresolved (silence -- fine,
-            // same as the offline renderer treating a missing wire as
-            // silence), or already placed.
-            bool inputReady = candidate.rawInputId.isEmpty() || entityIndexById.contains(candidate.rawInputId);
-            if (! inputReady)
-                continue;
-
-            LiveEntity entity;
-            entity.kind = candidate.isFilter ? EntityKind::Filter : EntityKind::Envelope;
-            entity.id = candidate.id;
-            entity.inputEntityIndex = candidate.rawInputId.isNotEmpty() ? entityIndexById[candidate.rawInputId] : -1;
-
-            if (candidate.isFilter)
+            entity.inputAEntityIndex = candidate.rawInputAId.isNotEmpty() && entityIndexById.contains(candidate.rawInputAId) ? entityIndexById[candidate.rawInputAId] : -1;
+            entity.inputBEntityIndex = candidate.rawInputBId.isNotEmpty() && entityIndexById.contains(candidate.rawInputBId) ? entityIndexById[candidate.rawInputBId] : -1;
+            entity.blend = getNumericProperty(candidate.node->properties, "blend", entity.blend);
+            entity.blendMidiSlot = registerOrReuseSlot(liveBindings.findMidiNodeId(candidate.id, "blend"), liveBindings);
+        }
+        else if (candidate.kind == EntityKind::Router)
+        {
+            for (auto& rawId : candidate.rawRouterInputIds)
+                entity.routerInputEntityIndices.add(rawId.isNotEmpty() && entityIndexById.contains(rawId) ? entityIndexById[rawId] : -1);
+            entity.routerSelect = getNumericProperty(candidate.node->properties, "select", entity.routerSelect);
+            entity.routerSelectMidiSlot = registerOrReuseSlot(liveBindings.findMidiNodeId(candidate.id, "select"), liveBindings);
+        }
+        else
+        {
+            entity.inputEntityIndex = candidate.rawInputId.isNotEmpty() && entityIndexById.contains(candidate.rawInputId) ? entityIndexById[candidate.rawInputId] : -1;
+            if (candidate.kind == EntityKind::Filter)
             {
                 entity.filterMode = candidate.node->properties.getWithDefault("mode", juce::String("lowpass")).toString();
                 entity.cutoffHz = getNumericProperty(candidate.node->properties, "cutoffHz", entity.cutoffHz);
@@ -531,7 +568,7 @@ void PatchLiveVoice::rebuild(const cw::PatchDocument& patch, const PatchLiveBind
                 entity.resonanceMidiSlot = registerOrReuseSlot(liveBindings.findMidiNodeId(candidate.id, "resonance"), liveBindings);
                 entity.envelopeAmountMidiSlot = registerOrReuseSlot(liveBindings.findMidiNodeId(candidate.id, "envelopeAmount"), liveBindings);
             }
-            else
+            else if (candidate.kind == EntityKind::Envelope)
             {
                 entity.curveMode = candidate.node->properties.getWithDefault("curveMode", juce::String("linear")).toString();
                 auto pointsJson = candidate.node->properties.getWithDefault("pointsJson", {}).toString();
@@ -540,9 +577,43 @@ void PatchLiveVoice::rebuild(const cw::PatchDocument& patch, const PatchLiveBind
                 if (entity.points.isEmpty())
                     entity.points = envelopePoints;
             }
+            else // SampleHold
+            {
+                entity.sampleHoldTrigger = getNumericProperty(candidate.node->properties, "trigger", entity.sampleHoldTrigger);
+                entity.sampleHoldTriggerMidiSlot = registerOrReuseSlot(liveBindings.findMidiNodeId(candidate.id, "trigger"), liveBindings);
+            }
+        }
 
-            graph->entities.add(entity);
-            entityIndexById.set(candidate.id, graph->entities.size() - 1);
+        graph->entities.add(entity);
+        entityIndexById.set(candidate.id, graph->entities.size() - 1);
+    };
+
+    bool progressed = true;
+    while (! pending.isEmpty() && progressed)
+    {
+        progressed = false;
+        for (int i = pending.size(); --i >= 0;)
+        {
+            auto& candidate = pending.getReference(i);
+            // Placeable once its input(s) are either unresolved (silence --
+            // fine, same as the offline renderer treating a missing wire as
+            // silence), or already placed.
+            bool inputReady;
+            if (candidate.kind == EntityKind::CrossFader)
+                inputReady = (candidate.rawInputAId.isEmpty() || entityIndexById.contains(candidate.rawInputAId))
+                          && (candidate.rawInputBId.isEmpty() || entityIndexById.contains(candidate.rawInputBId));
+            else if (candidate.kind == EntityKind::Router)
+            {
+                inputReady = true;
+                for (auto& rawId : candidate.rawRouterInputIds)
+                    if (rawId.isNotEmpty() && ! entityIndexById.contains(rawId)) { inputReady = false; break; }
+            }
+            else
+                inputReady = candidate.rawInputId.isEmpty() || entityIndexById.contains(candidate.rawInputId);
+            if (! inputReady)
+                continue;
+
+            placeEntity(candidate);
             pending.remove(i);
             progressed = true;
         }
@@ -551,26 +622,7 @@ void PatchLiveVoice::rebuild(const cw::PatchDocument& patch, const PatchLiveBind
     // on one) -- place it with a silent input rather than drop it, so it's
     // still visible/tappable even though its input can't be resolved.
     for (auto& candidate : pending)
-    {
-        LiveEntity entity;
-        entity.kind = candidate.isFilter ? EntityKind::Filter : EntityKind::Envelope;
-        entity.id = candidate.id;
-        entity.inputEntityIndex = -1;
-        if (candidate.isFilter)
-        {
-            entity.filterMode = candidate.node->properties.getWithDefault("mode", juce::String("lowpass")).toString();
-            entity.cutoffHz = getNumericProperty(candidate.node->properties, "cutoffHz", entity.cutoffHz);
-            entity.resonance = getNumericProperty(candidate.node->properties, "resonance", entity.resonance);
-            entity.envelopeAmount = getNumericProperty(candidate.node->properties, "envelopeAmount", entity.envelopeAmount);
-        }
-        else
-        {
-            entity.curveMode = candidate.node->properties.getWithDefault("curveMode", juce::String("linear")).toString();
-            entity.points = envelopePoints;
-        }
-        graph->entities.add(entity);
-        entityIndexById.set(candidate.id, graph->entities.size() - 1);
-    }
+        placeEntity(candidate);
 
     // --- Step 3 equivalent: resolve the final output, same fallback order
     // as PatchRuntimePlayer: explicit Sink wiring, else the first Filter/
@@ -586,7 +638,8 @@ void PatchLiveVoice::rebuild(const cw::PatchDocument& patch, const PatchLiveBind
     {
         for (auto& entity : graph->entities)
         {
-            if ((entity.kind == EntityKind::Filter || entity.kind == EntityKind::Envelope) && ! hasOutgoingConnection(patch, entity.id))
+            if ((entity.kind == EntityKind::Filter || entity.kind == EntityKind::Envelope || entity.kind == EntityKind::CrossFader
+                 || entity.kind == EntityKind::Router || entity.kind == EntityKind::SampleHold) && ! hasOutgoingConnection(patch, entity.id))
             {
                 graph->finalEntityIndex = entityIndexById[entity.id];
                 break;
@@ -768,6 +821,52 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
                 runtime.filterDsp.setResonance(juce::jlimit(0.30f, 8.0f, (float) resonanceMotion + hardnessMotion * 0.9f - weightMotion * 0.15f));
                 auto filteredValue = runtime.filterDsp.processSample(0, inputValue);
                 outputValue = juce::jmap(airMotion, filteredValue, juce::jlimit(-1.0f, 1.0f, inputValue));
+            }
+            else if (entity.kind == EntityKind::CrossFader)
+            {
+                // Equal-power blend (cos/sin over blend * pi/2), not linear --
+                // a linear crossfade dips audibly in perceived loudness at
+                // the midpoint. Blend value itself follows the same
+                // live-MIDI-or-automation-or-baked resolution every other
+                // parameter here does.
+                auto baseBlend = resolveMidiOr(entity.blendMidiSlot, entity.blend);
+                auto blendMotion = (float) (hasAutomationLanes ? sampleTargetLanes(graph.automationLanes, "crossfadeBlend", t, (double) baseBlend) : (double) baseBlend);
+                auto blend = clamp01(blendMotion);
+                auto gainA = std::cos(blend * juce::MathConstants<float>::halfPi);
+                auto gainB = std::sin(blend * juce::MathConstants<float>::halfPi);
+
+                float inputA = entity.inputAEntityIndex >= 0 ? runtimeStates[entity.inputAEntityIndex]->scratch.getSample(0, localSample) : 0.0f;
+                float inputB = entity.inputBEntityIndex >= 0 ? runtimeStates[entity.inputBEntityIndex]->scratch.getSample(0, localSample) : 0.0f;
+                outputValue = inputA * gainA + inputB * gainB;
+            }
+            else if (entity.kind == EntityKind::Router)
+            {
+                // Hard switch, no declick -- matches the offline renderer's
+                // v1 scope (see PatchRuntimePlayer.cpp's computeRouter).
+                auto baseSelect = resolveMidiOr(entity.routerSelectMidiSlot, entity.routerSelect);
+                auto selectMotion = (float) (hasAutomationLanes ? sampleTargetLanes(graph.automationLanes, "routerSelect", t, (double) baseSelect) : (double) baseSelect);
+                auto selectClamped = juce::jlimit(0.0f, 0.999f, selectMotion);
+                auto count = entity.routerInputEntityIndices.size();
+                auto activeIndex = count > 0 ? juce::jlimit(0, count - 1, (int) std::floor(selectClamped * (float) count)) : -1;
+                auto inputEntityIndex = activeIndex >= 0 ? entity.routerInputEntityIndices.getReference(activeIndex) : -1;
+                outputValue = inputEntityIndex >= 0 ? runtimeStates[inputEntityIndex]->scratch.getSample(0, localSample) : 0.0f;
+            }
+            else if (entity.kind == EntityKind::SampleHold)
+            {
+                // Latches the input on every rising edge of the trigger
+                // (fixed 0.5 threshold, same reasoning as the offline
+                // renderer -- Button Control's own 0/1 output already
+                // crosses that cleanly).
+                auto baseTrigger = resolveMidiOr(entity.sampleHoldTriggerMidiSlot, entity.sampleHoldTrigger);
+                auto triggerMotion = (float) (hasAutomationLanes ? sampleTargetLanes(graph.automationLanes, "sampleHoldTrigger", t, (double) baseTrigger) : (double) baseTrigger);
+                constexpr float kTriggerThreshold = 0.5f;
+                if (triggerMotion >= kTriggerThreshold && runtime.sampleHoldPreviousTrigger < kTriggerThreshold)
+                {
+                    float inputValue = entity.inputEntityIndex >= 0 ? runtimeStates[entity.inputEntityIndex]->scratch.getSample(0, localSample) : 0.0f;
+                    runtime.sampleHoldValue = inputValue;
+                }
+                runtime.sampleHoldPreviousTrigger = triggerMotion;
+                outputValue = runtime.sampleHoldValue;
             }
 
             runtime.scratch.setSample(0, localSample, outputValue);

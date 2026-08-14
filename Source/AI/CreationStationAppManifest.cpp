@@ -25,7 +25,7 @@ AI guidance modes:
 - Research: verify claims, prefer grounded answers, and say when something is uncertain
 
 Primary workspaces and capabilities:
-- Foley / Arrange: record, import, trim, layer, and organize sounds
+- Tracker: record, import, trim, layer, and organize sounds and tracks
 - Signal Lab: design tones, modulation, envelopes, analysis, and signal experiments
 - Library: browse built-in, downloaded, and user content
 - Layers / Mixer: shape routing, gain, pan, sends, buses, and mixes

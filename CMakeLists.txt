@@ -69,6 +69,41 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Interop/CMakeLists.txt")
     set(CS_INTEROP_TARGET creation_suite_interop)
 endif()
 
+set(CS_TIMELINE_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Timeline/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Timeline"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedTimeline")
+    set(CS_TIMELINE_TARGET creation_suite_timeline)
+endif()
+
+# Not yet linked into CreativeWorkstation itself - nothing in the app consumes it as a live video
+# FX graph host yet (no video-FX panel/editor exists). Built here so it compiles/links/smoke-tests
+# as part of the normal build, same as every other shared library, ahead of having a real consumer.
+set(CS_VIDEO_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Video/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Video"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedVideo")
+    set(CS_VIDEO_TARGET creation_suite_video)
+endif()
+
+# Same "not linked into the app yet, built standalone for verification" situation as
+# CS_VIDEO_TARGET above - no plugin loading is wired up yet, see shared/OfxHost's own scope note.
+set(CS_OFXHOST_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/OfxHost/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/OfxHost"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedOfxHost")
+    set(CS_OFXHOST_TARGET creation_suite_ofxhost)
+endif()
+
+# Unlike Video/OfxHost above, THIS one is linked into the app itself (see target_link_libraries
+# below) - the Foley panel (Phase 2) is a real, live consumer of this UI library.
+set(CS_NODE_EDITOR_UI_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/NodeEditorUI/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeEditorUI"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedNodeEditorUI")
+    set(CS_NODE_EDITOR_UI_TARGET creation_suite_node_editor_ui)
+endif()
+
 # Station's own scripting surface (the "Code" workspace tab) is CEL, the
 # one suite-wide language -- not a bespoke per-app DSL. ce_lang_frontend
 # (lexer/parser/sema/diagnostics) and node_system build with no LLVM
@@ -96,6 +131,19 @@ juce_add_gui_app(CreativeWorkstation
 add_custom_command(TARGET CreativeWorkstation POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
+    # Mirrors the app-scanned Plugins folder alongside it too (see
+    # CreationStationPlugin.cmake's creation_station_copy_plugin_to_scanned_folder) so
+    # VstPluginCatalog::rescan()'s <exeDir>/Plugins auto-scan finds the in-house plugins
+    # whether the app is launched from here or straight from the build tree. Whichever
+    # plugin targets have already built by the time this step runs are mirrored; a plugin
+    # built after this step catches up on the next build.
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/Plugins"
+    # Guarantee the source exists (even empty) before copying from it -- CreativeWorkstation
+    # can build standalone, before any plugin target has ever run its own POST_BUILD step.
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
+        "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/Plugins"
     COMMENT "Copying CreativeWorkstation to the shared claude bin directory"
 )
 
@@ -139,8 +187,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/AI/CreationStationAppManifest.h
     Source/AI/LiteSemRagApiClient.cpp
     Source/AI/LiteSemRagApiClient.h
-    Source/AI/OpenAiModelCatalogClient.cpp
-    Source/AI/OpenAiModelCatalogClient.h
     Source/AI/CreationStationTaskPlanner.cpp
     Source/AI/CreationStationTaskPlanner.h
     Source/Audio/WorkstationAudioEngine.cpp
@@ -180,6 +226,13 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Tutorial/TutorialScriptCompiler.h
     Source/Timeline/TimelineModel.cpp
     Source/Timeline/TimelineModel.h
+    Source/Video/VideoDecodeService.cpp
+    Source/Video/VideoDecodeService.h
+    Source/Video/Bt709NV12Shader.h
+    Source/Video/VideoThumbnailCache.cpp
+    Source/Video/VideoThumbnailCache.h
+    Source/Video/VideoScrubPreview.h
+    Source/Video/VideoPreviewComponent.h
     Source/Patch/PatchModel.cpp
     Source/Patch/PatchModel.h
     Source/Main.cpp
@@ -195,8 +248,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/AudioGraphSelfTest.h
     Source/Views/AuthGateView.cpp
     Source/Views/AuthGateView.h
-    Source/Views/ArrangeView.cpp
-    Source/Views/ArrangeView.h
     Source/Views/AiPanel.cpp
     Source/Views/AiPanel.h
     Source/Views/ContentPanel.cpp
@@ -229,6 +280,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/TrackerPanel.h
     Source/Views/SamplePackBuilderPanel.cpp
     Source/Views/SamplePackBuilderPanel.h
+    Source/Views/FoleyPanel.cpp
+    Source/Views/FoleyPanel.h
 )
 
 target_sources(CreationStationInstrument PRIVATE
@@ -273,9 +326,12 @@ target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_SERVICES_TARGET}
     ${CS_UI_TARGET}
     ${CS_INTEROP_TARGET}
+    ${CS_TIMELINE_TARGET}
+    ${CS_NODE_EDITOR_UI_TARGET}
     creation_station_language_host
     ce_lang_frontend
     ce_lang_jit
+    ce_lang_nodegen
     node_system
     juce::juce_audio_devices
     juce::juce_audio_processors
@@ -324,6 +380,11 @@ target_link_libraries(CreationStationPluginKit PUBLIC
 )
 
 include(cmake/CreationStationPlugin.cmake)
+
+# CreationStationInstrument is declared above via a standalone juce_add_plugin(...) call, not
+# through either add_creation_station_*_plugin wrapper, so it needs this call made explicitly
+# (the wrappers make it automatically for every other in-house plugin).
+creation_station_copy_plugin_to_scanned_folder(CreationStationInstrument)
 
 add_creation_station_effect_plugin(CreationStationCompressor "Creation Station Compressor" CSCp "Fx")
 target_sources(CreationStationCompressor PRIVATE

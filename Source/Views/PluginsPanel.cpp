@@ -34,6 +34,7 @@ void PluginsPanel::PathCard::setPath(const juce::String& newPath, int newIndex)
 {
     path = newPath;
     index = newIndex;
+    missing = ! juce::File(newPath).isDirectory();
     repaint();
 }
 
@@ -42,14 +43,14 @@ void PluginsPanel::PathCard::paint(juce::Graphics& g)
     auto bounds = getLocalBounds().toFloat();
     g.setColour(cardColour());
     g.fillRoundedRectangle(bounds, 10.0f);
-    g.setColour(borderColour());
-    g.drawRoundedRectangle(bounds, 10.0f, 1.0f);
+    g.setColour(missing ? juce::Colours::darkorange : borderColour());
+    g.drawRoundedRectangle(bounds, 10.0f, missing ? 1.5f : 1.0f);
 
     auto textArea = getLocalBounds().reduced(12);
     textArea.removeFromRight(94);
-    g.setColour(juce::Colours::white);
+    g.setColour(missing ? juce::Colours::darkorange : juce::Colours::white);
     g.setFont(juce::Font(14.0f).boldened());
-    g.drawText(path, textArea, juce::Justification::centredLeft, true);
+    g.drawText(missing ? path + "  (folder not found)" : path, textArea, juce::Justification::centredLeft, true);
 }
 
 void PluginsPanel::PathCard::resized()

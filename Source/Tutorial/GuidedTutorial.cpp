@@ -47,21 +47,21 @@ say "This guided demo walks the app for you so you can record a clean lesson. St
 advanceOnClick false
 connector false
 next "Begin Demo"
-do switch-workspace arrange
+do switch-workspace tracker
 endscene
 
 scene transport
 title "Transport"
 say "Use Play, Stop, and Record here. This is the fastest place to audition and capture ideas."
 focus transport
-do switch-workspace arrange
+do switch-workspace tracker
 endscene
 
 scene modes
 title "Creative Modes"
-say "These modes switch between Foley staging, signal forging, content browsing, layering, patch design, scripting, capture, and AI help."
+say "These modes switch between tracking, signal forging, content browsing, layering, patch design, scripting, capture, and AI help."
 focus modes
-do switch-workspace arrange
+do switch-workspace tracker
 endscene
 
 scene signal
@@ -144,7 +144,7 @@ say "That is the guided map. You can record this walkthrough with OBS now, then 
 focus transport
 advanceOnClick false
 next "Done"
-do switch-workspace arrange
+do switch-workspace tracker
 endscene
 )NALM";
 }

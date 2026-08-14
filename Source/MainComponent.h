@@ -7,10 +7,10 @@
 #include "AI/CreationStationAppManifest.h"
 #include "AI/CreationStationContextStore.h"
 #include "AI/CreationStationTaskPlanner.h"
+#include "AI/AiProviderSettings.h"
 #include <creation/services/SuiteAiChatClient.h>
 #include <creation/services/SuiteUndoService.h>
 #include "AI/LiteSemRagApiClient.h"
-#include "AI/OpenAiModelCatalogClient.h"
 #include <creation/ui/SuiteDesktopAuthSession.h>
 #include "Audio/StudioIOModel.h"
 #include "Audio/VstPluginCatalog.h"
@@ -19,6 +19,7 @@
 #include "ControlSurface/ControlSurfaceMappingStore.h"
 #include "Content/ContentLibrary.h"
 #include "Content/ContentApiClient.h"
+#include <creation/assets/ProjectAssetService.h>
 #include <creation/assets/ProjectSession.h>
 #include <creation/ui/CreationSuiteHeaderBar.h>
 #include <creation/ui/SuiteShellController.h>
@@ -27,7 +28,6 @@
 #include "Timeline/TimelineModel.h"
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
-#include "Views/ArrangeView.h"
 #include "Views/ContentPanel.h"
 #include "Views/DslPanel.h"
 #include "Views/GraphPanel.h"
@@ -37,6 +37,7 @@
 #include "Views/PluginsPanel.h"
 #include "Views/SamplePackBuilderPanel.h"
 #include "Views/RecordView.h"
+#include "Views/FoleyPanel.h"
 #include "Views/SettingsPanel.h"
 #include "Views/ScorePanel.h"
 #include "Views/SignalLabPanel.h"
@@ -52,7 +53,6 @@ public:
     enum class WorkspaceMode
     {
         tracker,
-        arrange,
         signal,
         library,
         mix,
@@ -66,7 +66,10 @@ public:
         // layout/session's saved integer mode value keeps meaning what it always meant - the
         // button itself is still positioned right after Tracker in ViewModeBar, since that's a
         // purely visual layout choice independent of this enum's declaration order.
-        sampler
+        sampler,
+        // Same reasoning as sampler above - appended, not inserted, to preserve ordinal
+        // stability for already-persisted layouts.
+        foley
     };
 
     using StartupProgressCallback = std::function<void(const juce::String& statusText, float progress)>;
@@ -97,7 +100,6 @@ private:
         juce::Label titleLabel;
         juce::TextButton trackerButton { "Tracker" };
         juce::TextButton samplerButton { "Sampler" };
-        juce::TextButton arrangeButton { "Foley" };
         juce::TextButton signalButton { "Signal" };
         juce::TextButton mixButton { "Layers" };
         juce::TextButton pluginsButton { "Plugins" };
@@ -106,6 +108,7 @@ private:
         juce::TextButton recordButton { "Capture" };
         juce::TextButton scoreButton { "Score" };
         juce::TextButton settingsButton { "Settings" };
+        juce::TextButton foleyButton { "Foley" };
         juce::TextButton popOutButton { "Pop Out" };
     };
 
@@ -218,7 +221,6 @@ private:
     CreationStationAppManifest appManifest;
     LiteSemRagApiClient semanticApiClient;
     creation::services::SuiteAiChatClient openAiChatClient;
-    OpenAiModelCatalogClient modelCatalogClient;
     WorkstationAudioEngine engine;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
@@ -227,7 +229,6 @@ private:
     PluginRackBar pluginRackBar;
     TrackerPanel trackerPanel;
     SamplePackBuilderPanel samplePackBuilderPanel;
-    ArrangeView arrangeView;
     SignalLabPanel signalLabPanel;
     ContentPanel contentPanel;
     MixerPanel mixerPanel;
@@ -235,6 +236,7 @@ private:
     GraphPanel graphPanel;
     DslPanel dslPanel;
     RecordView recordView;
+    FoleyPanel foleyPanel;
     ScorePanel scorePanel;
     AiPanel aiPanel;
     SettingsPanel settingsPanel;
@@ -266,6 +268,11 @@ private:
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     creation::assets::ProjectSession projectSession;
+    // Which saved arrangement/patch/foley-setup (project asset id) is currently active in each
+    // tool tab -- used to auto-restore the right one when the project reopens.
+    juce::String currentArrangementAssetId;
+    juce::String currentSignalLabAssetId;
+    juce::String currentFoleyAssetId;
     VstPluginCatalog vstPluginCatalog;
     ContentLibrary contentLibrary;
     ContentApiClient contentApiClient;
@@ -288,6 +295,9 @@ private:
     bool authenticated = false;
     WorkspaceMode activeMode = WorkspaceMode::tracker;
     AiProviderSettings aiProviderSettings;
+    // Full suite AI account/routing state (Settings -> Suite AI Accounts) - CreationStation only
+    // ever selects among these named accounts, it never creates or edits one itself.
+    creation::services::SuiteAiSettings suiteAiSettings;
     bool autoloadLastProject = false;
     bool aiSidebarCollapsed = false;
     bool layoutDirty = false;
@@ -362,7 +372,6 @@ private:
     void duplicateClip(int clipIndex);
     void deleteClip(int clipIndex);
     void renameClip(int clipIndex);
-    juce::File getAppSettingsFile() const;
     void saveAppSettings();
     void loadAppSettings();
     void applySelectedAudioDeviceSettings();
@@ -430,7 +439,7 @@ private:
     void createProjectFromTemplate();
     void beginCreateProjectFromTemplate();
     void openProject();
-    void openProject(const juce::File& containerFile);
+    void openProject(const juce::String& projectId);
     void beginOpenProject();
     void saveProject();
     void saveProjectAs();
@@ -474,13 +483,19 @@ private:
     void showTour();
     void importProjectSounds();
     void refreshProjectAssets();
-    void refreshFoleyArrangement();
     void refreshContentLibrary();
     void refreshTutorialLibrary();
     void refreshAiContextStore();
     void downloadContentItem(const ContentLibrary::Item& item);
     void activateContentItem(const ContentLibrary::Item& item);
     void openProjectAsset(const creation::assets::AssetDescriptor& asset);
+    // Silent restores (no workspace-mode switch, no undo entry) for the "last active" named
+    // asset in each tool tab, used both by the auto-restore-on-project-open path and by each
+    // tool's own interactive Load menu.
+    bool restoreArrangementAsset(const creation::assets::AssetDescriptor& asset);
+    bool restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset);
+    bool restoreFoleyAsset(const creation::assets::AssetDescriptor& asset);
+    void restoreLastActiveAssets(const juce::ValueTree& lastActiveAssetsState);
     void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset);
     void exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset);
     int placeAudioAssetOnTracker(const creation::assets::AssetDescriptor& asset,
@@ -505,8 +520,9 @@ private:
     void setAiSidebarCollapsed(bool shouldCollapse);
     void syncSemanticAppContext();
     bool loadSuiteAiProviderSettings();
-    bool saveSuiteAiProviderSettings(const AiProviderSettings& settings, juce::String& errorMessage);
-    void refreshAiModelCatalog();
+    void refreshAiAccountModelCachesAtStartup();
+    void refreshAiPanelAccountsAndModels();
+    void selectAiAccountForStation(const juce::String& accountId, const juce::String& modelNameOverride = {});
     WorkspaceMode workspaceModeFromString(const juce::String& modeName) const;
     void configureTutorialOverlay();
     std::vector<TourGuideOverlay::Step> buildTutorialSteps(const cw::tutorial::Script& script);

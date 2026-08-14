@@ -35,6 +35,14 @@ public:
         SignalRecipe();
 
         juce::String name { "Signal-Lab-Render" };
+        // The rendered WAV is a distinct asset from the patch itself -- a
+        // "render"-kind asset derived from it (creation::assets::AssetKind::render),
+        // not the same thing as the patch under a different label -- so it
+        // gets its own name instead of sharing `name` above. Empty means
+        // "not set yet"; resolveRenderAssetName() falls back to `name` so
+        // there's always something sensible pre-filled until the user
+        // actually names a render.
+        juce::String renderAssetName;
         juce::String description;
         double sampleRate = 48000.0;
         double durationSeconds = 5.0;
@@ -185,6 +193,28 @@ private:
         // Envelope instances only: each Envelope node owns its own curve.
         juce::String envelopeCurveMode { "smooth" };
         juce::Array<cw::PatchAutomationPoint> envelopePoints;
+
+        // Cross Fader instances only: 0 = fully input A, 1 = fully input B,
+        // equal-power law applied at render/live time (not a linear blend --
+        // linear crossfades dip audibly in perceived loudness at the
+        // midpoint).
+        float crossfadeBlend = 0.5f;
+
+        // Router instances only: how many signalIn:N ports it currently has
+        // (default 2, grown via the same "+ Input" button Mixer uses). No
+        // per-input weight array like Mixer's mixerInputVolumes -- Router
+        // hard-switches to exactly one input, it never blends. routerSelect
+        // is the manual/unwired fallback for param:routerSelect (0..1,
+        // index = floor(select * routerInputCount)).
+        int routerInputCount = 2;
+        float routerSelect = 0.0f;
+
+        // Sample & Hold instances only: manual/unwired fallback for
+        // param:sampleHoldTrigger -- a constant here never rises, so it
+        // effectively never latches (expected: this node is meant to be
+        // wired to a Button Control or automation lane, not left manual).
+        // Rising-edge threshold is a fixed 0.5, not a per-instance setting.
+        float sampleHoldTrigger = 0.0f;
 
         // MIDI Control nodes only (midiFader / midiButton): the learned
         // hardware binding (empty deviceId + number 0 == not learned yet)
@@ -456,8 +486,39 @@ private:
         juce::Point<int> dragOffset;
         bool dragMoved = false;
         bool panning = false;
+        // Set at the top of mouseDown's right-click branch, consumed at the
+        // top of mouseUp. mouseUp still fires for a right-button release
+        // even though mouseDown returned early after showing a context
+        // menu -- without this, mouseUp fell through to its left-click
+        // "nothing was dragged" fallback (dragMoved/dragNodeIndex are
+        // untouched by the right-click path) and popped the canvas add-node
+        // menu on top of whatever context menu had just opened.
+        bool rightClickActive = false;
         juce::Point<int> panAnchor;
         juce::Point<int> viewportAnchor;
+
+        // Group drag: when the node grabbed at mouseDown is already part of
+        // a multi-selection, every selected node's position is snapshotted
+        // here at drag-start so the whole group moves by the same delta
+        // rather than snapping to dragOffset individually. Empty means
+        // "just a normal single-node drag".
+        juce::Array<int> groupDragIndices;
+        juce::Array<juce::Point<int>> groupDragStartPositions;
+        // True when mouseDown landed on a node that was already part of a
+        // >1 multi-selection -- collapsing to single-select is deferred
+        // until mouseUp (only if no drag happened), so a drag starting here
+        // moves the whole group instead of losing the rest of the selection.
+        bool dragNodeWasPreselected = false;
+
+        // Marquee/rubber-band select: plain left-drag on empty background
+        // (Ctrl+drag is panning instead, see mouseDown). marqueeMoved
+        // distinguishes an actual drag from a plain click-no-drag, which
+        // still needs to open the add-node popup like it always has.
+        bool marqueeActive = false;
+        bool marqueeMoved = false;
+        juce::Point<int> marqueeStart;
+        juce::Point<int> marqueeCurrent;
+        juce::Array<int> marqueeBaseSelection; // pre-drag selection, unioned in when Shift is held
 
         bool wireDragging = false;
         int wireDragNodeIndex = -1;
@@ -522,10 +583,20 @@ private:
             juce::String label;
             juce::String type;
             juce::String payload;
+            // Section this entry groups under (e.g. "Sources", "Processing")
+            // -- entries are expected to already arrive grouped by category
+            // (setEntries() doesn't sort), so callers control display order
+            // by the order they add() entries in.
+            juce::String category;
+            juce::Colour accent { 0xff6fa8ff };
         };
 
         NodeSearchPanel();
         void setEntries(juce::Array<Entry> entries);
+        // Height (capped at kMaxPanelHeight) the panel would need to show
+        // everything without scrolling -- callers use this to size the
+        // CallOutBox that hosts this panel.
+        int getIdealHeight() const;
         void resized() override;
         void paint(juce::Graphics& g) override;
 
@@ -540,11 +611,31 @@ private:
             juce::Font getTextButtonFont(juce::TextButton&, int) override { return juce::Font(11.0f); }
         };
 
+        // One row in the scrollable results list, in display order -- either
+        // a non-clickable category header or a node button (entryIndex
+        // indexes into visibleEntries). Kept as a flat ordered list rather
+        // than nesting headers/buttons so resized() only has to walk one
+        // sequence to stack everything, headers included.
+        struct RowItem
+        {
+            bool isHeader = false;
+            juce::String headerText;
+            int entryIndex = -1;
+        };
+
+        static constexpr int kRowHeight = 20;
+        static constexpr int kHeaderHeight = 18;
+        static constexpr int kMaxPanelHeight = 420;
+
         CompactLookAndFeel compactLookAndFeel;
         juce::TextEditor searchEditor;
+        juce::Viewport resultsViewport;
+        juce::Component resultsContent;
+        juce::OwnedArray<juce::Label> headerLabels;
         juce::OwnedArray<juce::TextButton> resultButtons;
         juce::Array<Entry> allEntries;
         juce::Array<Entry> visibleEntries;
+        juce::Array<RowItem> rows;
     };
 
     class FloatingWindow final : public juce::Component
@@ -578,6 +669,12 @@ private:
     void configureSlider(juce::Slider& slider, double min, double max, double step);
     void regenerateSignal();
     void ensureAudioRendered();
+    juce::String resolveRenderAssetName() const { return recipe.renderAssetName.isNotEmpty() ? recipe.renderAssetName : recipe.name; }
+    // Wave (File) sink mode is a one-shot render, not a live loop -- Play
+    // becomes "Render" and Repeat is disabled while it's active. Called
+    // whenever recipe.sinkMode changes or gets loaded from anywhere
+    // (Output Mode combo, restoreState, loadPatchDocument, createNewSignal).
+    void refreshTransportControlsForSinkMode();
     const juce::AudioBuffer<float>& getDisplayBufferForNode(const juce::String& nodeId) const;
     juce::AudioBuffer<float> buildSignalBuffer(const SignalRecipe& recipe) const;
     cw::PatchDocument buildPatchDocument(const SignalRecipe& recipe) const;
@@ -647,6 +744,13 @@ private:
     int getGraphNodeHeight(int index) const;
     juce::Rectangle<int> getMixerAddInputButtonBounds(int index) const;
     void setSelectedGraphNodeIndex(int index);
+    // Plural multi-select entry points, both of which end up calling
+    // setSelectedGraphNodeIndex() for the existing side effects (repaint,
+    // inspector refresh, floating window retarget) and then overwrite
+    // selectedGraphNodeIndices with the real full set -- see the comment on
+    // that field for the "primary + full set" split.
+    void setGraphNodeSelection(const juce::Array<int>& indices);
+    void toggleGraphNodeSelection(int index);
     bool hasGraphNodeType(const juce::String& type) const;
     bool hasSetterNodeForVariable(const juce::String& variableId) const;
     void addMixerInput(int nodeIndex);
@@ -728,6 +832,12 @@ private:
     bool descriptionEditUndoCaptured = false;
     PatchRuntimePlayer runtimePlayer;
     int selectedGraphNodeIndex = -1;
+    // Full multi-select set. selectedGraphNodeIndex stays the "primary"
+    // (most-recently-touched) member -- every existing single-select call
+    // site keeps working unchanged, since setSelectedGraphNodeIndex() keeps
+    // this array in sync automatically. Only group operations (canvas
+    // highlight, group drag, group delete) read this directly.
+    juce::Array<int> selectedGraphNodeIndices;
     int editingNodeIndex = -1;
     bool nodeEditorVisible = false;
     bool controlPadVisible = false;

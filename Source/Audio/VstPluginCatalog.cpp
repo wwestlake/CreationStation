@@ -95,6 +95,35 @@ void VstPluginCatalog::rescan()
     // copied into a real plugin folder (e.g. to use it in another host), which is the same
     // binary as the freshly-built one here, not a distinct 32-bit/64-bit variant.
     auto appExe = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
+
+    // Always scan a "Plugins" folder sitting directly next to the running executable, no
+    // path configuration required - this is where every first-party plugin's build (see
+    // creation_station_copy_plugin_to_scanned_folder in cmake/CreationStationPlugin.cmake)
+    // gets copied, both in the raw build tree and in the shared claude-<config>-bin copy, so
+    // it works identically regardless of which copy of the exe is actually running (unlike
+    // the "_artefacts" climb below, which only resolves from the raw build tree).
+    auto builtInPluginsDirectory = appExe.getParentDirectory().getChildFile("Plugins");
+    if (builtInPluginsDirectory.isDirectory())
+    {
+        juce::Array<juce::File> foundFiles;
+        builtInPluginsDirectory.findChildFiles(foundFiles, juce::File::findFilesAndDirectories, true, "*.vst3");
+
+        for (const auto& file : foundFiles)
+        {
+            auto fullPath = file.getFullPathName();
+            if (seenPaths.contains(fullPath))
+                continue;
+
+            if (file.getParentDirectory().getFullPathName().containsIgnoreCase(".vst3"))
+                continue;
+
+            seenPaths.add(fullPath);
+            auto displayName = makeDisplayName(file);
+            seenNames.add(displayName);
+            addEntriesForFile(file, displayName);
+        }
+    }
+
     // Path is like: D:/000 Creation Station/build/CreativeWorkstation_artefacts/Release/Creative Workstation.exe
     // We want: D:/000 Creation Station/build/
     // Only trust this climb when the exe actually sits in that layout (checked via the

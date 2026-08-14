@@ -4,51 +4,17 @@
 #include <vector>
 #include "TimelineTypes.h"
 #include "../Project/ProjectStorage.h"
+#include <creation/timeline/TimelineClip.h>
+#include <creation/timeline/TimelineEditOps.h>
 
 namespace cs
 {
-struct MidiNoteEvent
-{
-    juce::String id;
-    int pitch = 60;            // MIDI note number, 0-127
-    int velocity = 100;        // 1-127
-    double startBeats = 0.0;   // relative to clip start
-    double lengthBeats = 1.0;
-    int channel = 1;           // MIDI channel, 1-16
-    bool muted = false;
-};
-
-struct MidiCCEvent
-{
-    juce::String id;
-    int controller = 1;        // CC number, 0-127
-    int value = 0;             // 0-127
-    double beats = 0.0;        // relative to clip start
-};
-
-struct TimelineClip
-{
-    juce::String id;
-    ClipKind kind = ClipKind::audio;
-    juce::String displayName;
-    juce::String assetId;
-    cs::AssetVersionId assetVersionId;
-    cs::AssetReferenceMode assetReferenceMode = cs::AssetReferenceMode::exact;
-    juce::String sourceTool;
-    int trackIndex = -1;
-    juce::File file;
-    double startSeconds = 0.0;
-    double durationSeconds = 0.0;
-    double sourceStartSeconds = 0.0;
-    double sourceDurationSeconds = 0.0;
-    int sourceNumChannels = 0;
-    bool recording = false;
-    std::vector<float> peaks;
-    std::vector<float> rightPeaks;
-    std::vector<MidiNoteEvent> midiNotes;
-    std::vector<MidiCCEvent> midiCC;
-    std::vector<AutomationPoint> automationPoints;
-};
+// The clip struct shape (including the per-kind MIDI/automation/peak fields, carried over as-is
+// rather than split apart) now lives in shared/Timeline alongside the track/clip kind enums -
+// see TimelineTypes.h's own comment for why.
+using MidiNoteEvent = creation::timeline::MidiNoteEvent;
+using MidiCCEvent = creation::timeline::MidiCCEvent;
+using TimelineClip = creation::timeline::TimelineClip;
 
 class TimelineModel final
 {
@@ -62,8 +28,6 @@ public:
 
     void setPixelsPerSecond(double newPixelsPerSecond);
     double getPixelsPerSecond() const noexcept { return pixelsPerSecond; }
-    void zoomIn();
-    void zoomOut();
 
     void setTransportSeconds(double seconds);
     double getTransportSeconds() const noexcept { return transportSeconds; }
@@ -96,6 +60,14 @@ public:
     void setClipAssetReference(int clipIndex, const cs::AssetRef& assetRef);
     void setClipFile(int clipIndex, const juce::File& file);
     void setClipDuration(int clipIndex, double newDurationSeconds);
+    // Non-destructive edge trim (same in/out-point-shifting semantics as splitClip, just
+    // dragging one edge instead of cutting in two) - kind-agnostic, works identically for audio
+    // and video clips. trimClipStart also pulls sourceStartSeconds so the clip keeps pointing at
+    // the same underlying material; it's clamped to sourceStartSeconds itself so a left-trim can
+    // never reveal material earlier than an already-trimmed-away in-point. trimClipEnd is clamped
+    // to sourceDurationSeconds when known (file-backed clips) so it can't extend past the source.
+    bool trimClipStart(int clipIndex, double newStartSeconds);
+    bool trimClipEnd(int clipIndex, double newEndSeconds);
     bool duplicateClip(int clipIndex, double startOffsetSeconds = 0.25);
     bool deleteClip(int clipIndex);
     bool splitClip(int clipIndex, double splitSeconds);
@@ -104,6 +76,7 @@ public:
     juce::String addMarker(double seconds, const juce::String& name = {});
     void removeMarker(const juce::String& id);
     void renameMarker(const juce::String& id, const juce::String& name);
+    void moveMarker(const juce::String& id, double seconds);
     const std::vector<TimelineMarker>& getMarkers() const noexcept { return markers; }
 
     void setLoopRegion(double startSeconds, double endSeconds);
@@ -132,6 +105,8 @@ public:
     void addTrack(TrackKind kind = TrackKind::audio, const juce::String& name = {});
     void setTrackName(int trackIndex, const juce::String& name);
     juce::String getTrackName(int trackIndex) const;
+    void setTrackHeight(int trackIndex, int heightPixels);
+    int getTrackHeight(int trackIndex) const;
     // Stable across reorders (unlike the index itself) - useful for anything that needs to key
     // off "this specific track" rather than "whatever's currently at this position" (e.g. a
     // folder's derived accent colour, which shouldn't change just because tracks got reordered).
