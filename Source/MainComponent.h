@@ -520,6 +520,7 @@ private:
     void setAiSidebarCollapsed(bool shouldCollapse);
     void syncSemanticAppContext();
     bool loadSuiteAiProviderSettings();
+    void refreshAiAccountModelCachesAtStartup();
     void refreshAiPanelAccountsAndModels();
     void selectAiAccountForStation(const juce::String& accountId, const juce::String& modelNameOverride = {});
     WorkspaceMode workspaceModeFromString(const juce::String& modeName) const;

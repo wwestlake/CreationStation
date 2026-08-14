@@ -1306,6 +1306,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         settingsPanel.setProjectMetadata(projectSession.getManifest());
     settingsPanel.setAutoloadEnabled(true);
     loadSuiteAiProviderSettings();
+    refreshAiAccountModelCachesAtStartup();
 
     if (! suiteSettings.suiteVfsRoot.isNotEmpty() && storageError.isEmpty())
         contentPanel.setStatusText("Storage is not configured yet. You can keep using the studio and set up saving/content later.");
@@ -6082,6 +6083,35 @@ void MainComponent::selectAiAccountForStation(const juce::String& accountId, con
     aiProviderSettings = makeAiProviderSettings(runtimeSettings);
 
     refreshAiPanelAccountsAndModels();
+}
+
+void MainComponent::refreshAiAccountModelCachesAtStartup()
+{
+    // Reconnects every configured account once at launch to keep its cached model list current -
+    // not continuous polling. Runs off the message thread since it's real (blocking) HTTP calls
+    // per account; the UI already shows whatever was cached from the last run in the meantime.
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+
+    std::thread([safeThis]() mutable
+    {
+        creation::services::SuiteAiSettingsStore store;
+        juce::String errorMessage;
+        auto refreshedSettings = store.refreshAllAccountModelCaches(errorMessage);
+
+        juce::MessageManager::callAsync([safeThis, refreshedSettings]
+        {
+            if (safeThis == nullptr)
+                return;
+
+            safeThis->suiteAiSettings = refreshedSettings;
+
+            const auto runtimeSettings = creation::services::SuiteAiSettingsResolver::resolveRuntimeSettingsForApp(
+                safeThis->suiteAiSettings, creation::assets::SuiteAppDomain::station);
+            safeThis->aiProviderSettings = makeAiProviderSettings(runtimeSettings);
+
+            safeThis->refreshAiPanelAccountsAndModels();
+        });
+    }).detach();
 }
 
 void MainComponent::syncSemanticAppContext()
