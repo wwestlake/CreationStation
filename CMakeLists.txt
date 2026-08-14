@@ -131,6 +131,19 @@ juce_add_gui_app(CreativeWorkstation
 add_custom_command(TARGET CreativeWorkstation POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
+    # Mirrors the app-scanned Plugins folder alongside it too (see
+    # CreationStationPlugin.cmake's creation_station_copy_plugin_to_scanned_folder) so
+    # VstPluginCatalog::rescan()'s <exeDir>/Plugins auto-scan finds the in-house plugins
+    # whether the app is launched from here or straight from the build tree. Whichever
+    # plugin targets have already built by the time this step runs are mirrored; a plugin
+    # built after this step catches up on the next build.
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/Plugins"
+    # Guarantee the source exists (even empty) before copying from it -- CreativeWorkstation
+    # can build standalone, before any plugin target has ever run its own POST_BUILD step.
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
+        "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/Plugins"
     COMMENT "Copying CreativeWorkstation to the shared claude bin directory"
 )
 

@@ -1,10 +1,12 @@
 #include "CreationStationContextStore.h"
 #include "CreationStationContextEngine.h"
 #include "../Patch/PatchModel.h"
-#include <creation/suite/SuiteStoragePaths.h>
+#include <creation/services/SuiteVfsJsonStore.h>
 
 namespace
 {
+constexpr const char* aiContextStoreLogicalPath = "ai-context-store.json";
+
 juce::var documentToVar(const CreationStationContextEngine::SourceDocument& document)
 {
     auto* object = new juce::DynamicObject();
@@ -57,8 +59,6 @@ bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession
         errorMessage = "Storage root is not configured yet.";
         return false;
     }
-
-    snapshotFile = creation::suite::getCacheDirectory(suiteSettings).getChildFile("ai-context-store.json");
 
     CreationStationContextEngine::SourceDocument modeDocument;
     modeDocument.id = "workspace-mode";
@@ -186,24 +186,18 @@ bool CreationStationContextStore::rebuild(const creation::assets::ProjectSession
         documents.add(document);
     }
 
-    return writeSnapshot(snapshotFile, errorMessage);
+    return writeSnapshot(errorMessage);
 }
 
-bool CreationStationContextStore::load(const juce::File& file, juce::String& errorMessage)
+bool CreationStationContextStore::load(juce::String& errorMessage)
 {
     documents.clearQuick();
-    snapshotFile = file;
 
-    if (! file.existsAsFile())
-    {
-        errorMessage = "The AI context snapshot does not exist yet.";
-        return false;
-    }
-
-    auto parsed = juce::JSON::parse(file.loadFileAsString());
+    auto parsed = creation::services::SuiteVfsJsonStore::loadJson(aiContextStoreLogicalPath, errorMessage);
     if (parsed.isVoid())
     {
-        errorMessage = "The AI context snapshot is not valid JSON.";
+        if (errorMessage.isEmpty())
+            errorMessage = "The AI context snapshot does not exist yet.";
         return false;
     }
 
@@ -248,7 +242,7 @@ juce::String CreationStationContextStore::joinTags(const juce::StringArray& tags
     return tags.joinIntoString(", ");
 }
 
-bool CreationStationContextStore::writeSnapshot(const juce::File& file, juce::String& errorMessage) const
+bool CreationStationContextStore::writeSnapshot(juce::String& errorMessage) const
 {
     auto* root = new juce::DynamicObject();
     root->setProperty("generatedAt", juce::Time::getCurrentTime().toISO8601(true));
@@ -258,10 +252,10 @@ bool CreationStationContextStore::writeSnapshot(const juce::File& file, juce::St
         serializedDocuments.add(documentToVar(document));
     root->setProperty("documents", juce::var(serializedDocuments));
 
-    file.getParentDirectory().createDirectory();
-    if (! file.replaceWithText(juce::JSON::toString(juce::var(root), true)))
+    if (! creation::services::SuiteVfsJsonStore::saveJson(aiContextStoreLogicalPath, juce::var(root), errorMessage))
     {
-        errorMessage = "Could not write the AI context snapshot.";
+        if (errorMessage.isEmpty())
+            errorMessage = "Could not write the AI context snapshot.";
         return false;
     }
 

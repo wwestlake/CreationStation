@@ -41,6 +41,26 @@ function(add_creation_station_effect_plugin TARGET_NAME PRODUCT_NAME PLUGIN_CODE
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
     )
+
+    creation_station_copy_plugin_to_scanned_folder(${TARGET_NAME})
+endfunction()
+
+# Copies a plugin target's built VST3 output into a "Plugins" folder that sits directly next to
+# the CreativeWorkstation executable's own artefact folder -- the "user-writable, app-scanned
+# folder" referenced in the comment above, which was never actually wired up until now.
+# VstPluginCatalog::rescan() (Source/Audio/VstPluginCatalog.cpp) always scans this exact relative
+# location in addition to whatever the user has configured, so every in-house plugin is found with
+# zero configuration. Whole-directory copy (not a single file) because JUCE's VST3 output shape
+# (single binary vs. a Contents/<arch> bundle folder) isn't this function's business to know.
+function(creation_station_copy_plugin_to_scanned_folder TARGET_NAME)
+    add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_artefacts/$<CONFIG>/VST3"
+            "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
+        COMMENT "Copying ${TARGET_NAME} into the app-scanned Plugins folder"
+    )
 endfunction()
 
 # Same shape as add_creation_station_effect_plugin, but for an instrument (MIDI in, audio out,
@@ -82,4 +102,6 @@ function(add_creation_station_instrument_plugin TARGET_NAME PRODUCT_NAME PLUGIN_
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
     )
+
+    creation_station_copy_plugin_to_scanned_folder(${TARGET_NAME})
 endfunction()

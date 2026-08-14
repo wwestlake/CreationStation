@@ -22,10 +22,9 @@ public:
                  const juce::String& celSource,
                  juce::String& errorMessage);
 
-    bool load(const juce::File& snapshotFile, juce::String& errorMessage);
+    bool load(juce::String& errorMessage);
 
     const juce::Array<CreationStationContextEngine::SourceDocument>& getDocuments() const noexcept { return documents; }
-    juce::File getSnapshotFile() const noexcept { return snapshotFile; }
 
 private:
     static juce::String readTextPreview(const juce::File& file, int maxCharacters);
@@ -33,8 +32,7 @@ private:
     static juce::String documentIdForFile(const juce::String& prefix, const juce::File& file);
     static juce::String joinTags(const juce::StringArray& tags);
 
-    bool writeSnapshot(const juce::File& file, juce::String& errorMessage) const;
+    bool writeSnapshot(juce::String& errorMessage) const;
 
     juce::Array<CreationStationContextEngine::SourceDocument> documents;
-    juce::File snapshotFile;
 };

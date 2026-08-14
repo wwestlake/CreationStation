@@ -12,6 +12,7 @@
 #include "Tutorial/TutorialScriptCompiler.h"
 #include <creation/services/SuiteAiSettings.h>
 #include <creation/services/SuiteVfsJsonStore.h>
+#include <creation/services/SuiteVfsServiceClient.h>
 #include <creation/ui/ControlSurfaceActionIds.h>
 #include <creation/ui/CreationSuiteLogos.h>
 #include <thread>
@@ -2519,29 +2520,85 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     dslPanel.onSourceSaveToLibraryRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
     {
-        if (! ensureStorageRootConfigured())
+        creation::services::SuiteVfsServiceClient client;
+        if (! client.discover())
+        {
+            transportBar.setStatusText("Could not reach the suite VFS service.");
             return;
-
-        auto celDirectory = creation::suite::getContentDirectory(suiteSettings).getChildFile("User").getChildFile("CEL");
-        celDirectory.createDirectory();
-        auto celFile = celDirectory.getChildFile(suggestedName + ".cel").getNonexistentSibling();
-
-        if (celFile.replaceWithText(sourceText))
-        {
-            refreshContentLibrary();
-            transportBar.setStatusText("Saved to your library: " + celFile.getFileName());
         }
+
+        auto logicalPath = "library/cel/" + slugForProjectAssetName(suggestedName) + ".cel";
+        const juce::MemoryBlock data(sourceText.toRawUTF8(), sourceText.getNumBytesAsUTF8());
+        if (client.writeEntry(logicalPath, data))
+            transportBar.setStatusText("Saved to your library: " + suggestedName);
         else
-        {
-            transportBar.setStatusText("Could not save " + celFile.getFileName());
-        }
+            transportBar.setStatusText("Could not save " + suggestedName + " to your library.");
     };
 
-    dslPanel.onSourceLoadRequested = [this]
+    auto showCelLoadFromLibraryMenu = [this]
     {
-        auto startDirectory = suiteSettings.suiteVfsRoot.isNotEmpty()
-            ? creation::suite::getContentDirectory(suiteSettings).getChildFile("User").getChildFile("CEL")
-            : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+        creation::services::SuiteVfsServiceClient client;
+        if (! client.discover())
+        {
+            transportBar.setStatusText("Could not reach the suite VFS service.");
+            return;
+        }
+
+        juce::StringArray allPaths;
+        client.listEntries(allPaths);
+
+        juce::StringArray celPaths;
+        for (const auto& path : allPaths)
+            if (path.startsWith("library/cel/"))
+                celPaths.add(path);
+
+        if (celPaths.isEmpty())
+        {
+            transportBar.setStatusText("Your library has no saved CEL sources yet.");
+            return;
+        }
+
+        celPaths.sort(true);
+
+        juce::PopupMenu menu;
+        menu.addSectionHeader("Load From Your Library");
+        for (int index = 0; index < celPaths.size(); ++index)
+        {
+            auto displayName = juce::File(celPaths[index]).getFileNameWithoutExtension();
+            menu.addItem(index + 1, displayName);
+        }
+
+        auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }),
+                           [this, celPaths](int result)
+                           {
+                               if (result <= 0 || result > celPaths.size())
+                                   return;
+
+                               creation::services::SuiteVfsServiceClient loadClient;
+                               if (! loadClient.discover())
+                               {
+                                   transportBar.setStatusText("Could not reach the suite VFS service.");
+                                   return;
+                               }
+
+                               juce::MemoryBlock data;
+                               if (! loadClient.readEntry(celPaths[result - 1], data))
+                               {
+                                   transportBar.setStatusText("Could not load that library item.");
+                                   return;
+                               }
+
+                               auto sourceText = juce::String::createStringFromData(data.getData(), (int) data.getSize());
+                               dslPanel.setSourceText(sourceText);
+                               transportBar.setStatusText("Loaded from your library: "
+                                                          + juce::File(celPaths[result - 1]).getFileNameWithoutExtension());
+                           });
+    };
+
+    auto showCelLoadFromDiskChooser = [this]
+    {
+        auto startDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
 
         celSourceChooser = std::make_unique<juce::FileChooser>("Load a CEL source file",
                                                                     startDirectory,
@@ -2560,6 +2617,22 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                                transportBar.setStatusText("Loaded CEL source: " + file.getFileName());
                                                setWorkspaceMode(WorkspaceMode::code);
                                            });
+    };
+
+    dslPanel.onSourceLoadRequested = [this, showCelLoadFromLibraryMenu, showCelLoadFromDiskChooser]
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Load From Your Library...");
+        menu.addItem(2, "Load From File...");
+
+        menu.showMenuAsync(juce::PopupMenu::Options(),
+                           [showCelLoadFromLibraryMenu, showCelLoadFromDiskChooser](int result)
+                           {
+                               if (result == 1)
+                                   showCelLoadFromLibraryMenu();
+                               else if (result == 2)
+                                   showCelLoadFromDiskChooser();
+                           });
     };
 
     contextEngine.onContextReady = [this](const CreationStationContextEngine::ContextPacket& packet)
@@ -5501,7 +5574,6 @@ void MainComponent::refreshContentLibrary()
     if (! contentLibrary.loadFromStorage(creation::suite::getContentDirectory(suiteSettings).getChildFile("BuiltIn"),
                                          creation::suite::getContentDirectory(suiteSettings).getChildFile("Downloaded"),
                                          creation::suite::getContentDirectory(suiteSettings).getChildFile("User"),
-                                         creation::suite::getContentDirectory(suiteSettings).getChildFile("manifest.json"),
                                          errorMessage))
     {
         contentPanel.setItems({});
@@ -6043,11 +6115,6 @@ void MainComponent::syncSemanticAppContext()
     auto token = authSession.getSession().token;
     auto manifest = appManifest;
     auto appName = juce::String("creation-station");
-    auto manifestFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                            .getChildFile("CreationStation")
-                            .getChildFile("creation-station-app-context.json");
-    manifestFile.getParentDirectory().createDirectory();
-    manifestFile.replaceWithText(manifest.toJson());
     auto safeThis = juce::Component::SafePointer<MainComponent>(this);
 
     std::thread([safeThis, token, manifest, appName]() mutable
@@ -6270,6 +6337,32 @@ void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& as
         }
 
         transportBar.setStatusText("Previewing project asset: " + asset.displayName);
+        return;
+    }
+
+    if (asset.kind == creation::assets::AssetKind::trackerArrangement)
+    {
+        if (! restoreArrangementAsset(asset))
+        {
+            contentPanel.setStatusText("Could not open that arrangement: " + asset.displayName);
+            return;
+        }
+
+        setWorkspaceMode(WorkspaceMode::tracker);
+        transportBar.setStatusText("Opened arrangement: " + asset.displayName);
+        return;
+    }
+
+    if (asset.kind == creation::assets::AssetKind::foleyPatch)
+    {
+        if (! restoreFoleyAsset(asset))
+        {
+            contentPanel.setStatusText("Could not open that Foley setup: " + asset.displayName);
+            return;
+        }
+
+        setWorkspaceMode(WorkspaceMode::foley);
+        transportBar.setStatusText("Opened Foley setup: " + asset.displayName);
         return;
     }
 
