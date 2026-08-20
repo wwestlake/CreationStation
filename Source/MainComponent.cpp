@@ -19,6 +19,55 @@
 
 namespace
 {
+class NonOwningPanelHost final : public juce::Component
+{
+public:
+    explicit NonOwningPanelHost(juce::Component& contentToHost) : content(contentToHost)
+    {
+        addAndMakeVisible(content);
+    }
+
+    void resized() override
+    {
+        content.setBounds(getLocalBounds());
+    }
+
+private:
+    juce::Component& content;
+};
+
+constexpr int menuIdProjectFirst = 1000;
+constexpr int menuIdToolTracker = 2001;
+constexpr int menuIdToolSampler = 2002;
+constexpr int menuIdToolSignal = 2003;
+constexpr int menuIdToolLayers = 2004;
+constexpr int menuIdToolPlugins = 2005;
+constexpr int menuIdToolPatch = 2006;
+constexpr int menuIdToolScript = 2007;
+constexpr int menuIdToolCapture = 2008;
+constexpr int menuIdToolScore = 2009;
+constexpr int menuIdToolSettings = 2010;
+constexpr int menuIdToolFoley = 2011;
+constexpr int menuIdToolVirtualEngineer = 2012;
+constexpr int menuIdToolTrackInsert = 2013;
+constexpr int menuIdToolResetLayout = 2099;
+constexpr int menuIdHelpTour = 3001;
+constexpr int menuIdHelpResetLayout = 3002;
+
+const char* trackerPanelId = "tracker";
+const char* samplerPanelId = "sampler";
+const char* signalPanelId = "signal";
+const char* layersPanelId = "layers";
+const char* pluginsPanelId = "plugins";
+const char* patchPanelId = "patch";
+const char* scriptPanelId = "script";
+const char* capturePanelId = "capture";
+const char* scorePanelId = "score";
+const char* settingsPanelId = "settings";
+const char* foleyPanelId = "foley";
+const char* virtualEngineerPanelId = "virtual-engineer";
+const char* trackInsertPanelId = "track-insert";
+
 juce::String trimProjectLabelPrefix(const juce::String& label)
 {
     constexpr auto prefix = "Project:";
@@ -606,73 +655,34 @@ bool isAdminRole(const juce::String& role)
 
 MainComponent::ViewModeBar::ViewModeBar()
 {
-    titleLabel.setText("Creative Modes", juce::dontSendNotification);
-    titleLabel.setFont(juce::Font(18.0f).boldened());
-    titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(titleLabel);
-
-    auto setupButton = [this](juce::TextButton& button, WorkspaceMode mode)
+    auto setupButton = [this](juce::TextButton& button, const juce::String& tooltip, const std::function<void()>& onClick)
     {
-        button.setClickingTogglesState(true);
-        button.onClick = [this, mode]
-        {
-            setActiveMode(mode);
-            if (onModeSelected)
-                onModeSelected(mode);
-        };
+        button.onClick = onClick;
+        button.setTooltip(tooltip);
         addAndMakeVisible(button);
     };
 
-    setupButton(trackerButton, WorkspaceMode::tracker);
-    setupButton(samplerButton, WorkspaceMode::sampler);
-    setupButton(signalButton, WorkspaceMode::signal);
-    setupButton(mixButton, WorkspaceMode::mix);
-    setupButton(pluginsButton, WorkspaceMode::plugins);
-    setupButton(nodeButton, WorkspaceMode::node);
-    setupButton(codeButton, WorkspaceMode::code);
-    setupButton(recordButton, WorkspaceMode::record);
-    setupButton(scoreButton, WorkspaceMode::score);
-    setupButton(settingsButton, WorkspaceMode::settings);
-    setupButton(foleyButton, WorkspaceMode::foley);
-
-    trackerButton.setTooltip("Tracker - arrange and edit tracks");
-    samplerButton.setTooltip("Sampler - build and manage pitch-mapped sample packs");
-    signalButton.setTooltip("Signal Lab - sound design and synthesis");
-    mixButton.setTooltip("Mixer - adjust levels, pan, and sends");
-    pluginsButton.setTooltip("Plugin browser - find and load VST plugins");
-    nodeButton.setTooltip("Node graph - patch signal routing visually");
-    codeButton.setTooltip("CEL script editor - write and validate CEL patches");
-    recordButton.setTooltip("Recording workspace - capture new takes");
-    scoreButton.setTooltip("Score view - notation and piano roll editing");
-    settingsButton.setTooltip("App settings - project, audio, MIDI, and AI configuration");
-    foleyButton.setTooltip("Foley - node-graph sound sequencing/choice logic, expressed in CEL");
-    popOutButton.setTooltip("Pop the current workspace out into its own window");
-
-    popOutButton.onClick = [this]
-    {
-        if (onPopOutRequested)
-            onPopOutRequested();
-    };
-    addAndMakeVisible(popOutButton);
-
-    setActiveMode(WorkspaceMode::tracker);
-}
-
-void MainComponent::ViewModeBar::setActiveMode(WorkspaceMode newMode)
-{
-    activeMode = newMode;
-    trackerButton.setToggleState(activeMode == WorkspaceMode::tracker, juce::dontSendNotification);
-    samplerButton.setToggleState(activeMode == WorkspaceMode::sampler, juce::dontSendNotification);
-    signalButton.setToggleState(activeMode == WorkspaceMode::signal, juce::dontSendNotification);
-    mixButton.setToggleState(activeMode == WorkspaceMode::mix, juce::dontSendNotification);
-    pluginsButton.setToggleState(activeMode == WorkspaceMode::plugins, juce::dontSendNotification);
-    nodeButton.setToggleState(activeMode == WorkspaceMode::node, juce::dontSendNotification);
-    codeButton.setToggleState(activeMode == WorkspaceMode::code, juce::dontSendNotification);
-    recordButton.setToggleState(activeMode == WorkspaceMode::record, juce::dontSendNotification);
-    scoreButton.setToggleState(activeMode == WorkspaceMode::score, juce::dontSendNotification);
-    settingsButton.setToggleState(activeMode == WorkspaceMode::settings, juce::dontSendNotification);
-    foleyButton.setToggleState(activeMode == WorkspaceMode::foley, juce::dontSendNotification);
-    repaint();
+    setupButton(projectButton,
+                "Project actions for the current Creation Station workspace",
+                [this]
+                {
+                    if (onProjectMenuRequested)
+                        onProjectMenuRequested(projectButton);
+                });
+    setupButton(toolsButton,
+                "Show or hide docked creative tools",
+                [this]
+                {
+                    if (onToolsMenuRequested)
+                        onToolsMenuRequested(toolsButton);
+                });
+    setupButton(helpButton,
+                "Guided tour and help actions",
+                [this]
+                {
+                    if (onHelpMenuRequested)
+                        onHelpMenuRequested(helpButton);
+                });
 }
 
 void MainComponent::ViewModeBar::paint(juce::Graphics& g)
@@ -685,30 +695,17 @@ void MainComponent::ViewModeBar::paint(juce::Graphics& g)
                static_cast<float>(getHeight()) - 1.0f,
                1.0f);
 
-    g.setColour(juce::Colour(0xff8ea0b7));
-    g.setFont(juce::Font(13.0f));
-    g.drawText(workspaceModeName(activeMode) + " active", getLocalBounds().reduced(12, 0), juce::Justification::centredRight, true);
 }
 
 void MainComponent::ViewModeBar::resized()
 {
     auto area = getLocalBounds().reduced(14, 8);
-    titleLabel.setBounds(area.removeFromLeft(140));
-    area.removeFromLeft(8);
-    popOutButton.setBounds(area.removeFromRight(92));
-    area.removeFromRight(8);
-    auto buttonWidth = 78;
-    trackerButton.setBounds(area.removeFromLeft(buttonWidth));
-    samplerButton.setBounds(area.removeFromLeft(buttonWidth));
-    signalButton.setBounds(area.removeFromLeft(buttonWidth));
-    mixButton.setBounds(area.removeFromLeft(buttonWidth));
-    pluginsButton.setBounds(area.removeFromLeft(buttonWidth));
-    nodeButton.setBounds(area.removeFromLeft(buttonWidth));
-    codeButton.setBounds(area.removeFromLeft(buttonWidth));
-    recordButton.setBounds(area.removeFromLeft(buttonWidth));
-    scoreButton.setBounds(area.removeFromLeft(buttonWidth));
-    settingsButton.setBounds(area.removeFromLeft(buttonWidth));
-    foleyButton.setBounds(area.removeFromLeft(buttonWidth));
+    constexpr int buttonWidth = 92;
+    projectButton.setBounds(area.removeFromLeft(buttonWidth));
+    area.removeFromLeft(6);
+    toolsButton.setBounds(area.removeFromLeft(buttonWidth));
+    area.removeFromLeft(6);
+    helpButton.setBounds(area.removeFromLeft(buttonWidth));
 }
 
 MainComponent::PluginRackBar::PluginRackBar()
@@ -1104,6 +1101,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     reportStartup("Building the studio surface...", 0.28f);
     setSize(1400, 900);
+    menuBar = std::make_unique<juce::MenuBarComponent>(static_cast<juce::MenuBarModel*>(this));
+    dockManager = std::make_unique<CreationDock::DockManager>(*this);
     addAndMakeVisible(authGateView);
     transportBarSafe = &transportBar;
     pluginRackBarSafe = &pluginRackBar;
@@ -1332,38 +1331,19 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     midiSurface.setControlSurfaceMappings(controlSurfaceMappings);
     midiSurface.setEngineForMidiLearn(engine);
 
-    viewModeBar.onModeSelected = [this](WorkspaceMode mode)
-    {
-        setWorkspaceMode(mode);
-    };
-    viewModeBar.onPopOutRequested = [this]
-    {
-        popOutActiveWorkspace();
-    };
-
     reportStartup("Creating studio panels...", 0.92f);
     addAndMakeVisible(transportBar);
-    addAndMakeVisible(viewModeBar);
-    addAndMakeVisible(pluginRackBar);
-    addAndMakeVisible(trackerPanel);
-    addAndMakeVisible(samplePackBuilderPanel);
-    addAndMakeVisible(signalLabPanel);
-    addAndMakeVisible(contentPanel);
-    addAndMakeVisible(mixerPanel);
-    addAndMakeVisible(pluginsPanel);
-    addAndMakeVisible(graphPanel);
-    addAndMakeVisible(dslPanel);
-    addAndMakeVisible(foleyPanel);
-    addAndMakeVisible(recordView);
-    addAndMakeVisible(scorePanel);
-    addAndMakeVisible(aiPanel);
-    addAndMakeVisible(settingsPanel);
+    addAndMakeVisible(*menuBar);
+    addAndMakeVisible(*dockManager);
     poppedWorkspacePlaceholder.setJustificationType(juce::Justification::centred);
     poppedWorkspacePlaceholder.setFont(juce::Font(20.0f).boldened());
     poppedWorkspacePlaceholder.setColour(juce::Label::textColourId, juce::Colour(0xffc7d7ef));
     poppedWorkspacePlaceholder.setColour(juce::Label::backgroundColourId, juce::Colour(0xff121a25));
     addChildComponent(poppedWorkspacePlaceholder);
     addChildComponent(tourOverlay);
+
+    menuItemsChanged();
+    initialiseDockingWorkspace();
 
     pluginRackBar.setContextMaster();
     refreshPluginsPanel();
@@ -3892,8 +3872,6 @@ MainComponent::~MainComponent()
     saveLayoutToDisk(true);
     stopTimer();
     pluginEditorWindows.clear();
-    for (auto& window : workspacePopoutWindows)
-        window.reset();
     midiSurface.detachFromDeviceManager(deviceManager);
     engine.detachFromDevice(deviceManager);
 }
@@ -4115,32 +4093,200 @@ void MainComponent::resized()
     auto transportArea = area.removeFromTop(92);
     transportBar.setBounds(transportArea);
 
-    auto pluginArea = area.removeFromTop(48);
-    pluginRackBar.setBounds(pluginArea);
+    auto menuArea = area.removeFromTop(28);
+    if (menuBar != nullptr)
+        menuBar->setBounds(menuArea);
 
-    auto modeArea = area.removeFromTop(42);
-    viewModeBar.setBounds(modeArea);
-
-    auto aiWidth = aiSidebarCollapsed ? 44 : 420;
-    aiWidth = juce::jlimit(44, juce::jmin(560, juce::jmax(44, getWidth() / 2)), aiWidth);
-    auto aiArea = area.removeFromRight(aiWidth);
-    auto contentArea = area;
-    if (! isWorkspacePoppedOut(WorkspaceMode::tracker)) trackerPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::sampler)) samplePackBuilderPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::signal)) signalLabPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::mix)) mixerPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::plugins)) pluginsPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::node)) graphPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::code)) dslPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::record)) recordView.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::foley)) foleyPanel.setBounds(contentArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::score)) scorePanel.setBounds(contentArea);
-    aiPanel.setBounds(aiArea);
-    if (! isWorkspacePoppedOut(WorkspaceMode::settings)) settingsPanel.setBounds(contentArea);
-    poppedWorkspacePlaceholder.setBounds(contentArea.reduced(24));
+    if (dockManager != nullptr)
+        dockManager->setBounds(area);
+    poppedWorkspacePlaceholder.setBounds(area.reduced(24));
     authGateView.setBounds(getLocalBounds());
     tourOverlay.setBounds(getLocalBounds());
     markLayoutDirty();
+}
+
+juce::StringArray MainComponent::getMenuBarNames()
+{
+    return { "Project", "Tools", "Help" };
+}
+
+juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce::String&)
+{
+    juce::PopupMenu menu;
+
+    if (topLevelMenuIndex == 0)
+    {
+        currentProjectMenuListError.clear();
+        currentProjectMenuProjects = creation::assets::ProjectContainerService::listProjects(
+            suiteSettings,
+            creation::assets::SuiteAppDomain::station,
+            currentProjectMenuListError);
+
+        if (! currentProjectMenuProjects.isEmpty())
+        {
+            for (int index = 0; index < currentProjectMenuProjects.size(); ++index)
+            {
+                const auto& project = currentProjectMenuProjects.getReference(index);
+                auto label = project.manifest.projectName.isNotEmpty() ? project.manifest.projectName : project.projectId;
+                const auto isCurrentProject = projectSession.isValid() && project.projectId == projectSession.getProjectId();
+                menu.addItem(menuIdProjectFirst + index, label, true, isCurrentProject);
+            }
+
+            menu.addSeparator();
+        }
+
+        menu.addItem(1, "Create New Project...");
+        menu.addItem(2, "Create New Project From Template...");
+        menu.addItem(3, "Open Project Browser / Package...");
+        menu.addSeparator();
+        menu.addItem(4, "Save Project");
+        menu.addItem(5, "Save Project As...");
+        menu.addItem(6, "Save Project As Template...");
+        menu.addItem(7, "Open Project Folder");
+        menu.addSeparator();
+        menu.addItem(8, "Render Full Mix to Project");
+        menu.addItem(9, "Export Full Mix as WAV...");
+        return menu;
+    }
+
+    if (topLevelMenuIndex == 1)
+    {
+        const auto isOpen = [this](const juce::String& id)
+        {
+            return dockManager != nullptr && dockManager->isPanelOpen(id);
+        };
+
+        menu.addItem(menuIdToolTracker, "Tracker", true, isOpen(trackerPanelId));
+        menu.addItem(menuIdToolSampler, "Sampler", true, isOpen(samplerPanelId));
+        menu.addItem(menuIdToolSignal, "Signal", true, isOpen(signalPanelId));
+        menu.addItem(menuIdToolLayers, "Layers", true, isOpen(layersPanelId));
+        menu.addItem(menuIdToolPlugins, "Plugins", true, isOpen(pluginsPanelId));
+        menu.addItem(menuIdToolPatch, "Patch", true, isOpen(patchPanelId));
+        menu.addItem(menuIdToolScript, "Script", true, isOpen(scriptPanelId));
+        menu.addItem(menuIdToolCapture, "Capture", true, isOpen(capturePanelId));
+        menu.addItem(menuIdToolScore, "Score", true, isOpen(scorePanelId));
+        menu.addItem(menuIdToolSettings, "Settings", true, isOpen(settingsPanelId));
+        menu.addItem(menuIdToolFoley, "Foley", true, isOpen(foleyPanelId));
+        menu.addSeparator();
+        menu.addItem(menuIdToolTrackInsert, "Track Insert", true, isOpen(trackInsertPanelId));
+        menu.addItem(menuIdToolVirtualEngineer, "Virtual Engineer", true, isOpen(virtualEngineerPanelId));
+        menu.addSeparator();
+        menu.addItem(menuIdToolResetLayout, "Reset Dock Layout");
+        return menu;
+    }
+
+    menu.addItem(menuIdHelpTour, "Guided Tour");
+    menu.addItem(menuIdHelpResetLayout, "Reset Dock Layout");
+    return menu;
+}
+
+void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
+{
+    if (menuItemID == 0)
+        return;
+
+    if (topLevelMenuIndex == 0)
+    {
+        if (menuItemID >= menuIdProjectFirst
+            && menuItemID < menuIdProjectFirst + currentProjectMenuProjects.size())
+        {
+            const auto selectedProject = currentProjectMenuProjects.getReference(menuItemID - menuIdProjectFirst);
+            guardUnsavedProjectChange("opening another project", [this, selectedProject]
+            {
+                juce::String errorMessage;
+                if (! creation::assets::ProjectWorkspaceService::openProject(suiteSettings, selectedProject.projectId, projectSession, errorMessage))
+                {
+                    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                           "Project Error",
+                                                           errorMessage);
+                    return;
+                }
+
+                transportBar.setProjectLabel(projectSession.getManifest().projectName);
+                settingsPanel.setProjectMetadata(projectSession.getManifest());
+                refreshProjectAssets();
+                loadSessionFromDisk();
+            });
+            return;
+        }
+
+        switch (menuItemID)
+        {
+            case 1: createNewProject(); break;
+            case 2: createProjectFromTemplate(); break;
+            case 3: openProject(); break;
+            case 4: saveProject(); break;
+            case 5: saveProjectAs(); break;
+            case 6: saveProjectAsTemplate(); break;
+            case 7: revealProjectFolder(); break;
+            case 8: renderFullMixToProject(); break;
+            case 9: exportFullMixAsWav(); break;
+            default: break;
+        }
+
+        if (currentProjectMenuListError.isNotEmpty())
+            transportBar.setStatusText("Project list warning: " + currentProjectMenuListError);
+        return;
+    }
+
+    if (topLevelMenuIndex == 1)
+    {
+        switch (menuItemID)
+        {
+            case menuIdToolTracker: toggleToolWindow(WorkspaceMode::tracker); break;
+            case menuIdToolSampler: toggleToolWindow(WorkspaceMode::sampler); break;
+            case menuIdToolSignal: toggleToolWindow(WorkspaceMode::signal); break;
+            case menuIdToolLayers: toggleToolWindow(WorkspaceMode::mix); break;
+            case menuIdToolPlugins: toggleToolWindow(WorkspaceMode::plugins); break;
+            case menuIdToolPatch: toggleToolWindow(WorkspaceMode::node); break;
+            case menuIdToolScript: toggleToolWindow(WorkspaceMode::code); break;
+            case menuIdToolCapture: toggleToolWindow(WorkspaceMode::record); break;
+            case menuIdToolScore: toggleToolWindow(WorkspaceMode::score); break;
+            case menuIdToolSettings: toggleToolWindow(WorkspaceMode::settings); break;
+            case menuIdToolFoley: toggleToolWindow(WorkspaceMode::foley); break;
+            case menuIdToolVirtualEngineer: toggleAiToolWindow(); break;
+            case menuIdToolTrackInsert: toggleDockPanel(trackInsertPanelId, CreationDock::DockTargetZone::Bottom); break;
+            case menuIdToolResetLayout: resetDockLayout(); break;
+            default: break;
+        }
+
+        menuItemsChanged();
+        return;
+    }
+
+    if (menuItemID == menuIdHelpTour)
+        showTour();
+    else if (menuItemID == menuIdHelpResetLayout)
+        resetDockLayout();
+}
+
+void MainComponent::initialiseDockingWorkspace()
+{
+    if (dockManager == nullptr)
+        return;
+
+    dockManager->registerPanel(trackInsertPanelId, "Track Insert", std::make_unique<NonOwningPanelHost>(pluginRackBar), CreationDock::DockTargetZone::Bottom);
+    dockManager->registerPanel(trackerPanelId, "Tracker", std::make_unique<NonOwningPanelHost>(trackerPanel), CreationDock::DockTargetZone::CenterTab);
+    dockManager->registerPanel(samplerPanelId, "Sampler", std::make_unique<NonOwningPanelHost>(samplePackBuilderPanel), CreationDock::DockTargetZone::Left);
+    dockManager->registerPanel(signalPanelId, "Signal", std::make_unique<NonOwningPanelHost>(signalLabPanel), CreationDock::DockTargetZone::CenterTab);
+    dockManager->registerPanel(layersPanelId, "Layers", std::make_unique<NonOwningPanelHost>(mixerPanel), CreationDock::DockTargetZone::Bottom);
+    dockManager->registerPanel(pluginsPanelId, "Plugins", std::make_unique<NonOwningPanelHost>(pluginsPanel), CreationDock::DockTargetZone::Left);
+    dockManager->registerPanel(patchPanelId, "Patch", std::make_unique<NonOwningPanelHost>(graphPanel), CreationDock::DockTargetZone::CenterTab);
+    dockManager->registerPanel(scriptPanelId, "Script", std::make_unique<NonOwningPanelHost>(dslPanel), CreationDock::DockTargetZone::Right);
+    dockManager->registerPanel(capturePanelId, "Capture", std::make_unique<NonOwningPanelHost>(recordView), CreationDock::DockTargetZone::Left);
+    dockManager->registerPanel(scorePanelId, "Score", std::make_unique<NonOwningPanelHost>(scorePanel), CreationDock::DockTargetZone::CenterTab);
+    dockManager->registerPanel(settingsPanelId, "Settings", std::make_unique<NonOwningPanelHost>(settingsPanel), CreationDock::DockTargetZone::Right);
+    dockManager->registerPanel(foleyPanelId, "Foley", std::make_unique<NonOwningPanelHost>(foleyPanel), CreationDock::DockTargetZone::Left);
+    dockManager->registerPanel(virtualEngineerPanelId, "Virtual Engineer", std::make_unique<NonOwningPanelHost>(aiPanel), CreationDock::DockTargetZone::Right);
+
+    for (const auto panelId : { samplerPanelId, signalPanelId, layersPanelId, pluginsPanelId, patchPanelId,
+                                scriptPanelId, capturePanelId, scorePanelId, settingsPanelId, foleyPanelId,
+                                virtualEngineerPanelId, trackInsertPanelId })
+    {
+        dockManager->closePanel(panelId);
+    }
+
+    dockManager->activatePanel(trackerPanelId);
 }
 
 void MainComponent::setWorkspaceMode(WorkspaceMode mode)
@@ -4155,30 +4301,107 @@ void MainComponent::setWorkspaceMode(WorkspaceMode mode)
         refreshMidiDeviceSettings();
 
     activeMode = mode;
-    viewModeBar.setActiveMode(mode);
-    refreshModeVisibility();
+    activateDockPanel(mode == WorkspaceMode::tracker ? trackerPanelId
+                     : mode == WorkspaceMode::sampler ? samplerPanelId
+                     : mode == WorkspaceMode::signal ? signalPanelId
+                     : mode == WorkspaceMode::mix ? layersPanelId
+                     : mode == WorkspaceMode::plugins ? pluginsPanelId
+                     : mode == WorkspaceMode::node ? patchPanelId
+                     : mode == WorkspaceMode::code ? scriptPanelId
+                     : mode == WorkspaceMode::record ? capturePanelId
+                     : mode == WorkspaceMode::score ? scorePanelId
+                     : mode == WorkspaceMode::settings ? settingsPanelId
+                     : mode == WorkspaceMode::foley ? foleyPanelId
+                     : trackerPanelId,
+                     mode == WorkspaceMode::mix ? CreationDock::DockTargetZone::Bottom
+                     : mode == WorkspaceMode::plugins || mode == WorkspaceMode::sampler
+                       || mode == WorkspaceMode::record || mode == WorkspaceMode::foley ? CreationDock::DockTargetZone::Left
+                     : mode == WorkspaceMode::settings || mode == WorkspaceMode::code ? CreationDock::DockTargetZone::Right
+                     : CreationDock::DockTargetZone::CenterTab);
+
     markLayoutDirty();
+}
+
+void MainComponent::resetDockLayout()
+{
+    if (dockManager != nullptr)
+        dockManager->resetLayout();
+
+    markLayoutDirty();
+    menuItemsChanged();
+}
+
+void MainComponent::toggleToolWindow(WorkspaceMode mode)
+{
+    if (mode == WorkspaceMode::library)
+        return;
+
+    const auto panelId = mode == WorkspaceMode::tracker ? trackerPanelId
+                        : mode == WorkspaceMode::sampler ? samplerPanelId
+                        : mode == WorkspaceMode::signal ? signalPanelId
+                        : mode == WorkspaceMode::mix ? layersPanelId
+                        : mode == WorkspaceMode::plugins ? pluginsPanelId
+                        : mode == WorkspaceMode::node ? patchPanelId
+                        : mode == WorkspaceMode::code ? scriptPanelId
+                        : mode == WorkspaceMode::record ? capturePanelId
+                        : mode == WorkspaceMode::score ? scorePanelId
+                        : mode == WorkspaceMode::settings ? settingsPanelId
+                        : mode == WorkspaceMode::foley ? foleyPanelId
+                        : trackerPanelId;
+    const auto fallbackZone = mode == WorkspaceMode::mix ? CreationDock::DockTargetZone::Bottom
+                              : mode == WorkspaceMode::plugins || mode == WorkspaceMode::sampler
+                                || mode == WorkspaceMode::record || mode == WorkspaceMode::foley ? CreationDock::DockTargetZone::Left
+                              : mode == WorkspaceMode::settings || mode == WorkspaceMode::code ? CreationDock::DockTargetZone::Right
+                              : CreationDock::DockTargetZone::CenterTab;
+
+    toggleDockPanel(panelId, fallbackZone);
+
+    if (dockManager != nullptr && dockManager->isPanelOpen(panelId))
+        activeMode = mode;
+
+    markLayoutDirty();
+    menuItemsChanged();
+}
+
+void MainComponent::toggleAiToolWindow()
+{
+    toggleDockPanel(virtualEngineerPanelId, CreationDock::DockTargetZone::Right);
+    markLayoutDirty();
+    menuItemsChanged();
+}
+
+void MainComponent::toggleDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone)
+{
+    if (dockManager == nullptr)
+        return;
+
+    if (dockManager->isPanelOpen(panelId))
+        dockManager->closePanel(panelId);
+    else
+        dockManager->showPanel(panelId, fallbackZone);
+}
+
+void MainComponent::activateDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone)
+{
+    if (dockManager == nullptr)
+        return;
+
+    if (! dockManager->isPanelOpen(panelId))
+        dockManager->showPanel(panelId, fallbackZone);
+    else
+        dockManager->activatePanel(panelId);
+
+    menuItemsChanged();
 }
 
 void MainComponent::refreshModeVisibility()
 {
     transportBar.setVisible(true);
-    viewModeBar.setVisible(true);
-    pluginRackBar.setVisible(true);
-    trackerPanel.setVisible(activeMode == WorkspaceMode::tracker || isWorkspacePoppedOut(WorkspaceMode::tracker));
-    samplePackBuilderPanel.setVisible(activeMode == WorkspaceMode::sampler || isWorkspacePoppedOut(WorkspaceMode::sampler));
-    signalLabPanel.setVisible(activeMode == WorkspaceMode::signal || isWorkspacePoppedOut(WorkspaceMode::signal));
-    contentPanel.setVisible(false);
-    mixerPanel.setVisible(activeMode == WorkspaceMode::mix || isWorkspacePoppedOut(WorkspaceMode::mix));
-    pluginsPanel.setVisible(activeMode == WorkspaceMode::plugins || isWorkspacePoppedOut(WorkspaceMode::plugins));
-    graphPanel.setVisible(activeMode == WorkspaceMode::node || isWorkspacePoppedOut(WorkspaceMode::node));
-    dslPanel.setVisible(activeMode == WorkspaceMode::code || isWorkspacePoppedOut(WorkspaceMode::code));
-    recordView.setVisible(activeMode == WorkspaceMode::record || isWorkspacePoppedOut(WorkspaceMode::record));
-    foleyPanel.setVisible(activeMode == WorkspaceMode::foley || isWorkspacePoppedOut(WorkspaceMode::foley));
-    scorePanel.setVisible(activeMode == WorkspaceMode::score || isWorkspacePoppedOut(WorkspaceMode::score));
-    settingsPanel.setVisible(activeMode == WorkspaceMode::settings || isWorkspacePoppedOut(WorkspaceMode::settings));
-    poppedWorkspacePlaceholder.setVisible(isWorkspacePoppedOut(activeMode));
-    aiPanel.setVisible(true);
+    if (menuBar != nullptr)
+        menuBar->setVisible(true);
+    if (dockManager != nullptr)
+        dockManager->setVisible(true);
+    poppedWorkspacePlaceholder.setVisible(false);
     authGateView.setVisible(false);
     if (tourOverlay.isActive())
         tourOverlay.toFront(true);
@@ -4191,6 +4414,8 @@ juce::ValueTree MainComponent::createLayoutState() const
     layout.setProperty("formatVersion", 1, nullptr);
     layout.setProperty("activeMode", static_cast<int>(activeMode), nullptr);
     layout.setProperty("aiSidebarCollapsed", aiSidebarCollapsed, nullptr);
+    if (dockManager != nullptr)
+        layout.setProperty("dockLayoutJson", juce::JSON::toString(dockManager->captureLayout()), nullptr);
 
     if (auto* window = findParentComponentOfClass<juce::DocumentWindow>())
     {
@@ -4199,22 +4424,6 @@ juce::ValueTree MainComponent::createLayoutState() const
         layout.setProperty("mainWindowY", bounds.getY(), nullptr);
         layout.setProperty("mainWindowW", bounds.getWidth(), nullptr);
         layout.setProperty("mainWindowH", bounds.getHeight(), nullptr);
-    }
-
-    for (int index = 0; index < workspaceModeCount; ++index)
-    {
-        auto* window = workspacePopoutWindows[(size_t) index].get();
-        if (window == nullptr)
-            continue;
-
-        auto bounds = window->getBounds();
-        juce::ValueTree popped("PoppedWorkspace");
-        popped.setProperty("mode", index, nullptr);
-        popped.setProperty("x", bounds.getX(), nullptr);
-        popped.setProperty("y", bounds.getY(), nullptr);
-        popped.setProperty("w", bounds.getWidth(), nullptr);
-        popped.setProperty("h", bounds.getHeight(), nullptr);
-        layout.addChild(popped, -1, nullptr);
     }
 
     return layout;
@@ -4231,10 +4440,13 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
     if (savedActiveMode == WorkspaceMode::library)
         savedActiveMode = WorkspaceMode::tracker;
     activeMode = savedActiveMode;
-    viewModeBar.setActiveMode(savedActiveMode);
 
     aiSidebarCollapsed = (bool) state.getProperty("aiSidebarCollapsed", false);
     aiPanel.setCollapsed(aiSidebarCollapsed);
+
+    auto dockLayoutJson = state.getProperty("dockLayoutJson").toString();
+    if (dockManager != nullptr && dockLayoutJson.isNotEmpty())
+        dockManager->applyLayout(juce::JSON::parse(dockLayoutJson));
 
     refreshModeVisibility();
 
@@ -4248,24 +4460,7 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
             window->setBounds(mainX, mainY, mainW, mainH);
     }
 
-    for (int index = 0; index < workspaceModeCount; ++index)
-    {
-        auto child = state.getChildWithProperty("mode", index);
-        if (! child.isValid())
-            continue;
-
-        auto mode = static_cast<WorkspaceMode>(index);
-        auto popX = (int) child.getProperty("x", -1);
-        if (mode == WorkspaceMode::library)
-            continue;
-
-        auto popY = (int) child.getProperty("y", -1);
-        auto popW = (int) child.getProperty("w", -1);
-        auto popH = (int) child.getProperty("h", -1);
-        juce::Rectangle<int> bounds(popX, popY, popW, popH);
-        popOutWorkspace(mode, bounds.isEmpty() ? nullptr : &bounds);
-    }
-
+    setWorkspaceMode(savedActiveMode);
     layoutDirty = false;
 }
 
@@ -4341,93 +4536,6 @@ juce::Component* MainComponent::getWorkspaceComponent(WorkspaceMode mode)
     }
 
     return nullptr;
-}
-
-bool MainComponent::isWorkspacePoppedOut(WorkspaceMode mode) const
-{
-    auto index = workspaceModeIndex(mode);
-    return workspacePopoutWindows[(size_t) index] != nullptr;
-}
-
-void MainComponent::popOutActiveWorkspace()
-{
-    popOutWorkspace(activeMode);
-}
-
-void MainComponent::popOutWorkspace(WorkspaceMode mode, const juce::Rectangle<int>* bounds)
-{
-    auto index = workspaceModeIndex(mode);
-    auto& windowSlot = workspacePopoutWindows[(size_t) index];
-
-    if (windowSlot != nullptr)
-    {
-        if (bounds != nullptr && ! bounds->isEmpty())
-            windowSlot->setBounds(*bounds);
-
-        windowSlot->toFront(true);
-        transportBar.setStatusText(workspaceModeName(mode) + " is already popped out.");
-        return;
-    }
-
-    auto* component = getWorkspaceComponent(mode);
-    if (component == nullptr)
-        return;
-
-    poppedWorkspacePlaceholder.setText(workspaceModeName(mode) + " is open in its own window.\nClose that window to dock it back here.",
-                                       juce::dontSendNotification);
-
-    auto window = std::make_unique<ManagedDocumentWindow>("Creation Station - " + workspaceModeName(mode),
-                                                          juce::Colour(0xff10141a),
-                                                          juce::DocumentWindow::closeButton
-                                                              | juce::DocumentWindow::minimiseButton
-                                                              | juce::DocumentWindow::maximiseButton,
-                                                          [this, mode]
-                                                          {
-                                                              dockWorkspace(mode);
-                                                          });
-    window->setUsingNativeTitleBar(true);
-    window->setResizable(true, true);
-    window->setContentNonOwned(component, false);
-
-    if (bounds != nullptr && ! bounds->isEmpty())
-        window->setBounds(*bounds);
-    else
-        window->centreWithSize(1180, 760);
-
-    window->setVisible(true);
-    window->toFront(true);
-    windowSlot = std::move(window);
-
-    refreshModeVisibility();
-    resized();
-    transportBar.setStatusText("Popped out " + workspaceModeName(mode) + ".");
-    markLayoutDirty();
-}
-
-void MainComponent::dockWorkspace(WorkspaceMode mode)
-{
-    auto index = workspaceModeIndex(mode);
-    auto& windowSlot = workspacePopoutWindows[(size_t) index];
-    if (windowSlot == nullptr)
-        return;
-
-    auto* component = getWorkspaceComponent(mode);
-    if (windowSlot != nullptr)
-    {
-        windowSlot->clearContentComponent();
-        windowSlot.reset();
-    }
-
-    if (component != nullptr)
-        addAndMakeVisible(component);
-
-    if (activeMode == mode)
-        poppedWorkspacePlaceholder.setVisible(false);
-
-    setWorkspaceMode(mode);
-    resized();
-    transportBar.setStatusText("Docked " + workspaceModeName(mode) + ".");
-    markLayoutDirty();
 }
 
 void MainComponent::refreshAuthState()
@@ -5858,7 +5966,7 @@ juce::Rectangle<int> MainComponent::tutorialTargetBoundsForId(const juce::String
     if (id == "transport")
         return transportBar.getBounds();
     if (id == "modes")
-        return viewModeBar.getBounds();
+        return menuBar != nullptr ? menuBar->getBounds() : juce::Rectangle<int>();
     if (id == "signal")
         return signalLabPanel.getBounds();
     if (id == "library")
@@ -6861,86 +6969,7 @@ void MainComponent::exportFullMixAsWav()
 
 void MainComponent::showProjectMenu()
 {
-    juce::PopupMenu menu;
-    constexpr int projectItemBase = 1000;
-    juce::String listError;
-    auto availableProjects = creation::assets::ProjectContainerService::listProjects(
-        suiteSettings,
-        creation::assets::SuiteAppDomain::station,
-        listError);
-
-    if (! availableProjects.isEmpty())
-    {
-        for (int index = 0; index < availableProjects.size(); ++index)
-        {
-            const auto& project = availableProjects.getReference(index);
-            bool isCurrentProject = projectSession.isValid()
-                                    && project.projectId == projectSession.getProjectId();
-            auto label = project.manifest.projectName;
-            if (label.isEmpty())
-                label = project.projectId;
-
-            menu.addItem(projectItemBase + index, label, true, isCurrentProject);
-        }
-
-        menu.addSeparator();
-    }
-
-    menu.addItem(1, "Create New Project...");
-    menu.addItem(2, "Create New Project From Template...");
-    menu.addItem(3, "Open Project Browser / Package...");
-    menu.addSeparator();
-    menu.addItem(4, "Save Project");
-    menu.addItem(5, "Save Project As...");
-    menu.addItem(6, "Save Project As Template...");
-    menu.addItem(7, "Open Project Folder");
-    menu.addSeparator();
-    menu.addItem(8, "Render Full Mix to Project");
-    menu.addItem(9, "Export Full Mix as WAV...");
-    menu.addSeparator();
-    auto screenArea = transportBar.getProjectButtonScreenBounds();
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(screenArea),
-                       [this, availableProjects, listError](int result)
-                       {
-                           if (result >= projectItemBase && result < projectItemBase + availableProjects.size())
-                           {
-                               auto selectedProject = availableProjects.getReference(result - projectItemBase);
-                               guardUnsavedProjectChange("opening another project", [this, selectedProject]
-                               {
-                                   juce::String errorMessage;
-                                   if (! creation::assets::ProjectWorkspaceService::openProject(suiteSettings, selectedProject.projectId, projectSession, errorMessage))
-                                   {
-                                       juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-                                                                              "Project Error",
-                                                                              errorMessage);
-                                       return;
-                                   }
-
-                                   transportBar.setProjectLabel(projectSession.getManifest().projectName);
-                                   settingsPanel.setProjectMetadata(projectSession.getManifest());
-                                   refreshProjectAssets();
-                                   loadSessionFromDisk();
-                               });
-                               return;
-                           }
-
-                           switch (result)
-                           {
-                               case 1: createNewProject(); break;
-                               case 2: createProjectFromTemplate(); break;
-                               case 3: openProject(); break;
-                               case 4: saveProject(); break;
-                               case 5: saveProjectAs(); break;
-                               case 6: saveProjectAsTemplate(); break;
-                               case 7: revealProjectFolder(); break;
-                               case 8: renderFullMixToProject(); break;
-                               case 9: exportFullMixAsWav(); break;
-                               default: break;
-                           }
-
-                           if (result == 0 && listError.isNotEmpty())
-                               transportBar.setStatusText("Project list warning: " + listError);
-                       });
+    suiteShellController.showProjectBrowser();
 }
 
 void MainComponent::showSuiteSettingsWindow()
