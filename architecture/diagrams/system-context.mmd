@@ -1,0 +1,15 @@
+```mermaid
+flowchart LR
+    user["User / Producer"]
+    cs["Creation Station"]
+    lag["LagDaemon Auth + Content"]
+    gh["GitHub Releases"]
+    hw["Audio + MIDI Hardware"]
+    vst["Local VST Plugins"]
+
+    user --> cs
+    cs --> lag
+    cs --> gh
+    cs --> hw
+    cs --> vst
+```
