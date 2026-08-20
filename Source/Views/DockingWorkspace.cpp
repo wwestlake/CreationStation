@@ -256,7 +256,20 @@ const DockingWorkspace::DockGroup& DockingWorkspace::getGroup(Zone zone) const
 
 void DockingWorkspace::addPane(juce::Component& pane, const juce::String& title, Zone zone)
 {
-    panes.add({ &pane, title, zone });
+    for (auto& entry : panes)
+    {
+        if (entry.pane == &pane)
+        {
+            entry.title = title;
+            entry.zone = zone;
+            entry.visible = true;
+            getGroup(zone).addPane(pane, title);
+            getGroup(zone).setActivePane(pane);
+            return;
+        }
+    }
+
+    panes.add({ &pane, title, zone, true });
     getGroup(zone).addPane(pane, title);
     pane.setVisible(true);
 }
@@ -290,6 +303,55 @@ DockingWorkspace::Zone DockingWorkspace::getPaneZone(juce::Component& pane) cons
             return candidate.zone;
 
     return Zone::centre;
+}
+
+void DockingWorkspace::setPaneVisible(juce::Component& pane, bool shouldBeVisible)
+{
+    for (auto& entry : panes)
+    {
+        if (entry.pane != &pane)
+            continue;
+
+        if (entry.visible == shouldBeVisible)
+            return;
+
+        entry.visible = shouldBeVisible;
+        if (shouldBeVisible)
+        {
+            getGroup(entry.zone).addPane(pane, entry.title);
+            getGroup(entry.zone).setActivePane(pane);
+        }
+        else
+        {
+            getGroup(entry.zone).removePane(pane);
+            pane.setVisible(false);
+        }
+
+        resized();
+        repaint();
+        return;
+    }
+}
+
+bool DockingWorkspace::isPaneVisible(juce::Component& pane) const
+{
+    for (const auto& entry : panes)
+        if (entry.pane == &pane)
+            return entry.visible;
+
+    return false;
+}
+
+void DockingWorkspace::setActivePane(juce::Component& pane)
+{
+    for (const auto& entry : panes)
+    {
+        if (entry.pane == &pane && entry.visible)
+        {
+            getGroup(entry.zone).setActivePane(pane);
+            return;
+        }
+    }
 }
 
 void DockingWorkspace::beginPaneDrag(juce::Component& pane, Zone fromZone)
