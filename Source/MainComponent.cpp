@@ -1102,6 +1102,15 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     reportStartup("Building the studio surface...", 0.28f);
     setSize(1400, 900);
     menuBar = std::make_unique<juce::MenuBarComponent>(static_cast<juce::MenuBarModel*>(this));
+    // Nothing in this app sets a suite-wide dark LookAndFeel, so MenuBarComponent
+    // falls back to LookAndFeel_V4::drawMenuBarItem/drawMenuBarBackground, which key
+    // off TextButton colour ids (not PopupMenu's) -- on this JUCE version that default
+    // scheme renders dark text on a dark-on-dark bar, invisible against the studio's
+    // navy chrome. Force explicit colours instead of depending on the LookAndFeel default.
+    menuBar->setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1c2230));
+    menuBar->setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff2a3244));
+    menuBar->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    menuBar->setColour(juce::TextButton::textColourOnId, juce::Colours::white);
     dockManager = std::make_unique<CreationDock::DockManager>(*this);
     addAndMakeVisible(authGateView);
     transportBarSafe = &transportBar;
@@ -1335,6 +1344,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     addAndMakeVisible(transportBar);
     addAndMakeVisible(*menuBar);
     addAndMakeVisible(*dockManager);
+    // setSize() above ran before menuBar/dockManager existed, so the resized() it
+    // triggered laid out only transportBar (its own null checks skipped the rest) --
+    // menuBar and dockManager were left at their default zero bounds. Force one more
+    // layout pass now that every child actually exists.
+    resized();
     poppedWorkspacePlaceholder.setJustificationType(juce::Justification::centred);
     poppedWorkspacePlaceholder.setFont(juce::Font(20.0f).boldened());
     poppedWorkspacePlaceholder.setColour(juce::Label::textColourId, juce::Colour(0xffc7d7ef));
