@@ -148,7 +148,7 @@ jobs:
       - name: Build app
         shell: pwsh
         run: |
-          cmake --build build --config Release --target ${{ steps.classify.outputs.cmake_target }}
+          cmake --build build --config Release --target ${{ steps.classify.outputs.cmake_target }} -- /m:1
 
       - name: Install MSI packaging tools
         shell: pwsh
