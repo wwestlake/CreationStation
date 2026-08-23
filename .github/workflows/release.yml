@@ -143,7 +143,7 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common"
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common"
 
       - name: Build app
         shell: pwsh
