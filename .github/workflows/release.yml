@@ -143,7 +143,13 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common"
+          # /GL- (disable whole-program optimization) works around C1060
+          # (compiler out of heap space) on PatchLiveVoice.h -- juce::
+          # juce_recommended_lto_flags applies -GL in Release, which retains
+          # far more per-TU compiler state than this GitHub-hosted runner
+          # has memory for on that specific heavily-templated header. Local
+          # dev builds are untouched -- this is CI-configure-only.
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common" -DCMAKE_CXX_FLAGS="/GL-"
 
       - name: Build app
         shell: pwsh
