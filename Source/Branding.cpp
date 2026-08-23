@@ -173,56 +173,5 @@ juce::Image createCreationStationLogoImage(int size)
     return image;
 }
 
-juce::Image createCreationStationSplashImage()
-{
-    constexpr int width = 720;
-    constexpr int height = 420;
-
-    juce::Image image(juce::Image::ARGB, width, height, true);
-    juce::Graphics g(image);
-
-    g.fillAll(juce::Colour(0xff090b10));
-    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff15253b), 0.0f, 0.0f,
-                                            juce::Colour(0xff090b10), 0.0f, (float) height, false));
-    g.fillRoundedRectangle(image.getBounds().toFloat().reduced(14.0f), 30.0f);
-
-    g.setColour(juce::Colour(0xff273451));
-    g.drawRoundedRectangle(image.getBounds().toFloat().reduced(14.0f), 30.0f, 1.0f);
-
-    g.setColour(juce::Colour(0x22394a6a));
-    for (int i = 0; i < 7; ++i)
-    {
-        auto y = 74.0f + (float) (i * 40);
-        g.drawLine(320.0f, y, 676.0f, y, 1.0f);
-    }
-
-    auto logo = createCreationStationLogoImage(180);
-    g.drawImageWithin(logo, 58, 112, 180, 180, juce::RectanglePlacement::centred, false);
-
-    g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(34.0f).boldened());
-    g.drawText("Creation Station", 274, 92, 380, 40, juce::Justification::left, false);
-
-    g.setColour(juce::Colour(0xff9fb0c8));
-    g.setFont(juce::Font(18.0f));
-    g.drawText("Audio workstation - mixer - node graph - AI assist",
-               274, 136, 380, 28, juce::Justification::left, false);
-
-    g.setColour(juce::Colour(0xff7fcfff));
-    g.setFont(juce::Font(17.0f).boldened());
-    g.drawText("Loading your creative deck...", 274, 176, 280, 26, juce::Justification::left, false);
-
-    g.setColour(juce::Colour(0xff56f4ff));
-    g.fillRoundedRectangle(274.0f, 218.0f, 340.0f, 8.0f, 4.0f);
-    g.setColour(juce::Colour(0x403c4a66));
-    g.fillRoundedRectangle(274.0f, 218.0f, 376.0f, 8.0f, 4.0f);
-
-    g.setColour(juce::Colour(0xffd8e2ff));
-    g.setFont(juce::Font(15.0f));
-    g.drawText("Banked mixer - X-Touch control - VST hosting - DSP graph",
-               274, 258, 410, 24, juce::Justification::left, false);
-
-    return image;
-}
 }
 
