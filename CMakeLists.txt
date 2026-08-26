@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 set(CREATION_STATION_VERSION "0.5.1" CACHE STRING "Creation Station product version")
+option(CREATION_STATION_ENABLE_LTO "Enable JUCE link-time optimization for Creation Station targets" ON)
 project(CreativeWorkstation VERSION ${CREATION_STATION_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -348,6 +349,11 @@ if(MSVC)
     target_compile_options(CreationStationInstrument PRIVATE /FS)
 endif()
 
+set(CS_JUCE_LTO_FLAGS)
+if(CREATION_STATION_ENABLE_LTO)
+    list(APPEND CS_JUCE_LTO_FLAGS juce::juce_recommended_lto_flags)
+endif()
+
 target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_SERVICES_TARGET}
@@ -368,7 +374,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     juce::juce_dsp
     juce::juce_gui_extra
     juce::juce_recommended_config_flags
-    juce::juce_recommended_lto_flags
+    ${CS_JUCE_LTO_FLAGS}
     juce::juce_recommended_warning_flags
 )
 
@@ -381,7 +387,7 @@ target_link_libraries(CreationStationInstrument PRIVATE
     juce::juce_dsp
     juce::juce_gui_extra
     juce::juce_recommended_config_flags
-    juce::juce_recommended_lto_flags
+    ${CS_JUCE_LTO_FLAGS}
     juce::juce_recommended_warning_flags
 )
 

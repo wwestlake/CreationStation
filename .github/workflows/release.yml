@@ -143,7 +143,10 @@ jobs:
       - name: Configure CMake
         shell: pwsh
         run: |
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common"
+          # Keep the runner release build within MSVC's heap budget without
+          # overriding global compiler flags. The previous /GL- workaround
+          # accidentally removed JUCE's required C++ exception setting.
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common" -DCREATION_STATION_ENABLE_LTO=OFF
 
       - name: Build app
         shell: pwsh
