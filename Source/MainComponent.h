@@ -19,10 +19,12 @@
 #include "ControlSurface/ControlSurfaceMappingStore.h"
 #include "Content/ContentLibrary.h"
 #include "Content/ContentApiClient.h"
+#include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectAssetService.h>
 #include <creation/assets/ProjectSession.h>
 #include <creation/ui/CreationSuiteHeaderBar.h>
 #include <creation/ui/SuiteShellController.h>
+#include <CreationDock/DockManager.h>
 #include "Suite/SuiteSettings.h"
 #include "Tutorial/GuidedTutorial.h"
 #include "Timeline/TimelineModel.h"
@@ -46,6 +48,7 @@
 #include <creation/ui/SuiteSettingsPanel.h>
 
 class MainComponent final : public juce::Component,
+                            private juce::MenuBarModel,
                             private juce::Timer,
                             private juce::KeyListener
 {
@@ -81,6 +84,9 @@ public:
     void confirmCloseApplication(const std::function<void(bool shouldClose)>& onDecision);
     void paint(juce::Graphics&) override;
     void resized() override;
+    juce::StringArray getMenuBarNames() override;
+    juce::PopupMenu getMenuForIndex(int topLevelMenuIndex, const juce::String& menuName) override;
+    void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
 
 private:
     class ViewModeBar final : public juce::Component
@@ -88,28 +94,17 @@ private:
     public:
         ViewModeBar();
 
-        std::function<void(WorkspaceMode)> onModeSelected;
-        std::function<void()> onPopOutRequested;
+        std::function<void(juce::Component&)> onProjectMenuRequested;
+        std::function<void(juce::Component&)> onToolsMenuRequested;
+        std::function<void(juce::Component&)> onHelpMenuRequested;
 
-        void setActiveMode(WorkspaceMode newMode);
         void resized() override;
         void paint(juce::Graphics&) override;
 
     private:
-        WorkspaceMode activeMode = WorkspaceMode::tracker;
-        juce::Label titleLabel;
-        juce::TextButton trackerButton { "Tracker" };
-        juce::TextButton samplerButton { "Sampler" };
-        juce::TextButton signalButton { "Signal" };
-        juce::TextButton mixButton { "Layers" };
-        juce::TextButton pluginsButton { "Plugins" };
-        juce::TextButton nodeButton { "Patch" };
-        juce::TextButton codeButton { "Script" };
-        juce::TextButton recordButton { "Capture" };
-        juce::TextButton scoreButton { "Score" };
-        juce::TextButton settingsButton { "Settings" };
-        juce::TextButton foleyButton { "Foley" };
-        juce::TextButton popOutButton { "Pop Out" };
+        juce::TextButton projectButton { "Project" };
+        juce::TextButton toolsButton { "Tools" };
+        juce::TextButton helpButton { "Help" };
     };
 
     class PluginRackBar final : public juce::Component
@@ -225,7 +220,8 @@ private:
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
     CreationSuiteHeaderBar transportBar;
-    ViewModeBar viewModeBar;
+    std::unique_ptr<juce::MenuBarComponent> menuBar;
+    std::unique_ptr<CreationDock::DockManager> dockManager;
     PluginRackBar pluginRackBar;
     TrackerPanel trackerPanel;
     SamplePackBuilderPanel samplePackBuilderPanel;
@@ -289,6 +285,8 @@ private:
     ControlSurfaceMappingStore controlSurfaceMappings;
     std::vector<bool> armedTracks;
     std::vector<bool> monitoredTracks;
+    juce::Array<creation::assets::ProjectContainerService::ProjectSummary> currentProjectMenuProjects;
+    juce::String currentProjectMenuListError;
     // Wall-clock timestamp of the last manual write into each track's automation lane (Touch
     // mode's idle-release timer). Parallel to armedTracks, resized alongside it.
     std::vector<double> automationLastManualWriteWallSeconds;
@@ -415,7 +413,13 @@ private:
     void addTrack();
     void removeTrack(int trackIndex);
     void performTrackRemoval(int trackIndex);
+    void initialiseDockingWorkspace();
     void setWorkspaceMode(WorkspaceMode mode);
+    void resetDockLayout();
+    void toggleToolWindow(WorkspaceMode mode);
+    void toggleAiToolWindow();
+    void toggleDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone);
+    void activateDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone);
     void refreshModeVisibility();
     juce::Component* getWorkspaceComponent(WorkspaceMode mode);
     bool isWorkspacePoppedOut(WorkspaceMode mode) const;

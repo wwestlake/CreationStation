@@ -19,6 +19,9 @@ public:
     void addPane(juce::Component& pane, const juce::String& title, Zone zone);
     void movePaneToZone(juce::Component& pane, Zone zone);
     Zone getPaneZone(juce::Component& pane) const;
+    void setPaneVisible(juce::Component& pane, bool shouldBeVisible);
+    bool isPaneVisible(juce::Component& pane) const;
+    void setActivePane(juce::Component& pane);
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -30,6 +33,7 @@ private:
         juce::Component* pane = nullptr;
         juce::String title;
         Zone zone = Zone::centre;
+        bool visible = true;
     };
 
     class DockGroup final : public juce::Component

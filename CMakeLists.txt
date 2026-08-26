@@ -1,11 +1,15 @@
 cmake_minimum_required(VERSION 3.22)
 
 set(CREATION_STATION_VERSION "0.5.1" CACHE STRING "Creation Station product version")
+option(CREATION_STATION_ENABLE_LTO "Enable JUCE link-time optimization for Creation Station targets" ON)
 project(CreativeWorkstation VERSION ${CREATION_STATION_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/CMake/CreationSuiteBuildSettings.cmake")
+creation_suite_require_juce()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/CMake/CreationSharedLLVM.cmake")
 configure_creation_shared_llvm(CS "Creation Station")
@@ -20,13 +24,19 @@ if(MSVC)
     string(APPEND CMAKE_MODULE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
 endif()
 
-if(NOT DEFINED JUCE_DIR)
-    message(FATAL_ERROR "Set JUCE_DIR to your JUCE root directory before configuring.")
-endif()
-
 option(CREATION_STATION_ENABLE_ASIO "Enable Steinberg ASIO support in Creation Station" OFF)
 set(CREATION_STATION_ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK folder containing iasiodrv.h")
 set(CREATION_SUITE_SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared" CACHE PATH "Path to the Creation Suite shared code root")
+
+if(CREATION_STATION_ENABLE_ASIO AND NOT CREATION_STATION_ASIO_SDK_DIR)
+    if(DEFINED ENV{CREATION_STATION_ASIO_SDK_DIR} AND NOT "$ENV{CREATION_STATION_ASIO_SDK_DIR}" STREQUAL "")
+        set(CREATION_STATION_ASIO_SDK_DIR "$ENV{CREATION_STATION_ASIO_SDK_DIR}" CACHE PATH
+            "Path to the Steinberg ASIO SDK folder containing iasiodrv.h" FORCE)
+    elseif(DEFINED ENV{ASIO_SDK_DIR} AND NOT "$ENV{ASIO_SDK_DIR}" STREQUAL "")
+        set(CREATION_STATION_ASIO_SDK_DIR "$ENV{ASIO_SDK_DIR}" CACHE PATH
+            "Path to the Steinberg ASIO SDK folder containing iasiodrv.h" FORCE)
+    endif()
+endif()
 
 add_subdirectory("${JUCE_DIR}" juce)
 
@@ -60,6 +70,11 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/UI/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/UI"
                      "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedUI")
     set(CS_UI_TARGET creation_suite_ui)
+endif()
+
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/JuceDocking/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/JuceDocking"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedDocking")
 endif()
 
 set(CS_INTEROP_TARGET "")
@@ -124,27 +139,29 @@ juce_add_gui_app(CreativeWorkstation
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconSmall.png"
 )
 
+creation_suite_get_shared_bin_dir(CREATION_STATION_SHARED_BIN_DIR)
+
 # Mirrors the built executable into the workspace-level shared bin
-# directory (D:\CreationSuite-Workspaces\claude-<config>-bin) so it's
-# reachable at a stable path without needing OS symlink privileges.
-# Every suite agent does this for its own repo -- see AGENTS.md.
+# directory so it's reachable at a stable path without needing OS
+# symlink privileges. Every suite agent does this for its own repo --
+# see AGENTS.md.
 add_custom_command(TARGET CreativeWorkstation POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CREATION_STATION_SHARED_BIN_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "${CREATION_STATION_SHARED_BIN_DIR}/"
     # Mirrors the app-scanned Plugins folder alongside it too (see
     # CreationStationPlugin.cmake's creation_station_copy_plugin_to_scanned_folder) so
     # VstPluginCatalog::rescan()'s <exeDir>/Plugins auto-scan finds the in-house plugins
     # whether the app is launched from here or straight from the build tree. Whichever
     # plugin targets have already built by the time this step runs are mirrored; a plugin
     # built after this step catches up on the next build.
-    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/Plugins"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CREATION_STATION_SHARED_BIN_DIR}/Plugins"
     # Guarantee the source exists (even empty) before copying from it -- CreativeWorkstation
     # can build standalone, before any plugin target has ever run its own POST_BUILD step.
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_BINARY_DIR}/CreativeWorkstation_artefacts/$<CONFIG>/Plugins"
-        "D:/CreationSuite-Workspaces/claude-$<LOWER_CASE:$<CONFIG>>-bin/Plugins"
-    COMMENT "Copying CreativeWorkstation to the shared claude bin directory"
+        "${CREATION_STATION_SHARED_BIN_DIR}/Plugins"
+    COMMENT "Copying CreativeWorkstation to the shared ${CREATION_SUITE_AGENT_ID} bin directory"
 )
 
 juce_add_plugin(CreationStationInstrument
@@ -299,9 +316,20 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_VERSION>"
 )
 
+target_include_directories(CreativeWorkstation PRIVATE
+    "${CREATION_SUITE_SHARED_DIR}/JuceDocking/include"
+)
+
 if(CREATION_STATION_ENABLE_ASIO)
     if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
-        message(FATAL_ERROR "CREATION_STATION_ENABLE_ASIO is ON, but iasiodrv.h was not found in CREATION_STATION_ASIO_SDK_DIR.")
+        message(FATAL_ERROR
+            "CREATION_STATION_ENABLE_ASIO is ON, but iasiodrv.h was not found.\n"
+            "Creation Station does not vendor the Steinberg ASIO SDK in this repository.\n"
+            "Install or clone the ASIO SDK separately, then configure one of:\n"
+            "  -DCREATION_STATION_ASIO_SDK_DIR=<path-to-folder-containing-iasiodrv.h>\n"
+            "  CREATION_STATION_ASIO_SDK_DIR environment variable\n"
+            "  ASIO_SDK_DIR environment variable\n"
+            "Example: -DCREATION_STATION_ASIO_SDK_DIR=D:/sdk/asio/common")
     endif()
 
     target_compile_definitions(CreativeWorkstation PRIVATE JUCE_ASIO=1)
@@ -321,6 +349,11 @@ if(MSVC)
     target_compile_options(CreationStationInstrument PRIVATE /FS)
 endif()
 
+set(CS_JUCE_LTO_FLAGS)
+if(CREATION_STATION_ENABLE_LTO)
+    list(APPEND CS_JUCE_LTO_FLAGS juce::juce_recommended_lto_flags)
+endif()
+
 target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_SERVICES_TARGET}
@@ -328,6 +361,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_INTEROP_TARGET}
     ${CS_TIMELINE_TARGET}
     ${CS_NODE_EDITOR_UI_TARGET}
+    CreationDock
     creation_station_language_host
     ce_lang_frontend
     ce_lang_jit
@@ -340,7 +374,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     juce::juce_dsp
     juce::juce_gui_extra
     juce::juce_recommended_config_flags
-    juce::juce_recommended_lto_flags
+    ${CS_JUCE_LTO_FLAGS}
     juce::juce_recommended_warning_flags
 )
 
@@ -353,7 +387,7 @@ target_link_libraries(CreationStationInstrument PRIVATE
     juce::juce_dsp
     juce::juce_gui_extra
     juce::juce_recommended_config_flags
-    juce::juce_recommended_lto_flags
+    ${CS_JUCE_LTO_FLAGS}
     juce::juce_recommended_warning_flags
 )
 
