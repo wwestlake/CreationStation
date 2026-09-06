@@ -4133,7 +4133,6 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         currentProjectMenuListError.clear();
         currentProjectMenuProjects = creation::assets::ProjectContainerService::listProjects(
             suiteSettings,
-            creation::assets::SuiteAppDomain::station,
             currentProjectMenuListError);
 
         if (! currentProjectMenuProjects.isEmpty())
@@ -7725,7 +7724,7 @@ bool MainComponent::ensureProjectSessionActive(juce::String& errorMessage)
 
     juce::String listError;
     auto availableProjects = creation::assets::ProjectContainerService::listProjects(
-        suiteSettings, creation::assets::SuiteAppDomain::station, listError);
+        suiteSettings, listError);
 
     if (! availableProjects.isEmpty())
     {
