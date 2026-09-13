@@ -663,7 +663,7 @@ MainComponent::ViewModeBar::ViewModeBar()
     };
 
     setupButton(projectButton,
-                "Project actions for the current Creation Station workspace",
+                "Project actions for the current Djehuti Station workspace",
                 [this]
                 {
                     if (onProjectMenuRequested)
@@ -1085,7 +1085,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     reportStartup("Preparing application shell...", 0.08f);
     setWantsKeyboardFocus(true);
-    transportBar.setAppTitle("Creation Station");
+    transportBar.setAppTitle("Djehuti Station");
     transportBar.setLogoImage(creation::ui::getSuiteLogoImage(creation::ui::SuiteLogoId::station));
 
     appManifest = CreationStationAppManifest::createDefault(
@@ -1162,10 +1162,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         authGateView.setStatusText("Session cleared.");
         refreshAuthState();
     };
-    suiteShellController.configure({ "Creation Station",
+    suiteShellController.configure({ "Djehuti Station",
                                      creation::assets::SuiteAppDomain::station,
                                      juce::Colour(0xff15181d),
-                                     creation::ui::SuiteAssetManagerCapability{ "Creation Station",
+                                     creation::ui::SuiteAssetManagerCapability{ "Djehuti Station",
                                                                                 creation::assets::SuiteAppDomain::station,
                                                                                 { ".cel" },
                                                                                 {},
@@ -1865,7 +1865,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         options.displayName = name;
         options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(name) + ".csarrangement";
         options.mediaType = "application/x-creation-station-arrangement";
-        options.sourceApp = "Creation Station";
+        options.sourceApp = "Djehuti Station";
         options.sourceTool = "Tracker";
         options.description = "Saved set of Tracker tracks/clips.";
 
@@ -2270,7 +2270,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             renderedAsset.mediaType = "audio/wav";
             renderedAsset.fileSizeBytes = (int64) fileData.getSize();
             renderedAsset.createdAt = renderedAsset.modifiedAt = juce::Time::getCurrentTime();
-            renderedAsset.sourceApp = "Creation Station";
+            renderedAsset.sourceApp = "Djehuti Station";
             renderedAsset.description = "Rendered from Signal Lab on command.";
             projectSession.upsertAssetDescriptor(renderedAsset);
 
@@ -2346,7 +2346,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         options.displayName = suggestedName.isNotEmpty() ? suggestedName : "Signal Design";
         options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(suggestedName) + ".cspatch";
         options.mediaType = "application/x-creation-station-patch";
-        options.sourceApp = "Creation Station";
+        options.sourceApp = "Djehuti Station";
         options.sourceTool = "Signal Lab";
         options.description = "Editable Signal Lab sound design object.";
 
@@ -2435,7 +2435,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         options.displayName = name;
         options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(name) + ".celg";
         options.mediaType = "application/x-creation-node-graph";
-        options.sourceApp = "Creation Station";
+        options.sourceApp = "Djehuti Station";
         options.sourceTool = "Foley";
         options.description = "Saved Foley node-graph setup.";
 
@@ -2891,7 +2891,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                                                                      : selectedFile.hasFileExtension(".wav") ? "sample-pack"
                                                                                      : "pack");
                                               dialog->addTextEditor("version", "0.1.0");
-                                              dialog->addTextEditor("description", "Published from Creation Station.");
+                                              dialog->addTextEditor("description", "Published from Djehuti Station.");
                                               dialog->addTextEditor("tags", "creation-station");
                                               dialog->addTextEditor("tier", "");
                                               dialog->addTextEditor("minAppVersion", "0.2.0");
@@ -3874,7 +3874,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     configureTutorialOverlay();
     loadLayoutFromDisk();
-    reportStartup("Creation Station is ready.", 1.0f);
+    reportStartup("Djehuti Station is ready.", 1.0f);
     startTimerHz(30);
 }
 
@@ -4690,7 +4690,7 @@ void MainComponent::showFxStackWindow()
 
     panel->setCatalog(vstPluginCatalog.getEntries());
 
-    auto window = std::make_unique<ManagedDocumentWindow>("Creation Station - Track FX Stack",
+    auto window = std::make_unique<ManagedDocumentWindow>("Djehuti Station - Track FX Stack",
                                                           juce::Colour(0xff11151c),
                                                           juce::DocumentWindow::allButtons,
                                                           [this]
@@ -4798,7 +4798,7 @@ void MainComponent::showMidiEditorWindow(int clipIndex)
     panel->setPlaybackState(engine.isPlaying(), engine.isRecording() || engine.isMidiRecording());
     panel->setDisplayedTransportSeconds(0.0, false);
 
-    auto window = std::make_unique<ManagedDocumentWindow>("Creation Station - MIDI Editor",
+    auto window = std::make_unique<ManagedDocumentWindow>("Djehuti Station - MIDI Editor",
                                                           juce::Colour(0xff11151c),
                                                           juce::DocumentWindow::allButtons,
                                                           [this]
@@ -6403,7 +6403,7 @@ void MainComponent::activateContentItem(const ContentLibrary::Item& item)
         importedAsset.mediaType = "audio/wav";
         importedAsset.fileSizeBytes = (int64) fileData.getSize();
         importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
-        importedAsset.sourceApp = "Creation Station";
+        importedAsset.sourceApp = "Djehuti Station";
         projectSession.upsertAssetDescriptor(importedAsset);
 
         if (! projectSession.commit(errorMessage))
@@ -6722,7 +6722,7 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
         importedAsset.mediaType = "audio/wav";
         importedAsset.fileSizeBytes = (int64) fileData.getSize();
         importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
-        importedAsset.sourceApp = "Creation Station";
+        importedAsset.sourceApp = "Djehuti Station";
         projectSession.upsertAssetDescriptor(importedAsset);
 
         if (! projectSession.commit(importError))
@@ -7009,7 +7009,7 @@ void MainComponent::showSuiteSettingsWindow()
     };
 
     auto* panelRaw = panel.get();
-    auto window = std::make_unique<ManagedDocumentWindow>("Creation Suite Control",
+    auto window = std::make_unique<ManagedDocumentWindow>("Djehuti Suite Control",
                                                           juce::Colour(0xff11151c),
                                                           juce::DocumentWindow::allButtons,
                                                           [this]
@@ -7036,7 +7036,7 @@ void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
 {
     juce::String currentPath = suiteSettings.suiteVfsRoot;
 
-    suiteDirectoryChooser = std::make_unique<juce::FileChooser>("Choose a folder for the Creation Suite",
+    suiteDirectoryChooser = std::make_unique<juce::FileChooser>("Choose a folder for the Djehuti Suite",
                                                                 currentPath.isNotEmpty()
                                                                     ? juce::File(currentPath)
                                                                     : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
@@ -7074,7 +7074,7 @@ void MainComponent::applySuiteSettings(const SuiteSettings& settings)
     }
 
     suiteSettings = settings;
-    transportBar.setStatusText("Saved Creation Suite settings.");
+    transportBar.setStatusText("Saved Djehuti Suite settings.");
     if (suiteSettingsPanel != nullptr)
         suiteSettingsPanel->setStatusText("Saved suite-wide settings for all Creation apps.");
 }
@@ -7241,7 +7241,7 @@ void MainComponent::beginCreateProjectFromTemplate()
     // honest format now that there's no single container file to snapshot. Browsing a real
     // template file via a native picker is a legitimate asset-import case, not a "pick a thing
     // the framework already catalogs" case.
-    projectChooser = std::make_unique<juce::FileChooser>("Create a project from a Creation Station template",
+    projectChooser = std::make_unique<juce::FileChooser>("Create a project from a Djehuti Station template",
                                                          creation::suite::getTemplatesDirectory(suiteSettings),
                                                          "*.xml",
                                                          true);
@@ -7606,7 +7606,7 @@ void MainComponent::stopRecordingSession()
         importedAsset.mediaType = "audio/wav";
         importedAsset.fileSizeBytes = (int64) fileData.getSize();
         importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
-        importedAsset.sourceApp = "Creation Station";
+        importedAsset.sourceApp = "Djehuti Station";
         projectSession.upsertAssetDescriptor(importedAsset);
 
         if (! projectSession.commit(importError))
@@ -7674,7 +7674,7 @@ bool MainComponent::chooseStorageRoot(bool promptWhenAlreadyConfigured)
 {
     juce::ignoreUnused(promptWhenAlreadyConfigured);
     suiteShellController.showSuiteSettings();
-    transportBar.setStatusText("Configure Creation Station project storage in Creation Suite settings.");
+    transportBar.setStatusText("Configure Djehuti Station project storage in Djehuti Suite settings.");
     return false;
 }
 
@@ -7683,10 +7683,10 @@ bool MainComponent::ensureStorageRootConfigured()
     if (suiteSettings.suiteVfsRoot.isNotEmpty())
         return true;
 
-    transportBar.setStatusText("Configure Creation Station project storage in Creation Suite settings.");
+    transportBar.setStatusText("Configure Djehuti Station project storage in Djehuti Suite settings.");
     if (! chooseStorageRoot())
     {
-        transportBar.setStatusText("Creation Station project storage is required before the studio can save projects or content.");
+        transportBar.setStatusText("Djehuti Station project storage is required before the studio can save projects or content.");
         return false;
     }
 
@@ -7700,7 +7700,7 @@ bool MainComponent::ensureProjectSessionActive(juce::String& errorMessage)
 
     if (! ensureStorageRootConfigured())
     {
-        errorMessage = "Creation Station project storage is not configured.";
+        errorMessage = "Djehuti Station project storage is not configured.";
         return false;
     }
 

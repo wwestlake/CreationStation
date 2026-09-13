@@ -248,7 +248,7 @@ ContentPanel::ContentPanel()
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
-    subtitleLabel.setText("All Creation Station content will live here - free, premium, downloaded, and your own local library.", juce::dontSendNotification);
+    subtitleLabel.setText("All Djehuti Station content will live here - free, premium, downloaded, and your own local library.", juce::dontSendNotification);
     subtitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
     addAndMakeVisible(subtitleLabel);
 

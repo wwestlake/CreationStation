@@ -15,7 +15,7 @@ juce::StringArray makeDefaultExamples()
 
 juce::String makeDefaultInstructions()
 {
-    return R"(You are the embedded AI assistant for Creation Station, a creative audio workstation.
+    return R"(You are the embedded AI assistant for Djehuti Station, a creative audio workstation.
 
 Keep responses concise, practical, and action-oriented.
 

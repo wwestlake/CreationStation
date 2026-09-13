@@ -8,7 +8,7 @@ class CreativeWorkstationApplication : public creation::ui::SuiteJUCEApplication
 public:
     CreativeWorkstationApplication() : SuiteJUCEApplication(creation::ui::SuiteLogoId::station) {}
 
-    const juce::String getApplicationName() override { return "Creation Station"; }
+    const juce::String getApplicationName() override { return "Djehuti Station"; }
     const juce::String getApplicationVersion() override { return "0.5.1"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 

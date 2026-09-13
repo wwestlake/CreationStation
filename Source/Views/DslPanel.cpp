@@ -10,7 +10,7 @@
 DslPanel::DslPanel()
 {
     setName("Code");
-    headerLabel.setText("Creation Engine Language (CEL)", juce::dontSendNotification);
+    headerLabel.setText("Djehuti Engine Language (CEL)", juce::dontSendNotification);
     headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);

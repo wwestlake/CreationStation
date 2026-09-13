@@ -326,7 +326,7 @@ void PluginsPanel::rebuildPluginsList()
 
     if (! csPlugins.isEmpty())
     {
-        auto* csSection = categorySections.add(new CategorySection("Creation Station Plugins", true));
+        auto* csSection = categorySections.add(new CategorySection("Djehuti Station Plugins", true));
         csSection->setPlugins(csPlugins);
         csSection->onLoadRequested = [this](const VstPluginCatalog::Entry& entry)
         {

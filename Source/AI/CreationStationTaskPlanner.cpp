@@ -190,7 +190,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
         case WorkflowKind::instrumentDesign:
             plan.workflow = "Instrument Build";
             plan.summary = "Shape a playable sound source, define control movement, and validate it from MIDI or scripted triggers.";
-            plan.suggestedTools.addArray({ "Signal Lab", "CEL", "Patch Graph", "Creation Station Instrument" });
+            plan.suggestedTools.addArray({ "Signal Lab", "CEL", "Patch Graph", "Djehuti Station Instrument" });
             plan.verificationNote = "A note-on event should produce the intended sound shape with predictable dynamics and controllable tone.";
             plan.dataSchema.add({ "instrument.targetCharacter", "Plain-language sound target", {}, 0.0, false });
             plan.dataSchema.add({ "instrument.templateName", "Starting template selected for the voice", {}, 0.0, false });

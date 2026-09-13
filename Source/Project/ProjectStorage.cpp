@@ -154,7 +154,7 @@ AssetDescriptor buildSuiteDescriptor(const AssetDescriptor& requested,
         ? descriptor.displayName
         : logicalPath.fromLastOccurrenceOf("/", false, false).upToLastOccurrenceOf(".", false, false);
     descriptor.logicalPath = logicalPath;
-    descriptor.sourceApp = "Creation Station";
+    descriptor.sourceApp = "Djehuti Station";
     descriptor.fileSizeBytes = fileSizeBytes;
     descriptor.modifiedAt = modifiedAt;
     if (descriptor.createdAt == juce::Time())

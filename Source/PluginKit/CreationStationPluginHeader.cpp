@@ -9,7 +9,7 @@ CreationStationPluginHeader::CreationStationPluginHeader(const juce::String& plu
 {
     logoImage = branding::createCreationStationLogoImage(48);
 
-    brandLabel.setText("CREATION STATION", juce::dontSendNotification);
+    brandLabel.setText("DJEHUTI STATION", juce::dontSendNotification);
     brandLabel.setFont(juce::Font(11.0f).boldened());
     brandLabel.setColour(juce::Label::textColourId, palette::textSecondary);
     addAndMakeVisible(brandLabel);

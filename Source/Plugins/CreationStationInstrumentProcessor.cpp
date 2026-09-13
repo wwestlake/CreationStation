@@ -18,7 +18,7 @@ public:
     {
         setSize(560, 240);
 
-        titleLabel.setText("Creation Station Instrument", juce::dontSendNotification);
+        titleLabel.setText("Djehuti Station Instrument", juce::dontSendNotification);
         titleLabel.setFont(juce::Font(24.0f).boldened());
         titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
         addAndMakeVisible(titleLabel);
@@ -38,7 +38,7 @@ public:
 
         loadButton.onClick = [this]
         {
-            chooser = std::make_unique<juce::FileChooser>("Load Creation Station patch", juce::File{}, "*.cspatch");
+            chooser = std::make_unique<juce::FileChooser>("Load Djehuti Station patch", juce::File{}, "*.cspatch");
             chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                  [safeThis = juce::Component::SafePointer<Editor>(this)](const juce::FileChooser& fileChooser)
                                  {
@@ -61,7 +61,7 @@ public:
                                      safeThis->refreshFromProcessor();
                                  });
         };
-        loadButton.setTooltip("Load a Creation Station patch file");
+        loadButton.setTooltip("Load a Djehuti Station patch file");
         addAndMakeVisible(loadButton);
 
         auditionButton.onClick = [this]

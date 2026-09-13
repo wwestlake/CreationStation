@@ -2,7 +2,7 @@
 
 AuthGateView::AuthGateView()
 {
-    titleLabel.setText("Sign in to Creation Station", juce::dontSendNotification);
+    titleLabel.setText("Sign in to Djehuti Station", juce::dontSendNotification);
     titleLabel.setFont(juce::Font(30.0f).boldened());
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
