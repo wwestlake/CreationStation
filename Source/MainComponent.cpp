@@ -53,6 +53,7 @@ constexpr int menuIdToolTrackInsert = 2013;
 constexpr int menuIdToolResetLayout = 2099;
 constexpr int menuIdHelpTour = 3001;
 constexpr int menuIdHelpResetLayout = 3002;
+constexpr int menuIdHelpFeedback = 3003;
 
 const char* trackerPanelId = "tracker";
 const char* samplerPanelId = "sampler";
@@ -3874,6 +3875,31 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     configureTutorialOverlay();
     loadLayoutFromDisk();
+
+    metricsCollector.setBearerTokenProvider([this] { return authSession.getSession().token; });
+
+    // Loaded off the message thread and deliberately not awaited here: this
+    // may be the very first VFS entry ever created for this install (no
+    // feedback-settings.json exists yet on a fresh install), and a
+    // first-time-create round trip through the VFS service has been
+    // observed to stall for a long time. Startup must never block on it --
+    // feedback/metrics are opt-in and off by default, so arriving a moment
+    // late (or not at all, if this never completes) changes nothing about
+    // whether the app is usable.
+    std::thread([safeThis = juce::Component::SafePointer<MainComponent>(this)]
+    {
+        auto settings = creation_station::FeedbackSettingsStore::load();
+        juce::MessageManager::callAsync([safeThis, settings]
+        {
+            if (safeThis == nullptr)
+                return;
+            safeThis->feedbackSettings = settings;
+            safeThis->metricsCollector.setInstallId(settings.installId);
+            safeThis->metricsCollector.setOptedIn(settings.metricsOptIn);
+            safeThis->metricsCollector.logEvent("session", "session_start");
+        });
+    }).detach();
+
     reportStartup("Djehuti Station is ready.", 1.0f);
     startTimerHz(30);
 }
@@ -3882,6 +3908,9 @@ MainComponent::~MainComponent()
 {
     if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
         top->removeKeyListener(this);
+
+    metricsCollector.logEvent("session", "session_end");
+    metricsCollector.flush();
 
     saveLayoutToDisk(true);
     stopTimer();
@@ -4190,6 +4219,8 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
 
     menu.addItem(menuIdHelpTour, "Guided Tour");
     menu.addItem(menuIdHelpResetLayout, "Reset Dock Layout");
+    menu.addSeparator();
+    menu.addItem(menuIdHelpFeedback, "Send Feedback...");
     return menu;
 }
 
@@ -4271,6 +4302,8 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
         showTour();
     else if (menuItemID == menuIdHelpResetLayout)
         resetDockLayout();
+    else if (menuItemID == menuIdHelpFeedback)
+        showFeedbackWindow();
 }
 
 CreationDock::DockPanel* MainComponent::registerNamedDockPanel(const juce::String& panelId, CreationDock::DockTargetZone zone)
@@ -4332,6 +4365,9 @@ void MainComponent::setWorkspaceMode(WorkspaceMode mode)
 
     if (mode == WorkspaceMode::settings)
         refreshMidiDeviceSettings();
+
+    if (mode != activeMode)
+        metricsCollector.logFeatureUsage("workspace_opened:" + workspaceModeName(mode));
 
     activeMode = mode;
     activateDockPanel(mode == WorkspaceMode::tracker ? trackerPanelId
@@ -4726,6 +4762,80 @@ void MainComponent::showFxStackWindow()
     window->setVisible(true);
     fxStackWindow = std::move(window);
     refreshFxStackWindow();
+}
+
+void MainComponent::showFeedbackWindow()
+{
+    if (feedbackWindow != nullptr)
+    {
+        feedbackWindow->toFront(true);
+        return;
+    }
+
+    auto panel = std::make_unique<FeedbackDialog>();
+    auto* panelRaw = panel.get();
+    panel->setOptIns(feedbackSettings.feedbackOptIn, feedbackSettings.metricsOptIn);
+
+    panel->onOptInsChanged = [this](bool feedbackOptIn, bool metricsOptIn)
+    {
+        feedbackSettings.feedbackOptIn = feedbackOptIn;
+        feedbackSettings.metricsOptIn = metricsOptIn;
+        metricsCollector.setOptedIn(metricsOptIn);
+
+        // Saved off the message thread -- see the startup load's comment on
+        // why a VFS write is never done synchronously here. The toggle's
+        // on-screen state already flipped instantly; this just persists it.
+        auto settingsToSave = feedbackSettings;
+        std::thread([settingsToSave]
+        {
+            juce::String saveError;
+            creation_station::FeedbackSettingsStore::save(settingsToSave, saveError);
+        }).detach();
+    };
+
+    panel->onSubmitRequested = [this](const juce::String& message, const juce::String& category)
+    {
+        if (feedbackDialogPanel != nullptr)
+            feedbackDialogPanel->setSubmitInProgress(true);
+
+        auto installId = feedbackSettings.installId;
+        auto bearerToken = authSession.getSession().token;
+
+        // Captures the client by value, not `this` -- stays safe even if the
+        // feedback window (and this component) is closed/destroyed before
+        // the background send finishes.
+        std::thread([client = feedbackMetricsClient, installId, message, category, bearerToken,
+                    safeThis = juce::Component::SafePointer<MainComponent>(this)]
+        {
+            juce::String errorMessage;
+            auto success = client.submitFeedback(installId, message, category, bearerToken, errorMessage);
+            juce::MessageManager::callAsync([safeThis, success, errorMessage]
+            {
+                if (safeThis == nullptr || safeThis->feedbackDialogPanel == nullptr)
+                    return;
+                safeThis->feedbackDialogPanel->setSubmitInProgress(false);
+                safeThis->feedbackDialogPanel->setSubmitResult(success,
+                    success ? "Thanks -- feedback sent." : errorMessage);
+            });
+        }).detach();
+    };
+
+    auto window = std::make_unique<ManagedDocumentWindow>("Djehuti Station - Feedback",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              feedbackDialogPanel = nullptr;
+                                                              feedbackWindow.reset();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setResizeLimits(520, 480, 900, 800);
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(600, 560);
+    window->setVisible(true);
+    feedbackWindow = std::move(window);
+    feedbackDialogPanel = panelRaw;
 }
 
 void MainComponent::showMidiEditorWindow(int clipIndex)
