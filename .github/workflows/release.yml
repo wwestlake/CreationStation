@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - "creation-station-v*"
+      - "djehuti-station-v*"
 
 permissions:
   contents: write
@@ -88,9 +88,9 @@ jobs:
           $tag = $env:GITHUB_REF_NAME
 
           switch -Regex -CaseSensitive ($tag) {
-            '^creation-station-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
-              $productSlug = "creation-station"
-              $displayName = "Creation Station"
+            '^djehuti-station-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
+              $productSlug = "djehuti-station"
+              $displayName = "Djehuti Station"
               $kind = "app"
               $cmakeTarget = "CreativeWorkstation"
               $componentName = "CreativeWorkstation"
@@ -98,7 +98,7 @@ jobs:
             }
 
             default {
-              throw "Tag '$tag' must start with creation-station-v."
+              throw "Tag '$tag' must start with djehuti-station-v."
             }
           }
 
