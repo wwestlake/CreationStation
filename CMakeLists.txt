@@ -119,16 +119,19 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/NodeEditorUI/CMakeLists.txt")
     set(CS_NODE_EDITOR_UI_TARGET creation_suite_node_editor_ui)
 endif()
 
-# Station's own scripting surface (the "Code" workspace tab) is CEL, the
-# one suite-wide language -- not a bespoke per-app DSL. ce_lang_frontend
-# (lexer/parser/sema/diagnostics) and node_system build with no LLVM
-# dependency at all; only the JIT half of shared/CEL needs LLVM, and this
-# panel only parses/validates source, it doesn't execute it.
+# Station's own scripting surface (the "Code" workspace tab) and its
+# Signal Lab node graph both target FRust, the one suite-wide language --
+# not a bespoke per-app DSL. node_system carries the graph model AND the
+# graph->FRust codegen (frust_codegen.cpp); creation_suite_frust_plugin_runtime
+# (shared/FrustPluginRuntime) wraps third_party/FrustLang's real
+# lexer/parser/sema/JIT for actually compiling and running the generated
+# source -- the same suite-level modules CreationEngine already uses for
+# its own node-to-FRust codegen, not a Station-local reimplementation.
 if(NOT TARGET node_system)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeSystem" CreationSuiteSharedNodeSystem)
 endif()
-if(NOT TARGET ce_lang_frontend)
-    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/CEL" CreationSuiteSharedCel)
+if(NOT TARGET creation_suite_frust_plugin_runtime)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FrustPluginRuntime" CreationSuiteSharedFrustPluginRuntime)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
@@ -299,6 +302,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/SamplePackBuilderPanel.h
     Source/Views/FoleyPanel.cpp
     Source/Views/FoleyPanel.h
+    Source/Views/FoleyNodeCatalog.cpp
+    Source/Views/FoleyNodeCatalog.h
 )
 
 target_sources(CreationStationInstrument PRIVATE
@@ -314,11 +319,29 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_PLUGINHOST_VST3=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_VERSION>"
+    # AudioGraphSelfTest.cpp's real .frust node-library module -- same
+    # "compiler-provided absolute path" convention Creation Engine's own
+    # CE_CORE_NODE_LIBRARY uses for CoreNodesLibrary.frust.
+    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    # DslPanel's "Compile" button shells out to the real frust_compiler CLI
+    # (--emit-obj: parses, runs sema/codegen, and emits an object file, but
+    # never executes anything and never requires a `manifest "...";`
+    # declaration the way frust_plugin_host's JIT load path does) -- the
+    # right tool for a free-form scratch/patch editor that isn't a loadable
+    # plugin. frust_compiler is built as part of the FrustPluginRuntime
+    # subdirectory above, so its build output path is already known here.
+    CS_FRUST_COMPILER_EXECUTABLE="$<TARGET_FILE:frust_compiler>"
 )
 
 target_include_directories(CreativeWorkstation PRIVATE
     "${CREATION_SUITE_SHARED_DIR}/JuceDocking/include"
 )
+
+# CS_FRUST_COMPILER_EXECUTABLE above only bakes in the path -- this makes
+# sure the exe is actually built (and, on Windows, its PDB/DLL deps are
+# up to date) before CreativeWorkstation, since nothing else in this
+# target's own source tree references the frust_compiler target.
+add_dependencies(CreativeWorkstation frust_compiler)
 
 if(CREATION_STATION_ENABLE_ASIO)
     if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
@@ -363,9 +386,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_NODE_EDITOR_UI_TARGET}
     CreationDock
     creation_station_language_host
-    ce_lang_frontend
-    ce_lang_jit
-    ce_lang_nodegen
+    creation_suite_frust_plugin_runtime
     node_system
     juce::juce_audio_devices
     juce::juce_audio_processors

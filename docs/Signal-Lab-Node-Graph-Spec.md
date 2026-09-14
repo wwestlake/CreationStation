@@ -149,15 +149,15 @@ underneath" phase; touches `SignalGraphRuntime`, not just the UI.
   port. (Mirrors UE4 Material Functions' Output node / Blueprint Function's
   return node.)
 - These packages are **generators, not processors/effects** — a packaged
-  CEL sound generator has **no external Signal-in port at all**, only
+  FRust sound generator has **no external Signal-in port at all**, only
   Signal-out. It produces sound; it does not take sound in. It can still
   have external **parameter-in ports** (pitch, macros, whatever the group
   exposes for control), just never an audio signal input at the package
   boundary. **[SPECIFIED]**
 - Open question to settle before building: is a grouped node a **true
-  reusable/shareable asset** (a real packaged CEL function you can reuse
+  reusable/shareable asset** (a real packaged FRust function you can reuse
   across different sound designs — this matches the Epic #30 north star:
-  "supports reusable packaged graphs/functions backed by CEL"), or just a
+  "supports reusable packaged graphs/functions backed by FRust"), or just a
   **local collapse-to-tidy-the-graph** convenience scoped to one sound
   design? This changes the implementation a lot (save/load/reference a
   named asset vs. a purely in-memory subgraph).
@@ -165,15 +165,15 @@ underneath" phase; touches `SignalGraphRuntime`, not just the UI.
   promoted to the group boundary (not just the one Signal-out) — not yet
   designed.
 
-## Grouped nodes are named, reusable, CEL-backed assets (answers the open question above)
+## Grouped nodes are named, reusable, FRust-backed assets (answers the open question above)
 
 - Confirmed: a grouped node is a **real, named, reusable asset** — not just a
   local collapse-to-tidy-the-graph convenience. **[SPECIFIED]**
-- Nodes represent CEL functions or internal functions. The built-in/primitive
+- Nodes represent FRust functions or internal functions. The built-in/primitive
   nodes ("internal functions") are implemented natively in C++. User-composed
-  nodes/functions can additionally be authored in **CEL**, or in a **"Node
+  nodes/functions can additionally be authored in **FRust**, or in a **"Node
   lang"** (a textual representation of a node graph — exact relationship to
-  CEL not yet settled). **[SPECIFIED, mechanism OPEN]**
+  FRust not yet settled). **[SPECIFIED, mechanism OPEN]**
 
 ## Serialization / model round-trip
 
@@ -184,44 +184,52 @@ underneath" phase; touches `SignalGraphRuntime`, not just the UI.
   existing flat `PatchDocument` JSON format (`PatchModel.h`), which doesn't
   currently capture node positions or typed-port connections.
 
-## VERTICAL SLICE PROVEN WORKING (2026-08-08)
+## VERTICAL SLICE PROVEN WORKING (2026-08-08; re-proven on FRust 2026-09-13)
 
-The full pipeline — node graph → generated CEL text → parsed → sema-checked
-→ JIT-compiled (real LLVM) → executed → real numeric result — has been
-built and verified end to end. **[DONE]**
+The full pipeline — node graph → generated FRust text → parsed → sema/
+codegen-checked → JIT-compiled (real LLVM, via `frust_plugin_host`) →
+executed → real numeric result — has been built and verified end to end.
+**[DONE]**
+
+Originally proven on CEL (2026-08-08); the suite has since replaced CEL
+outright with FRust, and this same vertical slice was re-verified on the
+FRust pipeline (2026-09-13) with the same demo computation and the same
+result.
 
 What was built (all in `apps/CreationStation/Source/Language/`):
 - `AudioNodeCatalog.h/.cpp` — registers `SineOscillator` (input: `level`/
   Float, output: `signalOut`/AudioSignal) and `Output` (input: `signalIn`/
-  AudioSignal) into a `ce::node_system::NodeTypeRegistry` tagged
-  `Domain::Audio`, mirroring `shared/CEL/src/nodegen/node_catalog.cpp`'s
-  established pattern exactly.
-- `AudioGraphCodegen.h/.cpp` — Signal Lab's own graph → CEL text generator
-  (deliberately separate from the control-graph `graph_to_source.cpp`, per
-  this doc's own architecture section above). Walks back from the Output
-  node's connection to find the feeding SineOscillator, reads its `level`
-  pin's literal value, and emits a real `.cel` function.
+  AudioSignal) into a `ce::node_system::NodeLibraryRegistry` tagged
+  `Domain::Core` (see `frust_codegen.cpp`'s own comment on why the pure-
+  value compile path requires `Domain::Core`, not `Domain::Audio`, despite
+  the node's audio-DSP subject matter), bound to a real FRust function in
+  `BuiltInPlugins/SignalLabNodesLibrary.frust`.
+- `AudioGraphCodegen.h/.cpp` — Signal Lab's own graph → FRust text generator
+  (deliberately separate from the control-graph compiler, per this doc's
+  own architecture section above), calling the shared
+  `ce::node_system::CompileBehaviorGraphToFrust` (`shared/NodeSystem/src/
+  frust_codegen.cpp`) every exec-chain/dataflow graph in the suite compiles
+  through. Walks back from the Output node's connection to find the
+  feeding SineOscillator, reads its `level` pin's literal value, and emits
+  a real `.frust` function.
 - `AudioGraphSelfTest.h/.cpp` — builds the demo graph, generates source,
-  runs it through the real `ce::lang::ParseProgram` →
-  `ce::lang::AnalyzeProgram` → `ce::lang::jit::Runtime::CompileAndRun`
-  pipeline (the exact sequence `celc`'s own `main.cpp` uses), and compares
-  the JIT-computed result against the same computation done natively in
-  C++.
+  loads it through `creation::frust::PluginRuntime` (`shared/
+  FrustPluginRuntime`) after registering the `sin` host function FRust has
+  no built-in math intrinsic for, and compares the JIT-computed result
+  against the same computation done natively in C++.
 - Result: JIT produced `0.311627` for `sin(0.5) * 0.65`, byte-matching the
   native `std::sin` computation. Verified by actually running the built
   app, not assumed.
-- `CMakeLists.txt` updated: new files added to `CreativeWorkstation`'s
-  sources, `ce_lang_jit` added to its linked libraries (previously only
-  `ce_lang_frontend` + `node_system` were linked). Confirms `creation_suite_
-  cel_jit` builds cleanly against the LLVM 18.1.6 already present via
-  Creation Engine's `vcpkg_installed` — no LLVM rebuild was needed or done.
+- `CMakeLists.txt`: `creation_suite_frust_plugin_runtime` (wrapping
+  `third_party/FrustLang`) is linked into `CreativeWorkstation` in place of
+  the former `ce_lang_frontend`/`ce_lang_jit`/`ce_lang_nodegen` CEL
+  libraries, which no longer exist anywhere in this repository.
 
 **Deliberate v1 scope limits** (so they don't read as oversights later,
-same convention `shared/CEL`'s own catalog doc uses):
-- Proves ONE computed sample via CEL's existing `sin` Core intrinsic —
-  **not** a real N-sample buffer render yet. No new native
-  intrinsic/ABI/`intrinsics.def` extension was needed for this, because
-  `sin`/arithmetic are already first-class CEL capabilities.
+same convention this suite's other node-catalog docs use):
+- Proves ONE computed sample via `sin`, registered as a host function
+  because FRust has no built-in math intrinsics — **not** a real N-sample
+  buffer render yet.
 - The `level` parameter is read as a **literal only** — a level fed by
   another node's output (a Value node, an envelope...) isn't walked yet;
   codegen only follows the Output node's own incoming connection back one
@@ -231,19 +239,24 @@ same convention `shared/CEL`'s own catalog doc uses):
   "Compilation & cross-suite execution model" above), now with a proven
   foundation under them instead of an untested plan.
 
-## MAJOR FINDING (2026-08-08): the node-graph-to-CEL system already exists
+## MAJOR FINDING (2026-08-08): the node-graph-to-FRust system already exists
 
 Before reading the "confirmed pipeline" section below, read this first —
 it changes the recommended path significantly. Verified by reading the
-actual code, not assumed:
+actual code, not assumed. (Originally written against CEL's node system;
+updated 2026-09-13 to name the current FRust-backed equivalents after the
+suite-wide CEL removal — the underlying `ce::node_system` structures this
+section describes did not change shape, only the language they compile to.)
 
 `shared/NodeSystem` (`ce::node_system`, headers in
 `shared/NodeSystem/include/node_system/`) is a **complete, working,
 domain-agnostic node-graph system**, already built:
 
-- `node.h` — `Domain` enum is `{ Core, Animation, Material, Event, Audio }`.
-  **`Audio` is already a first-class domain**, not something that needs to
-  be invented.
+- `node.h` — `Domain` enum is `{ Core, Animation, Material, Event, Audio,
+  Video, Input, Physics }`. Only `Core` and `Event` have real codegen
+  support in `frust_codegen.cpp` today — the others exist in the enum but
+  aren't wired through the compiler yet (a real, current gap, not
+  something to assume works).
 - `pin.h` — `PinKind { Data, Exec }`, `DataType { Float, Vec2, Vec3, Vec4,
   Color, Bool, Int, String, Transform, BoneTransform, Texture,
   **AudioSignal**, Entity }`. **`AudioSignal` is already a first-class data
@@ -255,118 +268,120 @@ domain-agnostic node-graph system**, already built:
   already implements exactly the type-matching rule (same kind, same
   DataType for Data pins) that today's `SignalLabPanel.cpp` reimplemented
   ad hoc in `tryCompleteConnection`.
-- `type_registry.h` — `NodeTypeRegistry` + `NodeTypeDescriptor` is exactly
-  the mechanism to register a node kind ("Sine Oscillator", "Filter",
-  "Device Sink", ...) with a fixed, validated pin signature —
-  `AddRegisteredNode` constructs a conforming instance,
+- `type_registry.h` — `NodeTypeRegistry`/`NodeLibraryRegistry` +
+  `NodeTypeDescriptor` is exactly the mechanism to register a node kind
+  ("Sine Oscillator", "Filter", "Device Sink", ...) with a fixed, validated
+  pin signature — `AddRegisteredNode` constructs a conforming instance,
   `ValidateAgainstRegistry` catches shape drift. This is the real version
   of what `nodeParameterIds()`/`getNodePorts()` in `SignalLabPanel.cpp`
   reinvented today, informally and locally.
-- `celg_serialization.h` — a `.celg` file format that round-trips a graph,
-  **including each node's editor canvas position** (`Node::EditorX/Y`,
-  persisted through save/load). This is very likely the JSON model
+- `frgraph_serialization.h` — a `.frgraph` file format that round-trips a
+  graph, **including each node's editor canvas position** (`Node::EditorX/
+  Y`, persisted through save/load). This is very likely the JSON model
   round-trip requirement from earlier in this doc — needs confirming it's
   JSON under the hood, but the round-trip mechanism itself already exists.
-- `shared/CEL/src/nodegen/graph_to_source.cpp` (`ce::lang::nodegen`) —
-  **`GenerateSource(graph, registry, options)`** validates a graph and
-  generates real, human-readable `.cel` source text from it (deliberately
-  text, not direct AST construction — the stated reason: graph-authored and
-  hand-authored CEL must provably be the same language sharing one
-  parse/sema/IR-gen/JIT pipeline, not two code paths that could drift).
-  **`CheckGeneratedSource`** maps compiler diagnostics back to the
-  originating node ID via a source-line map, for exactly the "node 7 is
-  broken" UX this doc's earlier sections wanted.
-- Also present: `OnStart`/`OnTick` lifecycle entry nodes, and — notably —
-  a **`SubgraphEntry`/`CallSubgraph`** node pair, where a `SubgraphEntry`
-  has a `name` config pin and `CallSubgraph` invokes it by name, validated
-  at generation time. **This is very likely already the "named reusable
-  grouped node" mechanism** the Grouping section above asks for — needs
-  confirming whether it already supports what this doc calls the
-  generator-only constraint (no external Signal-in), or whether that's new.
+- `shared/NodeSystem/src/frust_codegen.cpp` (`ce::node_system`) —
+  **`CompileBehaviorGraphToFrust(graph, libraries, options)`** validates a
+  graph and generates real, human-readable `.frust` source text from it
+  (deliberately text, not direct AST construction — the stated reason:
+  graph-authored and hand-authored FRust must provably be the same
+  language sharing one parse/sema/IR-gen/JIT pipeline, not two code paths
+  that could drift). Diagnostics are returned as a plain error string
+  today (`FrustGraphCompileResult::error`), not yet mapped back to a
+  source-line map / originating node ID the way this doc's earlier "node 7
+  is broken" UX wants — that mapping doesn't exist yet.
+- Also present: `core.event.tick`/`core.event.beginplay`/`core.event.
+  endplay` lifecycle entry nodes (`core_control_flow.cpp`) and real
+  structured control flow (`core.branch`, `core.sequence`, `core.
+  randomSelect`, `core.for`, `core.while`, ...) with working `frust_
+  codegen.cpp` lowering for every one. No `SubgraphEntry`/`CallSubgraph`-
+  style "named reusable grouped node" mechanism exists yet — that
+  "grouped node" concept from the Grouping section above is still
+  genuinely unbuilt, not just undocumented.
 
 **What this means for the recommended path:** Signal Lab should very
-likely **register its own node types into `NodeTypeRegistry` under
-`Domain::Audio`** and **operate on `ce::node_system::Graph`/`Node`/`Pin`
-directly**, rather than continuing to grow `SignalLabPanel.cpp`'s own
-bespoke `GraphNodeModel`/`GraphConnection`/`getNodePorts()` structures,
-which today duplicate — informally, and not validated the same way — what
-this shared system already does properly. This is a real architectural
-decision to make explicitly (migrate now vs. keep the UI-only bespoke
-model for a while longer and migrate later), not something to decide
-implicitly by continuing to add to the bespoke version.
+likely **register its own node types into `NodeLibraryRegistry`** and
+**operate on `ce::node_system::Graph`/`Node`/`Pin` directly**, rather than
+continuing to grow `SignalLabPanel.cpp`'s own bespoke `GraphNodeModel`/
+`GraphConnection`/`getNodePorts()` structures, which today duplicate —
+informally, and not validated the same way — what this shared system
+already does properly. This is a real architectural decision to make
+explicitly (migrate now vs. keep the UI-only bespoke model for a while
+longer and migrate later), not something to decide implicitly by
+continuing to add to the bespoke version. (Update 2026-09-13: `Audio*Node
+Catalog.h/.cpp` now does exactly this — registered as `Domain::Core`, not
+`Domain::Audio`, per the codegen-support note above.)
 
-**Still genuinely missing** (confirmed by search, not assumed): no Audio-
-domain node types are registered anywhere yet (no `Sine`, `Filter`, etc. in
-any `NodeTypeRegistry` call site found), no Audio-domain CEL
-intrinsics/ABI exist yet (the actual DSP math a registered "Sine
-Oscillator" node would call into), and Station has no runtime layer
-analogous to Engine's `world_runtime.h` to host-wire a compiled module into
-Station's actual audio render path.
+**Still genuinely missing** (confirmed by search, not assumed): the actual
+DSP math a registered "Sine Oscillator" node would call into is still just
+one host-registered `sin` function, not a real oscillator/filter/envelope
+library, and Station has no runtime layer analogous to Engine's `world_
+runtime.h`-style host wiring to plug a compiled module into Station's
+actual audio render path.
 
 ## Compilation & cross-suite execution model — OPEN, needs a real design pass
 
 This is the big open architecture question, and it reaches beyond Signal
-Lab's UI into `shared/CEL` and other suite apps, so a fuller design doc may
-be warranted once this is scoped — captured here first so it isn't lost.
+Lab's UI into `third_party/FrustLang` and other suite apps, so a fuller
+design doc may be warranted once this is scoped — captured here first so
+it isn't lost.
 
-**Confirmed pipeline, verified against the actual codebase on 2026-08-08:**
+**Confirmed pipeline, verified against the actual codebase (2026-08-08;
+re-verified against the FRust-based implementation 2026-09-13):**
 
 1. Node structure (Signal Lab's visual graph — already built).
-2. Node structure compiles to a **CEL AST** (the graph *is* the program;
-   not hand-authored CEL text as an intermediate).
-3. AST is **JIT-compiled and executed** via the real, already-working
-   shared JIT engine — `shared/CEL/src/jit/runtime.cpp`,
-   `ce::lang::jit::Runtime::CompileAndRun`. This is genuine, tested LLVM
-   ORC JIT compilation to native code, not a spec-only concept.
-4. Execution goes through **a Station-side domain runtime**, following the
-   exact pattern Creation Engine already established for its own "World"
-   domain (`apps/CreationEngine/Language/include/lang/jit/world_runtime.h`,
-   `RunWorldProgram`) — Station needs to build its own equivalent for an
-   `audio-dsp` domain: register Station's own audio intrinsics/ABI, and
-   follow the declare/verify/enforce domain-tagging model from the CEL
-   language spec (§5.1: a module declares its domain in source, the
-   compiler verifies it actually satisfies that domain's safety checks,
-   and the host wiring point refuses to load a module that isn't verified
-   for the slot it's being plugged into — e.g. an audio render callback).
+2. Node structure compiles to **FRust source text** via the shared
+   `CompileBehaviorGraphToFrust` (the graph *is* the program; hand-authored
+   FRust text is only an intermediate artifact for inspection/debugging,
+   not a separate authoring path).
+3. Source is **JIT-compiled and executed** via `creation::frust::
+   PluginRuntime` (`shared/FrustPluginRuntime`), wrapping FrustLang's own
+   `frust_plugin_host` (real LLVM ORC JIT compilation to native code, not a
+   spec-only concept).
+4. Execution goes through **a Station-side domain runtime** — Station
+   still needs to build its own audio-render host wiring (register
+   Station's own audio intrinsics as host functions, following the same
+   `registerHostFunction`/manifest-driven convention every other FRust
+   plugin host in the suite already uses, e.g. Creation Engine's
+   `EngineFrustHost`).
 
 **What already exists vs. what Station still needs to build (verified by
 reading the actual code, not assumed):**
-- Shared JIT engine (compile CEL → LLVM IR → native, run it): **built**,
-  self-tested, already used by Creation Engine.
-- Domain-tag declare/verify/enforce system (§5.1 of the language spec):
-  **spec'd, not implemented** — no `audio-dsp`/domain-tag parsing found in
-  `shared/CEL` source yet.
+- Shared JIT engine (compile FRust → LLVM IR → native, run it): **built**,
+  self-tested, already used across the suite (Signal Lab, Foley, Creation
+  Engine's Pods).
 - An Engine-style domain runtime for Station (register audio intrinsics,
   host-wire a compiled module into Station's audio render path): **does
   not exist yet.** `SignalGraphRuntime` today is pure native C++ with zero
-  CEL/JIT involvement.
-- Node-graph → CEL-AST compiler (the thing that turns Signal Lab's node
-  model into a CEL program): **does not exist yet.**
+  FRust/JIT involvement.
+- Node-graph → FRust compiler (the thing that turns Signal Lab's node
+  model into a FRust program): **built** — `CompileBehaviorGraphToFrust`,
+  called from `AudioGraphCodegen.cpp`.
 
 Older, less precise framing this section replaces: "the node graph should
 compile to CEL, and CEL then runs it — including the automations, not a
-separate hardcoded modulation system." Still true, just now stated as the
-concrete 4-step pipeline above.
-- The resulting compiled CEL function should be a **portable, suite-wide
+separate hardcoded modulation system." Still true with FRust standing in
+for CEL, just now stated as the concrete 4-step pipeline above.
+- The resulting compiled FRust function should be a **portable, suite-wide
   reusable sound generator**. General principle: **any suite member that
   uses sound can use them** — live-streamed as sound effects, and because
-  it's CEL, callers can pass **parameters in at call time** (whichever
-  parameter-in ports the package exposes become the CEL function's callable
-  parameter signature). Named examples so far:
+  it's FRust, callers can pass **parameters in at call time** (whichever
+  parameter-in ports the package exposes become the FRust function's
+  callable parameter signature). Named examples so far:
   - Station's own **Tracker timeline** (as a clip/event-triggered generator).
   - Station's **Foley** tool (as a sound source/generator).
   - **Creation Movie** (the video editor) — live-streamed sound effects.
   - Not an exhaustive list — the principle is suite-wide, not Station-only.
-- Two consumption modes for the same compiled CEL function:
+- Two consumption modes for the same compiled FRust function:
   1. **Executed live/on-demand** wherever it's needed (e.g. a Tracker
      timeline event calls it in real time).
   2. **Rendered once to WAV** by the editor and reused as a static baked
      asset (ties back to the real-time-vs-offline-render discussion above —
      baking is just one more way of consuming the same compiled function).
-- Not yet decided: compilation pipeline details, how CEL's automation/curve
+- Not yet decided: compilation pipeline details, how FRust's automation/curve
   execution model maps onto the pull-based "Parameter Request" runtime model
   described above, and how a Tracker/Foley call site discovers and invokes a
-  named Signal Lab CEL asset.
+  named Signal Lab FRust asset.
 
 ## Rendering model — real-time vs. offline-to-WAV
 
@@ -471,3 +486,11 @@ principle as before, just surfaced properly instead of hidden.
   session so far (node anatomy, sizing, parameter input ports as a NOW
   requirement, parameter outputs as an OPEN requirement, connections/reroute,
   runtime pull model, Sources/Sinks + Device Sink).
+- 2026-09-13: CEL removed suite-wide, replaced by FRust everywhere. Updated
+  every CEL-era reference in this doc (API names, file paths, `.celg` ->
+  `.frgraph`, `ce_lang_*` libraries -> `creation_suite_frust_plugin_runtime`)
+  to the current FRust-based implementation; re-verified the "VERTICAL SLICE
+  PROVEN WORKING" pipeline against the FRust rewrite with the same result.
+  Also added Foley's own FRust node catalog and a new shared `core.
+  randomSelect` control-flow primitive (`ControlFlowKind::RandomSelect`,
+  `shared/NodeSystem`) while doing this pass.

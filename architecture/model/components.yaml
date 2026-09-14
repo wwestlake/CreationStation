@@ -26,13 +26,13 @@ components:
   signal_graph_language:
     file_hints:
       - Source/Views/DslPanel.cpp
-      - shared/CEL/include/lang/compiler.h
-      - shared/CEL/include/lang/sema.h
+      - third_party/FrustLang/projects/01_language_paradigms/02_functional/Main.cpp
+      - shared/FrustPluginRuntime/include/creation/frust/PluginRuntime.h
     role: language and compilation pipeline
     responsibilities:
-      - parse and analyze CEL source (shared/CEL, suite-wide language)
+      - parse, analyze, and codegen FRust source (third_party/FrustLang, suite-wide language)
       - support signal-lab and future scripting workflows
-    note: the bespoke Patina DSL (lexer/parser/lowering/artifact format) was removed; Station now consumes the shared CEL frontend directly, no app-local language implementation.
+    note: the bespoke Patina DSL (lexer/parser/lowering/artifact format) was removed; Station now consumes FRust directly via frust_compiler (DslPanel) and shared/FrustPluginRuntime (Signal Lab/Foley node graphs), no app-local language implementation.
 
   patch_system:
     file_hints:

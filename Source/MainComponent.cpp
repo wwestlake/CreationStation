@@ -1167,7 +1167,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                      juce::Colour(0xff15181d),
                                      creation::ui::SuiteAssetManagerCapability{ "Djehuti Station",
                                                                                 creation::assets::SuiteAppDomain::station,
-                                                                                { ".cel" },
+                                                                                { ".frust" },
                                                                                 {},
                                                                                 [this]()
                                                                                 {
@@ -2427,13 +2427,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
         }
 
-        auto celgText = foleyPanel.serializeGraph();
-        juce::MemoryBlock data(celgText.toRawUTF8(), celgText.getNumBytesAsUTF8());
+        auto frgraphText = foleyPanel.serializeGraph();
+        juce::MemoryBlock data(frgraphText.toRawUTF8(), frgraphText.getNumBytesAsUTF8());
 
         creation::assets::ProjectAssetService::ImportOptions options;
         options.kind = creation::assets::AssetKind::foleyPatch;
         options.displayName = name;
-        options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(name) + ".celg";
+        options.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + slugForProjectAssetName(name) + ".frgraph";
         options.mediaType = "application/x-creation-node-graph";
         options.sourceApp = "Djehuti Station";
         options.sourceTool = "Foley";
@@ -2514,21 +2514,21 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     dslPanel.onSourceExportRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
     {
         auto startDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
-        celSourceChooser = std::make_unique<juce::FileChooser>("Export CEL source",
-                                                                    startDirectory.getChildFile(suggestedName + ".cel"),
-                                                                    "*.cel");
+        frustSourceChooser = std::make_unique<juce::FileChooser>("Export FRust source",
+                                                                    startDirectory.getChildFile(suggestedName + ".frust"),
+                                                                    "*.frust");
 
-        celSourceChooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        frustSourceChooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
                                            [this, sourceText](const juce::FileChooser& chooser)
                                            {
                                                auto file = chooser.getResult();
-                                               celSourceChooser.reset();
+                                               frustSourceChooser.reset();
 
                                                if (file == juce::File())
                                                    return;
 
                                                if (file.replaceWithText(sourceText))
-                                                   transportBar.setStatusText("Exported CEL source: " + file.getFileName());
+                                                   transportBar.setStatusText("Exported FRust source: " + file.getFileName());
                                                else
                                                    transportBar.setStatusText("Could not write " + file.getFileName());
                                            });
@@ -2543,7 +2543,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
         }
 
-        auto logicalPath = "library/cel/" + slugForProjectAssetName(suggestedName) + ".cel";
+        auto logicalPath = "library/frust/" + slugForProjectAssetName(suggestedName) + ".frust";
         const juce::MemoryBlock data(sourceText.toRawUTF8(), sourceText.getNumBytesAsUTF8());
         if (client.writeEntry(logicalPath, data))
             transportBar.setStatusText("Saved to your library: " + suggestedName);
@@ -2551,7 +2551,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             transportBar.setStatusText("Could not save " + suggestedName + " to your library.");
     };
 
-    auto showCelLoadFromLibraryMenu = [this]
+    auto showFrustLoadFromLibraryMenu = [this]
     {
         creation::services::SuiteVfsServiceClient client;
         if (! client.discover())
@@ -2563,32 +2563,32 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         juce::StringArray allPaths;
         client.listEntries(allPaths);
 
-        juce::StringArray celPaths;
+        juce::StringArray frustPaths;
         for (const auto& path : allPaths)
-            if (path.startsWith("library/cel/"))
-                celPaths.add(path);
+            if (path.startsWith("library/frust/"))
+                frustPaths.add(path);
 
-        if (celPaths.isEmpty())
+        if (frustPaths.isEmpty())
         {
-            transportBar.setStatusText("Your library has no saved CEL sources yet.");
+            transportBar.setStatusText("Your library has no saved FRust sources yet.");
             return;
         }
 
-        celPaths.sort(true);
+        frustPaths.sort(true);
 
         juce::PopupMenu menu;
         menu.addSectionHeader("Load From Your Library");
-        for (int index = 0; index < celPaths.size(); ++index)
+        for (int index = 0; index < frustPaths.size(); ++index)
         {
-            auto displayName = juce::File(celPaths[index]).getFileNameWithoutExtension();
+            auto displayName = juce::File(frustPaths[index]).getFileNameWithoutExtension();
             menu.addItem(index + 1, displayName);
         }
 
         auto clickPoint = juce::Desktop::getInstance().getMainMouseSource().getScreenPosition().roundToInt();
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ clickPoint.x, clickPoint.y, 1, 1 }),
-                           [this, celPaths](int result)
+                           [this, frustPaths](int result)
                            {
-                               if (result <= 0 || result > celPaths.size())
+                               if (result <= 0 || result > frustPaths.size())
                                    return;
 
                                creation::services::SuiteVfsServiceClient loadClient;
@@ -2599,7 +2599,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                }
 
                                juce::MemoryBlock data;
-                               if (! loadClient.readEntry(celPaths[result - 1], data))
+                               if (! loadClient.readEntry(frustPaths[result - 1], data))
                                {
                                    transportBar.setStatusText("Could not load that library item.");
                                    return;
@@ -2608,46 +2608,46 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                auto sourceText = juce::String::createStringFromData(data.getData(), (int) data.getSize());
                                dslPanel.setSourceText(sourceText);
                                transportBar.setStatusText("Loaded from your library: "
-                                                          + juce::File(celPaths[result - 1]).getFileNameWithoutExtension());
+                                                          + juce::File(frustPaths[result - 1]).getFileNameWithoutExtension());
                            });
     };
 
-    auto showCelLoadFromDiskChooser = [this]
+    auto showFrustLoadFromDiskChooser = [this]
     {
         auto startDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
 
-        celSourceChooser = std::make_unique<juce::FileChooser>("Load a CEL source file",
+        frustSourceChooser = std::make_unique<juce::FileChooser>("Load a FRust source file",
                                                                     startDirectory,
-                                                                    "*.cel");
+                                                                    "*.frust");
 
-        celSourceChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        frustSourceChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                            [this](const juce::FileChooser& chooser)
                                            {
                                                auto file = chooser.getResult();
-                                               celSourceChooser.reset();
+                                               frustSourceChooser.reset();
 
                                                if (! file.existsAsFile())
                                                    return;
 
                                                dslPanel.loadSourceFromFile(file);
-                                               transportBar.setStatusText("Loaded CEL source: " + file.getFileName());
+                                               transportBar.setStatusText("Loaded FRust source: " + file.getFileName());
                                                setWorkspaceMode(WorkspaceMode::code);
                                            });
     };
 
-    dslPanel.onSourceLoadRequested = [this, showCelLoadFromLibraryMenu, showCelLoadFromDiskChooser]
+    dslPanel.onSourceLoadRequested = [this, showFrustLoadFromLibraryMenu, showFrustLoadFromDiskChooser]
     {
         juce::PopupMenu menu;
         menu.addItem(1, "Load From Your Library...");
         menu.addItem(2, "Load From File...");
 
         menu.showMenuAsync(juce::PopupMenu::Options(),
-                           [showCelLoadFromLibraryMenu, showCelLoadFromDiskChooser](int result)
+                           [showFrustLoadFromLibraryMenu, showFrustLoadFromDiskChooser](int result)
                            {
                                if (result == 1)
-                                   showCelLoadFromLibraryMenu();
+                                   showFrustLoadFromLibraryMenu();
                                else if (result == 2)
-                                   showCelLoadFromDiskChooser();
+                                   showFrustLoadFromDiskChooser();
                            });
     };
 
@@ -4166,7 +4166,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
     {
         const auto isOpen = [this](const juce::String& id)
         {
-            return dockManager != nullptr && dockManager->isPanelOpen(id);
+            return dockManager != nullptr && dockManager->isRegistered(id);
         };
 
         menu.addItem(menuIdToolTracker, "Tracker", true, isOpen(trackerPanelId));
@@ -4273,32 +4273,52 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
         resetDockLayout();
 }
 
+CreationDock::DockPanel* MainComponent::registerNamedDockPanel(const juce::String& panelId, CreationDock::DockTargetZone zone)
+{
+    if (dockManager == nullptr)
+        return nullptr;
+
+    if (panelId == trackInsertPanelId)
+        return dockManager->registerPanel(panelId, "Track Insert", std::make_unique<NonOwningPanelHost>(pluginRackBar), zone);
+    if (panelId == trackerPanelId)
+        return dockManager->registerPanel(panelId, "Tracker", std::make_unique<NonOwningPanelHost>(trackerPanel), zone);
+    if (panelId == samplerPanelId)
+        return dockManager->registerPanel(panelId, "Sampler", std::make_unique<NonOwningPanelHost>(samplePackBuilderPanel), zone);
+    if (panelId == signalPanelId)
+        return dockManager->registerPanel(panelId, "Signal", std::make_unique<NonOwningPanelHost>(signalLabPanel), zone);
+    if (panelId == layersPanelId)
+        return dockManager->registerPanel(panelId, "Layers", std::make_unique<NonOwningPanelHost>(mixerPanel), zone);
+    if (panelId == pluginsPanelId)
+        return dockManager->registerPanel(panelId, "Plugins", std::make_unique<NonOwningPanelHost>(pluginsPanel), zone);
+    if (panelId == patchPanelId)
+        return dockManager->registerPanel(panelId, "Patch", std::make_unique<NonOwningPanelHost>(graphPanel), zone);
+    if (panelId == scriptPanelId)
+        return dockManager->registerPanel(panelId, "Script", std::make_unique<NonOwningPanelHost>(dslPanel), zone);
+    if (panelId == capturePanelId)
+        return dockManager->registerPanel(panelId, "Capture", std::make_unique<NonOwningPanelHost>(recordView), zone);
+    if (panelId == scorePanelId)
+        return dockManager->registerPanel(panelId, "Score", std::make_unique<NonOwningPanelHost>(scorePanel), zone);
+    if (panelId == settingsPanelId)
+        return dockManager->registerPanel(panelId, "Settings", std::make_unique<NonOwningPanelHost>(settingsPanel), zone);
+    if (panelId == foleyPanelId)
+        return dockManager->registerPanel(panelId, "Foley", std::make_unique<NonOwningPanelHost>(foleyPanel), zone);
+    if (panelId == virtualEngineerPanelId)
+        return dockManager->registerPanel(panelId, "Virtual Engineer", std::make_unique<NonOwningPanelHost>(aiPanel), zone);
+
+    jassertfalse; // unknown panel id
+    return nullptr;
+}
+
 void MainComponent::initialiseDockingWorkspace()
 {
     if (dockManager == nullptr)
         return;
 
-    dockManager->registerPanel(trackInsertPanelId, "Track Insert", std::make_unique<NonOwningPanelHost>(pluginRackBar), CreationDock::DockTargetZone::Bottom);
-    dockManager->registerPanel(trackerPanelId, "Tracker", std::make_unique<NonOwningPanelHost>(trackerPanel), CreationDock::DockTargetZone::CenterTab);
-    dockManager->registerPanel(samplerPanelId, "Sampler", std::make_unique<NonOwningPanelHost>(samplePackBuilderPanel), CreationDock::DockTargetZone::Left);
-    dockManager->registerPanel(signalPanelId, "Signal", std::make_unique<NonOwningPanelHost>(signalLabPanel), CreationDock::DockTargetZone::CenterTab);
-    dockManager->registerPanel(layersPanelId, "Layers", std::make_unique<NonOwningPanelHost>(mixerPanel), CreationDock::DockTargetZone::Bottom);
-    dockManager->registerPanel(pluginsPanelId, "Plugins", std::make_unique<NonOwningPanelHost>(pluginsPanel), CreationDock::DockTargetZone::Left);
-    dockManager->registerPanel(patchPanelId, "Patch", std::make_unique<NonOwningPanelHost>(graphPanel), CreationDock::DockTargetZone::CenterTab);
-    dockManager->registerPanel(scriptPanelId, "Script", std::make_unique<NonOwningPanelHost>(dslPanel), CreationDock::DockTargetZone::Right);
-    dockManager->registerPanel(capturePanelId, "Capture", std::make_unique<NonOwningPanelHost>(recordView), CreationDock::DockTargetZone::Left);
-    dockManager->registerPanel(scorePanelId, "Score", std::make_unique<NonOwningPanelHost>(scorePanel), CreationDock::DockTargetZone::CenterTab);
-    dockManager->registerPanel(settingsPanelId, "Settings", std::make_unique<NonOwningPanelHost>(settingsPanel), CreationDock::DockTargetZone::Right);
-    dockManager->registerPanel(foleyPanelId, "Foley", std::make_unique<NonOwningPanelHost>(foleyPanel), CreationDock::DockTargetZone::Left);
-    dockManager->registerPanel(virtualEngineerPanelId, "Virtual Engineer", std::make_unique<NonOwningPanelHost>(aiPanel), CreationDock::DockTargetZone::Right);
-
-    for (const auto panelId : { samplerPanelId, signalPanelId, layersPanelId, pluginsPanelId, patchPanelId,
-                                scriptPanelId, capturePanelId, scorePanelId, settingsPanelId, foleyPanelId,
-                                virtualEngineerPanelId, trackInsertPanelId })
-    {
-        dockManager->closePanel(panelId);
-    }
-
+    // Only Tracker starts open; every other tool panel is registered on demand the first
+    // time it's shown (View menu / toggleDockPanel) and fully unregistered when closed --
+    // the shared DockManager has no separate "registered but hidden" state, see
+    // registerNamedDockPanel().
+    registerNamedDockPanel(trackerPanelId, CreationDock::DockTargetZone::CenterTab);
     dockManager->activatePanel(trackerPanelId);
 }
 
@@ -4369,7 +4389,7 @@ void MainComponent::toggleToolWindow(WorkspaceMode mode)
 
     toggleDockPanel(panelId, fallbackZone);
 
-    if (dockManager != nullptr && dockManager->isPanelOpen(panelId))
+    if (dockManager != nullptr && dockManager->isRegistered(panelId))
         activeMode = mode;
 
     markLayoutDirty();
@@ -4388,10 +4408,10 @@ void MainComponent::toggleDockPanel(const juce::String& panelId, CreationDock::D
     if (dockManager == nullptr)
         return;
 
-    if (dockManager->isPanelOpen(panelId))
-        dockManager->closePanel(panelId);
+    if (dockManager->isRegistered(panelId))
+        dockManager->unregisterPanel(panelId);
     else
-        dockManager->showPanel(panelId, fallbackZone);
+        registerNamedDockPanel(panelId, fallbackZone);
 }
 
 void MainComponent::activateDockPanel(const juce::String& panelId, CreationDock::DockTargetZone fallbackZone)
@@ -4399,8 +4419,8 @@ void MainComponent::activateDockPanel(const juce::String& panelId, CreationDock:
     if (dockManager == nullptr)
         return;
 
-    if (! dockManager->isPanelOpen(panelId))
-        dockManager->showPanel(panelId, fallbackZone);
+    if (! dockManager->isRegistered(panelId))
+        registerNamedDockPanel(panelId, fallbackZone);
     else
         dockManager->activatePanel(panelId);
 
@@ -6543,9 +6563,9 @@ bool MainComponent::restoreFoleyAsset(const creation::assets::AssetDescriptor& a
     if (! projectSession.readEntry(asset.logicalPath, data))
         return false;
 
-    auto celgText = juce::String::createStringFromData(data.getData(), (int) data.getSize());
+    auto frgraphText = juce::String::createStringFromData(data.getData(), (int) data.getSize());
     juce::String errorMessage;
-    if (! foleyPanel.loadGraph(celgText, errorMessage))
+    if (! foleyPanel.loadGraph(frgraphText, errorMessage))
         return false;
 
     currentFoleyAssetId = asset.id;

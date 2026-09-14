@@ -1,7 +1,10 @@
 # Creation Station — Control Registry Seed List
 
-Concrete `set_state`/`get_state` entries (see `shared/CEL/docs/
-CEL_V2_LANGUAGE_SPEC.md` section 6 for the mechanism) for Creation
+Concrete `set_state`/`get_state` entries (the mechanism was originally
+specified in CEL's own language spec, section 6 -- CEL has since been
+removed suite-wide and replaced with FRust; no FRust-side equivalent spec
+exists yet, so this doc's state-vs-action split is carried forward as
+intent only until that's re-established) for Creation
 Station, seeded from a real investigation of the current codebase
 (2026-08-02), not guessed. Every entry below cites the exact getter/
 setter it should be wired to, or flags that one needs to be added first.
@@ -106,12 +109,13 @@ investigation**: Foley clip placement uses a hardcoded
 `foleySecondsPerBeat = 0.5` (`WorkstationAudioEngine.cpp:102`, i.e. a
 fixed 120 BPM grid), not `TimelineModel::getTempoBpm()`. If Foley
 clips are meant to follow the project's actual tempo, this is already
-wrong today, independent of anything CEL-related — worth its own fix
-regardless of when/whether the control registry work happens.
+wrong today, independent of anything language/registry-related — worth its
+own fix regardless of when/whether the control registry work happens.
 
 ## Explicitly out of scope for `set_state`/`get_state` — real intrinsics instead
 
-Per the state-vs-action split in `CEL_V2_LANGUAGE_SPEC.md` section 6.1:
+Per the state-vs-action split originally specified in CEL's own (now
+removed) language spec, section 6.1:
 `create_track(name, kind) -> entity`, `remove_track(entity)`,
 `add_plugin(track, pluginName) -> pluginHandle`,
 `request_all_notes_off()` — these create/destroy things or are one-shot

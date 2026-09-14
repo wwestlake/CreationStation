@@ -1,6 +1,10 @@
 #include "FoleyPanel.h"
 
-#include <lang/nodegen/foley_graph_to_source.h>
+#include <algorithm>
+#include <map>
+#include <sstream>
+
+#include <node_system/frust_codegen.h>
 
 FoleyPanel::FoleyPanel()
 {
@@ -28,7 +32,7 @@ FoleyPanel::FoleyPanel()
     sourceView_.setFont(juce::Font(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain)));
     sourceView_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff0e1218));
     sourceView_.setColour(juce::TextEditor::textColourId, juce::Colour(0xffd7e3f0));
-    sourceView_.setText("Generated CEL source will appear here.", juce::dontSendNotification);
+    sourceView_.setText("Generated FRust source will appear here.", juce::dontSendNotification);
     addAndMakeVisible(sourceView_);
 
     addAndMakeVisible(palette_);
@@ -44,22 +48,56 @@ FoleyPanel::FoleyPanel()
 
 void FoleyPanel::generateSource()
 {
-    auto result = ce::lang::nodegen::foley::GenerateFoleySource(graph_, registry_);
-    if (result.ok)
+    // One compiled function per On Trigger node -- same "each Event node is
+    // its own entry point, concatenated into one file" shape CreationEngine's
+    // PodEditorPanel uses for its own multi-entry Behavior graphs, since a
+    // Foley setup legitimately has more than one independent cue.
+    std::vector<ce::node_system::NodeId> triggerNodes;
+    for (const auto& [id, node] : graph_.Nodes())
+        if (node->TypeName() == cw::foleynodes::NodeType::OnTrigger)
+            triggerNodes.push_back(id);
+
+    if (triggerNodes.empty())
     {
-        sourceView_.setText(result.source, juce::dontSendNotification);
-        statusLabel_.setText("Generated OK.", juce::dontSendNotification);
-        statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff67e8a5));
+        sourceView_.setText("Add an On Trigger node to generate a cue.", juce::dontSendNotification);
+        statusLabel_.setText("Nothing to generate", juce::dontSendNotification);
+        statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+        return;
     }
-    else
+    std::sort(triggerNodes.begin(), triggerNodes.end());
+
+    std::map<std::string, std::string> externsByName;
+    std::vector<std::string> functionBodies;
+    for (const auto triggerId : triggerNodes)
     {
-        juce::String combined;
-        for (const auto& error : result.errors)
-            combined << error << "\n";
-        sourceView_.setText(combined, juce::dontSendNotification);
-        statusLabel_.setText("Generation failed - see errors below.", juce::dontSendNotification);
-        statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffff6b6b));
+        ce::node_system::FrustGraphCompileOptions options;
+        options.functionName = "on_trigger_" + std::to_string(triggerId);
+        options.entryNode = triggerId;
+        options.emitManifestAndImports = false;
+
+        const auto result = ce::node_system::CompileBehaviorGraphToFrust(graph_, libraries_, options);
+        if (!result.ok)
+        {
+            sourceView_.setText(juce::String(result.error), juce::dontSendNotification);
+            statusLabel_.setText("Generation failed - see errors below.", juce::dontSendNotification);
+            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffff6b6b));
+            return;
+        }
+        functionBodies.push_back(result.source);
+        for (const auto& decl : result.externDeclarations)
+            externsByName[decl] = decl;
     }
+
+    std::ostringstream combined;
+    for (const auto& [name, decl] : externsByName) { (void) name; combined << decl; }
+    if (!externsByName.empty())
+        combined << "\n";
+    for (const auto& body : functionBodies)
+        combined << body << "\n";
+
+    sourceView_.setText(combined.str(), juce::dontSendNotification);
+    statusLabel_.setText("Generated OK.", juce::dontSendNotification);
+    statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff67e8a5));
 }
 
 juce::String FoleyPanel::serializeGraph() const
@@ -67,10 +105,10 @@ juce::String FoleyPanel::serializeGraph() const
     return ce::node_system::SerializeGraph(graph_);
 }
 
-bool FoleyPanel::loadGraph(const juce::String& celgText, juce::String& errorMessage)
+bool FoleyPanel::loadGraph(const juce::String& frgraphText, juce::String& errorMessage)
 {
     std::string errorOut;
-    auto loaded = ce::node_system::DeserializeGraph(celgText.toStdString(), errorOut);
+    auto loaded = ce::node_system::DeserializeGraph(frgraphText.toStdString(), errorOut);
     if (loaded == nullptr)
     {
         errorMessage = juce::String(errorOut);

@@ -9,7 +9,7 @@ Creation apps in active integration work today:
 Creation Movie and Creation Live should adopt this same contract after
 the Station/Engine path is proven stable.
 
-The goal is seamless transfer of assets, products, and CEL code between
+The goal is seamless transfer of assets, products, and FRust code between
 apps without path fragility, silent mutation, or per-app private formats
 drifting apart.
 
@@ -20,8 +20,8 @@ drifting apart.
 3. Exact asset versions must be immutable.
 4. Projects may reference shared assets without copying them.
 5. Projects may optionally embed or vendor assets for portability.
-6. CEL code with no domain-specific calls must compile in every app.
-7. Domain-specific CEL must be explicitly gated by host policy.
+6. FRust code with no domain-specific calls must compile in every app.
+7. Domain-specific FRust must be explicitly gated by host policy.
 
 ## Two Storage Layers
 
@@ -33,8 +33,8 @@ The suite asset store is the canonical shared resource system for:
 
 - audio
 - midi
-- CEL source
-- generated CEL graphs
+- FRust source
+- generated FRust graphs
 - presets
 - textures
 - meshes
@@ -130,8 +130,8 @@ Recommended `metadata` examples:
 
 - audio: sample rate, channels, bit depth, duration, peak, loudness
 - midi: track count, tempo hints, duration
-- CEL: declared domains, exports, ABI/runtime version
-- graph: source language, generated CEL checksum, node catalog version
+- FRust: declared domains, exports, ABI/runtime version
+- graph: source language, generated FRust checksum, node catalog version
 
 ## Content Addressing
 
@@ -176,15 +176,15 @@ Vendoring is allowed for:
 When vendored, the project should still preserve the original shared
 asset reference in metadata so provenance is not lost.
 
-## Shared CEL Rules
+## Shared FRust Rules
 
-CEL is the shared procedural language across the Creation suite.
+FRust is the shared procedural language across the Creation suite.
 
-There are two categories of CEL:
+There are two categories of FRust:
 
-### Core CEL
+### Core FRust
 
-Core CEL contains only:
+Core FRust contains only:
 
 - language syntax
 - control flow
@@ -192,11 +192,11 @@ Core CEL contains only:
 - generic data transforms
 - non-domain-specific utility calls
 
-Core CEL must compile in every Creation app.
+Core FRust must compile in every Creation app.
 
-### Host CEL
+### Host FRust
 
-Host CEL uses app-specific intrinsic domains such as:
+Host FRust uses app-specific intrinsic domains such as:
 
 - `world`
 - `audio`
@@ -206,12 +206,12 @@ Host CEL uses app-specific intrinsic domains such as:
 - `performance`
 - later Movie/Live domains
 
-Host CEL may compile only in apps whose policy explicitly allows those
+Host FRust may compile only in apps whose policy explicitly allows those
 domains.
 
-## CEL Asset Manifest
+## FRust Asset Manifest
 
-Every shared CEL asset should carry a manifest describing:
+Every shared FRust asset should carry a manifest describing:
 
 - `asset_id`
 - `version_id`
@@ -225,19 +225,19 @@ Every shared CEL asset should carry a manifest describing:
 
 `generated_from` may point to:
 
-- user-authored `.cel`
+- user-authored `.frust`
 - node graph asset
 - future higher-level authoring tools
 
-## Node Graph Relationship To CEL
+## Node Graph Relationship To FRust
 
 Visual node graphs are not a separate final scripting language.
 
 The suite standard is:
 
 - node graph is an authoring format
-- CEL is the executable language
-- graph generation must target CEL
+- FRust is the executable language
+- graph generation must target FRust
 - diagnostics should map back to graph nodes where possible
 
 This keeps one executable language family across apps instead of one
@@ -261,9 +261,9 @@ Any asset may depend on other assets by shared references.
 
 Examples:
 
-- a Station patch graph may depend on wave assets and CEL helpers
-- an Engine scene may depend on mesh, texture, and CEL helper assets
-- a shared CEL library may depend only on other CEL libraries
+- a Station patch graph may depend on wave assets and FRust helpers
+- an Engine scene may depend on mesh, texture, and FRust helper assets
+- a shared FRust library may depend only on other FRust libraries
 
 Dependencies must be recorded as references to exact versions or to a
 declared resolution policy.
@@ -283,9 +283,9 @@ If not, the app must fail clearly and non-destructively.
 
 For the first integration pass:
 
-1. Creation Engine's CEL implementation is the reference language core.
+1. Creation Engine's FRust implementation is the reference language core.
 2. Creation Station replaces its current private language path with the
-   shared CEL path.
+   shared FRust path.
 3. Creation Station and Creation Engine converge on shared asset
    references before Movie/Live begin deeper implementation.
 4. The existing Engine zip-backed VFS work is the reference direction
@@ -297,8 +297,8 @@ For the first integration pass:
 
 1. Define the shared asset reference structure in code.
 2. Add exact-version asset references to Creation Station project data.
-3. Add capability manifests for CEL assets.
-4. Expand CEL domain gating beyond `core` and `world` as Station audio
+3. Add capability manifests for FRust assets.
+4. Expand FRust domain gating beyond `core` and `world` as Station audio
    intrinsics come online.
 5. Introduce a suite asset catalog/index layer above per-app project
    storage.
