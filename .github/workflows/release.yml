@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: wwestlake/Creation-Suite
-          ref: claude/development
+          ref: master
 
       - name: Checkout this app at the release tag
         uses: actions/checkout@v4
@@ -181,6 +181,11 @@ jobs:
           $exe = Get-ChildItem $installRoot -Recurse -File | Where-Object { $_.Extension -eq '.exe' } | Select-Object -First 1
           if (-not $exe) {
             throw "Could not find the packaged executable for ${{ steps.classify.outputs.display_name }}."
+          }
+
+          $betaGuide = "docs/Djehuti-Station-Beta-Tester-Guide.md"
+          if (Test-Path $betaGuide) {
+            Copy-Item -Path $betaGuide -Destination (Join-Path $installRoot "Beta-Tester-Guide.md") -Force
           }
 
           $zipName = Join-Path $PWD ("artifacts\{0}.zip" -f "${{ steps.classify.outputs.tag }}")
