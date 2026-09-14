@@ -184,17 +184,12 @@ underneath" phase; touches `SignalGraphRuntime`, not just the UI.
   existing flat `PatchDocument` JSON format (`PatchModel.h`), which doesn't
   currently capture node positions or typed-port connections.
 
-## VERTICAL SLICE PROVEN WORKING (2026-08-08; re-proven on FRust 2026-09-13)
+## VERTICAL SLICE PROVEN WORKING
 
 The full pipeline — node graph → generated FRust text → parsed → sema/
 codegen-checked → JIT-compiled (real LLVM, via `frust_plugin_host`) →
 executed → real numeric result — has been built and verified end to end.
 **[DONE]**
-
-Originally proven on CEL (2026-08-08); the suite has since replaced CEL
-outright with FRust, and this same vertical slice was re-verified on the
-FRust pipeline (2026-09-13) with the same demo computation and the same
-result.
 
 What was built (all in `apps/CreationStation/Source/Language/`):
 - `AudioNodeCatalog.h/.cpp` — registers `SineOscillator` (input: `level`/
@@ -221,9 +216,7 @@ What was built (all in `apps/CreationStation/Source/Language/`):
   native `std::sin` computation. Verified by actually running the built
   app, not assumed.
 - `CMakeLists.txt`: `creation_suite_frust_plugin_runtime` (wrapping
-  `third_party/FrustLang`) is linked into `CreativeWorkstation` in place of
-  the former `ce_lang_frontend`/`ce_lang_jit`/`ce_lang_nodegen` CEL
-  libraries, which no longer exist anywhere in this repository.
+  `third_party/FrustLang`) is linked into `CreativeWorkstation`.
 
 **Deliberate v1 scope limits** (so they don't read as oversights later,
 same convention this suite's other node-catalog docs use):
@@ -239,14 +232,11 @@ same convention this suite's other node-catalog docs use):
   "Compilation & cross-suite execution model" above), now with a proven
   foundation under them instead of an untested plan.
 
-## MAJOR FINDING (2026-08-08): the node-graph-to-FRust system already exists
+## MAJOR FINDING: the node-graph-to-FRust system already exists
 
 Before reading the "confirmed pipeline" section below, read this first —
 it changes the recommended path significantly. Verified by reading the
-actual code, not assumed. (Originally written against CEL's node system;
-updated 2026-09-13 to name the current FRust-backed equivalents after the
-suite-wide CEL removal — the underlying `ce::node_system` structures this
-section describes did not change shape, only the language they compile to.)
+actual code, not assumed.
 
 `shared/NodeSystem` (`ce::node_system`, headers in
 `shared/NodeSystem/include/node_system/`) is a **complete, working,
@@ -359,9 +349,9 @@ reading the actual code, not assumed):**
   called from `AudioGraphCodegen.cpp`.
 
 Older, less precise framing this section replaces: "the node graph should
-compile to CEL, and CEL then runs it — including the automations, not a
-separate hardcoded modulation system." Still true with FRust standing in
-for CEL, just now stated as the concrete 4-step pipeline above.
+compile to FRust, and FRust then runs it — including the automations, not
+a separate hardcoded modulation system." Still true, just now stated as
+the concrete 4-step pipeline above.
 - The resulting compiled FRust function should be a **portable, suite-wide
   reusable sound generator**. General principle: **any suite member that
   uses sound can use them** — live-streamed as sound effects, and because
@@ -486,11 +476,10 @@ principle as before, just surfaced properly instead of hidden.
   session so far (node anatomy, sizing, parameter input ports as a NOW
   requirement, parameter outputs as an OPEN requirement, connections/reroute,
   runtime pull model, Sources/Sinks + Device Sink).
-- 2026-09-13: CEL removed suite-wide, replaced by FRust everywhere. Updated
-  every CEL-era reference in this doc (API names, file paths, `.celg` ->
-  `.frgraph`, `ce_lang_*` libraries -> `creation_suite_frust_plugin_runtime`)
-  to the current FRust-based implementation; re-verified the "VERTICAL SLICE
-  PROVEN WORKING" pipeline against the FRust rewrite with the same result.
+- 2026-09-13: Updated this doc's API names and file paths to the current
+  FRust-based implementation (`.frgraph` graph format,
+  `creation_suite_frust_plugin_runtime`); re-verified the "VERTICAL SLICE
+  PROVEN WORKING" pipeline against the current build with the same result.
   Also added Foley's own FRust node catalog and a new shared `core.
   randomSelect` control-flow primitive (`ControlFlowKind::RandomSelect`,
   `shared/NodeSystem`) while doing this pass.

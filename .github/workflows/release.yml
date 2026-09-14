@@ -60,18 +60,15 @@ jobs:
           # third_party/FrustLang's grammar generation needs
           # win_bison.exe/win_flex.exe.
           #
-          # KNOWN CI GAP (2026-09-13, post CEL removal): Station now links
-          # shared/FrustPluginRuntime, which pulls in third_party/FrustLang's
-          # real LLVM-backed JIT (creation_suite_frust_plugin_runtime) --
-          # unlike the old shared/CEL wiring this comment used to describe
-          # ("Station only links ce_lang_frontend/node_system, no JIT, no
-          # LLVM/DIA SDK concerns"), which is no longer true. This workflow
-          # has no LLVM/vcpkg provisioning step at all, so a real release
-          # build through this pipeline will fail at configure time until
-          # one is added -- see Creation Engine's own release workflow for
-          # the reference pattern (restoring a pre-built vcpkg_installed
-          # LLVM rather than building it in CI). Not fixed here: only
-          # triggers on a release tag, and the suite has none yet.
+          # KNOWN CI GAP: Station links shared/FrustPluginRuntime, which
+          # pulls in third_party/FrustLang's real LLVM-backed JIT
+          # (creation_suite_frust_plugin_runtime). This workflow has no
+          # LLVM/vcpkg provisioning step at all, so a real release build
+          # through this pipeline will fail at configure time until one is
+          # added -- see Creation Engine's own release workflow for the
+          # reference pattern (restoring a pre-built vcpkg_installed LLVM
+          # rather than building it in CI). Not fixed here: only triggers
+          # on a release tag, and the suite has none yet.
           $release = Invoke-RestMethod -Uri "https://api.github.com/repos/lexxmark/winflexbison/releases/latest"
           $asset = $release.assets | Where-Object { $_.name -like "*win_flex_bison*.zip" } | Select-Object -First 1
           if (-not $asset) {
