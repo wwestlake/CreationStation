@@ -19,6 +19,9 @@
 #include "ControlSurface/ControlSurfaceMappingStore.h"
 #include "Content/ContentLibrary.h"
 #include "Content/ContentApiClient.h"
+#include "Feedback/FeedbackSettingsStore.h"
+#include "Feedback/FeedbackMetricsClient.h"
+#include "Feedback/MetricsCollector.h"
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectAssetService.h>
 #include <creation/assets/ProjectSession.h>
@@ -45,6 +48,7 @@
 #include "Views/SignalLabPanel.h"
 #include "Views/TrackerPanel.h"
 #include "Views/TourGuideOverlay.h"
+#include "Views/FeedbackDialog.h"
 #include <creation/ui/SuiteSettingsPanel.h>
 
 class MainComponent final : public juce::Component,
@@ -256,6 +260,12 @@ private:
     juce::Component::SafePointer<FxStackPanel> fxStackPanel;
     std::unique_ptr<juce::DocumentWindow> suiteSettingsWindow;
     juce::Component::SafePointer<SuiteSettingsPanel> suiteSettingsPanel;
+    std::unique_ptr<juce::DocumentWindow> feedbackWindow;
+    juce::Component::SafePointer<FeedbackDialog> feedbackDialogPanel;
+    creation_station::FeedbackSettingsStore::Settings feedbackSettings;
+    creation_station::FeedbackMetricsClient feedbackMetricsClient;
+    creation_station::MetricsCollector metricsCollector;
+    void showFeedbackWindow();
     std::unique_ptr<juce::DocumentWindow> midiEditorWindow;
     juce::Component::SafePointer<MidiEditorPanel> midiEditorPanel;
     std::array<std::unique_ptr<juce::DocumentWindow>, 12> workspacePopoutWindows;

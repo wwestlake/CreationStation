@@ -237,6 +237,12 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Content/ContentLibrary.h
     Source/Content/ContentApiClient.cpp
     Source/Content/ContentApiClient.h
+    Source/Feedback/FeedbackSettingsStore.cpp
+    Source/Feedback/FeedbackSettingsStore.h
+    Source/Feedback/FeedbackMetricsClient.cpp
+    Source/Feedback/FeedbackMetricsClient.h
+    Source/Feedback/MetricsCollector.cpp
+    Source/Feedback/MetricsCollector.h
     Source/Project/ProjectStorage.cpp
     Source/Project/ProjectStorage.h
     Source/Suite/SuiteSettings.h
@@ -280,6 +286,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/GraphPanel.h
     Source/Views/TourGuideOverlay.cpp
     Source/Views/TourGuideOverlay.h
+    Source/Views/FeedbackDialog.cpp
+    Source/Views/FeedbackDialog.h
     Source/Views/MidiEditorPanel.cpp
     Source/Views/MidiEditorPanel.h
     Source/Views/MixerPanel.cpp
