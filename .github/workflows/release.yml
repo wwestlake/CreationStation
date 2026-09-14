@@ -34,16 +34,20 @@ jobs:
         with:
           repository: wwestlake/Creation-Suite
           ref: master
+          # third_party/FrustLang is a submodule of the UMBRELLA repo, not
+          # of CreationStation (confirmed: CreationStation has no
+          # .gitmodules at all) -- without this it's an empty directory in
+          # CI, and shared/FrustPluginRuntime's CMakeLists.txt EXISTS check
+          # for it fails, falling through to its own FATAL_ERROR branch.
+          # A previous fix mistakenly added submodules: true to the OTHER
+          # checkout step below (CreationStation's own, which has no
+          # submodules of its own -- harmless but useless there).
+          submodules: true
 
       - name: Checkout this app at the release tag
         uses: actions/checkout@v4
         with:
           path: apps/CreationStation
-          # third_party/FrustLang is a submodule of THIS repo -- without
-          # this it's an empty directory in CI, and
-          # shared/FrustPluginRuntime's CMakeLists.txt EXISTS check for it
-          # fails, falling through to its own FATAL_ERROR branch.
-          submodules: true
 
       - name: Fetch JUCE
         shell: pwsh
