@@ -90,7 +90,7 @@ jobs:
           switch -Regex -CaseSensitive ($tag) {
             '^creation-station-v(?<version>\d+\.\d+\.\d+)(?:-(?<channel>[0-9A-Za-z.-]+))?$' {
               $productSlug = "creation-station"
-              $displayName = "Creation Station"
+              $displayName = "Djehuti Station"
               $kind = "app"
               $cmakeTarget = "CreativeWorkstation"
               $componentName = "CreativeWorkstation"
