@@ -7446,6 +7446,7 @@ bool MainComponent::startRecordingSession()
 
     juce::Array<WorkstationAudioEngine::RecordingTarget> recordingTargets;
     juce::Array<int> midiRecordingTracks;
+    juce::StringArray tracksRejectedForRecording;
     const auto timestamp = makeRecordingTimestamp();
 
     for (int trackIndex = 0; trackIndex < engine.getTrackCount(); ++trackIndex)
@@ -7456,6 +7457,12 @@ bool MainComponent::startRecordingSession()
         if (timelineModel.getTrackKind(trackIndex) == cs::TrackKind::midi)
         {
             midiRecordingTracks.add(trackIndex);
+            continue;
+        }
+
+        if (! cs::canTrackContainClip(timelineModel.getTrackKind(trackIndex), cs::ClipKind::audio))
+        {
+            tracksRejectedForRecording.add(engine.getTrackName(trackIndex));
             continue;
         }
 
@@ -7497,12 +7504,18 @@ bool MainComponent::startRecordingSession()
     const auto totalArmedCount = recordingTargets.size() + midiRecordingTracks.size();
     if (totalArmedCount == 0)
     {
-        transportBar.setStatusText("Record failed: no armed tracks were available for recording.");
+        transportBar.setStatusText(tracksRejectedForRecording.isEmpty()
+            ? "Record failed: no armed tracks were available for recording."
+            : "Record failed: " + tracksRejectedForRecording.joinIntoString(", ")
+                  + " cannot hold an audio recording (wrong track type).");
         return false;
     }
 
     trackerPanel.refreshTimelineView();
-    transportBar.setStatusText("Recording " + juce::String(totalArmedCount) + " track(s).");
+    transportBar.setStatusText(tracksRejectedForRecording.isEmpty()
+        ? "Recording " + juce::String(totalArmedCount) + " track(s)."
+        : "Recording " + juce::String(totalArmedCount) + " track(s) -- skipped "
+              + tracksRejectedForRecording.joinIntoString(", ") + " (wrong track type for audio).");
     recordView.setRecordingState(true, totalArmedCount == 1
                                             ? (recordingTargets.size() == 1 ? recordingTargets[0].file.getFileName()
                                                                              : juce::String("MIDI"))
@@ -7587,6 +7600,8 @@ void MainComponent::stopRecordingSession()
         midiTrackCount = recordedTrackIndices.size();
     }
 
+    juce::StringArray recordingSaveErrors;
+
     for (const auto& takeFile : takeFiles)
     {
         if (! takeFile.existsAsFile())
@@ -7595,8 +7610,9 @@ void MainComponent::stopRecordingSession()
         juce::String importError;
         if (! ensureProjectSessionActive(importError))
         {
-            transportBar.setStatusText(importError.isNotEmpty() ? importError
-                                                                : "Could not initialize project to save the recorded take.");
+            recordingSaveErrors.add((importError.isNotEmpty() ? importError
+                                                                : "Could not initialize project to save the recorded take.")
+                                     + " (" + takeFile.getFileName() + ")");
             continue;
         }
 
@@ -7606,13 +7622,13 @@ void MainComponent::stopRecordingSession()
         juce::MemoryBlock fileData;
         if (! takeFile.loadFileAsData(fileData))
         {
-            transportBar.setStatusText("Could not read recorded take: " + takeFile.getFileName());
+            recordingSaveErrors.add("Could not read recorded take: " + takeFile.getFileName());
             continue;
         }
 
         if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
         {
-            transportBar.setStatusText("Recorded take could not be registered in the project library.");
+            recordingSaveErrors.add("Recorded take could not be registered in the project library: " + takeFile.getFileName());
             continue;
         }
 
@@ -7631,7 +7647,8 @@ void MainComponent::stopRecordingSession()
 
         if (! projectSession.commit(importError))
         {
-            transportBar.setStatusText(importError.isNotEmpty() ? importError : "Could not save the recorded take.");
+            recordingSaveErrors.add((importError.isNotEmpty() ? importError : "Could not save the recorded take.")
+                                     + " (" + takeFile.getFileName() + ")");
             continue;
         }
 
@@ -7640,7 +7657,8 @@ void MainComponent::stopRecordingSession()
                                               creation::assets::MaterializationAccess::readOnly,
                                               lease, importError))
         {
-            transportBar.setStatusText(importError.isNotEmpty() ? importError : "Could not read back the recorded take.");
+            recordingSaveErrors.add((importError.isNotEmpty() ? importError : "Could not read back the recorded take.")
+                                     + " (" + takeFile.getFileName() + ")");
             continue;
         }
 
@@ -7670,7 +7688,11 @@ void MainComponent::stopRecordingSession()
     midiSurface.setTransportState(false, false);
 
     const auto totalTrackCount = takeFiles.size() + midiTrackCount;
-    transportBar.setStatusText("Recording stopped: " + juce::String(totalTrackCount) + " track(s).");
+    if (! recordingSaveErrors.isEmpty())
+        transportBar.setStatusText("Recording stopped, but " + juce::String(recordingSaveErrors.size())
+            + " take(s) failed to save to the project: " + recordingSaveErrors.joinIntoString(" | "));
+    else
+        transportBar.setStatusText("Recording stopped: " + juce::String(totalTrackCount) + " track(s).");
     recordView.setRecordingState(false, totalTrackCount == 1
                                              ? (takeFiles.size() == 1 ? takeFiles[0].getFileName() : juce::String("MIDI"))
                                              : juce::String(totalTrackCount) + " tracks");
