@@ -1,36 +1,38 @@
 #include "DslPanel.h"
 
-#include <sstream>
-
-#include "lang/ast.h"
-#include "lang/compiler.h"
-#include "lang/diagnostics.h"
-#include "lang/sema.h"
-
+// DslPanel's "Compile" button shells out to the real frust_compiler CLI in
+// --emit-obj mode (parses, runs sema/codegen, emits an object file, never
+// executes anything) rather than linking an embeddable FRust frontend
+// library -- FrustLang doesn't package its parser/sema as one today (see
+// CS_FRUST_COMPILER_EXECUTABLE's own comment in CMakeLists.txt). This also
+// means a bare, manifest-free patch compiles here exactly like it did under
+// CEL -- frust_plugin_host's JIT load path (used by Signal Lab/Foley's real
+// node-graph output) refuses to load anything without a `manifest "...";`
+// declaration, which would be unwanted boilerplate for a scratch patch.
 DslPanel::DslPanel()
 {
     setName("Code");
-    headerLabel.setText("Creation Engine Language (CEL)", juce::dontSendNotification);
+    headerLabel.setText("Djehuti Suite Language (FRust)", juce::dontSendNotification);
     headerLabel.setFont(juce::Font(24.0f).boldened());
     headerLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(headerLabel);
 
     sourceEditor.setMultiLine(true);
     sourceEditor.setReturnKeyStartsNewLine(true);
-    sourceEditor.setText(R"(// Starter CEL patch
-func gain(input: float, amount: float) -> float {
-    return input * amount;
+    sourceEditor.setText(R"(// Starter FRust patch
+pub fn gain(input: f64, amount: f64) -> f64 = {
+    input * amount
 }
 )");
     addAndMakeVisible(sourceEditor);
 
     outputEditor.setMultiLine(true);
     outputEditor.setReadOnly(true);
-    outputEditor.setText("Compile to see CEL diagnostics.");
+    outputEditor.setText("Compile to see FRust diagnostics.");
     addAndMakeVisible(outputEditor);
 
     compileButton.onClick = [this] { compileSource(); };
-    compileButton.setTooltip("Parse and analyze the CEL source");
+    compileButton.setTooltip("Parse, analyze, and codegen the FRust source");
     addAndMakeVisible(compileButton);
 
     exportButton.onClick = [this]
@@ -38,7 +40,7 @@ func gain(input: float, amount: float) -> float {
         if (lastCompileSucceeded && onSourceExportRequested)
             onSourceExportRequested(sourceEditor.getText(), makeSuggestedFileName());
     };
-    exportButton.setTooltip("Export this source as a .cel file");
+    exportButton.setTooltip("Export this source as a .frust file");
     addAndMakeVisible(exportButton);
 
     saveButton.onClick = [this]
@@ -54,7 +56,7 @@ func gain(input: float, amount: float) -> float {
         if (onSourceLoadRequested)
             onSourceLoadRequested();
     };
-    loadButton.setTooltip("Load a saved .cel file");
+    loadButton.setTooltip("Load a saved .frust file");
     addAndMakeVisible(loadButton);
 
     compileSource();
@@ -97,35 +99,42 @@ void DslPanel::resized()
 
 void DslPanel::compileSource()
 {
-    std::istringstream stream(sourceEditor.getText().toStdString());
-    ce::lang::AstArena arena;
-    ce::lang::DiagnosticEngine diagnostics;
-    ce::lang::Program* program = ce::lang::ParseProgram(stream, arena, diagnostics);
-    if (program != nullptr && !diagnostics.HasErrors())
-        ce::lang::AnalyzeProgram(*program, diagnostics);
+    const auto scratchDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                 .getChildFile("djehuti_station_dsl_panel");
+    scratchDir.createDirectory();
+    const auto sourceFile = scratchDir.getChildFile("patch.frust");
+    const auto objectFile = scratchDir.getChildFile("patch.o");
+    sourceFile.replaceWithText(sourceEditor.getText());
 
-    lastCompileSucceeded = program != nullptr && !diagnostics.HasErrors();
+    juce::ChildProcess compilerProcess;
+    const juce::StringArray arguments {
+        CS_FRUST_COMPILER_EXECUTABLE,
+        "--emit-obj",
+        objectFile.getFullPathName(),
+        sourceFile.getFullPathName()
+    };
 
     juce::String output;
-    if (lastCompileSucceeded)
+    if (!compilerProcess.start(arguments, juce::ChildProcess::wantStdOut | juce::ChildProcess::wantStdErr))
     {
-        int functionCount = 0;
-        int globalCount = 0;
-        for (const auto* decl : program->decls)
-        {
-            if (decl->kind == ce::lang::DeclKind::Func)
-                ++functionCount;
-            else
-                ++globalCount;
-        }
-
-        output << functionCount << " function(s), " << globalCount << " global(s) parsed and analyzed cleanly.";
+        output = "Could not launch frust_compiler.";
+        lastCompileSucceeded = false;
     }
     else
     {
-        for (const auto& diagnostic : diagnostics.Diagnostics())
-            output << "Line " << diagnostic.loc.line << ": " << diagnostic.message << "\n";
+        output = compilerProcess.readAllProcessOutput();
+        compilerProcess.waitForProcessToFinish(10000);
+
+        // frust_compiler prints nothing at all on a clean --emit-obj compile
+        // (see its own Main.cpp) -- any output at all means a parse/sema/
+        // codegen diagnostic fired. Not the process exit code: a known,
+        // separately-tracked frust_compiler bug means it doesn't yet exit
+        // nonzero on a compile error, so exit code can't be trusted here.
+        lastCompileSucceeded = output.isEmpty();
     }
+
+    if (lastCompileSucceeded)
+        output = "Compiled cleanly.";
 
     outputEditor.setText(output, juce::dontSendNotification);
     exportButton.setEnabled(lastCompileSucceeded);

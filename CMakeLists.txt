@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-set(CREATION_STATION_VERSION "0.5.1" CACHE STRING "Creation Station product version")
+set(CREATION_STATION_VERSION "0.5.1" CACHE STRING "Djehuti Station product version")
 option(CREATION_STATION_ENABLE_LTO "Enable JUCE link-time optimization for Creation Station targets" ON)
 project(CreativeWorkstation VERSION ${CREATION_STATION_VERSION} LANGUAGES CXX)
 
@@ -12,7 +12,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/CMake/CreationSuiteBuildSettin
 creation_suite_require_juce()
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/CMake/CreationSharedLLVM.cmake")
-configure_creation_shared_llvm(CS "Creation Station")
+configure_creation_shared_llvm(CS "Djehuti Station")
 
 # Keep full optimizations in Release but still emit PDBs, so a crash dump collected from a
 # Release build can actually be resolved to real function names/line numbers instead of raw
@@ -119,20 +119,23 @@ if(EXISTS "${CREATION_SUITE_SHARED_DIR}/NodeEditorUI/CMakeLists.txt")
     set(CS_NODE_EDITOR_UI_TARGET creation_suite_node_editor_ui)
 endif()
 
-# Station's own scripting surface (the "Code" workspace tab) is CEL, the
-# one suite-wide language -- not a bespoke per-app DSL. ce_lang_frontend
-# (lexer/parser/sema/diagnostics) and node_system build with no LLVM
-# dependency at all; only the JIT half of shared/CEL needs LLVM, and this
-# panel only parses/validates source, it doesn't execute it.
+# Station's own scripting surface (the "Code" workspace tab) and its
+# Signal Lab node graph both target FRust, the one suite-wide language --
+# not a bespoke per-app DSL. node_system carries the graph model AND the
+# graph->FRust codegen (frust_codegen.cpp); creation_suite_frust_plugin_runtime
+# (shared/FrustPluginRuntime) wraps third_party/FrustLang's real
+# lexer/parser/sema/JIT for actually compiling and running the generated
+# source -- the same suite-level modules CreationEngine already uses for
+# its own node-to-FRust codegen, not a Station-local reimplementation.
 if(NOT TARGET node_system)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeSystem" CreationSuiteSharedNodeSystem)
 endif()
-if(NOT TARGET ce_lang_frontend)
-    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/CEL" CreationSuiteSharedCel)
+if(NOT TARGET creation_suite_frust_plugin_runtime)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FrustPluginRuntime" CreationSuiteSharedFrustPluginRuntime)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
-    PRODUCT_NAME "Creation Station"
+    PRODUCT_NAME "Djehuti Station"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationstation"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconBig.png"
@@ -166,7 +169,7 @@ add_custom_command(TARGET CreativeWorkstation POST_BUILD
 
 juce_add_plugin(CreationStationInstrument
     COMPANY_NAME "LagDaemon Software"
-    PRODUCT_NAME "Creation Station Instrument"
+    PRODUCT_NAME "Djehuti Station Instrument"
     BUNDLE_ID "com.creationstation.instrument"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
@@ -299,6 +302,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/SamplePackBuilderPanel.h
     Source/Views/FoleyPanel.cpp
     Source/Views/FoleyPanel.h
+    Source/Views/FoleyNodeCatalog.cpp
+    Source/Views/FoleyNodeCatalog.h
 )
 
 target_sources(CreationStationInstrument PRIVATE
@@ -314,17 +319,35 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_PLUGINHOST_VST3=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_VERSION>"
+    # AudioGraphSelfTest.cpp's real .frust node-library module -- same
+    # "compiler-provided absolute path" convention Creation Engine's own
+    # CE_CORE_NODE_LIBRARY uses for CoreNodesLibrary.frust.
+    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    # DslPanel's "Compile" button shells out to the real frust_compiler CLI
+    # (--emit-obj: parses, runs sema/codegen, and emits an object file, but
+    # never executes anything and never requires a `manifest "...";`
+    # declaration the way frust_plugin_host's JIT load path does) -- the
+    # right tool for a free-form scratch/patch editor that isn't a loadable
+    # plugin. frust_compiler is built as part of the FrustPluginRuntime
+    # subdirectory above, so its build output path is already known here.
+    CS_FRUST_COMPILER_EXECUTABLE="$<TARGET_FILE:frust_compiler>"
 )
 
 target_include_directories(CreativeWorkstation PRIVATE
     "${CREATION_SUITE_SHARED_DIR}/JuceDocking/include"
 )
 
+# CS_FRUST_COMPILER_EXECUTABLE above only bakes in the path -- this makes
+# sure the exe is actually built (and, on Windows, its PDB/DLL deps are
+# up to date) before CreativeWorkstation, since nothing else in this
+# target's own source tree references the frust_compiler target.
+add_dependencies(CreativeWorkstation frust_compiler)
+
 if(CREATION_STATION_ENABLE_ASIO)
     if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
         message(FATAL_ERROR
             "CREATION_STATION_ENABLE_ASIO is ON, but iasiodrv.h was not found.\n"
-            "Creation Station does not vendor the Steinberg ASIO SDK in this repository.\n"
+            "Djehuti Station does not vendor the Steinberg ASIO SDK in this repository.\n"
             "Install or clone the ASIO SDK separately, then configure one of:\n"
             "  -DCREATION_STATION_ASIO_SDK_DIR=<path-to-folder-containing-iasiodrv.h>\n"
             "  CREATION_STATION_ASIO_SDK_DIR environment variable\n"
@@ -363,9 +386,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_NODE_EDITOR_UI_TARGET}
     CreationDock
     creation_station_language_host
-    ce_lang_frontend
-    ce_lang_jit
-    ce_lang_nodegen
+    creation_suite_frust_plugin_runtime
     node_system
     juce::juce_audio_devices
     juce::juce_audio_processors
@@ -420,7 +441,7 @@ include(cmake/CreationStationPlugin.cmake)
 # (the wrappers make it automatically for every other in-house plugin).
 creation_station_copy_plugin_to_scanned_folder(CreationStationInstrument)
 
-add_creation_station_effect_plugin(CreationStationCompressor "Creation Station Compressor" CSCp "Fx")
+add_creation_station_effect_plugin(CreationStationCompressor "Djehuti Station Compressor" CSCp "Fx")
 target_sources(CreationStationCompressor PRIVATE
     Source/Plugins/Compressor/CreationStationCompressorProcessor.cpp
     Source/Plugins/Compressor/CreationStationCompressorProcessor.h
@@ -428,7 +449,7 @@ target_sources(CreationStationCompressor PRIVATE
     Source/Plugins/Compressor/CreationStationCompressorEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationLimiter "Creation Station Limiter" CSLm "Fx")
+add_creation_station_effect_plugin(CreationStationLimiter "Djehuti Station Limiter" CSLm "Fx")
 target_sources(CreationStationLimiter PRIVATE
     Source/Plugins/Limiter/CreationStationLimiterProcessor.cpp
     Source/Plugins/Limiter/CreationStationLimiterProcessor.h
@@ -436,7 +457,7 @@ target_sources(CreationStationLimiter PRIVATE
     Source/Plugins/Limiter/CreationStationLimiterEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationDeEsser "Creation Station De-Esser" CSDe "Fx")
+add_creation_station_effect_plugin(CreationStationDeEsser "Djehuti Station De-Esser" CSDe "Fx")
 target_sources(CreationStationDeEsser PRIVATE
     Source/Plugins/DeEsser/CreationStationDeEsserProcessor.cpp
     Source/Plugins/DeEsser/CreationStationDeEsserProcessor.h
@@ -444,7 +465,7 @@ target_sources(CreationStationDeEsser PRIVATE
     Source/Plugins/DeEsser/CreationStationDeEsserEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationPhaser "Creation Station Phaser" CSPh "Fx")
+add_creation_station_effect_plugin(CreationStationPhaser "Djehuti Station Phaser" CSPh "Fx")
 target_sources(CreationStationPhaser PRIVATE
     Source/Plugins/Phaser/CreationStationPhaserProcessor.cpp
     Source/Plugins/Phaser/CreationStationPhaserProcessor.h
@@ -452,7 +473,7 @@ target_sources(CreationStationPhaser PRIVATE
     Source/Plugins/Phaser/CreationStationPhaserEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationChorus "Creation Station Chorus" CSCh "Fx")
+add_creation_station_effect_plugin(CreationStationChorus "Djehuti Station Chorus" CSCh "Fx")
 target_sources(CreationStationChorus PRIVATE
     Source/Plugins/Chorus/CreationStationChorusProcessor.cpp
     Source/Plugins/Chorus/CreationStationChorusProcessor.h
@@ -460,7 +481,7 @@ target_sources(CreationStationChorus PRIVATE
     Source/Plugins/Chorus/CreationStationChorusEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationDelay "Creation Station Delay" CSDl "Fx")
+add_creation_station_effect_plugin(CreationStationDelay "Djehuti Station Delay" CSDl "Fx")
 target_sources(CreationStationDelay PRIVATE
     Source/Plugins/Delay/CreationStationDelayProcessor.cpp
     Source/Plugins/Delay/CreationStationDelayProcessor.h
@@ -468,7 +489,7 @@ target_sources(CreationStationDelay PRIVATE
     Source/Plugins/Delay/CreationStationDelayEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationReverb "Creation Station Reverb" CSRv "Fx")
+add_creation_station_effect_plugin(CreationStationReverb "Djehuti Station Reverb" CSRv "Fx")
 target_sources(CreationStationReverb PRIVATE
     Source/Plugins/Reverb/CreationStationReverbProcessor.cpp
     Source/Plugins/Reverb/CreationStationReverbProcessor.h
@@ -476,7 +497,7 @@ target_sources(CreationStationReverb PRIVATE
     Source/Plugins/Reverb/CreationStationReverbEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationOverdrive "Creation Station Overdrive" CSOd "Fx")
+add_creation_station_effect_plugin(CreationStationOverdrive "Djehuti Station Overdrive" CSOd "Fx")
 target_sources(CreationStationOverdrive PRIVATE
     Source/Plugins/Overdrive/CreationStationOverdriveProcessor.cpp
     Source/Plugins/Overdrive/CreationStationOverdriveProcessor.h
@@ -484,7 +505,7 @@ target_sources(CreationStationOverdrive PRIVATE
     Source/Plugins/Overdrive/CreationStationOverdriveEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationClipper "Creation Station Clipper" CSCp "Fx|Distortion")
+add_creation_station_effect_plugin(CreationStationClipper "Djehuti Station Clipper" CSCp "Fx|Distortion")
 target_sources(CreationStationClipper PRIVATE
     Source/Plugins/Clipper/CreationStationClipperProcessor.cpp
     Source/Plugins/Clipper/CreationStationClipperProcessor.h
@@ -492,7 +513,7 @@ target_sources(CreationStationClipper PRIVATE
     Source/Plugins/Clipper/CreationStationClipperEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationGate "Creation Station Gate" CSGt "Fx")
+add_creation_station_effect_plugin(CreationStationGate "Djehuti Station Gate" CSGt "Fx")
 target_sources(CreationStationGate PRIVATE
     Source/Plugins/Gate/CreationStationGateProcessor.cpp
     Source/Plugins/Gate/CreationStationGateProcessor.h
@@ -500,7 +521,7 @@ target_sources(CreationStationGate PRIVATE
     Source/Plugins/Gate/CreationStationGateEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationParametricEQ "Creation Station Parametric EQ" CSEq "EQ")
+add_creation_station_effect_plugin(CreationStationParametricEQ "Djehuti Station Parametric EQ" CSEq "EQ")
 target_sources(CreationStationParametricEQ PRIVATE
     Source/Plugins/ParametricEQ/CreationStationParametricEQProcessor.cpp
     Source/Plugins/ParametricEQ/CreationStationParametricEQProcessor.h
@@ -508,7 +529,7 @@ target_sources(CreationStationParametricEQ PRIVATE
     Source/Plugins/ParametricEQ/CreationStationParametricEQEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationVocalFocus "Creation Station Vocal Focus" CSVf "Fx")
+add_creation_station_effect_plugin(CreationStationVocalFocus "Djehuti Station Vocal Focus" CSVf "Fx")
 target_sources(CreationStationVocalFocus PRIVATE
     Source/Plugins/VocalFocus/CreationStationVocalFocusProcessor.cpp
     Source/Plugins/VocalFocus/CreationStationVocalFocusProcessor.h
@@ -516,7 +537,7 @@ target_sources(CreationStationVocalFocus PRIVATE
     Source/Plugins/VocalFocus/CreationStationVocalFocusEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationTune "Creation Station Tune" CSTn "Fx|Pitch Shift")
+add_creation_station_effect_plugin(CreationStationTune "Djehuti Station Tune" CSTn "Fx|Pitch Shift")
 target_sources(CreationStationTune PRIVATE
     Source/Plugins/Tune/CreationStationTuneProcessor.cpp
     Source/Plugins/Tune/CreationStationTuneProcessor.h
@@ -526,7 +547,7 @@ target_sources(CreationStationTune PRIVATE
     Source/Audio/SamplePackBuilder/PitchDetector.h
 )
 
-add_creation_station_effect_plugin(CreationStationDynamicEQ "Creation Station Dynamic EQ" CSDq "Fx|EQ")
+add_creation_station_effect_plugin(CreationStationDynamicEQ "Djehuti Station Dynamic EQ" CSDq "Fx|EQ")
 target_sources(CreationStationDynamicEQ PRIVATE
     Source/Plugins/DynamicEQ/CreationStationDynamicEQProcessor.cpp
     Source/Plugins/DynamicEQ/CreationStationDynamicEQProcessor.h
@@ -534,7 +555,7 @@ target_sources(CreationStationDynamicEQ PRIVATE
     Source/Plugins/DynamicEQ/CreationStationDynamicEQEditor.h
 )
 
-add_creation_station_effect_plugin(CreationStationResonanceSuppressor "Creation Station Resonance Suppressor" CSRs "Fx|EQ")
+add_creation_station_effect_plugin(CreationStationResonanceSuppressor "Djehuti Station Resonance Suppressor" CSRs "Fx|EQ")
 target_sources(CreationStationResonanceSuppressor PRIVATE
     Source/Plugins/ResonanceSuppressor/CreationStationResonanceSuppressorProcessor.cpp
     Source/Plugins/ResonanceSuppressor/CreationStationResonanceSuppressorProcessor.h
@@ -542,7 +563,7 @@ target_sources(CreationStationResonanceSuppressor PRIVATE
     Source/Plugins/ResonanceSuppressor/CreationStationResonanceSuppressorEditor.h
 )
 
-add_creation_station_instrument_plugin(CreationStationSamplePlayer "Creation Station Sample Player" CSSp "Instrument|Sampler")
+add_creation_station_instrument_plugin(CreationStationSamplePlayer "Djehuti Station Sample Player" CSSp "Instrument|Sampler")
 target_sources(CreationStationSamplePlayer PRIVATE
     Source/Plugins/SamplePlayer/CreationStationSamplePlayerProcessor.cpp
     Source/Plugins/SamplePlayer/CreationStationSamplePlayerProcessor.h
@@ -574,19 +595,19 @@ install(TARGETS CreativeWorkstation
 )
 install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
-set(CPACK_PACKAGE_NAME "Creation Station")
+set(CPACK_PACKAGE_NAME "Djehuti Station")
 set(CPACK_PACKAGE_VENDOR "LagDaemon Software")
 set(CPACK_PACKAGE_CONTACT "LagDaemon Software")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Creation Station")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Djehuti Station")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "creation-station-${CPACK_PACKAGE_VERSION}-win64")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "Creation Station")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Djehuti Station")
 set(CPACK_GENERATOR "ZIP;WIX")
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_WIX_COMPONENT_INSTALL ON)
-set(CPACK_WIX_PROGRAM_MENU_FOLDER "Creation Station")
+set(CPACK_WIX_PROGRAM_MENU_FOLDER "Djehuti Station")
 set(CPACK_WIX_LICENSE_RTF "${CMAKE_CURRENT_SOURCE_DIR}/installer/EULA.rtf")
-set(CPACK_PACKAGE_EXECUTABLES "Creative Workstation" "Creation Station")
+set(CPACK_PACKAGE_EXECUTABLES "Creative Workstation" "Djehuti Station")
 set(CPACK_CREATE_DESKTOP_LINKS "Creative Workstation")
 set(CPACK_COMPONENTS_ALL CreativeWorkstation)
 set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")

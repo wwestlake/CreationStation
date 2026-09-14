@@ -45,7 +45,7 @@ That policy should be data-driven eventually, but a small hard gate per app is e
 
 ## Creation Station Integration Plan
 
-Resolved: the bespoke `Patina` DSL (lexer/parser/lowering/artifact format) has been removed outright. Station consumes the shared CEL frontend directly — no app-local language implementation, no host-dialect decision to make. Remaining steps:
+Resolved: the bespoke `Patina` DSL (lexer/parser/lowering/artifact format) has been removed outright. Station consumes FRust (third_party/FrustLang) directly — no app-local language implementation, no host-dialect decision to make. Remaining steps:
 
 1. add the same shared LLVM discovery helper used by Creation Engine/Movie/Live
 2. introduce a `Creation Station` language host policy layer beside the current language code

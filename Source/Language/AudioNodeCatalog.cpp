@@ -5,8 +5,10 @@ namespace cw::audionodes
 
 using ce::node_system::DataType;
 using ce::node_system::Domain;
+using ce::node_system::GraphTarget;
+using ce::node_system::NodeLibraryDescriptor;
+using ce::node_system::NodeLibraryRegistry;
 using ce::node_system::NodeTypeDescriptor;
-using ce::node_system::NodeTypeRegistry;
 using ce::node_system::PinKind;
 using ce::node_system::PinSignature;
 using ce::node_system::PinTypeDesc;
@@ -36,21 +38,58 @@ PinSignature Float(const char* name, float defaultValue)
 
 } // namespace
 
-NodeTypeRegistry BuildAudioNodeCatalog()
+NodeLibraryRegistry BuildAudioNodeCatalog()
 {
-    NodeTypeRegistry registry;
+    NodeLibraryRegistry libraries;
 
-    registry.Register(NodeTypeDescriptor{
-        NodeType::SineOscillator, Domain::Audio,
-        /*inputs=*/{ Float(PinName::Level, 0.65f) },
-        /*outputs=*/{ Signal(PinName::SignalOut) } });
+    NodeLibraryDescriptor library;
+    library.id = "signal_lab.nodes";
+    library.displayName = "Signal Lab Nodes";
+    library.target = GraphTarget::Behavior;
+    library.frustSourceModules = { kSignalLabFrustModule };
 
-    registry.Register(NodeTypeDescriptor{
-        NodeType::Output, Domain::Audio,
-        /*inputs=*/{ Signal(PinName::SignalIn) },
-        /*outputs=*/{} });
+    NodeTypeDescriptor sineOscillator;
+    sineOscillator.typeName = NodeType::SineOscillator;
+    // Domain::Core, not Domain::Audio: CompileBehaviorGraphToFrust's pure-
+    // single-value-node lowering only processes Domain::Core nodes today --
+    // Domain::Audio/Video/Animation/Material exist in the enum but have no
+    // handling anywhere in frust_codegen.cpp yet (a real, suite-level gap,
+    // not something specific to this node). This node's actual "it's audio"
+    // nature lives in displayName/category, which the compiler never reads.
+    sineOscillator.domain = Domain::Core;
+    sineOscillator.inputs = { Float(PinName::Level, 0.65f) };
+    sineOscillator.outputs = { Signal(PinName::SignalOut) };
+    sineOscillator.displayName = "Sine Oscillator";
+    sineOscillator.category = "Signal Lab";
+    // Real FRust function in BuiltInPlugins/SignalLabNodesLibrary.frust --
+    // this is metadata CompileBehaviorGraphToFrust reads to emit the actual
+    // call; it isn't interpreted at all until a graph actually reaches this
+    // node type during compilation.
+    sineOscillator.frustEntryPoint = "sine_oscillator";
+    library.nodeTypes.push_back(std::move(sineOscillator));
 
-    return registry;
+    // Output is a graph-EDITOR-side sink marker only -- it must never be
+    // handed to CompileBehaviorGraphToFrust as part of the compiled graph.
+    // TopologicalDataOrder walks every node in a graph unconditionally, and
+    // the compiler's pure-node loop hard-errors on any node whose output
+    // count isn't exactly 1 -- Output has zero. AudioGraphCodegen walks
+    // back from Output's input pin to find the real source node and builds
+    // a SEPARATE, Output-free graph for the actual compile call (resultNode/
+    // resultPin point straight at the source), exactly the same "single
+    // real computation node, no sink node in the compiled graph" shape
+    // Creation Engine's own node-codegen smoke tests already use. Output
+    // still needs a registered NodeTypeDescriptor (with no frustEntryPoint)
+    // so AddNode/the editor can place and validate it like any other type.
+    NodeTypeDescriptor output;
+    output.typeName = NodeType::Output;
+    output.domain = Domain::Core;
+    output.inputs = { Signal(PinName::SignalIn) };
+    output.displayName = "Output";
+    output.category = "Signal Lab";
+    library.nodeTypes.push_back(std::move(output));
+
+    libraries.Register(std::move(library));
+    return libraries;
 }
 
 } // namespace cw::audionodes

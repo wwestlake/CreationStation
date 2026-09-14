@@ -4405,7 +4405,7 @@ bool SignalLabPanel::findWiredParameterValue(const juce::String& nodeId, const j
 // live atomic slot for it in PatchLiveVoice), not just its current value.
 // Empty string if the port isn't wired to a MIDI Control node (unwired, or
 // wired to a Get-variable instead -- variables aren't live yet, see the
-// CEL/control-graph roadmap note).
+// FRust/control-graph roadmap note).
 juce::String SignalLabPanel::findWiredMidiSourceNodeId(const juce::String& nodeId, const juce::String& portId) const
 {
     for (auto& connection : graphConnections)

@@ -10,9 +10,9 @@ public:
     void setSourceText(const juce::String& text);
     juce::String getSourceText() const;
 
-    // Reads a previously exported/saved .cel source file back into the
-    // editor, recompiles it, and shows a short load summary. CEL source is
-    // re-parsed on load exactly like it is on every edit -- there's no
+    // Reads a previously exported/saved .frust source file back into the
+    // editor, recompiles it, and shows a short load summary. FRust source is
+    // re-checked on load exactly like it is on every edit -- there's no
     // separate compiled-artifact format to summarize.
     void loadSourceFromFile(const juce::File& sourceFile);
 
@@ -30,7 +30,7 @@ private:
     juce::Label headerLabel;
     juce::TextEditor sourceEditor;
     juce::TextEditor outputEditor;
-    juce::TextButton compileButton { "Compile CEL" };
+    juce::TextButton compileButton { "Compile" };
     juce::TextButton exportButton { "Export Source" };
     juce::TextButton saveButton { "Save To Library" };
     juce::TextButton loadButton { "Load Source" };

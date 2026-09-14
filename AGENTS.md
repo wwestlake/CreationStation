@@ -151,7 +151,7 @@ Always use GitHub Issues and the official GitHub Project Board (**Creation Suite
 
 ## LLVM / vcpkg Build Rule
 
-**Never build, rebuild, or touch LLVM (`apps/CreationEngine/vcpkg_installed/x64-windows/`, which CreationStation's CEL scripting layer also depends on via `shared/CMake/CreationSharedLLVM.cmake`) — directly or as a side effect of any `vcpkg` command — without an explicit, in-the-moment yes from the user.** Running `vcpkg install` in manifest mode anywhere reconciles the whole dependency list and can silently trigger a full rebuild even when adding something unrelated. See the root `AGENTS.md`'s LLVM / vcpkg Build Rule for the full incident and what to do instead. If blocked, stop and ask — never act.
+**Never build, rebuild, or touch LLVM (`apps/CreationEngine/vcpkg_installed/x64-windows/`, which CreationStation's FRust scripting layer also depends on via `shared/CMake/CreationSharedLLVM.cmake`) — directly or as a side effect of any `vcpkg` command — without an explicit, in-the-moment yes from the user.** Running `vcpkg install` in manifest mode anywhere reconciles the whole dependency list and can silently trigger a full rebuild even when adding something unrelated. See the root `AGENTS.md`'s LLVM / vcpkg Build Rule for the full incident and what to do instead. If blocked, stop and ask — never act.
 
 ## No OS Dialogs Except Asset Import/Export Rule
 

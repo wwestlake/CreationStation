@@ -277,7 +277,7 @@ private:
     std::unique_ptr<juce::FileChooser> assetChooser;
     std::unique_ptr<juce::FileChooser> renderExportChooser;
     std::unique_ptr<juce::FileChooser> rawAssetExportChooser;
-    std::unique_ptr<juce::FileChooser> celSourceChooser;
+    std::unique_ptr<juce::FileChooser> frustSourceChooser;
     std::unique_ptr<juce::FileChooser> contentUploadChooser;
     std::unique_ptr<juce::FileChooser> suiteDirectoryChooser;
     std::unique_ptr<juce::DocumentWindow> audioDeviceWindow;
@@ -414,6 +414,11 @@ private:
     void removeTrack(int trackIndex);
     void performTrackRemoval(int trackIndex);
     void initialiseDockingWorkspace();
+    // Registers (or re-registers) the one named tool panel this suite ships, wiring its
+    // title and persistent content component into a fresh CreationDock::DockPanel -- the
+    // shared DockManager destroys the DockPanel wrapper on unregisterPanel(), so "showing"
+    // a previously-closed panel means calling this again, not reusing an old handle.
+    CreationDock::DockPanel* registerNamedDockPanel(const juce::String& panelId, CreationDock::DockTargetZone zone);
     void setWorkspaceMode(WorkspaceMode mode);
     void resetDockLayout();
     void toggleToolWindow(WorkspaceMode mode);

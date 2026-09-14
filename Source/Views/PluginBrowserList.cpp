@@ -256,7 +256,7 @@ void PluginBrowserList::rebuild()
             effects.add(entry);
     }
 
-    addSection("Creation Station Plugins", csPlugins, true, true);
+    addSection("Djehuti Station Plugins", csPlugins, true, true);
     addSection("Instruments", instruments, false, false);
 
     juce::StringArray categories;

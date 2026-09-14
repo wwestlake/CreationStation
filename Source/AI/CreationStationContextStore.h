@@ -19,7 +19,7 @@ public:
                  const creation::suite::SuiteSettings& suiteSettings,
                  const ContentLibrary& contentLibrary,
                  const juce::String& workspaceMode,
-                 const juce::String& celSource,
+                 const juce::String& frustSource,
                  juce::String& errorMessage);
 
     bool load(juce::String& errorMessage);

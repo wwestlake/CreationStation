@@ -3,18 +3,19 @@
 #include <variant>
 
 #include "AudioNodeCatalog.h"
+#include "node_system/type_registry.h"
 
 namespace cw::audionodes
 {
 
 using namespace ce::node_system;
 
-Graph BuildSineToOutputDemoGraph(const NodeTypeRegistry& registry, float levelValue)
+Graph BuildSineToOutputDemoGraph(const NodeLibraryRegistry& libraries, float levelValue)
 {
     Graph graph("SignalLabDemo");
 
-    Node* sine = AddRegisteredNode(graph, registry, NodeType::SineOscillator);
-    Node* output = AddRegisteredNode(graph, registry, NodeType::Output);
+    Node* sine = libraries.AddNode(graph, NodeType::SineOscillator);
+    Node* output = libraries.AddNode(graph, NodeType::Output);
     if (sine == nullptr || output == nullptr)
         return graph;
 
@@ -50,14 +51,15 @@ float ReadFloatDefault(const Pin& pin, float fallback)
 
 } // namespace
 
-GraphToSourceResult GenerateAudioSource(const Graph& graph, const NodeTypeRegistry& registry)
+FrustGraphCompileResult GenerateAudioSource(const Graph& graph, const NodeLibraryRegistry& libraries,
+                                             const std::string& functionName)
 {
-    GraphToSourceResult result;
-
     std::vector<std::string> validationErrors;
-    if (!ValidateAgainstRegistry(graph, registry, &validationErrors))
+    if (!ValidateAgainstRegistry(graph, libraries.TypeRegistry(), &validationErrors))
     {
-        result.errors = std::move(validationErrors);
+        FrustGraphCompileResult result;
+        result.ok = false;
+        result.error = validationErrors.empty() ? "graph validation failed" : validationErrors.front();
         return result;
     }
 
@@ -72,7 +74,8 @@ GraphToSourceResult GenerateAudioSource(const Graph& graph, const NodeTypeRegist
     }
     if (outputNode == nullptr)
     {
-        result.errors.push_back("graph has no Output node");
+        FrustGraphCompileResult result;
+        result.error = "graph has no Output node";
         return result;
     }
 
@@ -88,30 +91,49 @@ GraphToSourceResult GenerateAudioSource(const Graph& graph, const NodeTypeRegist
     }
     if (feedingConnection == nullptr)
     {
-        result.errors.push_back("node " + std::to_string(outputNode->Id()) + " ('Output'): signalIn is not connected");
+        FrustGraphCompileResult result;
+        result.error = "node " + std::to_string(outputNode->Id()) + " ('Output'): signalIn is not connected";
         return result;
     }
 
     const Node* source = graph.FindNode(feedingConnection->fromNode);
     if (source == nullptr || source->TypeName() != NodeType::SineOscillator)
     {
-        result.errors.push_back("node " + std::to_string(outputNode->Id())
-                                 + " ('Output'): only a SineOscillator source is supported in this v1 slice");
+        FrustGraphCompileResult result;
+        result.error = "node " + std::to_string(outputNode->Id())
+                        + " ('Output'): only a SineOscillator source is supported in this v1 slice";
         return result;
     }
 
     const float level = ReadFloatDefault(source->Inputs()[0], 0.0f);
 
-    // Fixed test phase -- proving graph -> CEL -> JIT -> real numeric
-    // result end to end on ONE sample, not a real buffer render yet (see
-    // this file's header comment for why).
-    constexpr float kTestPhase = 0.5f;
+    // CompileBehaviorGraphToFrust must never see the Output sink node --
+    // TopologicalDataOrder walks every node in a graph unconditionally, and
+    // the compiler's pure-node loop hard-errors on any node whose output
+    // count isn't exactly 1 (Output has zero). Build a fresh, Output-free
+    // graph containing only a re-created source node carrying the same
+    // level, and point resultNode/resultPin straight at it -- the same
+    // "one real computation node, no sink node in the compiled graph"
+    // shape Creation Engine's own node-codegen already uses.
+    Graph compileGraph("SignalLabCompile");
+    Node* compileSource = libraries.AddNode(compileGraph, NodeType::SineOscillator);
+    if (compileSource == nullptr)
+    {
+        FrustGraphCompileResult result;
+        result.error = "could not re-create the source node for compilation";
+        return result;
+    }
+    if (Pin* levelPin = compileSource->FindPin(compileSource->Inputs()[0].id))
+        levelPin->defaultValue = level;
 
-    result.source = "func compute_sample() -> float {\n"
-                     "    return sin(" + std::to_string(kTestPhase) + ") * " + std::to_string(level) + ";\n"
-                     "}\n";
-    result.ok = true;
-    return result;
+    FrustGraphCompileOptions options;
+    options.functionName = functionName;
+    options.resultNode = compileSource->Id();
+    options.resultPin = compileSource->Outputs()[0].id;
+    options.sourceModules = { kSignalLabFrustModule };
+    options.manifestJson = "{\"name\":\"signal_lab_compiled\",\"version\":\"0.1.0\"}";
+
+    return CompileBehaviorGraphToFrust(compileGraph, libraries, options);
 }
 
 } // namespace cw::audionodes
