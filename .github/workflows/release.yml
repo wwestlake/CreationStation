@@ -39,6 +39,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: apps/CreationStation
+          # third_party/FrustLang is a submodule of THIS repo -- without
+          # this it's an empty directory in CI, and
+          # shared/FrustPluginRuntime's CMakeLists.txt EXISTS check for it
+          # fails, falling through to its own FATAL_ERROR branch.
+          submodules: true
 
       - name: Fetch JUCE
         shell: pwsh
@@ -54,22 +59,71 @@ jobs:
             throw "Could not find iasiodrv.h in fetched ASIO SDK."
           }
 
+      - name: Restore prebuilt LLVM from S3 (no build, ever)
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-2
+        run: |
+          # Same real, already-built LLVM archive Creation Engine's own
+          # release workflow restores (see that workflow's identically
+          # named step for the full explanation) -- never invokes
+          # vcpkg/cl.exe to compile anything. Extracts to
+          # vcpkg_installed/x64-windows under this step's own working
+          # directory (apps/CreationStation), which is exactly where
+          # shared/CMake/CreationSharedLLVM.cmake's auto-discovery already
+          # checks first for Station's own scripting host. FrustPluginRuntime
+          # (via third_party/FrustLang) needs its own explicit
+          # FRUST_VCPKG_INSTALLED_DIR override pointed at this same path --
+          # see the Configure CMake step below.
+          aws s3 cp s3://creation-suite-build-cache/vcpkg-cache/llvm-vcpkg-x64-windows.tar "$env:RUNNER_TEMP\llvm.tar"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download the prebuilt LLVM archive from S3."
+          }
+          tar -xf "$env:RUNNER_TEMP\llvm.tar"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract the prebuilt LLVM archive."
+          }
+          Remove-Item "$env:RUNNER_TEMP\llvm.tar" -Force
+          if (-not (Test-Path "vcpkg_installed\x64-windows")) {
+            throw "vcpkg_installed\x64-windows missing after extraction."
+          }
+
+      - name: Satisfy LLVM's baked-in DIA SDK path
+        shell: pwsh
+        run: |
+          # See Creation Engine's own release workflow's identically named
+          # step -- same S3 LLVM archive, same baked-in absolute path issue.
+          $expected = "D:\Program Files\Microsoft Visual Studio\2022\Enterprise\DIA SDK\lib\amd64\diaguids.lib"
+          if (Test-Path $expected) {
+            Write-Host "Already present at expected path."
+          } else {
+            $found = Get-ChildItem -Path "C:\Program Files*\Microsoft Visual Studio" -Recurse -Filter "diaguids.lib" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $found) {
+              throw "Could not find diaguids.lib anywhere on this runner."
+            }
+            New-Item -ItemType Directory -Force -Path (Split-Path $expected) | Out-Null
+            Copy-Item -Path $found.FullName -Destination $expected -Force
+            Write-Host "Copied $($found.FullName) -> $expected"
+          }
+
       - name: Install WinFlexBison (prebuilt binary, no compile)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # third_party/FrustLang's grammar generation needs
           # win_bison.exe/win_flex.exe.
           #
-          # KNOWN CI GAP: Station links shared/FrustPluginRuntime, which
-          # pulls in third_party/FrustLang's real LLVM-backed JIT
-          # (creation_suite_frust_plugin_runtime). This workflow has no
-          # LLVM/vcpkg provisioning step at all, so a real release build
-          # through this pipeline will fail at configure time until one is
-          # added -- see Creation Engine's own release workflow for the
-          # reference pattern (restoring a pre-built vcpkg_installed LLVM
-          # rather than building it in CI). Not fixed here: only triggers
-          # on a release tag, and the suite has none yet.
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/lexxmark/winflexbison/releases/latest"
+          # This call must be authenticated -- api.github.com's
+          # unauthenticated rate limit (60/hr) is shared across every
+          # GitHub-hosted runner on whatever IP the runner lands on, and
+          # gets exhausted easily; every job on this repo already has a
+          # GITHUB_TOKEN available for free, which raises the limit to
+          # 5000/hr scoped to this run.
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN" }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/lexxmark/winflexbison/releases/latest" -Headers $headers
           $asset = $release.assets | Where-Object { $_.name -like "*win_flex_bison*.zip" } | Select-Object -First 1
           if (-not $asset) {
             throw "Could not find a WinFlexBison release zip asset."
@@ -154,7 +208,15 @@ jobs:
           # Keep the runner release build within MSVC's heap budget without
           # overriding global compiler flags. The previous /GL- workaround
           # accidentally removed JUCE's required C++ exception setting.
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common" -DCREATION_STATION_ENABLE_LTO=OFF
+          #
+          # FRUST_VCPKG_INSTALLED_DIR: third_party/FrustLang's own top-level
+          # CMakeLists.txt refuses to configure unless this is pointed at a
+          # real vcpkg_installed/x64-windows tree containing LLVM (its
+          # default assumes a dev machine's personal clone, which doesn't
+          # exist on a runner) -- point it at the S3-restored one from the
+          # "Restore prebuilt LLVM from S3" step above, same working
+          # directory as this command.
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DFRUST_VCPKG_INSTALLED_DIR=$PWD\vcpkg_installed\x64-windows" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common" -DCREATION_STATION_ENABLE_LTO=OFF
 
       - name: Build app
         shell: pwsh
