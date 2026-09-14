@@ -130,7 +130,7 @@ void configureMainBusOnly(juce::AudioPluginInstance& instance)
 juce::File getPluginStateDiagnosticsFile()
 {
     auto logDirectory = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                            .getChildFile("Creation Station");
+                            .getChildFile("Djehuti Station");
     logDirectory.createDirectory();
     return logDirectory.getChildFile("plugin-state-diagnostics.log");
 }
