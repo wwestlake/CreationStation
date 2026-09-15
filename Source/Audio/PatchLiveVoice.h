@@ -4,6 +4,7 @@
 #include "../Patch/PatchModel.h"
 #include <array>
 #include <atomic>
+#include <memory>
 
 // Live, block-based counterpart to PatchRuntimePlayer. PatchRuntimePlayer
 // computes one fixed-duration buffer offline, all at once, and hands back a
@@ -176,7 +177,16 @@ private:
     // atomics, same shape as the liveMidiValues table above.
     static constexpr int maxTapSlots = 16;
     static constexpr int kScopeTapCapacity = 1 << 17; // ~2.7s @ 48kHz
-    std::array<std::array<std::atomic<float>, kScopeTapCapacity>, maxTapSlots> tapBuffers {};
+    // Heap-allocated, not a compile-time-initialized member array: a
+    // std::array<std::array<atomic<float>, kScopeTapCapacity>, maxTapSlots>
+    // member here (2,097,152 individual atomic<float> elements) made
+    // MSVC's Release build fail with "error C1060: compiler is out of heap
+    // space" synthesizing the aggregate initializer -- raising /Zm didn't
+    // help. Allocated and explicitly zero-filled once in the constructor
+    // instead; every [slot][index] call site is unchanged since
+    // unique_ptr<T[]>::operator[] behaves the same as a raw/std::array
+    // subscript.
+    std::array<std::unique_ptr<std::atomic<float>[]>, maxTapSlots> tapBuffers;
     std::array<juce::String, maxTapSlots> tapSlotNodeIds;
     int tapSlotCount = 0;
     std::atomic<int64> tapWritePos { 0 };
