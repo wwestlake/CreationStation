@@ -19,6 +19,18 @@ configure_creation_shared_llvm(CS "Djehuti Station")
 # offsets into the executable.
 if(MSVC)
     string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Zi")
+    # /Zm200: raise MSVC's internal compiler-memory budget. Release CI hit
+    # "error C1060: compiler is out of heap space" mid-way through a
+    # single-core build of a heavily-templated translation unit
+    # (Source/Audio/PatchLiveVoice.h) -- MSVC's default heap allocation is
+    # sized for a typical file and this one, combined with /Zi's extra
+    # debug-info bookkeeping, exceeds it even single-threaded. This is the
+    # standard remedy for C1060, distinct from the earlier /GL
+    # (whole-program optimization) and single-core (/m:1) fixes for a
+    # similar-looking error on 0.8.0 -- those addressed parallel-build
+    # memory pressure across multiple cl.exe processes, this addresses one
+    # process's own internal limit.
+    string(APPEND CMAKE_CXX_FLAGS_RELEASE " /Zm200")
     string(APPEND CMAKE_EXE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
     string(APPEND CMAKE_SHARED_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
     string(APPEND CMAKE_MODULE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
