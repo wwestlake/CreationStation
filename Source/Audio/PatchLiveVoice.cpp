@@ -170,6 +170,15 @@ PatchLiveVoice::PatchLiveVoice()
 {
     for (auto& id : liveMidiSlotNodeIds)
         id = {};
+
+    // See the tapBuffers declaration in the header for why this is
+    // allocated here at runtime rather than compile-time-initialized.
+    for (auto& ring : tapBuffers)
+    {
+        ring = std::make_unique<std::atomic<float>[]>((size_t) kScopeTapCapacity);
+        for (int i = 0; i < kScopeTapCapacity; ++i)
+            ring[(size_t) i].store(0.0f, std::memory_order_relaxed);
+    }
 }
 
 void PatchLiveVoice::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
