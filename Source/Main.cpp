@@ -31,18 +31,10 @@ public:
     }
 
 protected:
-    // The shared splash (creation::ui::SuiteJUCEApplication) has no live
-    // progress-reporting channel back from createMainWindow() the way this
-    // app's own hand-rolled splash used to -- MainComponent's
-    // StartupProgressCallback is passed empty here, an already-supported,
-    // already-guarded no-op path (see MainComponent's own default
-    // constructor, which already delegates with an empty callback). A real
-    // startup can still take a visible moment; it just isn't narrated on
-    // the splash anymore. See the splash/About-box plan's Risk #1 if this
-    // needs revisiting.
     std::unique_ptr<juce::DocumentWindow> createMainWindow() override
     {
-        return std::make_unique<MainWindow>(getApplicationName(), MainComponent::StartupProgressCallback{});
+        return std::make_unique<MainWindow>(getApplicationName(),
+            [this](const juce::String& statusText, float progress) { reportSplashProgress(statusText, progress); });
     }
 
 private:
