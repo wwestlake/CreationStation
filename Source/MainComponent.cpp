@@ -15,7 +15,41 @@
 #include <creation/services/SuiteVfsServiceClient.h>
 #include <creation/ui/ControlSurfaceActionIds.h>
 #include <creation/ui/CreationSuiteLogos.h>
+#include <atomic>
 #include <thread>
+
+#if JUCE_WINDOWS
+ #include <windows.h>
+#endif
+
+namespace
+{
+// Pumps the OS message queue in small slices until `done` is set -- keeps
+// the window painting/responsive (and the splash's forced repaints actually
+// visible) while a background thread does real, potentially slow work,
+// instead of the message thread just blocking outright. Ported from
+// SuiteJUCEApplication.cpp's identical pumpStartupPaintMessages: this
+// build has JUCE_MODAL_LOOPS_PERMITTED off, so
+// MessageManager::runDispatchLoopUntil isn't available.
+void pumpMessagesWhile(const std::atomic<bool>& done)
+{
+   #if JUCE_WINDOWS
+    while (! done.load(std::memory_order_acquire))
+    {
+        MSG message;
+        while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE) != 0)
+        {
+            TranslateMessage(&message);
+            DispatchMessage(&message);
+        }
+        juce::Thread::sleep(1);
+    }
+   #else
+    while (! done.load(std::memory_order_acquire))
+        juce::Thread::sleep(5);
+   #endif
+}
+}
 
 namespace
 {
@@ -1095,7 +1129,28 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             : "0.5.1");
 
     reportStartup("Opening audio engine...", 0.18f);
-    deviceManager.initialise(32, 2, nullptr, true, {}, nullptr);
+    {
+        // AudioDeviceManager::initialise scans/opens real audio hardware --
+        // confirmed via a real user hang report that this can block the
+        // message thread for a long time on real machines (slow or
+        // misbehaving drivers), which Windows then reports as "Not
+        // Responding" with the spinning-wheel cursor. deviceManager is only
+        // ever touched here and on this one helper thread, never both at
+        // once (this thread just pumps messages while it waits), so this
+        // stays safe despite AudioDeviceManager not being documented as
+        // thread-safe in general. The rest of startup still runs in the
+        // same order right after, unchanged -- this only changes how the
+        // wait for this one slow step is spent.
+        std::atomic<bool> deviceInitDone { false };
+        std::thread initThread([this, &deviceInitDone]
+        {
+            deviceManager.initialise(32, 2, nullptr, true, {}, nullptr);
+            deviceInitDone.store(true, std::memory_order_release);
+        });
+
+        pumpMessagesWhile(deviceInitDone);
+        initThread.join();
+    }
     engine.attachToDevice(deviceManager);
     engine.setPlaying(false);
     transportBar.setPlaybackVisualState(false, false);
