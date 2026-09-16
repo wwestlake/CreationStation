@@ -4406,7 +4406,22 @@ void MainComponent::initialiseDockingWorkspace()
     // time it's shown (View menu / toggleDockPanel) and fully unregistered when closed --
     // the shared DockManager has no separate "registered but hidden" state, see
     // registerNamedDockPanel().
-    registerNamedDockPanel(trackerPanelId, CreationDock::DockTargetZone::CenterTab);
+    //
+    // Real bug fixed here: this used to call registerNamedDockPanel()
+    // unconditionally, unlike every other call site in this file (all of
+    // which check isRegistered() first). An autoloaded project's
+    // loadSessionFromDisk() calls setWorkspaceMode(tracker) earlier in this
+    // same constructor, which already registers Tracker via the properly-
+    // guarded activateDockPanel() -- this function then ran anyway and
+    // registered a second, independent "tracker" DockPanel.
+    // registerNamedDockPanel() has no internal dedupe, so both got created;
+    // since both wrapped a fresh NonOwningPanelHost around the SAME
+    // trackerPanel member, the second one's addAndMakeVisible() reparented
+    // trackerPanel away from the first, leaving one tab a real "Tracker"
+    // and the other a permanently blank duplicate. Confirmed via a real
+    // dock-registration trace, not just code reading.
+    if (! dockManager->isRegistered(trackerPanelId))
+        registerNamedDockPanel(trackerPanelId, CreationDock::DockTargetZone::CenterTab);
     dockManager->activatePanel(trackerPanelId);
 }
 
