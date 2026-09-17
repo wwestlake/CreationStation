@@ -163,7 +163,7 @@ if(NOT TARGET frate_pod_cache)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
-    PRODUCT_NAME "Djehuti Station"
+    PRODUCT_NAME "DjehutiStation"
     COMPANY_NAME "LagDaemon Software"
     BUNDLE_ID "com.lagdaemon.creationstation"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/CreationStationIconBig.png"
@@ -197,7 +197,7 @@ add_custom_command(TARGET CreativeWorkstation POST_BUILD
 
 juce_add_plugin(CreationStationInstrument
     COMPANY_NAME "LagDaemon Software"
-    PRODUCT_NAME "Djehuti Station Instrument"
+    PRODUCT_NAME "DjehutiStationInstrument"
     BUNDLE_ID "com.creationstation.instrument"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
@@ -654,20 +654,20 @@ target_link_libraries(StationFrustIntegrationSmoke PRIVATE
 
 install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
-set(CPACK_PACKAGE_NAME "Djehuti Station")
+set(CPACK_PACKAGE_NAME "DjehutiStation")
 set(CPACK_PACKAGE_VENDOR "LagDaemon Software")
 set(CPACK_PACKAGE_CONTACT "LagDaemon Software")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Djehuti Station")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "DjehutiStation")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "djehuti-station-${CPACK_PACKAGE_VERSION}-win64")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY "Djehuti Station")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "DjehutiStation")
 set(CPACK_GENERATOR "ZIP;WIX")
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_WIX_COMPONENT_INSTALL ON)
-set(CPACK_WIX_PROGRAM_MENU_FOLDER "Djehuti Station")
+set(CPACK_WIX_PROGRAM_MENU_FOLDER "DjehutiStation")
 set(CPACK_WIX_LICENSE_RTF "${CMAKE_CURRENT_SOURCE_DIR}/installer/EULA.rtf")
-set(CPACK_PACKAGE_EXECUTABLES "Djehuti Station" "Djehuti Station")
-set(CPACK_CREATE_DESKTOP_LINKS "Djehuti Station")
+set(CPACK_PACKAGE_EXECUTABLES "DjehutiStation" "Djehuti Station")
+set(CPACK_CREATE_DESKTOP_LINKS "DjehutiStation")
 set(CPACK_COMPONENTS_ALL CreativeWorkstation)
 set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")
 set(CPACK_STRIP_FILES TRUE)
@@ -679,3 +679,9 @@ add_custom_command(TARGET CreativeWorkstation POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/gemini-$<LOWER_CASE:$<CONFIG>>-bin/"
     COMMENT "Copying CreativeWorkstation to the shared gemini bin directory"
 )
+
+# Auto-generated output name overrides
+set_target_properties(CreationStationPluginKit PROPERTIES OUTPUT_NAME "DjehutiStationPluginKit")
+set_target_properties(CreativeWorkstation PROPERTIES OUTPUT_NAME "DjehutiStation")
+set_target_properties(creation_station_language_host PROPERTIES OUTPUT_NAME "djehuti_station_language_host")
+set_target_properties(CreationStationInstrument PROPERTIES OUTPUT_NAME "DjehutiStationInstrument")
