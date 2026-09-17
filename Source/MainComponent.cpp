@@ -4,6 +4,7 @@
 #include "MainComponent.h"
 #include "Branding.h"
 #include "Patch/PatchModel.h"
+#include "Video/VideoDecodeService.h"
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectWorkspaceService.h>
 #include <creation/suite/SuiteStoragePaths.h>
@@ -2123,6 +2124,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     trackerPanel.onAudioFilesDropped = [this](const juce::StringArray& files, int trackIndex, double startSeconds)
     {
         importAudioFilesToTracker(files, trackIndex, startSeconds);
+    };
+
+    trackerPanel.onVideoFilesDropped = [this](const juce::StringArray& files, int trackIndex, double startSeconds)
+    {
+        importVideoFilesToTracker(files, trackIndex, startSeconds);
     };
 
     trackerPanel.onTempoChanged = [this](double bpm)
@@ -6967,6 +6973,159 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
     saveSessionToDisk(true);
     transportBar.setStatusText("Imported " + juce::String(placedCount) + " audio file(s) onto the Tracker.");
     return true;
+}
+
+int MainComponent::placeVideoAssetOnTracker(const juce::File& sourceFile, const cs::VideoStreamInfo& info,
+                                            int targetTrack, double startSeconds, juce::String& errorMessage)
+{
+    // Import the external video file into the VFS container -- same shape as
+    // placeAudioAssetOnTracker/importAudioFilesToTracker's own import step.
+    auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + sourceFile.getFileName();
+
+    juce::MemoryBlock fileData;
+    if (! sourceFile.loadFileAsData(fileData))
+    {
+        errorMessage = "Could not read: " + sourceFile.getFileName();
+        return -1;
+    }
+
+    if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
+    {
+        errorMessage = "Could not import: " + sourceFile.getFileName();
+        return -1;
+    }
+
+    creation::assets::AssetDescriptor importedAsset;
+    importedAsset.id = "asset:" + juce::Uuid().toString();
+    importedAsset.version = "1";
+    importedAsset.versionId = importedAsset.id + "@1";
+    importedAsset.displayName = sourceFile.getFileNameWithoutExtension();
+    importedAsset.logicalPath = logicalPath;
+    importedAsset.kind = creation::assets::AssetKind::video;
+    importedAsset.mediaType = "video/" + sourceFile.getFileExtension().trimCharactersAtStart(".").toLowerCase();
+    importedAsset.fileSizeBytes = (int64) fileData.getSize();
+    importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
+    importedAsset.sourceApp = "Djehuti Station";
+    projectSession.upsertAssetDescriptor(importedAsset);
+
+    if (! projectSession.commit(errorMessage))
+        return -1;
+
+    // Materialize the asset from the VFS container to a real temp file for the decode service
+    // and the Tracker clip itself, same as placeAudioAssetOnTracker does for audio.
+    creation::assets::MaterializedAssetLease lease;
+    if (! projectSession.materializeEntry(suiteSettings, importedAsset.logicalPath,
+                                          creation::assets::MaterializationAccess::readOnly,
+                                          lease, errorMessage))
+        return -1;
+
+    // durationSeconds comes from the caller's probed VideoStreamInfo -- addClip() deliberately
+    // never runs waveform/duration analysis for ClipKind::video (it can't open a video container
+    // as audio), so this is the only source of truth for how long the clip is.
+    return timelineModel.addClip(cs::ClipKind::video,
+                                 targetTrack,
+                                 importedAsset.displayName,
+                                 importedAsset.id,
+                                 "import",
+                                 lease.materializedFile,
+                                 startSeconds,
+                                 info.durationSeconds,
+                                 errorMessage);
+}
+
+void MainComponent::importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds)
+{
+    if (filePaths.isEmpty())
+        return;
+
+    if (! ensureStorageRootConfigured())
+        return;
+
+    juce::String projectError;
+    if (! ensureProjectSessionActive(projectError))
+    {
+        transportBar.setStatusText(projectError.isNotEmpty() ? projectError : "Could not initialize project for imported video.");
+        return;
+    }
+
+    // Video clips require a video-kind track (see canTrackContainClip) -- reuse the preferred/
+    // selected track only if it's already video-kind, otherwise add a fresh track and switch it,
+    // the same "make a sensible home for what was dropped" behavior importAudioFilesToTracker
+    // already has for audio.
+    auto targetTrack = preferredTrack;
+    if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()) || timelineModel.getTrackKind(targetTrack) != cs::TrackKind::video)
+        targetTrack = trackerPanel.getSelectedTrack();
+    if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()) || timelineModel.getTrackKind(targetTrack) != cs::TrackKind::video)
+    {
+        addTrack();
+        targetTrack = engine.getTrackCount() - 1;
+        timelineModel.setTrackKind(targetTrack, cs::TrackKind::video);
+        trackerPanel.setTrackKind(targetTrack, cs::TrackKind::video);
+        engine.setTrackIsMidiKind(targetTrack, false);
+        engine.setTrackIsAutomationKind(targetTrack, false);
+    }
+
+    importVideoFilesSequentially(filePaths, 0, targetTrack, juce::jmax(0.0, startSeconds));
+}
+
+void MainComponent::importVideoFilesSequentially(juce::StringArray filePaths, int index, int trackIndex, double startSeconds)
+{
+    if (index >= filePaths.size())
+    {
+        refreshProjectAssets();
+        trackerPanel.setSelectedTrack(trackIndex);
+        trackerPanel.refreshTimelineView();
+        setWorkspaceMode(WorkspaceMode::tracker);
+        saveSessionToDisk(true);
+        return;
+    }
+
+    auto sourceFile = juce::File(filePaths[(int) index]);
+    if (! sourceFile.existsAsFile())
+    {
+        importVideoFilesSequentially(std::move(filePaths), index + 1, trackIndex, startSeconds);
+        return;
+    }
+
+    // VideoDecodeService::open() does file I/O and media-type negotiation with the OS decoder --
+    // explicitly documented as not safe to call on the message thread (see VideoDecodeService.h).
+    // Runs on a helper thread; the actual VFS import + addClip (fast, local) happens back on the
+    // message thread once the real duration is known, matching the pattern this codebase already
+    // uses for other slow-open, fast-finish operations.
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    std::thread([safeThis, filePaths, index, trackIndex, startSeconds, sourceFile]() mutable
+    {
+        cs::VideoDecodeService decodeService;
+        auto info = decodeService.open(sourceFile);
+
+        juce::MessageManager::callAsync([safeThis, filePaths, index, trackIndex, startSeconds, sourceFile, info]() mutable
+        {
+            if (safeThis == nullptr)
+                return;
+
+            auto nextStart = startSeconds;
+            if (info.valid)
+            {
+                juce::String clipError;
+                auto clipIndex = safeThis->placeVideoAssetOnTracker(sourceFile, info, trackIndex, startSeconds, clipError);
+                if (clipIndex >= 0)
+                {
+                    const auto& clip = safeThis->timelineModel.getClips()[(size_t) clipIndex];
+                    nextStart = clip.startSeconds + clip.durationSeconds;
+                }
+                else if (clipError.isNotEmpty())
+                {
+                    safeThis->transportBar.setStatusText(clipError);
+                }
+            }
+            else
+            {
+                safeThis->transportBar.setStatusText("Could not open video: " + sourceFile.getFileName());
+            }
+
+            safeThis->importVideoFilesSequentially(std::move(filePaths), index + 1, trackIndex, nextStart);
+        });
+    }).detach();
 }
 
 std::optional<creation::assets::AssetDescriptor> MainComponent::resolveTimelineClipAsset(const cs::TimelineClip& clip) const

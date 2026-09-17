@@ -15,6 +15,7 @@
 #include "Audio/StudioIOModel.h"
 #include "Audio/VstPluginCatalog.h"
 #include "Audio/WorkstationAudioEngine.h"
+#include "Video/VideoDecodeService.h"
 #include "ControlSurface/XTouchControlSurface.h"
 #include "ControlSurface/ControlSurfaceMappingStore.h"
 #include "Content/ContentLibrary.h"
@@ -523,6 +524,10 @@ private:
                                  const juce::String& sourceTool,
                                  juce::String& errorMessage);
     bool importAudioFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
+    int placeVideoAssetOnTracker(const juce::File& sourceFile, const cs::VideoStreamInfo& info,
+                                 int targetTrack, double startSeconds, juce::String& errorMessage);
+    void importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
+    void importVideoFilesSequentially(juce::StringArray filePaths, int index, int trackIndex, double startSeconds);
     std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
     void resolveTrackerClipAssetFiles();
     void launchTutorialItem(const ContentPanel::TutorialItem& item);

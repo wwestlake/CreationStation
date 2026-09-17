@@ -75,6 +75,7 @@ public:
     std::function<void(double noteHz)> onPitchPipeTriggered;
     std::function<void(const juce::String& targetId, const juce::String& displayLabel)> onLearnMidiRequested;
     std::function<void(const juce::StringArray&, int, double)> onAudioFilesDropped;
+    std::function<void(const juce::StringArray&, int, double)> onVideoFilesDropped;
     // Save/load the current set of tracks/clips as one named project asset, via the shared
     // ProjectAssetService::saveGeneratedAsset mechanism -- see the Arrangement toolbar button.
     std::function<void(const juce::String& name)> onArrangementSaveRequested;
