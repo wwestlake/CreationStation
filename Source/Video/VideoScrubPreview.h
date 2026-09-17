@@ -50,11 +50,21 @@ private:
 
         pool.addJob([this, file, sourceSeconds, callback]
         {
-            VideoDecodeService service;
-            auto streamInfo = service.open(file);
+            // Real bug fixed here: this used to construct a fresh VideoDecodeService and call
+            // open() from scratch on every single tick -- a full Media Foundation source-reader
+            // creation (container probe, codec negotiation) many times a second, for what's
+            // almost always the same clip the playhead is still sitting over. Other tools open a
+            // file once and just seek; this now does the same -- openService/openFile persist
+            // across calls, and open() only runs again when the scrubbed clip actually changes.
+            if (openFile != file || ! openService.isOpen())
+            {
+                openValid = openService.open(file).valid;
+                openFile = file;
+            }
+
             juce::Image decoded;
-            if (streamInfo.valid)
-                decoded = service.decodeFrameAt(sourceSeconds, 320, 180);
+            if (openValid)
+                decoded = openService.decodeFrameAt(sourceSeconds, 320, 180);
 
             if (callback && decoded.isValid())
                 juce::MessageManager::callAsync([callback, decoded] { callback(decoded); });
@@ -71,6 +81,11 @@ private:
     juce::File pendingFile;
     double pendingSourceSeconds = 0.0;
     std::function<void(juce::Image)> pendingCallback;
+    // Touched only from the ThreadPool's one worker thread (never the message thread), so no
+    // lock needed for these despite jobRunning/hasPendingRequest above needing one.
+    VideoDecodeService openService;
+    juce::File openFile;
+    bool openValid = false;
     // Declared last so it's destroyed (and its guaranteed wait-for-running-job semantics run)
     // before the state above, closing the same teardown race VideoThumbnailCache avoids.
     juce::ThreadPool pool { 1 };

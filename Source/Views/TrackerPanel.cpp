@@ -738,13 +738,27 @@ void TrackerPanel::mouseWheelMove(const juce::MouseEvent& event, const juce::Mou
     applyWheelNavigation(event, wheel);
 }
 
+namespace
+{
+bool isAudioFileExtension(const juce::String& extension)
+{
+    return extension == ".wav" || extension == ".aif" || extension == ".aiff"
+        || extension == ".flac" || extension == ".mp3" || extension == ".ogg";
+}
+
+bool isVideoFileExtension(const juce::String& extension)
+{
+    return extension == ".mp4" || extension == ".mov" || extension == ".mkv"
+        || extension == ".avi" || extension == ".webm" || extension == ".m4v";
+}
+}
+
 bool TrackerPanel::isInterestedInFileDrag(const juce::StringArray& files)
 {
     for (const auto& path : files)
     {
         auto extension = juce::File(path).getFileExtension().toLowerCase();
-        if (extension == ".wav" || extension == ".aif" || extension == ".aiff"
-            || extension == ".flac" || extension == ".mp3" || extension == ".ogg")
+        if (isAudioFileExtension(extension) || isVideoFileExtension(extension))
             return true;
     }
 
@@ -770,10 +784,24 @@ void TrackerPanel::filesDropped(const juce::StringArray& files, int x, int y)
     fileDragActive = false;
     repaint();
 
-    if (! onAudioFilesDropped || ! isInterestedInFileDrag(files))
-        return;
+    juce::StringArray audioFiles, videoFiles;
+    for (const auto& path : files)
+    {
+        auto extension = juce::File(path).getFileExtension().toLowerCase();
+        if (isAudioFileExtension(extension))
+            audioFiles.add(path);
+        else if (isVideoFileExtension(extension))
+            videoFiles.add(path);
+    }
 
-    onAudioFilesDropped(files, trackIndexForDropY(y), timelineSecondsForDropX(x));
+    const auto trackIndex = trackIndexForDropY(y);
+    const auto startSeconds = timelineSecondsForDropX(x);
+
+    if (onAudioFilesDropped && ! audioFiles.isEmpty())
+        onAudioFilesDropped(audioFiles, trackIndex, startSeconds);
+
+    if (onVideoFilesDropped && ! videoFiles.isEmpty())
+        onVideoFilesDropped(videoFiles, trackIndex, startSeconds);
 }
 
 int TrackerPanel::trackIndexForDropY(int y) const noexcept
