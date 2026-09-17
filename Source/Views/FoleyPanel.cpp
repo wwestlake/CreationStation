@@ -19,6 +19,14 @@ FoleyPanel::FoleyPanel()
     generateButton_.onClick = [this] { generateSource(); };
     addAndMakeVisible(generateButton_);
 
+    buildPodButton_.onClick = [this] { requestPodBuild(); };
+    buildPodButton_.setTooltip("Build this graph as a reusable FRust pod in the current project");
+    addAndMakeVisible(buildPodButton_);
+
+    registryPodButton_.onClick = [this] { requestRegistryPodLoad(); };
+    registryPodButton_.setTooltip("Resolve a published Frate pod and add its reflected nodes to this palette");
+    addAndMakeVisible(registryPodButton_);
+
     setupMenuButton_.onClick = [this] { showSetupMenu(); };
     setupMenuButton_.setTooltip("Save or load this node setup as a named project asset");
     addAndMakeVisible(setupMenuButton_);
@@ -48,6 +56,22 @@ FoleyPanel::FoleyPanel()
 
 void FoleyPanel::generateSource()
 {
+    juce::String error;
+    const auto source = generateSourceText(false, error);
+    if (source.isEmpty())
+    {
+        sourceView_.setText(error, juce::dontSendNotification);
+        statusLabel_.setText("Generation failed - see errors below.", juce::dontSendNotification);
+        statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffff6b6b));
+        return;
+    }
+    sourceView_.setText(source, juce::dontSendNotification);
+    statusLabel_.setText("Generated OK.", juce::dontSendNotification);
+    statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff67e8a5));
+}
+
+juce::String FoleyPanel::generateSourceText(bool exposeAsNodes, juce::String& error) const
+{
     // One compiled function per On Trigger node -- same "each Event node is
     // its own entry point, concatenated into one file" shape CreationEngine's
     // PodEditorPanel uses for its own multi-entry Behavior graphs, since a
@@ -59,10 +83,8 @@ void FoleyPanel::generateSource()
 
     if (triggerNodes.empty())
     {
-        sourceView_.setText("Add an On Trigger node to generate a cue.", juce::dontSendNotification);
-        statusLabel_.setText("Nothing to generate", juce::dontSendNotification);
-        statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
-        return;
+        error = "Add an On Trigger node to generate a cue.";
+        return {};
     }
     std::sort(triggerNodes.begin(), triggerNodes.end());
 
@@ -74,14 +96,13 @@ void FoleyPanel::generateSource()
         options.functionName = "on_trigger_" + std::to_string(triggerId);
         options.entryNode = triggerId;
         options.emitManifestAndImports = false;
+        options.exposeAsNode = exposeAsNodes;
 
         const auto result = ce::node_system::CompileBehaviorGraphToFrust(graph_, libraries_, options);
         if (!result.ok)
         {
-            sourceView_.setText(juce::String(result.error), juce::dontSendNotification);
-            statusLabel_.setText("Generation failed - see errors below.", juce::dontSendNotification);
-            statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xffff6b6b));
-            return;
+            error = juce::String(result.error);
+            return {};
         }
         functionBodies.push_back(result.source);
         for (const auto& decl : result.externDeclarations)
@@ -95,9 +116,65 @@ void FoleyPanel::generateSource()
     for (const auto& body : functionBodies)
         combined << body << "\n";
 
-    sourceView_.setText(combined.str(), juce::dontSendNotification);
-    statusLabel_.setText("Generated OK.", juce::dontSendNotification);
-    statusLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff67e8a5));
+    return combined.str();
+}
+
+void FoleyPanel::requestPodBuild()
+{
+    juce::String error;
+    const auto source = generateSourceText(true, error);
+    if (source.isEmpty())
+    {
+        setBuildStatus(error, false);
+        return;
+    }
+
+    auto* prompt = new juce::AlertWindow("Build FRust Pod", "Name this reusable node pod:",
+                                         juce::MessageBoxIconType::QuestionIcon);
+    prompt->addTextEditor("podName", "foley-cues");
+    prompt->addButton("Build", 1);
+    prompt->addButton("Cancel", 0);
+    auto safeThis = juce::Component::SafePointer<FoleyPanel>(this);
+    prompt->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis, prompt, source](int result) mutable
+        {
+            std::unique_ptr<juce::AlertWindow> dialog(prompt);
+            if (result != 1 || safeThis == nullptr) return;
+            const auto name = dialog->getTextEditorContents("podName").trim().toLowerCase().replace(" ", "-");
+            if (safeThis->onPodBuildRequested) safeThis->onPodBuildRequested(name, source);
+        }), true);
+}
+
+void FoleyPanel::requestRegistryPodLoad()
+{
+    auto* prompt = new juce::AlertWindow("Add Frate Pod", "Load reflected nodes from the pod registry:",
+                                         juce::MessageBoxIconType::QuestionIcon);
+    prompt->addTextEditor("podName", "frust_dsp");
+    prompt->addTextEditor("version", "0.1.0");
+    prompt->addButton("Add", 1);
+    prompt->addButton("Cancel", 0);
+    auto safeThis = juce::Component::SafePointer<FoleyPanel>(this);
+    prompt->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis, prompt](int result) mutable
+        {
+            std::unique_ptr<juce::AlertWindow> dialog(prompt);
+            if (result != 1 || safeThis == nullptr) return;
+            if (safeThis->onRegistryPodLoadRequested)
+                safeThis->onRegistryPodLoadRequested(dialog->getTextEditorContents("podName").trim(),
+                                                      dialog->getTextEditorContents("version").trim());
+        }), true);
+}
+
+void FoleyPanel::refreshNodePalette()
+{
+    palette_.RefreshFromRegistry();
+}
+
+void FoleyPanel::setBuildStatus(const juce::String& status, bool success)
+{
+    statusLabel_.setText(status, juce::dontSendNotification);
+    statusLabel_.setColour(juce::Label::textColourId,
+                           success ? juce::Colour(0xff67e8a5) : juce::Colour(0xffff6b6b));
 }
 
 juce::String FoleyPanel::serializeGraph() const
@@ -175,6 +252,10 @@ void FoleyPanel::resized()
     auto footer = area.removeFromBottom(160);
     auto footerHeader = footer.removeFromTop(24);
     generateButton_.setBounds(footerHeader.removeFromLeft(130));
+    footerHeader.removeFromLeft(8);
+    buildPodButton_.setBounds(footerHeader.removeFromLeft(100));
+    footerHeader.removeFromLeft(8);
+    registryPodButton_.setBounds(footerHeader.removeFromLeft(90));
     footerHeader.removeFromLeft(8);
     setupMenuButton_.setBounds(footerHeader.removeFromLeft(90));
     footerHeader.removeFromLeft(8);

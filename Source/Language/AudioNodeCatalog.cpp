@@ -50,14 +50,8 @@ NodeLibraryRegistry BuildAudioNodeCatalog()
 
     NodeTypeDescriptor sineOscillator;
     sineOscillator.typeName = NodeType::SineOscillator;
-    // Domain::Core, not Domain::Audio: CompileBehaviorGraphToFrust's pure-
-    // single-value-node lowering only processes Domain::Core nodes today --
-    // Domain::Audio/Video/Animation/Material exist in the enum but have no
-    // handling anywhere in frust_codegen.cpp yet (a real, suite-level gap,
-    // not something specific to this node). This node's actual "it's audio"
-    // nature lives in displayName/category, which the compiler never reads.
-    sineOscillator.domain = Domain::Core;
-    sineOscillator.inputs = { Float(PinName::Level, 0.65f) };
+    sineOscillator.domain = Domain::Audio;
+    sineOscillator.inputs = { Float(PinName::Phase, 0.5f), Float(PinName::Level, 0.65f) };
     sineOscillator.outputs = { Signal(PinName::SignalOut) };
     sineOscillator.displayName = "Sine Oscillator";
     sineOscillator.category = "Signal Lab";

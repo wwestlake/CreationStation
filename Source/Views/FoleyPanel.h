@@ -15,11 +15,9 @@
 // node catalog (FoleyNodeCatalog.h) - per the suite's explicit stance, share the
 // editing machinery across domains, never merge the domain-specific node catalogs.
 //
-// Current scope matches this panel's CEL-backed predecessor exactly: "Generate" compiles the
-// graph and shows the resulting FRust source. Nothing loads or runs it yet -- no app in the
-// suite has PlaySample/GainMix/Delay's real native audio-engine hooks wired up, and no cue-
-// triggering mechanism exists here to call a compiled graph from. See FoleyNodeCatalog.h's own
-// comment on the three host functions a future runtime wiring pass would need to register.
+// Generate provides source inspection; Build Pod sends the same graph through
+// Station's VFS-backed Frate service and registers its compiler-reflected node
+// functions back into this editor's shared node catalog.
 //
 // PUBLICLY inherits juce::DragAndDropContainer (must be public, not private - JUCE's
 // DragAndDropContainer::findParentDragContainerFor walks the component tree using
@@ -43,9 +41,18 @@ public:
 
     std::function<void(const juce::String& name)> onSetupSaveRequested;
     std::function<void()> onSetupLoadRequested;
+    std::function<void(const juce::String& podName, const juce::String& generatedSource)> onPodBuildRequested;
+    std::function<void(const juce::String& podName, const juce::String& version)> onRegistryPodLoadRequested;
+
+    ce::node_system::NodeLibraryRegistry& nodeLibraries() noexcept { return libraries_; }
+    void refreshNodePalette();
+    void setBuildStatus(const juce::String& status, bool success);
 
 private:
     void generateSource();
+    juce::String generateSourceText(bool exposeAsNodes, juce::String& error) const;
+    void requestPodBuild();
+    void requestRegistryPodLoad();
     void showSetupMenu();
 
     ce::node_system::NodeLibraryRegistry libraries_ = cw::foleynodes::BuildFoleyNodeCatalog();
@@ -54,6 +61,8 @@ private:
     juce::Label titleLabel_ { {}, "Foley" };
     juce::Label hintLabel_ { {}, "Drag a node from the palette onto the canvas. Right-drag to pan, wheel to zoom." };
     juce::TextButton generateButton_ { "Generate FRust" };
+    juce::TextButton buildPodButton_ { "Build Pod" };
+    juce::TextButton registryPodButton_ { "Add Pod" };
     juce::TextButton setupMenuButton_ { "Setup" };
     juce::Label statusLabel_;
     juce::TextEditor sourceView_;

@@ -6,6 +6,8 @@
 #include <atomic>
 #include <memory>
 
+namespace creation::frust { class PluginRuntime; }
+
 // Live, block-based counterpart to PatchRuntimePlayer. PatchRuntimePlayer
 // computes one fixed-duration buffer offline, all at once, and hands back a
 // recording -- that's correct for Preview/Render-to-Project/export, but it
@@ -85,6 +87,7 @@ class PatchLiveVoice final : public juce::AudioSource
 {
 public:
     PatchLiveVoice();
+    ~PatchLiveVoice() override;
 
     void prepareToPlay(int samplesPerBlockExpected, double newSampleRate) override;
     void releaseResources() override;
@@ -313,4 +316,8 @@ private:
     std::atomic<int64> elapsedSamples { 0 };
     std::atomic<bool> active { false };
     std::atomic<bool> finished { false };
+
+    using FrustSineFn = double (*)(double, double);
+    std::unique_ptr<creation::frust::PluginRuntime> frustRuntime;
+    FrustSineFn frustSine = nullptr;
 };

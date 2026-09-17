@@ -33,6 +33,7 @@ namespace PinName
 {
 inline constexpr const char* SignalIn = "signalIn";
 inline constexpr const char* SignalOut = "signalOut";
+inline constexpr const char* Phase = "phase";
 inline constexpr const char* Level = "level";
 } // namespace PinName
 
