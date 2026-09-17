@@ -673,3 +673,9 @@ set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")
 set(CPACK_STRIP_FILES TRUE)
 
 include(CPack)
+
+add_custom_command(TARGET CreativeWorkstation POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/gemini-$<LOWER_CASE:$<CONFIG>>-bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/gemini-$<LOWER_CASE:$<CONFIG>>-bin/"
+    COMMENT "Copying CreativeWorkstation to the shared gemini bin directory"
+)
