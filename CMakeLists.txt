@@ -146,6 +146,22 @@ if(NOT TARGET creation_suite_frust_plugin_runtime)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FrustPluginRuntime" CreationSuiteSharedFrustPluginRuntime)
 endif()
 
+# Turns a loaded plugin's reflected node-library manifests (real pod code,
+# not hand-written stubs) into ce::node_system::NodeLibraryRegistry
+# entries -- same mechanism CreationEngine already uses, extracted to
+# shared/ so Station can use it too.
+if(NOT TARGET node_library_loader)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeLibraryLoader" CreationSuiteSharedNodeLibraryLoader)
+endif()
+
+# VFS-cache-first pod resolution: checks the Suite VFS cache, falls back to
+# the live lagdaemon.com registry on a miss, stores the result back into
+# the VFS. Needed before Station can reference a published pod inside a
+# schematic.
+if(NOT TARGET frate_pod_cache)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FratePodCache" CreationSuiteSharedFratePodCache)
+endif()
+
 juce_add_gui_app(CreativeWorkstation
     PRODUCT_NAME "Djehuti Station"
     COMPANY_NAME "LagDaemon Software"
