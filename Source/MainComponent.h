@@ -23,6 +23,7 @@
 #include "Feedback/FeedbackSettingsStore.h"
 #include "Feedback/FeedbackMetricsClient.h"
 #include "Feedback/MetricsCollector.h"
+#include "Language/StationFrustPodService.h"
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectAssetService.h>
 #include <creation/assets/ProjectSession.h>
@@ -222,6 +223,7 @@ private:
     LiteSemRagApiClient semanticApiClient;
     creation::services::SuiteAiChatClient openAiChatClient;
     WorkstationAudioEngine engine;
+    cw::StationFrustPodService frustPodService;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
     CreationSuiteHeaderBar transportBar;

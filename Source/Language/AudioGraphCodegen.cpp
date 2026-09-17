@@ -26,7 +26,7 @@ Graph BuildSineToOutputDemoGraph(const NodeLibraryRegistry& libraries, float lev
     // the registry only supplies the STARTING default (see
     // NodeTypeDescriptor's own comment); a real instance is free to carry
     // a different one, same as any other node in this system.
-    if (Pin* levelPin = sine->FindPin(sine->Inputs()[0].id))
+    if (Pin* levelPin = sine->FindPin(sine->Inputs()[1].id))
         levelPin->defaultValue = levelValue;
 
     graph.Connect(sine->Id(), sine->Outputs()[0].id, output->Id(), output->Inputs()[0].id);
@@ -105,7 +105,8 @@ FrustGraphCompileResult GenerateAudioSource(const Graph& graph, const NodeLibrar
         return result;
     }
 
-    const float level = ReadFloatDefault(source->Inputs()[0], 0.0f);
+    const float phase = ReadFloatDefault(source->Inputs()[0], 0.5f);
+    const float level = ReadFloatDefault(source->Inputs()[1], 0.0f);
 
     // CompileBehaviorGraphToFrust must never see the Output sink node --
     // TopologicalDataOrder walks every node in a graph unconditionally, and
@@ -123,7 +124,9 @@ FrustGraphCompileResult GenerateAudioSource(const Graph& graph, const NodeLibrar
         result.error = "could not re-create the source node for compilation";
         return result;
     }
-    if (Pin* levelPin = compileSource->FindPin(compileSource->Inputs()[0].id))
+    if (Pin* phasePin = compileSource->FindPin(compileSource->Inputs()[0].id))
+        phasePin->defaultValue = phase;
+    if (Pin* levelPin = compileSource->FindPin(compileSource->Inputs()[1].id))
         levelPin->defaultValue = level;
 
     FrustGraphCompileOptions options;

@@ -1,6 +1,7 @@
 #include "PatchLiveVoice.h"
 
 #include <cmath>
+#include <creation/frust/PluginRuntime.h>
 
 // Design note on why runtime DSP state (filter internals, one-pole
 // smoothing state) is NOT part of EntityGraph even though EntityGraph is
@@ -171,6 +172,16 @@ PatchLiveVoice::PatchLiveVoice()
     for (auto& id : liveMidiSlotNodeIds)
         id = {};
 
+    frustRuntime = std::make_unique<creation::frust::PluginRuntime>("creation-station-signal-lab");
+    frustRuntime->registerHostFunction("sin", reinterpret_cast<void*>(static_cast<double (*)(double)>(std::sin)));
+
+    std::string error;
+    if (frustRuntime->load(CS_SIGNAL_LAB_RUNTIME, error))
+        frustSine = reinterpret_cast<FrustSineFn>(frustRuntime->getFunction("render_sine"));
+
+    if (frustSine == nullptr)
+        DBG("Signal Lab FRust runtime unavailable: " + juce::String(error));
+
     // See the tapBuffers declaration in the header for why this is
     // allocated here at runtime rather than compile-time-initialized.
     for (auto& ring : tapBuffers)
@@ -180,6 +191,8 @@ PatchLiveVoice::PatchLiveVoice()
             ring[(size_t) i].store(0.0f, std::memory_order_relaxed);
     }
 }
+
+PatchLiveVoice::~PatchLiveVoice() = default;
 
 void PatchLiveVoice::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
 {
@@ -755,7 +768,7 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
 
                     float waveform = 0.0f;
                     if (entity.waveform == "sine")
-                        waveform = (float) std::sin(phase);
+                        waveform = frustSine != nullptr ? (float) frustSine(phase, 1.0) : (float) std::sin(phase);
                     else if (entity.waveform == "saw")
                         waveform = 2.0f * ((float) (phase / juce::MathConstants<double>::twoPi) - std::floor(0.5f + (float) (phase / juce::MathConstants<double>::twoPi)));
                     else if (entity.waveform == "square")

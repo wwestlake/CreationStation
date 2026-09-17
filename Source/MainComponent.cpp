@@ -2573,6 +2573,35 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                            });
     };
 
+    foleyPanel.onPodBuildRequested = [this](const juce::String& podName, const juce::String& source)
+    {
+        if (! projectSession.isValid())
+        {
+            foleyPanel.setBuildStatus("Open or create a project before building a Foley pod.", false);
+            return;
+        }
+        juce::String status;
+        const bool ok = frustPodService.buildGeneratedNodePod(projectSession, suiteSettings, podName, source,
+                                                               foleyPanel.nodeLibraries(), status);
+        if (ok)
+        {
+            foleyPanel.refreshNodePalette();
+            refreshProjectAssets();
+        }
+        foleyPanel.setBuildStatus(status, ok);
+        transportBar.setStatusText(status);
+    };
+
+    foleyPanel.onRegistryPodLoadRequested = [this](const juce::String& podName, const juce::String& version)
+    {
+        juce::String status;
+        const bool ok = frustPodService.loadRegistryNodePod(suiteSettings, podName, version,
+                                                            foleyPanel.nodeLibraries(), status);
+        if (ok) foleyPanel.refreshNodePalette();
+        foleyPanel.setBuildStatus(status, ok);
+        transportBar.setStatusText(status);
+    };
+
     dslPanel.onSourceExportRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
     {
         auto startDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);

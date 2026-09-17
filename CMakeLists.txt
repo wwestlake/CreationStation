@@ -300,6 +300,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/AudioGraphCodegen.h
     Source/Language/AudioGraphSelfTest.cpp
     Source/Language/AudioGraphSelfTest.h
+    Source/Language/StationFrustPodService.cpp
+    Source/Language/StationFrustPodService.h
     Source/Views/AuthGateView.cpp
     Source/Views/AuthGateView.h
     Source/Views/AiPanel.cpp
@@ -359,6 +361,7 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     # "compiler-provided absolute path" convention Creation Engine's own
     # CE_CORE_NODE_LIBRARY uses for CoreNodesLibrary.frust.
     CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
     # DslPanel's "Compile" button shells out to the real frust_compiler CLI
     # (--emit-obj: parses, runs sema/codegen, and emits an object file, but
     # never executes anything and never requires a `manifest "...";`
@@ -367,6 +370,7 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     # plugin. frust_compiler is built as part of the FrustPluginRuntime
     # subdirectory above, so its build output path is already known here.
     CS_FRUST_COMPILER_EXECUTABLE="$<TARGET_FILE:frust_compiler>"
+    CS_FRATE_EXECUTABLE="$<TARGET_FILE:frate_cli>"
 )
 
 target_include_directories(CreativeWorkstation PRIVATE
@@ -423,6 +427,8 @@ target_link_libraries(CreativeWorkstation PRIVATE
     CreationDock
     creation_station_language_host
     creation_suite_frust_plugin_runtime
+    creation_suite_frate_pod_cache
+    node_library_loader
     node_system
     juce::juce_audio_devices
     juce::juce_audio_processors
@@ -629,6 +635,23 @@ install(TARGETS CreativeWorkstation
     RUNTIME DESTINATION . COMPONENT CreativeWorkstation
     RESOURCE DESTINATION . COMPONENT CreativeWorkstation
 )
+
+add_executable(StationFrustIntegrationSmoke
+    tests/StationFrustIntegrationSmoke.cpp
+    Source/Language/AudioGraphCodegen.cpp
+    Source/Language/AudioGraphSelfTest.cpp
+    Source/Language/AudioNodeCatalog.cpp
+)
+target_include_directories(StationFrustIntegrationSmoke PRIVATE Source)
+target_compile_definitions(StationFrustIntegrationSmoke PRIVATE
+    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
+)
+target_link_libraries(StationFrustIntegrationSmoke PRIVATE
+    creation_suite_frust_plugin_runtime
+    node_system
+)
+
 install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "Djehuti Station")

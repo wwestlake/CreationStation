@@ -1,5 +1,3 @@
-manifest "{\"name\":\"signal_lab_nodes\",\"version\":\"0.1.0\",\"description\":\"Signal Lab audio-domain node functions\",\"intendedApplications\":[\"djehuti-station\"]}";
-
 // sin is a host-registered native function (creation::frust::PluginRuntime::
 // registerHostFunction), not a FRust language intrinsic -- FRust has no
 // built-in math functions today. Real-time-safe: plain scalar f64 in/out,
@@ -8,15 +6,10 @@ manifest "{\"name\":\"signal_lab_nodes\",\"version\":\"0.1.0\",\"description\":\
 // that property matters for anything that might run on an audio callback.
 extern fn sin(x: f64) -> f64;
 
-// v1 scope, single-sample: proves the graph -> FRust -> JIT pipeline on
-// the simplest possible case. `level` is the node's one real, graph-driven
-// input pin; phase is a fixed test constant, not yet a real oscillator
-// phase accumulator -- there is no phase input pin on this node type yet,
-// same acknowledged scope the original codegen-generated version had. A
-// real per-block render (N samples, a host-provided Array<f32, N> buffer,
-// a real accumulating phase) is real, specified follow-on work, not
-// attempted here -- see docs/Signal-Lab-Node-Graph-Spec.md.
-pub fn sine_oscillator(level: f64) -> f64 = {
-    let phase: f64 = 0.5;
+// The node graph supplies both values. Station resolves this function once
+// when its live Signal Lab voice is constructed, then calls the compiled
+// function pointer from the audio callback; compilation never occurs on the
+// real-time thread.
+pub fn sine_oscillator(phase: f64, level: f64) -> f64 = {
     sin(phase) * level
 }

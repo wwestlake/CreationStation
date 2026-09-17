@@ -1,0 +1,7 @@
+manifest "{\"name\":\"signal_lab_runtime\",\"version\":\"0.1.0\",\"description\":\"Station Signal Lab live FRust runtime\",\"intendedApplications\":[\"creation-station-signal-lab\"]}";
+
+use self::SignalLabNodesLibrary;
+
+pub fn render_sine(phase: f64, level: f64) -> f64 = {
+    sine_oscillator(phase, level)
+}
