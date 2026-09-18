@@ -1733,7 +1733,9 @@ void TrackerPanel::TimelineCanvas::resized()
 
     // Floating scrub-preview overlay, top-right corner - only shown while the playhead is over
     // a video clip (see updateVideoPreview), so it doesn't take up space in audio-only projects.
-    videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
+    if (videoWindow == nullptr) {
+        videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
+    }
 }
 
 TrackerPanel::TimelineCanvas::~TimelineCanvas() {
