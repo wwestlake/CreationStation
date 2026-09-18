@@ -8872,7 +8872,7 @@ void MainComponent::refreshMidiPlaybackClips()
 
 bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                                 double& durationSeconds,
-                                                juce::String& errorMessage) const
+                                                juce::String& errorMessage)
 {
     targets.clear();
     durationSeconds = 0.0;
@@ -8906,8 +8906,18 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
                 {
                                         if (clip.kind == cs::ClipKind::signal)
                     {
-                        auto tempWav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("signal_render_" + clip.assetId.replace(":", "_") + ".wav");
-                        if (! tempWav.existsAsFile() || tempWav.getLastModificationTime() < lease.materializedFile.getLastModificationTime())
+                        auto cachePath = "cache/signal_render_" + clip.assetId.replace(":", "_") + ".wav";
+                        creation::assets::MaterializedAssetLease renderLease;
+                        
+                        // Try to read it from the VFS first. If it exists and is newer than the patch file, we can use it.
+                        bool needsRender = true;
+                        if (projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError))
+                        {
+                            if (renderLease.materializedFile.existsAsFile() && renderLease.materializedFile.getLastModificationTime() >= lease.materializedFile.getLastModificationTime())
+                                needsRender = false;
+                        }
+
+                        if (needsRender)
                         {
                             cw::PatchDocument doc;
                             if (!cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, matError)) {
@@ -8921,17 +8931,27 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
                                 errorMessage = "Signal track render failed (render): " + matError;
                                 return false;
                             }
-                            tempWav.deleteFile();
+                            
+                            juce::MemoryBlock wavData;
+                            juce::MemoryOutputStream mos(wavData, false);
                             juce::WavAudioFormat wavFormat;
-                            if (auto os = std::unique_ptr<juce::FileOutputStream>(tempWav.createOutputStream()))
+                            if (auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(&mos, 48000.0, buffer.getNumChannels(), 24, {}, 0)))
                             {
-                                if (auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(os.release(), 48000.0, buffer.getNumChannels(), 24, {}, 0)))
-                                {
-                                    writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
-                                }
+                                writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+                                writer.reset(); // Flush the WAV header
+                            }
+                            
+                            if (!projectSession.writeEntry(cachePath, wavData, juce::Time::getCurrentTime())) {
+                                errorMessage = "Could not write rendered WAV into VFS.";
+                                return false;
+                            }
+                            
+                            if (!projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError)) {
+                                errorMessage = "Could not materialize rendered WAV from VFS: " + matError;
+                                return false;
                             }
                         }
-                        clipFile = tempWav;
+                        clipFile = renderLease.materializedFile;
                     }
                     else
                     {
@@ -10250,14 +10270,3 @@ void MainComponent::refreshInsertRack()
     refreshFxStackWindow();
     refreshPluginsPanel();
 }
-
-
-
-
-
-
-
-
-
-
-

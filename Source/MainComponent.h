@@ -369,7 +369,7 @@ private:
     void refreshTrackerPlaybackClips();
     bool buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                      double& durationSeconds,
-                                     juce::String& errorMessage) const;
+                                     juce::String& errorMessage);
     void previewScrubAudioAt(double timelineSeconds);
     void refreshMidiPlaybackClips();
     bool renderFullMixToProject();
