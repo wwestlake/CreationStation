@@ -281,6 +281,7 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Timeline/TimelineModel.cpp
     Source/Timeline/TimelineModel.h
     Source/Video/VideoDecodeService.cpp
+      Source/Video/VideoCaptureService.cpp
     Source/Video/VideoDecodeService.h
     Source/Video/Bt709NV12Shader.h
     Source/Video/VideoThumbnailCache.cpp

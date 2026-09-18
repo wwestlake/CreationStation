@@ -2,6 +2,7 @@
 #include <creation/assets/AssetMaterializer.h>
 #include <creation/assets/AssetTypes.h>
 #include "MainComponent.h"
+#include "Audio/PatchRuntimePlayer.h"
 #include "Branding.h"
 #include "Patch/PatchModel.h"
 #include "Video/VideoDecodeService.h"
@@ -259,6 +260,123 @@ CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const creation::ui::SuiteD
                                                : session.user.email;
     profile.badgeImage = branding::createPatreonBadgeImage(tierId, 36);
     return profile;
+}
+
+
+
+
+
+namespace {
+class AssetPickerDialog : public juce::DocumentWindow {
+public:
+    AssetPickerDialog(const juce::Array<creation::assets::AssetDescriptor>& allAssets,
+                      std::function<void(const creation::assets::AssetDescriptor&)> onSelected)
+        : juce::DocumentWindow("Add Clip...", juce::Colours::darkgrey, juce::DocumentWindow::closeButton),
+          allAssets_(allAssets), onSelected_(onSelected)
+    {
+        setUsingNativeTitleBar(true);
+        setResizable(true, false);
+        setResizeLimits(400, 300, 1000, 800);
+        
+        mainPanel_ = std::make_unique<juce::Component>();
+        setContentOwned(mainPanel_.get(), false);
+        
+        searchBox_.setTextToShowWhenEmpty("Search assets...", juce::Colours::lightgrey);
+        searchBox_.onTextChange = [this] { filterList(); };
+        mainPanel_->addAndMakeVisible(searchBox_);
+        
+        listBox_.setModel(&model_);
+        listBox_.setRowHeight(44);
+        mainPanel_->addAndMakeVisible(listBox_);
+
+        addButton_.setButtonText("Add");
+        addButton_.setEnabled(false);
+        addButton_.onClick = [this] {
+            auto row = listBox_.getSelectedRow();
+            if (row >= 0 && row < filteredAssets_.size() && onSelected_) {
+                onSelected_(filteredAssets_[row]);
+                closeButtonPressed();
+            }
+        };
+        mainPanel_->addAndMakeVisible(addButton_);
+
+        cancelButton_.setButtonText("Cancel");
+        cancelButton_.onClick = [this] { closeButtonPressed(); };
+        mainPanel_->addAndMakeVisible(cancelButton_);
+        
+        filterList();
+        
+        centreWithSize(450, 500);
+        setVisible(true);
+    }
+    
+    void closeButtonPressed() override {
+        delete this;
+    }
+    
+    void resized() override {
+        juce::DocumentWindow::resized();
+        if (mainPanel_) {
+            auto bounds = mainPanel_->getLocalBounds();
+            searchBox_.setBounds(bounds.removeFromTop(30).reduced(4));
+            
+            auto bottomBounds = bounds.removeFromBottom(40);
+            cancelButton_.setBounds(bottomBounds.removeFromRight(100).reduced(4));
+            addButton_.setBounds(bottomBounds.removeFromRight(100).reduced(4));
+
+            listBox_.setBounds(bounds);
+        }
+    }
+
+private:
+    void filterList() {
+        filteredAssets_.clear();
+        auto query = searchBox_.getText().trim().toLowerCase();
+        for (const auto& a : allAssets_) {
+            if (query.isEmpty() || a.displayName.toLowerCase().contains(query) || a.logicalPath.toLowerCase().contains(query))
+                filteredAssets_.add(a);
+        }
+        listBox_.updateContent();
+        listBox_.repaint();
+        addButton_.setEnabled(listBox_.getSelectedRow() >= 0);
+    }
+
+    struct Model : public juce::ListBoxModel {
+        Model(AssetPickerDialog* o) : owner(o) {}
+        AssetPickerDialog* owner;
+        int getNumRows() override { return owner->filteredAssets_.size(); }
+        void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override {
+            if (rowIsSelected) g.fillAll(juce::Colour(0xff293d5a));
+            if (rowNumber >= owner->filteredAssets_.size()) return;
+            const auto& a = owner->filteredAssets_.getReference(rowNumber);
+            g.setColour(juce::Colours::white);
+            g.setFont(14.0f);
+            g.drawText(a.displayName, 10, 2, width - 20, height / 2, juce::Justification::centredLeft, true);
+            g.setColour(juce::Colours::grey);
+            g.setFont(11.0f);
+            g.drawText(a.logicalPath, 10, height / 2, width - 20, height / 2, juce::Justification::centredLeft, true);
+        }
+        void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override {
+            if (row < owner->filteredAssets_.size() && owner->onSelected_) {
+                owner->onSelected_(owner->filteredAssets_[row]);
+                owner->closeButtonPressed();
+            }
+        }
+        void selectedRowsChanged(int lastRowSelected) override {
+            owner->addButton_.setEnabled(lastRowSelected >= 0 && lastRowSelected < owner->filteredAssets_.size());
+        }
+    };
+    
+    std::unique_ptr<juce::Component> mainPanel_;
+    juce::TextEditor searchBox_;
+    juce::TextButton addButton_;
+    juce::TextButton cancelButton_;
+    Model model_ { this };
+    juce::ListBox listBox_;
+    juce::Array<creation::assets::AssetDescriptor> allAssets_;
+    juce::Array<creation::assets::AssetDescriptor> filteredAssets_;
+    std::function<void(const creation::assets::AssetDescriptor&)> onSelected_;
+};
 }
 
 class ManagedDocumentWindow final : public juce::DocumentWindow
@@ -1694,9 +1812,29 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         showFxStackWindow();
     };
 
-    trackerPanel.onAddTrackRequested = [this]
+    trackerPanel.onEmptyTrackContextMenuRequested = [this](int trackIndex, double startSeconds, juce::Point<int> screenPos)
     {
-        addTrack();
+        juce::PopupMenu menu;
+        menu.addItem(1, "Add Track");
+        menu.addItem(2, "Add Clip...");
+        
+        auto area = juce::Rectangle<int>(screenPos.x, screenPos.y, 1, 1);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
+            [this, trackIndex, startSeconds](int result)
+            {
+                if (result == 1)
+                {
+                    addTrack();
+                }
+                else if (result == 2)
+                {
+                    juce::Array<creation::assets::AssetDescriptor> allAssets = projectSession.getManifest().assetCatalog.assets;
+                    new AssetPickerDialog(allAssets, [this, trackIndex, startSeconds](const creation::assets::AssetDescriptor& chosen) {
+                        trackerPanel.setSelectedTrack(trackIndex);
+                        placeProjectAssetOnTracker(chosen, startSeconds);
+                    });
+                }
+            });
     };
 
     trackerPanel.onRemoveTrackRequested = [this](int trackIndex)
@@ -6923,13 +7061,14 @@ void MainComponent::restoreLastActiveAssets(const juce::ValueTree& lastActiveAss
             restoreFoleyAsset(*asset);
 }
 
-void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset)
+void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset, double startSeconds)
 {
     if (asset.kind != creation::assets::AssetKind::audio
         && asset.kind != creation::assets::AssetKind::render
-        && asset.kind != creation::assets::AssetKind::patch)
+        && asset.kind != creation::assets::AssetKind::patch
+        && asset.kind != creation::assets::AssetKind::video)
     {
-        contentPanel.setStatusText("Only audio and signal patches can be placed on the Tracker right now.");
+        contentPanel.setStatusText("Only audio, video, and signal patches can be placed on the Tracker right now.");
         return;
     }
 
@@ -6955,6 +7094,76 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
 
     juce::String errorMessage;
     int clipIndex = -1;
+
+    if (asset.kind == creation::assets::AssetKind::video)
+    {
+        if (timelineModel.getTrackKind(targetTrack) != cs::TrackKind::video)
+        {
+            addTrack();
+            targetTrack = engine.getTrackCount() - 1;
+            timelineModel.setTrackKind(targetTrack, cs::TrackKind::video);
+            trackerPanel.setTrackKind(targetTrack, cs::TrackKind::video);
+            engine.setTrackIsMidiKind(targetTrack, false);
+            engine.setTrackIsAutomationKind(targetTrack, false);
+        }
+
+        creation::assets::MaterializedAssetLease lease;
+        if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath, creation::assets::MaterializationAccess::readOnly, lease, errorMessage))
+        {
+            contentPanel.setStatusText("Could not materialize video asset: " + errorMessage);
+            return;
+        }
+
+        auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+        auto sourceFile = lease.materializedFile;
+        std::thread([safeThis, asset, targetTrack, startSeconds, sourceFile]() mutable
+        {
+            cs::VideoDecodeService decodeService;
+            auto info = decodeService.open(sourceFile);
+
+            juce::MessageManager::callAsync([safeThis, asset, targetTrack, startSeconds, sourceFile, info]() mutable
+            {
+                if (safeThis == nullptr) return;
+
+                if (info.valid)
+                {
+                    juce::String clipError;
+                    cs::AssetRef assetRef;
+                    assetRef.id = asset.id;
+                    assetRef.versionId = asset.versionId;
+                    assetRef.mode = creation::assets::AssetReferenceMode::exact;
+
+                    auto clipIndex = safeThis->timelineModel.addClip(cs::ClipKind::video,
+                                                                     targetTrack,
+                                                                     asset.displayName,
+                                                                     asset.id,
+                                                                     "project-video",
+                                                                     sourceFile,
+                                                                     startSeconds,
+                                                                     info.durationSeconds > 0.0 ? info.durationSeconds : 10.0,
+                                                                     clipError);
+
+                                        if (clipIndex >= 0) {
+                        safeThis->timelineModel.setClipAssetReference(clipIndex, assetRef);
+                        safeThis->trackerPanel.setSelectedTrack(targetTrack);
+                        safeThis->trackerPanel.refreshTimelineView();
+                        safeThis->setWorkspaceMode(WorkspaceMode::tracker);
+                        safeThis->saveSessionToDisk();
+                        safeThis->transportBar.setStatusText("Placed project asset on Tracker: " + asset.displayName);
+                    }
+                    else if (clipError.isNotEmpty()) {
+                        safeThis->contentPanel.setStatusText(clipError);
+                    }
+                }
+                else
+                {
+                    safeThis->contentPanel.setStatusText("Could not decode video: " + sourceFile.getFileName());
+                }
+            });
+        }).detach();
+
+        return;
+    }
 
     if (asset.kind == creation::assets::AssetKind::patch)
     {
@@ -8041,7 +8250,7 @@ bool MainComponent::startRecordingSession()
     }
 
     const auto totalArmedCount = recordingTargets.size() + midiRecordingTracks.size();
-    if (totalArmedCount == 0)
+    if (totalArmedCount == 0 && !videoCaptureService.isRecording())
     {
         transportBar.setStatusText(tracksRejectedForRecording.isEmpty()
             ? "Record failed: no armed tracks were available for recording."
@@ -8663,7 +8872,7 @@ void MainComponent::refreshMidiPlaybackClips()
 
 bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                                 double& durationSeconds,
-                                                juce::String& errorMessage) const
+                                                juce::String& errorMessage)
 {
     targets.clear();
     durationSeconds = 0.0;
@@ -8695,7 +8904,59 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
                                                     creation::assets::MaterializationAccess::readOnly,
                                                     lease, matError))
                 {
-                    clipFile = lease.materializedFile;
+                                        if (clip.kind == cs::ClipKind::signal)
+                    {
+                        auto cachePath = "cache/signal_render_" + clip.assetId.replace(":", "_") + ".wav";
+                        creation::assets::MaterializedAssetLease renderLease;
+                        
+                        // Try to read it from the VFS first. If it exists and is newer than the patch file, we can use it.
+                        bool needsRender = true;
+                        if (projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError))
+                        {
+                            if (renderLease.materializedFile.existsAsFile() && renderLease.materializedFile.getLastModificationTime() >= lease.materializedFile.getLastModificationTime())
+                                needsRender = false;
+                        }
+
+                        if (needsRender)
+                        {
+                            cw::PatchDocument doc;
+                            if (!cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, matError)) {
+                                errorMessage = "Signal track render failed (parse): " + matError;
+                                return false;
+                            }
+                            PatchRuntimePlayer player;
+                            player.prepare(48000.0, 512);
+                            juce::AudioBuffer<float> buffer;
+                            if (!player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr)) {
+                                errorMessage = "Signal track render failed (render): " + matError;
+                                return false;
+                            }
+                            
+                            juce::MemoryBlock wavData;
+                            juce::MemoryOutputStream mos(wavData, false);
+                            juce::WavAudioFormat wavFormat;
+                            if (auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(&mos, 48000.0, buffer.getNumChannels(), 24, {}, 0)))
+                            {
+                                writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+                                writer.reset(); // Flush the WAV header
+                            }
+                            
+                            if (!projectSession.writeEntry(cachePath, wavData, juce::Time::getCurrentTime())) {
+                                errorMessage = "Could not write rendered WAV into VFS.";
+                                return false;
+                            }
+                            
+                            if (!projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError)) {
+                                errorMessage = "Could not materialize rendered WAV from VFS: " + matError;
+                                return false;
+                            }
+                        }
+                        clipFile = renderLease.materializedFile;
+                    }
+                    else
+                    {
+                        clipFile = lease.materializedFile;
+                    }
                 }
             }
         }

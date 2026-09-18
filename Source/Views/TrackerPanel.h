@@ -7,6 +7,7 @@
 #include "../Video/VideoThumbnailCache.h"
 #include "../Video/VideoScrubPreview.h"
 #include "../Video/VideoPreviewComponent.h"
+#include "../Video/VideoPlayerWindow.h"
 
 class TrackerPanel final : public juce::Component,
                            public juce::FileDragAndDropTarget,
@@ -15,7 +16,7 @@ class TrackerPanel final : public juce::Component,
 public:
     TrackerPanel();
 
-    std::function<void()> onAddTrackRequested;
+    std::function<void(int trackIndex, double startSeconds, juce::Point<int> screenPos)> onEmptyTrackContextMenuRequested;
     std::function<void(int)> onRemoveTrackRequested;
     std::function<void(int)> onTrackSelected;
     std::function<void(int, const juce::String&)> onTrackNameChanged;
@@ -96,7 +97,10 @@ public:
     void setTrackLevel(int trackIndex, float level);
     void setTrackGain(int trackIndex, float gain);
     void setInputSources(const juce::Array<juce::String>& sourceNames);
+    void setVideoInputSources(const juce::Array<juce::String>& sourceNames, const juce::Array<juce::String>& sourceIds);
+
     void setTrackInput(int trackIndex, int inputChannel);
+    void setTrackVideoInput(int trackIndex, const juce::String& deviceId);
     void setTrackFxSummary(int trackIndex, int pluginCount);
     void setSelectedTrack(int trackIndex);
     void setSelectedClip(int clipIndex);
@@ -136,6 +140,8 @@ private:
     class TimelineCanvas final : public juce::Component
     {
     public:
+        TimelineCanvas();
+        ~TimelineCanvas() override;
         std::function<void(int)> onTrackSelected;
         std::function<void(int, const juce::String&)> onTrackNameChanged;
         std::function<void(int, cs::TrackKind)> onTrackKindChanged;
@@ -150,7 +156,7 @@ private:
         std::function<void(int)> onTrackFxRequested;
         std::function<void(int)> onTrackRemoveRequested;
         std::function<void(int)> onMoveToFolderRequested;
-        std::function<void()> onAddTrackRequested;
+        std::function<void(int trackIndex, double startSeconds, juce::Point<int> screenPos)> onEmptyTrackContextMenuRequested;
         std::function<void(double)> onPlayheadPositionChanged;
         std::function<void(double, double)> onLoopRegionChanged;
         std::function<void()> onLoopRegionCleared;
@@ -190,7 +196,10 @@ private:
         void setTrackLevel(int trackIndex, float level);
         void setTrackGain(int trackIndex, float gain);
         void setInputSources(const juce::Array<juce::String>& sourceNames);
+    void setVideoInputSources(const juce::Array<juce::String>& sourceNames, const juce::Array<juce::String>& sourceIds);
+
         void setTrackInput(int trackIndex, int inputChannel);
+    void setTrackVideoInput(int trackIndex, const juce::String& deviceId);
         void setTrackFxSummary(int trackIndex, int pluginCount);
         void setSelectedTrack(int trackIndex);
         void setSelectedClip(int clipIndex);
@@ -296,6 +305,8 @@ private:
             void setLevel(float level);
             void setGain(float gain);
             void setInputSources(const juce::Array<juce::String>& sourceNames);
+    void setVideoInputSources(const juce::Array<juce::String>& sourceNames, const juce::Array<juce::String>& sourceIds);
+
             void setInputChannel(int inputChannel);
             void setFxSummary(int pluginCount);
             // Automation tracks have no source/output of their own - this shows what control the
@@ -335,6 +346,9 @@ private:
             juce::TextButton menuButton;
             juce::ComboBox inputSelector;
             juce::Array<juce::String> lastAudioSourceNames;
+            juce::Array<juce::String> lastVideoSourceNames;
+            juce::Array<juce::String> lastVideoSourceIds;
+            void setVideoInput(const juce::String& deviceId);
             juce::TextButton fxButton { "FX" };
             juce::Label dbLabel;
             juce::Slider gainSlider;
@@ -365,7 +379,7 @@ private:
         // drawAutomationLane's own const-ness, since neither touches this component's layout).
         mutable cs::VideoThumbnailCache videoThumbnailCache;
         cs::VideoScrubPreview scrubPreview;
-        cs::VideoPreviewComponent videoPreview;
+        std::unique_ptr<cs::VideoPlayerWindow> videoWindow;
         bool draggingLoopRegion = false;
         bool loopRegionMoved = false;
         double loopDragStartSeconds = 0.0;
@@ -428,3 +442,4 @@ private:
     void commitTimingEdits();
     void showArrangementMenu();
 };
+

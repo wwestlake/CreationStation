@@ -349,10 +349,10 @@ TrackerPanel::TrackerPanel()
         if (onRemoveTrackRequested)
             onRemoveTrackRequested(trackIndex);
     };
-    canvas.onAddTrackRequested = [this]
+    canvas.onEmptyTrackContextMenuRequested = [this](int trackIndex, double startSeconds, juce::Point<int> screenPos)
     {
-        if (onAddTrackRequested)
-            onAddTrackRequested();
+        if (onEmptyTrackContextMenuRequested)
+            onEmptyTrackContextMenuRequested(trackIndex, startSeconds, screenPos);
     };
     canvas.onPlayheadPositionChanged = [this](double seconds)
     {
@@ -1688,7 +1688,7 @@ void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
 {
     if (timelineModel == nullptr)
     {
-        videoPreview.setVisible(false);
+        if (videoWindow) videoWindow->setVisible(false);
         return;
     }
 
@@ -1706,18 +1706,18 @@ void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
 
     if (activeClip == nullptr)
     {
-        videoPreview.setVisible(false);
+        if (videoWindow) videoWindow->setVisible(false);
         return;
     }
 
-    videoPreview.setVisible(true);
+    if (videoWindow) videoWindow->setVisible(true);
     auto sourceSeconds = activeClip->sourceStartSeconds + (timelineSeconds - activeClip->startSeconds);
 
     scrubPreview.requestFrame(activeClip->file, sourceSeconds,
                               [safe = juce::Component::SafePointer<TimelineCanvas>(this)](juce::Image image)
                               {
                                   if (safe != nullptr)
-                                      safe->videoPreview.setImage(image);
+                                      safe->videoWindow->getPreviewComponent().setImage(image);
                               });
 }
 
@@ -1730,15 +1730,17 @@ void TrackerPanel::TimelineCanvas::resized()
         if (auto* header = trackHeaders[trackIndex])
             header->setBounds(0, trackTopY(trackIndex), labelWidth, getTrackHeightAt(trackIndex));
     }
+}
 
-    // Floating scrub-preview overlay, top-right corner - only shown while the playhead is over
-    // a video clip (see updateVideoPreview), so it doesn't take up space in audio-only projects.
-    addAndMakeVisible(videoPreview);
-    constexpr int previewWidth = 160;
-    constexpr int previewHeight = 90;
-    constexpr int previewMargin = 10;
-    videoPreview.setBounds(getWidth() - previewWidth - previewMargin, previewMargin, previewWidth, previewHeight);
-    videoPreview.toFront(false);
+TrackerPanel::TimelineCanvas::TimelineCanvas() {
+    videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
+}
+
+TrackerPanel::TimelineCanvas::~TimelineCanvas() {
+    if (videoWindow) {
+        videoWindow->setVisible(false);
+        videoWindow.reset();
+    }
 }
 
 void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
@@ -1813,16 +1815,11 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                                    : -1;
         if (clipUnderCursor < 0)
         {
-            juce::PopupMenu menu;
-            menu.addItem(1, "Add Track");
             auto clickArea = juce::Rectangle<int>(event.x, event.y, 1, 1);
-            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
-                                                        .withTargetScreenArea(localAreaToGlobal(clickArea)),
-                                [safe = juce::Component::SafePointer<TimelineCanvas>(this)](int result)
-                                {
-                                    if (safe != nullptr && result == 1 && safe->onAddTrackRequested)
-                                        safe->onAddTrackRequested();
-                                });
+            auto hoveredTrackIndex = yToTrackIndex(event.y);
+            auto startSeconds = timelineModel != nullptr ? timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x)) : 0.0;
+            if (onEmptyTrackContextMenuRequested)
+                onEmptyTrackContextMenuRequested(hoveredTrackIndex, startSeconds, localAreaToGlobal(clickArea).getPosition());
             return;
         }
     }
@@ -3296,3 +3293,6 @@ bool TrackerPanel::TimelineCanvas::TrackHeader::isInResizeHotzone(juce::Point<fl
     constexpr int resizeHotzonePixels = 6;
     return position.y >= (float) (getHeight() - resizeHotzonePixels);
 }
+
+
+

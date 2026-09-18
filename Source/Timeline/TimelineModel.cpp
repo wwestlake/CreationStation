@@ -1356,6 +1356,7 @@ juce::ValueTree TimelineModel::createState() const
         trackState.setProperty("kind", toStorageToken(track.kind), nullptr);
         trackState.setProperty("channelMode", toStorageToken(track.channelMode), nullptr);
         trackState.setProperty("parentTrackIndex", track.parentTrackIndex, nullptr);
+        trackState.setProperty("videoInputDevice", track.videoInputDevice, nullptr);
         trackState.setProperty("folded", track.folded, nullptr);
         trackState.setProperty("heightPixels", track.heightPixels, nullptr);
         trackState.setProperty("automationTargetKind", toStorageToken(track.automationTarget.kind), nullptr);
@@ -1501,6 +1502,7 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
             track.kind = trackKindFromStorageToken(child.getProperty("kind", "audio").toString());
             track.channelMode = trackChannelModeFromStorageToken(child.getProperty("channelMode", "mono").toString());
             track.parentTrackIndex = (int) child.getProperty("parentTrackIndex", -1);
+            track.videoInputDevice = child.getProperty("videoInputDevice", "").toString();
             track.folded = (bool) child.getProperty("folded", false);
             track.heightPixels = juce::jlimit(64, 156, (int) child.getProperty("heightPixels", 100));
             track.automationTarget.kind = automationTargetKindFromStorageToken(child.getProperty("automationTargetKind", "none").toString());
@@ -1621,3 +1623,4 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
     }
 }
 }
+

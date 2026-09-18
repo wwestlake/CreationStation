@@ -120,9 +120,11 @@ ContentPanel::ProjectAssetCard::ProjectAssetCard()
 void ContentPanel::ProjectAssetCard::setAsset(const creation::assets::AssetDescriptor& newAsset)
 {
     asset = newAsset;
-    const auto isAudioAsset = asset.kind == creation::assets::AssetKind::audio || asset.kind == creation::assets::AssetKind::render;
-    placeButton.setVisible(isAudioAsset);
-    exportButton.setVisible(isAudioAsset);
+    const auto isPlaceable = asset.kind == creation::assets::AssetKind::audio || 
+                             asset.kind == creation::assets::AssetKind::render || 
+                             asset.kind == creation::assets::AssetKind::patch;
+    placeButton.setVisible(isPlaceable);
+    exportButton.setVisible(asset.kind == creation::assets::AssetKind::audio || asset.kind == creation::assets::AssetKind::render);
     repaint();
 }
 

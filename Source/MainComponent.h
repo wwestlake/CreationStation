@@ -15,6 +15,7 @@
 #include "Audio/StudioIOModel.h"
 #include "Audio/VstPluginCatalog.h"
 #include "Audio/WorkstationAudioEngine.h"
+#include "Video/VideoCaptureService.h"
 #include "Video/VideoDecodeService.h"
 #include "ControlSurface/XTouchControlSurface.h"
 #include "ControlSurface/ControlSurfaceMappingStore.h"
@@ -223,6 +224,7 @@ private:
     LiteSemRagApiClient semanticApiClient;
     creation::services::SuiteAiChatClient openAiChatClient;
     WorkstationAudioEngine engine;
+    cs::VideoCaptureService videoCaptureService;
     cw::StationFrustPodService frustPodService;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;
@@ -367,7 +369,7 @@ private:
     void refreshTrackerPlaybackClips();
     bool buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                      double& durationSeconds,
-                                     juce::String& errorMessage) const;
+                                     juce::String& errorMessage);
     void previewScrubAudioAt(double timelineSeconds);
     void refreshMidiPlaybackClips();
     bool renderFullMixToProject();
@@ -520,7 +522,7 @@ private:
     bool restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset);
     bool restoreFoleyAsset(const creation::assets::AssetDescriptor& asset);
     void restoreLastActiveAssets(const juce::ValueTree& lastActiveAssetsState);
-    void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset);
+    void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset, double startSeconds = -1.0);
     void exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset);
     int placeAudioAssetOnTracker(const creation::assets::AssetDescriptor& asset,
                                  int targetTrack,
