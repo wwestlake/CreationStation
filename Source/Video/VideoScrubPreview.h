@@ -66,7 +66,7 @@ private:
             if (openValid)
                 decoded = openService.decodeFrameAt(sourceSeconds, 320, 180);
 
-            if (callback && decoded.isValid())
+            if (callback)
                 juce::MessageManager::callAsync([callback, decoded] { callback(decoded); });
 
             const juce::ScopedLock sl(lock);

@@ -334,6 +334,8 @@ private:
     cs::TimelineModel timelineModel;
     double transportStartWallSeconds = 0.0;
     double transportStartTimelineSeconds = 0.0;
+    double transportLoopDelayWaitUntilWallSeconds = 0.0;
+    bool transportIsWaitingForLoopDelay = false;
     bool midiScrubModeEnabled = false;
     bool midiEditorPreviewPlaying = false;
     bool midiEditorPreviewLoopEnabled = false;

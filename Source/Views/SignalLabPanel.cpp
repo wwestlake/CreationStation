@@ -2872,29 +2872,6 @@ SignalLabPanel::SignalLabPanel()
     compileButton.onClick = [this] { compileGraph(); };
     addAndMakeVisible(compileButton);
 
-    playButton.onClick = [this] { triggerTransportPlay(); };
-    addAndMakeVisible(playButton);
-
-    stopButton.onClick = [this] { stopTransport(); };
-    addAndMakeVisible(stopButton);
-
-    repeatButton.setClickingTogglesState(true);
-    repeatButton.setColour(juce::TextButton::buttonOnColourId, juce::Colour(0xff5f93ff));
-    repeatButton.setTooltip("Play again after a delay, on its own pace -- not a seamless loop. Set the gap with the seconds field next to it.");
-    repeatButton.onClick = [this]
-    {
-        repeatEnabled = repeatButton.getToggleState();
-        if (repeatEnabled)
-            triggerTransportPlay();
-    };
-    addAndMakeVisible(repeatButton);
-
-    configureSlider(repeatDelaySlider, 0.0, 10.0, 0.1);
-    repeatDelaySlider.setValue(repeatDelaySeconds, juce::dontSendNotification);
-    repeatDelaySlider.setTextValueSuffix(" s");
-    repeatDelaySlider.setTooltip("Seconds to wait between repeats (0 = back to back)");
-    repeatDelaySlider.onValueChange = [this] { repeatDelaySeconds = repeatDelaySlider.getValue(); };
-
     toolboxPane.onAddVariableRequested = [this]
     {
         captureUndoCheckpoint("Add graph variable");
@@ -3987,24 +3964,27 @@ void SignalLabPanel::showSignalMenu()
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
                        [this](int result)
                        {
-                           if (result == 1)
-                               createNewSignal();
-                           else if (result == 2)
+                           juce::MessageManager::callAsync([this, result]()
                            {
-                               if (onPatchLoadRequested)
-                                   onPatchLoadRequested();
-                           }
-                           else if (result == 3 || result == 4)
-                           {
-                               if (onPatchSaveToLibraryRequested)
-                                   onPatchSaveToLibraryRequested(cw::serialisePatchDocumentJson(buildPatchDocument(recipe)), recipe.name);
-                           }
-                           else if (result == 5)
-                           {
-                               ensureAudioRendered();
-                               if (onRenderRequested)
-                                   onRenderRequested(generatedBuffer, recipe.sampleRate, resolveRenderAssetName());
-                           }
+                               if (result == 1)
+                                   createNewSignal();
+                               else if (result == 2)
+                               {
+                                   if (onPatchLoadRequested)
+                                       onPatchLoadRequested();
+                               }
+                               else if (result == 3 || result == 4)
+                               {
+                                   if (onPatchSaveToLibraryRequested)
+                                       onPatchSaveToLibraryRequested(cw::serialisePatchDocumentJson(buildPatchDocument(recipe)), recipe.name);
+                               }
+                               else if (result == 5)
+                               {
+                                   ensureAudioRendered();
+                                   if (onRenderRequested)
+                                       onRenderRequested(generatedBuffer, recipe.sampleRate, resolveRenderAssetName());
+                               }
+                           });
                        });
 }
 
@@ -5922,6 +5902,9 @@ juce::ValueTree SignalLabPanel::createState() const
         state.addChild(laneState, -1, nullptr);
     }
 
+    auto patchDocument = buildPatchDocument(recipe);
+    state.setProperty("patchDocumentJson", cw::serialisePatchDocumentJson(patchDocument), nullptr);
+
     return state;
 }
 
@@ -5929,6 +5912,25 @@ void SignalLabPanel::restoreState(const juce::ValueTree& state)
 {
     if (! state.isValid())
         return;
+
+    recipe.name = state.getProperty("name", recipe.name).toString();
+    recipe.renderAssetName = state.getProperty("renderAssetName", recipe.renderAssetName).toString();
+    recipe.sampleRate = (double) state.getProperty("sampleRate", recipe.sampleRate);
+    recipe.durationSeconds = (double) state.getProperty("durationSeconds", recipe.durationSeconds);
+    recipe.sinkMode = state.getProperty("sinkMode", recipe.sinkMode).toString();
+
+    auto json = state.getProperty("patchDocumentJson").toString();
+    if (json.isNotEmpty())
+    {
+        cw::PatchDocument doc;
+        juce::String err;
+        if (cw::parsePatchDocumentJson(json, doc, err))
+        {
+            loadPatchDocument(doc, err);
+            regenerateSignal();
+            return;
+        }
+    }
 
     recipe = {};
     mixNodeEnabled = false;
@@ -6256,16 +6258,7 @@ bool SignalLabPanel::previewCurrentSignal()
     return true;
 }
 
-void SignalLabPanel::timerCallback()
-{
-    if (! repeatEnabled)
-    {
-        stopTimer();
-        return;
-    }
 
-    triggerTransportPlay();
-}
 
 juce::Array<SignalLabPanel::GraphValidationError> SignalLabPanel::validateGraph() const
 {
@@ -6448,25 +6441,10 @@ void SignalLabPanel::centerCanvasOnGraphNode(const juce::String& nodeId)
     }
 }
 
-void SignalLabPanel::refreshTransportControlsForSinkMode()
-{
-    auto isWave = recipe.sinkMode == "wave";
-    playButton.setButtonText(isWave ? "Render" : "Play");
-    repeatButton.setEnabled(! isWave);
-    if (isWave && repeatEnabled)
-    {
-        repeatEnabled = false;
-        repeatButton.setToggleState(false, juce::dontSendNotification);
-    }
-}
-
 void SignalLabPanel::triggerTransportPlay()
 {
-    // Wave (File) sink mode: Play is relabeled "Render" (see
-    // refreshTransportControlsForSinkMode()) and does a one-shot offline
-    // render straight to the project instead of starting the live engine --
-    // repeat doesn't apply to a one-shot render, so this never touches the
-    // timer/live-start path below at all.
+    // Wave (File) sink mode: Play is relabeled "Render" and does a one-shot
+    // offline render straight to the project instead of starting the live engine.
     if (recipe.sinkMode == "wave")
     {
         ensureAudioRendered();
@@ -6526,19 +6504,10 @@ void SignalLabPanel::triggerTransportPlay()
         onLiveStartRequested(recipe.durationSeconds);
 
     updateStatusText();
-
-    if (repeatEnabled)
-    {
-        auto totalSeconds = juce::jmax(0.001, recipe.durationSeconds + repeatDelaySeconds);
-        startTimer(juce::jmax(1, juce::roundToInt(totalSeconds * 1000.0)));
-    }
 }
 
 void SignalLabPanel::stopTransport()
 {
-    stopTimer();
-    repeatEnabled = false;
-    repeatButton.setToggleState(false, juce::dontSendNotification);
     if (onLiveStopRequested)
         onLiveStopRequested();
     if (onStopRequested)
@@ -6624,14 +6593,6 @@ void SignalLabPanel::resized()
     topBar.removeFromLeft(10);
     auto transportArea = topBar.removeFromLeft(546);
     compileButton.setBounds(transportArea.removeFromLeft(80));
-    transportArea.removeFromLeft(8);
-    playButton.setBounds(transportArea.removeFromLeft(80));
-    transportArea.removeFromLeft(8);
-    stopButton.setBounds(transportArea.removeFromLeft(80));
-    transportArea.removeFromLeft(8);
-    repeatButton.setBounds(transportArea.removeFromLeft(80));
-    transportArea.removeFromLeft(8);
-    repeatDelaySlider.setBounds(transportArea.removeFromLeft(180));
 
     area.removeFromTop(10);
     auto propertiesArea = area.removeFromLeft(280);
@@ -6818,7 +6779,6 @@ void SignalLabPanel::regenerateSignal()
     rebuildNodeGraphFromRecipe();
     updateInspectorForSelection();
     notifyFaderChannelClaims();
-    refreshTransportControlsForSinkMode();
 }
 
 void SignalLabPanel::applyLiveMidiControlChanges(const juce::Array<MidiControlChange>& changes)

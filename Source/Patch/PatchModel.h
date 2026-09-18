@@ -100,6 +100,10 @@ struct PatchDocument
     juce::String updatedAt;
     juce::String runtime { "creation-station" };
     juce::String minimumVersion { "0.2.0" };
+    double durationSeconds = 5.0;
+    double sampleRate = 48000.0;
+    juce::String sinkMode { "audio" };
+    juce::String renderAssetName;
     juce::Array<PatchParameter> parameters;
     juce::Array<PatchAutomationLane> automationLanes;
     juce::Array<PatchSource> sources;

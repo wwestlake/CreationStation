@@ -1169,6 +1169,19 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     menuBar->setColour(juce::TextButton::textColourOffId, juce::Colours::white);
     menuBar->setColour(juce::TextButton::textColourOnId, juce::Colours::white);
     dockManager = std::make_unique<CreationDock::DockManager>(*this);
+    dockManager->onPanelActivated = [this](const juce::String& panelId)
+    {
+        if (panelId == trackerPanelId) setWorkspaceMode(WorkspaceMode::tracker);
+        else if (panelId == samplerPanelId) setWorkspaceMode(WorkspaceMode::sampler);
+        else if (panelId == signalPanelId) setWorkspaceMode(WorkspaceMode::signal);
+        else if (panelId == pluginsPanelId) setWorkspaceMode(WorkspaceMode::plugins);
+        else if (panelId == patchPanelId) setWorkspaceMode(WorkspaceMode::node);
+        else if (panelId == scorePanelId) setWorkspaceMode(WorkspaceMode::score);
+        else if (panelId == settingsPanelId) setWorkspaceMode(WorkspaceMode::settings);
+        else if (panelId == foleyPanelId) setWorkspaceMode(WorkspaceMode::foley);
+        else if (panelId == layersPanelId) setWorkspaceMode(WorkspaceMode::mix);
+    };
+
     addAndMakeVisible(authGateView);
     transportBarSafe = &transportBar;
     pluginRackBarSafe = &pluginRackBar;
@@ -1439,9 +1452,18 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     transportBar.onPlay = [this]
     {
         engine.stopAssetPreview();
+
+        if (activeMode == WorkspaceMode::signal)
+        {
+            signalLabPanel.triggerTransportPlay();
+            transportBar.setPlaybackVisualState(true, false);
+            return;
+        }
+
         if (! prepareTrackerPlayback())
             return;
 
+        transportIsWaitingForLoopDelay = false;
         transportStartWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
         transportStartTimelineSeconds = timelineModel.getTransportSeconds();
         engine.setPlaybackPositionSeconds(transportStartTimelineSeconds);
@@ -1452,8 +1474,16 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     transportBar.onPause = [this]
     {
         engine.stopAssetPreview();
+
+        if (activeMode == WorkspaceMode::signal)
+        {
+            signalLabPanel.stopTransport();
+            transportBar.setPlaybackVisualState(false, false);
+            return;
+        }
+
+        transportIsWaitingForLoopDelay = false;
         engine.setPlaying(false);
-        transportBar.setPlaybackVisualState(false, false);
         midiSurface.setTransportState(false, false);
         transportBar.setPlaybackVisualState(false, false);
     };
@@ -1461,6 +1491,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         stopRecordingSession();
         engine.stopAssetPreview();
+
+        if (activeMode == WorkspaceMode::signal)
+        {
+            signalLabPanel.stopTransport();
+        }
+
+        transportIsWaitingForLoopDelay = false;
         engine.setPlaying(false);
         midiSurface.setTransportState(false, false);
         transportBar.setPlaybackVisualState(false, false);
@@ -1532,6 +1569,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         timelineModel.setLoopEnabled(loopEnabled);
         transportBar.setStatusText(loopEnabled ? "Transport: loop on" : "Transport: loop off");
+    };
+    transportBar.onLoopDelayChanged = [this](double delaySeconds)
+    {
+        timelineModel.setLoopDelaySeconds(delaySeconds);
+        transportBar.setStatusText("Transport: loop delay " + juce::String(delaySeconds, 1) + "s");
     };
     transportBar.onMetronomeModeChanged = [this](CreationSuiteHeaderBar::MetronomeMode mode)
     {
@@ -1930,7 +1972,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         juce::String errorMessage;
         if (! creation::assets::ProjectAssetService::saveGeneratedAsset(projectSession, data, options, savedAsset, errorMessage))
         {
-            transportBar.setStatusText("Could not save arrangement: " + errorMessage);
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Save Failed", "Could not save arrangement:\n" + errorMessage);
+            transportBar.setStatusText("Save failed.");
             return;
         }
 
@@ -1939,7 +1982,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
         if (! projectSession.commit(errorMessage))
         {
-            transportBar.setStatusText("Arrangement saved but project commit failed: " + errorMessage);
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Commit Failed", "Arrangement saved but project commit failed:\n" + errorMessage);
+            transportBar.setStatusText("Commit failed.");
             return;
         }
 
@@ -2416,7 +2460,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         juce::String errorMessage;
         if (! creation::assets::ProjectAssetService::saveGeneratedAsset(projectSession, patchData, options, patchAsset, errorMessage))
         {
-            transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the Signal Lab design asset.");
+            auto message = errorMessage.isNotEmpty() ? errorMessage : "Could not save the Signal Lab design asset.";
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Save Failed", message);
+            transportBar.setStatusText("Save failed.");
             return;
         }
 
@@ -2424,7 +2470,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
         if (! projectSession.commit(errorMessage))
         {
-            transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the Signal Lab design asset.");
+            auto message = errorMessage.isNotEmpty() ? errorMessage : "Could not save the Signal Lab design asset.";
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Commit Failed", message);
+            transportBar.setStatusText("Commit failed.");
             return;
         }
 
@@ -2505,7 +2553,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         juce::String errorMessage;
         if (! creation::assets::ProjectAssetService::saveGeneratedAsset(projectSession, data, options, savedAsset, errorMessage))
         {
-            transportBar.setStatusText("Could not save Foley setup: " + errorMessage);
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Save Failed", "Could not save Foley setup:\n" + errorMessage);
+            transportBar.setStatusText("Save failed.");
             return;
         }
 
@@ -2513,7 +2562,8 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
         if (! projectSession.commit(errorMessage))
         {
-            transportBar.setStatusText("Foley setup saved but project commit failed: " + errorMessage);
+            juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::WarningIcon, "Commit Failed", "Foley setup saved but project commit failed:\n" + errorMessage);
+            transportBar.setStatusText("Commit failed.");
             return;
         }
 
@@ -4078,6 +4128,38 @@ void MainComponent::timerCallback()
     if (layoutDirty && juce::Time::getMillisecondCounterHiRes() * 0.001 - layoutLastChangeWallSeconds > 0.75)
         saveLayoutToDisk();
 
+    if (activeMode == WorkspaceMode::signal && engine.takeSignalLabLivePlaybackFinishedFlag())
+    {
+        if (timelineModel.isLoopEnabled() && !transportIsWaitingForLoopDelay)
+        {
+            auto delaySeconds = timelineModel.getLoopDelaySeconds();
+            if (delaySeconds > 0.001)
+            {
+                transportIsWaitingForLoopDelay = true;
+                transportLoopDelayWaitUntilWallSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001 + delaySeconds;
+            }
+            else
+            {
+                signalLabPanel.triggerTransportPlay();
+            }
+        }
+        else
+        {
+            transportBar.setPlaybackVisualState(false, false);
+            engine.stopSignalLabLivePlayback(); // Reset state
+        }
+    }
+
+    if (activeMode == WorkspaceMode::signal && transportIsWaitingForLoopDelay)
+    {
+        auto nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        if (nowSeconds >= transportLoopDelayWaitUntilWallSeconds)
+        {
+            transportIsWaitingForLoopDelay = false;
+            signalLabPanel.triggerTransportPlay();
+        }
+    }
+
     if (midiPlaybackRefreshPending && juce::Time::getMillisecondCounterHiRes() * 0.001 - midiPlaybackRefreshLastChangeWallSeconds > 0.35)
     {
         midiPlaybackRefreshPending = false;
@@ -4090,14 +4172,48 @@ void MainComponent::timerCallback()
         auto elapsed = juce::jmax(0.0, nowSeconds - transportStartWallSeconds);
         auto timelineSeconds = transportStartTimelineSeconds + elapsed;
 
-        if (engine.isPlaying() && ! engine.isRecording() && timelineModel.isLoopEnabled()
+        if (transportIsWaitingForLoopDelay)
+        {
+            if (nowSeconds >= transportLoopDelayWaitUntilWallSeconds)
+            {
+                transportIsWaitingForLoopDelay = false;
+                if (activeMode == WorkspaceMode::signal)
+                {
+                    signalLabPanel.triggerTransportPlay();
+                }
+                else
+                {
+                    transportStartTimelineSeconds = timelineModel.getLoopStartSeconds();
+                    transportStartWallSeconds = nowSeconds;
+                    timelineSeconds = transportStartTimelineSeconds;
+                    engine.setPlaybackPositionSeconds(timelineSeconds);
+                    engine.setPlaying(true);
+                }
+            }
+            else
+            {
+                timelineSeconds = timelineModel.getLoopEndSeconds();
+            }
+        }
+        else if (engine.isPlaying() && ! engine.isRecording() && timelineModel.isLoopEnabled()
             && timelineModel.getLoopEndSeconds() > timelineModel.getLoopStartSeconds()
             && timelineSeconds >= timelineModel.getLoopEndSeconds())
         {
-            timelineSeconds = timelineModel.getLoopStartSeconds();
-            transportStartTimelineSeconds = timelineSeconds;
-            transportStartWallSeconds = nowSeconds;
-            engine.setPlaybackPositionSeconds(timelineSeconds);
+            auto delaySeconds = timelineModel.getLoopDelaySeconds();
+            if (delaySeconds > 0.001)
+            {
+                transportIsWaitingForLoopDelay = true;
+                transportLoopDelayWaitUntilWallSeconds = nowSeconds + delaySeconds;
+                engine.setPlaying(false);
+                timelineSeconds = timelineModel.getLoopEndSeconds();
+            }
+            else
+            {
+                timelineSeconds = timelineModel.getLoopStartSeconds();
+                transportStartTimelineSeconds = timelineSeconds;
+                transportStartWallSeconds = nowSeconds;
+                engine.setPlaybackPositionSeconds(timelineSeconds);
+            }
         }
 
         timelineModel.setTransportSeconds(timelineSeconds);
@@ -6810,9 +6926,10 @@ void MainComponent::restoreLastActiveAssets(const juce::ValueTree& lastActiveAss
 void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset)
 {
     if (asset.kind != creation::assets::AssetKind::audio
-        && asset.kind != creation::assets::AssetKind::render)
+        && asset.kind != creation::assets::AssetKind::render
+        && asset.kind != creation::assets::AssetKind::patch)
     {
-        contentPanel.setStatusText("Only audio project assets can be placed on the Tracker right now.");
+        contentPanel.setStatusText("Only audio and signal patches can be placed on the Tracker right now.");
         return;
     }
 
@@ -6823,13 +6940,67 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
     if (! juce::isPositiveAndBelow(targetTrack, engine.getTrackCount()))
         targetTrack = 0;
 
+    if (asset.kind == creation::assets::AssetKind::patch)
+    {
+        if (timelineModel.getTrackKind(targetTrack) != cs::TrackKind::signal)
+        {
+            addTrack();
+            targetTrack = engine.getTrackCount() - 1;
+            timelineModel.setTrackKind(targetTrack, cs::TrackKind::signal);
+            trackerPanel.setTrackKind(targetTrack, cs::TrackKind::signal);
+            engine.setTrackIsMidiKind(targetTrack, false);
+            engine.setTrackIsAutomationKind(targetTrack, false);
+        }
+    }
+
     juce::String errorMessage;
-    auto sourceTool = asset.kind == creation::assets::AssetKind::render ? "render" : "project-audio";
-    auto clipIndex = placeAudioAssetOnTracker(asset,
-                                              targetTrack,
-                                              timelineModel.getTransportSeconds(),
-                                              sourceTool,
-                                              errorMessage);
+    int clipIndex = -1;
+
+    if (asset.kind == creation::assets::AssetKind::patch)
+    {
+        creation::assets::MaterializedAssetLease lease;
+        if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath, creation::assets::MaterializationAccess::readOnly, lease, errorMessage))
+        {
+            contentPanel.setStatusText("Could not materialize patch asset: " + errorMessage);
+            return;
+        }
+
+        cw::PatchDocument doc;
+        if (! cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, errorMessage))
+        {
+            contentPanel.setStatusText("Could not parse patch asset: " + errorMessage);
+            return;
+        }
+
+        cs::AssetRef assetRef;
+        assetRef.id = asset.id;
+        assetRef.versionId = asset.versionId;
+        assetRef.mode = creation::assets::AssetReferenceMode::exact;
+
+        clipIndex = timelineModel.addClip(cs::ClipKind::signal,
+                                          targetTrack,
+                                          asset.displayName,
+                                          asset.id,
+                                          "signal-lab",
+                                          juce::File(),
+                                          timelineModel.getTransportSeconds(),
+                                          doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0,
+                                          errorMessage);
+
+        if (clipIndex >= 0)
+        {
+            timelineModel.setClipAssetReference(clipIndex, assetRef);
+        }
+    }
+    else
+    {
+        auto sourceTool = asset.kind == creation::assets::AssetKind::render ? "render" : "project-audio";
+        clipIndex = placeAudioAssetOnTracker(asset,
+                                             targetTrack,
+                                             timelineModel.getTransportSeconds(),
+                                             sourceTool,
+                                             errorMessage);
+    }
 
     if (clipIndex < 0)
     {
@@ -8136,6 +8307,16 @@ bool MainComponent::ensureProjectSessionActive(juce::String& errorMessage)
     auto availableProjects = creation::assets::ProjectContainerService::listProjects(
         suiteSettings, listError);
 
+    if (listError == "Could not reach the suite VFS service.")
+    {
+        errorMessage = listError;
+        transportBar.setStatusText(listError);
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                               "Service Error",
+                                               "Could not connect to the VFS service. Check if DjehutiSuiteVfsService is installed correctly.");
+        return false;
+    }
+
     if (! availableProjects.isEmpty())
     {
         if (creation::assets::ProjectWorkspaceService::openProject(
@@ -8625,6 +8806,11 @@ void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const
         timelineModel.restoreState(state);
     }
 
+    transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);
+    transportBar.loopDelaySlider.setValue(timelineModel.getLoopDelaySeconds(), juce::dontSendNotification);
+
+    resolveTrackerClipAssetFiles();
+    refreshTrackerPlaybackClips();
     selectedClipIndex = -1;
     syncTrackViews();
     trackerPanel.setSelectedClip(-1);
@@ -8922,6 +9108,7 @@ void MainComponent::loadSessionFromDisk()
     resolveTrackerClipAssetFiles();
 
     transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);
+    transportBar.loopDelaySlider.setValue(timelineModel.getLoopDelaySeconds(), juce::dontSendNotification);
 
     auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
     timelineUndoContext.clear();

@@ -88,6 +88,8 @@ public:
     double getLoopEndSeconds() const noexcept { return loopEndSeconds; }
     void setLoopEnabled(bool shouldEnable) noexcept { loopEnabled = shouldEnable; }
     bool isLoopEnabled() const noexcept { return loopEnabled; }
+    void setLoopDelaySeconds(double seconds) noexcept { loopDelaySeconds = seconds; }
+    double getLoopDelaySeconds() const noexcept { return loopDelaySeconds; }
 
     // Timeline (tracker) snap-to-grid - separate from the MIDI piano-roll editor's own grid,
     // since they're different views with independent zoom/resolution needs.
@@ -198,6 +200,7 @@ private:
     std::vector<TimelineMarker> markers;
     double loopStartSeconds = 0.0;
     double loopEndSeconds = 0.0;
+    double loopDelaySeconds = 0.0;
     bool loopEnabled = false;
     bool timelineSnapEnabled = true;
     double timelineGridBeats = 1.0;
