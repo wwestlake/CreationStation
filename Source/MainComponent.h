@@ -522,7 +522,7 @@ private:
     bool restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset);
     bool restoreFoleyAsset(const creation::assets::AssetDescriptor& asset);
     void restoreLastActiveAssets(const juce::ValueTree& lastActiveAssetsState);
-    void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset);
+    void placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset, double startSeconds = -1.0);
     void exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset);
     int placeAudioAssetOnTracker(const creation::assets::AssetDescriptor& asset,
                                  int targetTrack,

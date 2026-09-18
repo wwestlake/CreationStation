@@ -16,7 +16,7 @@ class TrackerPanel final : public juce::Component,
 public:
     TrackerPanel();
 
-    std::function<void()> onAddTrackRequested;
+    std::function<void(int trackIndex, double startSeconds, juce::Point<int> screenPos)> onEmptyTrackContextMenuRequested;
     std::function<void(int)> onRemoveTrackRequested;
     std::function<void(int)> onTrackSelected;
     std::function<void(int, const juce::String&)> onTrackNameChanged;
@@ -140,6 +140,7 @@ private:
     class TimelineCanvas final : public juce::Component
     {
     public:
+        ~TimelineCanvas() override;
         std::function<void(int)> onTrackSelected;
         std::function<void(int, const juce::String&)> onTrackNameChanged;
         std::function<void(int, cs::TrackKind)> onTrackKindChanged;
@@ -154,7 +155,7 @@ private:
         std::function<void(int)> onTrackFxRequested;
         std::function<void(int)> onTrackRemoveRequested;
         std::function<void(int)> onMoveToFolderRequested;
-        std::function<void()> onAddTrackRequested;
+        std::function<void(int trackIndex, double startSeconds, juce::Point<int> screenPos)> onEmptyTrackContextMenuRequested;
         std::function<void(double)> onPlayheadPositionChanged;
         std::function<void(double, double)> onLoopRegionChanged;
         std::function<void()> onLoopRegionCleared;

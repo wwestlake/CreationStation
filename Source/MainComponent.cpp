@@ -262,6 +262,97 @@ CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const creation::ui::SuiteD
     return profile;
 }
 
+
+
+
+
+namespace {
+class AssetPickerDialog : public juce::DocumentWindow {
+public:
+    AssetPickerDialog(const juce::Array<creation::assets::AssetDescriptor>& allAssets,
+                      std::function<void(const creation::assets::AssetDescriptor&)> onSelected)
+        : juce::DocumentWindow("Add Clip...", juce::Colours::darkgrey, juce::DocumentWindow::closeButton),
+          allAssets_(allAssets), onSelected_(onSelected)
+    {
+        setUsingNativeTitleBar(true);
+        setResizable(true, false);
+        setResizeLimits(400, 300, 1000, 800);
+        
+        mainPanel_ = std::make_unique<juce::Component>();
+        setContentOwned(mainPanel_.get(), false);
+        
+        searchBox_.setTextToShowWhenEmpty("Search assets...", juce::Colours::lightgrey);
+        searchBox_.onTextChange = [this] { filterList(); };
+        mainPanel_->addAndMakeVisible(searchBox_);
+        
+        listBox_.setModel(&model_);
+        listBox_.setRowHeight(44);
+        mainPanel_->addAndMakeVisible(listBox_);
+        
+        filterList();
+        
+        centreWithSize(450, 500);
+        setVisible(true);
+    }
+    
+    void closeButtonPressed() override {
+        delete this;
+    }
+    
+    void resized() override {
+        juce::DocumentWindow::resized();
+        if (mainPanel_) {
+            auto bounds = mainPanel_->getLocalBounds();
+            searchBox_.setBounds(bounds.removeFromTop(30).reduced(4));
+            listBox_.setBounds(bounds);
+        }
+    }
+
+private:
+    void filterList() {
+        filteredAssets_.clear();
+        auto query = searchBox_.getText().trim().toLowerCase();
+        for (const auto& a : allAssets_) {
+            if (query.isEmpty() || a.displayName.toLowerCase().contains(query) || a.logicalPath.toLowerCase().contains(query))
+                filteredAssets_.add(a);
+        }
+        listBox_.updateContent();
+        listBox_.repaint();
+    }
+
+    struct Model : public juce::ListBoxModel {
+        Model(AssetPickerDialog* o) : owner(o) {}
+        AssetPickerDialog* owner;
+        int getNumRows() override { return owner->filteredAssets_.size(); }
+        void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override {
+            if (rowIsSelected) g.fillAll(juce::Colour(0xff293d5a));
+            if (rowNumber >= owner->filteredAssets_.size()) return;
+            const auto& a = owner->filteredAssets_.getReference(rowNumber);
+            g.setColour(juce::Colours::white);
+            g.setFont(14.0f);
+            g.drawText(a.displayName, 10, 2, width - 20, height / 2, juce::Justification::centredLeft, true);
+            g.setColour(juce::Colours::grey);
+            g.setFont(11.0f);
+            g.drawText(a.logicalPath, 10, height / 2, width - 20, height / 2, juce::Justification::centredLeft, true);
+        }
+        void listBoxItemClicked(int row, const juce::MouseEvent&) override {
+            if (row < owner->filteredAssets_.size() && owner->onSelected_) {
+                owner->onSelected_(owner->filteredAssets_[row]);
+                owner->closeButtonPressed();
+            }
+        }
+    };
+    
+    std::unique_ptr<juce::Component> mainPanel_;
+    juce::TextEditor searchBox_;
+    Model model_ { this };
+    juce::ListBox listBox_;
+    juce::Array<creation::assets::AssetDescriptor> allAssets_;
+    juce::Array<creation::assets::AssetDescriptor> filteredAssets_;
+    std::function<void(const creation::assets::AssetDescriptor&)> onSelected_;
+};
+}
+
 class ManagedDocumentWindow final : public juce::DocumentWindow
 {
 public:
@@ -1695,9 +1786,29 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         showFxStackWindow();
     };
 
-    trackerPanel.onAddTrackRequested = [this]
+    trackerPanel.onEmptyTrackContextMenuRequested = [this](int trackIndex, double startSeconds, juce::Point<int> screenPos)
     {
-        addTrack();
+        juce::PopupMenu menu;
+        menu.addItem(1, "Add Track");
+        menu.addItem(2, "Add Clip...");
+        
+        auto area = juce::Rectangle<int>(screenPos.x, screenPos.y, 1, 1);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
+            [this, trackIndex, startSeconds](int result)
+            {
+                if (result == 1)
+                {
+                    addTrack();
+                }
+                else if (result == 2)
+                {
+                    juce::Array<creation::assets::AssetDescriptor> allAssets = projectSession.getManifest().assetCatalog.assets;
+                    new AssetPickerDialog(allAssets, [this, trackIndex, startSeconds](const creation::assets::AssetDescriptor& chosen) {
+                        trackerPanel.setSelectedTrack(trackIndex);
+                        placeProjectAssetOnTracker(chosen, startSeconds);
+                    });
+                }
+            });
     };
 
     trackerPanel.onRemoveTrackRequested = [this](int trackIndex)
@@ -6924,7 +7035,7 @@ void MainComponent::restoreLastActiveAssets(const juce::ValueTree& lastActiveAss
             restoreFoleyAsset(*asset);
 }
 
-void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset)
+void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDescriptor& asset, double startSeconds)
 {
     if (asset.kind != creation::assets::AssetKind::audio
         && asset.kind != creation::assets::AssetKind::render

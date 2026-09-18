@@ -349,10 +349,10 @@ TrackerPanel::TrackerPanel()
         if (onRemoveTrackRequested)
             onRemoveTrackRequested(trackIndex);
     };
-    canvas.onAddTrackRequested = [this]
+    canvas.onEmptyTrackContextMenuRequested = [this](int trackIndex, double startSeconds, juce::Point<int> screenPos)
     {
-        if (onAddTrackRequested)
-            onAddTrackRequested();
+        if (onEmptyTrackContextMenuRequested)
+            onEmptyTrackContextMenuRequested(trackIndex, startSeconds, screenPos);
     };
     canvas.onPlayheadPositionChanged = [this](double seconds)
     {
@@ -1736,6 +1736,13 @@ void TrackerPanel::TimelineCanvas::resized()
     videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
 }
 
+TrackerPanel::TimelineCanvas::~TimelineCanvas() {
+    if (videoWindow) {
+        videoWindow->setVisible(false);
+        videoWindow.reset();
+    }
+}
+
 void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
 {
     auto laneStart = 56;
@@ -1808,16 +1815,11 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                                    : -1;
         if (clipUnderCursor < 0)
         {
-            juce::PopupMenu menu;
-            menu.addItem(1, "Add Track");
             auto clickArea = juce::Rectangle<int>(event.x, event.y, 1, 1);
-            menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
-                                                        .withTargetScreenArea(localAreaToGlobal(clickArea)),
-                                [safe = juce::Component::SafePointer<TimelineCanvas>(this)](int result)
-                                {
-                                    if (safe != nullptr && result == 1 && safe->onAddTrackRequested)
-                                        safe->onAddTrackRequested();
-                                });
+            auto hoveredTrackIndex = yToTrackIndex(event.y);
+            auto startSeconds = timelineModel != nullptr ? timelineModel->snapTimelineSeconds(xToTimelineSeconds(event.x)) : 0.0;
+            if (onEmptyTrackContextMenuRequested)
+                onEmptyTrackContextMenuRequested(hoveredTrackIndex, startSeconds, localAreaToGlobal(clickArea).getPosition());
             return;
         }
     }
