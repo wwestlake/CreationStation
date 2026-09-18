@@ -96,7 +96,10 @@ public:
     void setTrackLevel(int trackIndex, float level);
     void setTrackGain(int trackIndex, float gain);
     void setInputSources(const juce::Array<juce::String>& sourceNames);
+    void setVideoInputSources(const juce::Array<juce::String>& sourceNames, const juce::Array<juce::String>& sourceIds);
+
     void setTrackInput(int trackIndex, int inputChannel);
+    void setTrackVideoInput(int trackIndex, const juce::String& deviceId);
     void setTrackFxSummary(int trackIndex, int pluginCount);
     void setSelectedTrack(int trackIndex);
     void setSelectedClip(int clipIndex);
@@ -190,7 +193,10 @@ private:
         void setTrackLevel(int trackIndex, float level);
         void setTrackGain(int trackIndex, float gain);
         void setInputSources(const juce::Array<juce::String>& sourceNames);
+    void setVideoInputSources(const juce::Array<juce::String>& sourceNames, const juce::Array<juce::String>& sourceIds);
+
         void setTrackInput(int trackIndex, int inputChannel);
+    void setTrackVideoInput(int trackIndex, const juce::String& deviceId);
         void setTrackFxSummary(int trackIndex, int pluginCount);
         void setSelectedTrack(int trackIndex);
         void setSelectedClip(int clipIndex);
@@ -296,6 +302,8 @@ private:
             void setLevel(float level);
             void setGain(float gain);
             void setInputSources(const juce::Array<juce::String>& sourceNames);
+    void setVideoInputSources(const juce::Array<juce::String>& sourceNames, const juce::Array<juce::String>& sourceIds);
+
             void setInputChannel(int inputChannel);
             void setFxSummary(int pluginCount);
             // Automation tracks have no source/output of their own - this shows what control the
@@ -335,6 +343,9 @@ private:
             juce::TextButton menuButton;
             juce::ComboBox inputSelector;
             juce::Array<juce::String> lastAudioSourceNames;
+            juce::Array<juce::String> lastVideoSourceNames;
+            juce::Array<juce::String> lastVideoSourceIds;
+            void setVideoInput(const juce::String& deviceId);
             juce::TextButton fxButton { "FX" };
             juce::Label dbLabel;
             juce::Slider gainSlider;

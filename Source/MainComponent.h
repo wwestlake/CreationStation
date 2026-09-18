@@ -15,6 +15,7 @@
 #include "Audio/StudioIOModel.h"
 #include "Audio/VstPluginCatalog.h"
 #include "Audio/WorkstationAudioEngine.h"
+#include "Video/VideoCaptureService.h"
 #include "Video/VideoDecodeService.h"
 #include "ControlSurface/XTouchControlSurface.h"
 #include "ControlSurface/ControlSurfaceMappingStore.h"
@@ -223,6 +224,7 @@ private:
     LiteSemRagApiClient semanticApiClient;
     creation::services::SuiteAiChatClient openAiChatClient;
     WorkstationAudioEngine engine;
+    cs::VideoCaptureService videoCaptureService;
     cw::StationFrustPodService frustPodService;
     XTouchControlSurface midiSurface;
     AuthGateView authGateView;

@@ -8041,7 +8041,7 @@ bool MainComponent::startRecordingSession()
     }
 
     const auto totalArmedCount = recordingTargets.size() + midiRecordingTracks.size();
-    if (totalArmedCount == 0)
+    if (totalArmedCount == 0 && !videoCaptureService.isRecording())
     {
         transportBar.setStatusText(tracksRejectedForRecording.isEmpty()
             ? "Record failed: no armed tracks were available for recording."

@@ -108,6 +108,8 @@ public:
     void setTrackName(int trackIndex, const juce::String& name);
     juce::String getTrackName(int trackIndex) const;
     void setTrackHeight(int trackIndex, int heightPixels);
+    void setTrackVideoInput(int trackIndex, const juce::String& deviceId);
+    juce::String getTrackVideoInput(int trackIndex) const;
     int getTrackHeight(int trackIndex) const;
     // Stable across reorders (unlike the index itself) - useful for anything that needs to key
     // off "this specific track" rather than "whatever's currently at this position" (e.g. a
