@@ -288,6 +288,21 @@ public:
         listBox_.setModel(&model_);
         listBox_.setRowHeight(44);
         mainPanel_->addAndMakeVisible(listBox_);
+
+        addButton_.setButtonText("Add");
+        addButton_.setEnabled(false);
+        addButton_.onClick = [this] {
+            auto row = listBox_.getSelectedRow();
+            if (row >= 0 && row < filteredAssets_.size() && onSelected_) {
+                onSelected_(filteredAssets_[row]);
+                closeButtonPressed();
+            }
+        };
+        mainPanel_->addAndMakeVisible(addButton_);
+
+        cancelButton_.setButtonText("Cancel");
+        cancelButton_.onClick = [this] { closeButtonPressed(); };
+        mainPanel_->addAndMakeVisible(cancelButton_);
         
         filterList();
         
@@ -304,6 +319,11 @@ public:
         if (mainPanel_) {
             auto bounds = mainPanel_->getLocalBounds();
             searchBox_.setBounds(bounds.removeFromTop(30).reduced(4));
+            
+            auto bottomBounds = bounds.removeFromBottom(40);
+            cancelButton_.setBounds(bottomBounds.removeFromRight(100).reduced(4));
+            addButton_.setBounds(bottomBounds.removeFromRight(100).reduced(4));
+
             listBox_.setBounds(bounds);
         }
     }
@@ -318,6 +338,7 @@ private:
         }
         listBox_.updateContent();
         listBox_.repaint();
+        addButton_.setEnabled(listBox_.getSelectedRow() >= 0);
     }
 
     struct Model : public juce::ListBoxModel {
@@ -335,16 +356,21 @@ private:
             g.setFont(11.0f);
             g.drawText(a.logicalPath, 10, height / 2, width - 20, height / 2, juce::Justification::centredLeft, true);
         }
-        void listBoxItemClicked(int row, const juce::MouseEvent&) override {
+        void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override {
             if (row < owner->filteredAssets_.size() && owner->onSelected_) {
                 owner->onSelected_(owner->filteredAssets_[row]);
                 owner->closeButtonPressed();
             }
         }
+        void selectedRowsChanged(int lastRowSelected) override {
+            owner->addButton_.setEnabled(lastRowSelected >= 0 && lastRowSelected < owner->filteredAssets_.size());
+        }
     };
     
     std::unique_ptr<juce::Component> mainPanel_;
     juce::TextEditor searchBox_;
+    juce::TextButton addButton_;
+    juce::TextButton cancelButton_;
     Model model_ { this };
     juce::ListBox listBox_;
     juce::Array<creation::assets::AssetDescriptor> allAssets_;
@@ -7039,9 +7065,10 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
 {
     if (asset.kind != creation::assets::AssetKind::audio
         && asset.kind != creation::assets::AssetKind::render
-        && asset.kind != creation::assets::AssetKind::patch)
+        && asset.kind != creation::assets::AssetKind::patch
+        && asset.kind != creation::assets::AssetKind::video)
     {
-        contentPanel.setStatusText("Only audio and signal patches can be placed on the Tracker right now.");
+        contentPanel.setStatusText("Only audio, video, and signal patches can be placed on the Tracker right now.");
         return;
     }
 
@@ -7067,6 +7094,69 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
 
     juce::String errorMessage;
     int clipIndex = -1;
+
+    if (asset.kind == creation::assets::AssetKind::video)
+    {
+        if (timelineModel.getTrackKind(targetTrack) != cs::TrackKind::video)
+        {
+            addTrack();
+            targetTrack = engine.getTrackCount() - 1;
+            timelineModel.setTrackKind(targetTrack, cs::TrackKind::video);
+            trackerPanel.setTrackKind(targetTrack, cs::TrackKind::video);
+            engine.setTrackIsMidiKind(targetTrack, false);
+            engine.setTrackIsAutomationKind(targetTrack, false);
+        }
+
+        creation::assets::MaterializedAssetLease lease;
+        if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath, creation::assets::MaterializationAccess::readOnly, lease, errorMessage))
+        {
+            contentPanel.setStatusText("Could not materialize video asset: " + errorMessage);
+            return;
+        }
+
+        auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+        auto sourceFile = lease.materializedFile;
+        std::thread([safeThis, asset, targetTrack, startSeconds, sourceFile]() mutable
+        {
+            cs::VideoDecodeService decodeService;
+            auto info = decodeService.open(sourceFile);
+
+            juce::MessageManager::callAsync([safeThis, asset, targetTrack, startSeconds, sourceFile, info]() mutable
+            {
+                if (safeThis == nullptr) return;
+
+                if (info.valid)
+                {
+                    juce::String clipError;
+                    cs::AssetRef assetRef;
+                    assetRef.id = asset.id;
+                    assetRef.versionId = asset.versionId;
+                    assetRef.mode = creation::assets::AssetReferenceMode::exact;
+
+                    auto clipIndex = safeThis->timelineModel.addClip(cs::ClipKind::video,
+                                                                     targetTrack,
+                                                                     asset.displayName,
+                                                                     asset.id,
+                                                                     "project-video",
+                                                                     sourceFile,
+                                                                     startSeconds,
+                                                                     info.durationSeconds > 0.0 ? info.durationSeconds : 10.0,
+                                                                     clipError);
+
+                    if (clipIndex >= 0)
+                        safeThis->timelineModel.setClipAssetReference(clipIndex, assetRef);
+                    else if (clipError.isNotEmpty())
+                        safeThis->contentPanel.setStatusText(clipError);
+                }
+                else
+                {
+                    safeThis->contentPanel.setStatusText("Could not decode video: " + sourceFile.getFileName());
+                }
+            });
+        }).detach();
+
+        return;
+    }
 
     if (asset.kind == creation::assets::AssetKind::patch)
     {
@@ -8807,7 +8897,7 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
                                                     creation::assets::MaterializationAccess::readOnly,
                                                     lease, matError))
                 {
-                    if (clip.kind == cs::ClipKind::signal && lease.materializedFile.getFileExtension() == ".frust")
+                    if (clip.kind == cs::ClipKind::signal)
                     {
                         auto tempWav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("signal_render_" + clip.assetId + ".wav");
                         if (! tempWav.existsAsFile() || tempWav.getLastModificationTime() < lease.materializedFile.getLastModificationTime())
@@ -10151,3 +10241,10 @@ void MainComponent::refreshInsertRack()
     refreshFxStackWindow();
     refreshPluginsPanel();
 }
+
+
+
+
+
+
+
