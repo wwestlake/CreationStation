@@ -675,12 +675,6 @@ set(CPACK_STRIP_FILES TRUE)
 
 include(CPack)
 
-add_custom_command(TARGET CreativeWorkstation POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/gemini-$<LOWER_CASE:$<CONFIG>>-bin"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/gemini-$<LOWER_CASE:$<CONFIG>>-bin/"
-    COMMENT "Copying CreativeWorkstation to the shared gemini bin directory"
-)
-
 # Auto-generated output name overrides
 set_target_properties(CreationStationPluginKit PROPERTIES OUTPUT_NAME "DjehutiStationPluginKit")
 set_target_properties(CreativeWorkstation PROPERTIES OUTPUT_NAME "DjehutiStation")

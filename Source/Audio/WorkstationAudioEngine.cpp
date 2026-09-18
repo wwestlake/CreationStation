@@ -2205,7 +2205,10 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
     for (const auto& target : targets)
     {
         if (! target.file.existsAsFile())
+        {
+            errorMessage = "Tracker clip file is missing: " + target.file.getFullPathName();
             continue;
+        }
 
         std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(target.file));
         if (reader == nullptr)
@@ -2216,7 +2219,10 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
 
         const auto totalSamples = (int64) reader->lengthInSamples;
         if (totalSamples <= 0)
+        {
+            errorMessage = "Tracker clip has no audio data: " + target.file.getFileName();
             continue;
+        }
 
         ArrangementSource::Clip clip;
         const auto sourceStartSample = juce::jlimit<int64>(0,
