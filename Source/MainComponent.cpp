@@ -7143,10 +7143,17 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
                                                                      info.durationSeconds > 0.0 ? info.durationSeconds : 10.0,
                                                                      clipError);
 
-                    if (clipIndex >= 0)
+                                        if (clipIndex >= 0) {
                         safeThis->timelineModel.setClipAssetReference(clipIndex, assetRef);
-                    else if (clipError.isNotEmpty())
+                        safeThis->trackerPanel.setSelectedTrack(targetTrack);
+                        safeThis->trackerPanel.refreshTimelineView();
+                        safeThis->setWorkspaceMode(WorkspaceMode::tracker);
+                        safeThis->saveSessionToDisk();
+                        safeThis->transportBar.setStatusText("Placed project asset on Tracker: " + asset.displayName);
+                    }
+                    else if (clipError.isNotEmpty()) {
                         safeThis->contentPanel.setStatusText(clipError);
+                    }
                 }
                 else
                 {
@@ -8897,32 +8904,34 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
                                                     creation::assets::MaterializationAccess::readOnly,
                                                     lease, matError))
                 {
-                    if (clip.kind == cs::ClipKind::signal)
+                                        if (clip.kind == cs::ClipKind::signal)
                     {
-                        auto tempWav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("signal_render_" + clip.assetId + ".wav");
+                        auto tempWav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("signal_render_" + clip.assetId.replace(":", "_") + ".wav");
                         if (! tempWav.existsAsFile() || tempWav.getLastModificationTime() < lease.materializedFile.getLastModificationTime())
                         {
                             cw::PatchDocument doc;
-                            if (cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, matError))
+                            if (!cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, matError)) {
+                                errorMessage = "Signal track render failed (parse): " + matError;
+                                return false;
+                            }
+                            PatchRuntimePlayer player;
+                            player.prepare(48000.0, 512);
+                            juce::AudioBuffer<float> buffer;
+                            if (!player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr)) {
+                                errorMessage = "Signal track render failed (render): " + matError;
+                                return false;
+                            }
+                            tempWav.deleteFile();
+                            juce::WavAudioFormat wavFormat;
+                            if (auto os = std::unique_ptr<juce::FileOutputStream>(tempWav.createOutputStream()))
                             {
-                                PatchRuntimePlayer player;
-                                player.prepare(48000.0, 512);
-                                juce::AudioBuffer<float> buffer;
-                                if (player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr))
+                                if (auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(os.release(), 48000.0, buffer.getNumChannels(), 24, {}, 0)))
                                 {
-                                    tempWav.deleteFile();
-                                    juce::WavAudioFormat wavFormat;
-                                    if (auto os = std::unique_ptr<juce::FileOutputStream>(tempWav.createOutputStream()))
-                                    {
-                                        if (auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(os.release(), 48000.0, buffer.getNumChannels(), 24, {}, 0)))
-                                        {
-                                            writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
-                                        }
-                                    }
+                                    writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
                                 }
                             }
                         }
-                        clipFile = tempWav.existsAsFile() ? tempWav : lease.materializedFile;
+                        clipFile = tempWav;
                     }
                     else
                     {
@@ -10241,6 +10250,10 @@ void MainComponent::refreshInsertRack()
     refreshFxStackWindow();
     refreshPluginsPanel();
 }
+
+
+
+
 
 
 

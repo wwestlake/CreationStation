@@ -2240,7 +2240,7 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
 
     if (clips.isEmpty() && ! targets.isEmpty())
     {
-        errorMessage = "No tracker audio clips could be loaded for playback.";
+        if (errorMessage.isEmpty()) errorMessage = "No tracker audio clips could be loaded for playback.";
         return false;
     }
 
@@ -3411,3 +3411,4 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
 
     return true;
 }
+
