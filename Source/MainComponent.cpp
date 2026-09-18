@@ -2,6 +2,7 @@
 #include <creation/assets/AssetMaterializer.h>
 #include <creation/assets/AssetTypes.h>
 #include "MainComponent.h"
+#include "Audio/PatchRuntimePlayer.h"
 #include "Branding.h"
 #include "Patch/PatchModel.h"
 #include "Video/VideoDecodeService.h"
@@ -8695,7 +8696,37 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
                                                     creation::assets::MaterializationAccess::readOnly,
                                                     lease, matError))
                 {
-                    clipFile = lease.materializedFile;
+                    if (clip.kind == cs::ClipKind::signal && lease.materializedFile.getFileExtension() == ".frust")
+                    {
+                        auto tempWav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("signal_render_" + clip.assetId + ".wav");
+                        if (! tempWav.existsAsFile() || tempWav.getLastModificationTime() < lease.materializedFile.getLastModificationTime())
+                        {
+                            cw::PatchDocument doc;
+                            if (cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, matError))
+                            {
+                                PatchRuntimePlayer player;
+                                player.prepare(48000.0, 512);
+                                juce::AudioBuffer<float> buffer;
+                                if (player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr))
+                                {
+                                    tempWav.deleteFile();
+                                    juce::WavAudioFormat wavFormat;
+                                    if (auto os = std::unique_ptr<juce::FileOutputStream>(tempWav.createOutputStream()))
+                                    {
+                                        if (auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(os.release(), 48000.0, buffer.getNumChannels(), 24, {}, 0)))
+                                        {
+                                            writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        clipFile = tempWav.existsAsFile() ? tempWav : lease.materializedFile;
+                    }
+                    else
+                    {
+                        clipFile = lease.materializedFile;
+                    }
                 }
             }
         }

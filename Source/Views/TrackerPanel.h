@@ -7,6 +7,7 @@
 #include "../Video/VideoThumbnailCache.h"
 #include "../Video/VideoScrubPreview.h"
 #include "../Video/VideoPreviewComponent.h"
+#include "../Video/VideoPlayerWindow.h"
 
 class TrackerPanel final : public juce::Component,
                            public juce::FileDragAndDropTarget,
@@ -376,7 +377,7 @@ private:
         // drawAutomationLane's own const-ness, since neither touches this component's layout).
         mutable cs::VideoThumbnailCache videoThumbnailCache;
         cs::VideoScrubPreview scrubPreview;
-        cs::VideoPreviewComponent videoPreview;
+        std::unique_ptr<cs::VideoPlayerWindow> videoWindow;
         bool draggingLoopRegion = false;
         bool loopRegionMoved = false;
         double loopDragStartSeconds = 0.0;

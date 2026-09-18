@@ -1688,7 +1688,7 @@ void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
 {
     if (timelineModel == nullptr)
     {
-        videoPreview.setVisible(false);
+        if (videoWindow) videoWindow->setVisible(false);
         return;
     }
 
@@ -1706,18 +1706,18 @@ void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
 
     if (activeClip == nullptr)
     {
-        videoPreview.setVisible(false);
+        if (videoWindow) videoWindow->setVisible(false);
         return;
     }
 
-    videoPreview.setVisible(true);
+    if (videoWindow) videoWindow->setVisible(true);
     auto sourceSeconds = activeClip->sourceStartSeconds + (timelineSeconds - activeClip->startSeconds);
 
     scrubPreview.requestFrame(activeClip->file, sourceSeconds,
                               [safe = juce::Component::SafePointer<TimelineCanvas>(this)](juce::Image image)
                               {
                                   if (safe != nullptr)
-                                      safe->videoPreview.setImage(image);
+                                      safe->videoWindow->getPreviewComponent().setImage(image);
                               });
 }
 
@@ -1733,12 +1733,7 @@ void TrackerPanel::TimelineCanvas::resized()
 
     // Floating scrub-preview overlay, top-right corner - only shown while the playhead is over
     // a video clip (see updateVideoPreview), so it doesn't take up space in audio-only projects.
-    addAndMakeVisible(videoPreview);
-    constexpr int previewWidth = 160;
-    constexpr int previewHeight = 90;
-    constexpr int previewMargin = 10;
-    videoPreview.setBounds(getWidth() - previewWidth - previewMargin, previewMargin, previewWidth, previewHeight);
-    videoPreview.toFront(false);
+    videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
 }
 
 void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
