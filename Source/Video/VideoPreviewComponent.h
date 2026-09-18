@@ -12,6 +12,14 @@ public:
     void setImage(juce::Image newImage)
     {
         image = std::move(newImage);
+        receivedFrame = true;
+        repaint();
+    }
+
+    void resetDecodingState()
+    {
+        receivedFrame = false;
+        image = {};
         repaint();
     }
 
@@ -24,11 +32,17 @@ public:
         {
             g.drawImage(image, getLocalBounds().toFloat(), juce::RectanglePlacement::centred);
         }
-        else
+        else if (!receivedFrame)
         {
             g.setColour(juce::Colour(0xff5eebd6));
             g.setFont(juce::Font(11.0f));
             g.drawText("Decoding...", getLocalBounds(), juce::Justification::centred);
+        }
+        else
+        {
+            g.setColour(juce::Colour(0xffff6666));
+            g.setFont(juce::Font(11.0f));
+            g.drawText("Decode Failed", getLocalBounds(), juce::Justification::centred);
         }
 
         g.setColour(juce::Colour(0xff5eebd6));
@@ -37,5 +51,6 @@ public:
 
 private:
     juce::Image image;
+    bool receivedFrame = false;
 };
 }

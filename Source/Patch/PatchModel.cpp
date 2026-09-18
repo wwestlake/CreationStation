@@ -150,6 +150,13 @@ juce::String serialisePatchDocumentJson(const PatchDocument& document)
     engine->setProperty("minimumVersion", document.minimumVersion);
     root->setProperty("engine", juce::var(engine));
 
+    auto* metadata = new juce::DynamicObject();
+    metadata->setProperty("durationSeconds", document.durationSeconds);
+    metadata->setProperty("sampleRate", document.sampleRate);
+    metadata->setProperty("sinkMode", document.sinkMode);
+    metadata->setProperty("renderAssetName", document.renderAssetName);
+    root->setProperty("metadata", juce::var(metadata));
+
     juce::Array<juce::var> parameters;
     for (const auto& parameter : document.parameters)
         parameters.add(parameterToVar(parameter));
@@ -218,6 +225,14 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
     {
         document.runtime = engine->getProperty("runtime").toString();
         document.minimumVersion = engine->getProperty("minimumVersion").toString();
+    }
+
+    if (auto* metadata = root->getProperty("metadata").getDynamicObject())
+    {
+        document.durationSeconds = (double) metadata->getProperty("durationSeconds");
+        document.sampleRate = (double) metadata->getProperty("sampleRate");
+        document.sinkMode = metadata->getProperty("sinkMode").toString();
+        document.renderAssetName = metadata->getProperty("renderAssetName").toString();
     }
 
     auto parseArray = [](const juce::var& value) -> const juce::Array<juce::var>* { return value.getArray(); };

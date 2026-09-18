@@ -26,8 +26,7 @@ public:
     }
 };
 
-class SignalLabPanel final : public juce::Component,
-                             private juce::Timer
+class SignalLabPanel final : public juce::Component
 {
 public:
     struct SignalRecipe
@@ -114,7 +113,12 @@ public:
     // (engine.rebuildSignalLabLiveGraph, etc.), same callback-injection
     // pattern as onPreviewRequested/onRenderRequested above rather than
     // holding a direct engine reference.
-    std::function<void(const cw::PatchDocument&, const PatchLiveBindingMap&)> onLiveGraphRebuildRequested;
+    void takeLiveScopeSamples(const juce::String& nodeId, juce::AudioBuffer<float>& dest, int numSamples);
+
+    void triggerTransportPlay();
+    void stopTransport();
+
+    std::function<void(const cw::PatchDocument& patch, const PatchLiveBindingMap& bindings)> onLiveGraphRebuildRequested;
     std::function<void(double durationSeconds)> onLiveStartRequested;
     std::function<void()> onLiveStopRequested;
     std::function<bool()> onLiveIsActiveRequested;
@@ -670,11 +674,6 @@ private:
     void regenerateSignal();
     void ensureAudioRendered();
     juce::String resolveRenderAssetName() const { return recipe.renderAssetName.isNotEmpty() ? recipe.renderAssetName : recipe.name; }
-    // Wave (File) sink mode is a one-shot render, not a live loop -- Play
-    // becomes "Render" and Repeat is disabled while it's active. Called
-    // whenever recipe.sinkMode changes or gets loaded from anywhere
-    // (Output Mode combo, restoreState, loadPatchDocument, createNewSignal).
-    void refreshTransportControlsForSinkMode();
     const juce::AudioBuffer<float>& getDisplayBufferForNode(const juce::String& nodeId) const;
     juce::AudioBuffer<float> buildSignalBuffer(const SignalRecipe& recipe) const;
     cw::PatchDocument buildPatchDocument(const SignalRecipe& recipe) const;
@@ -772,9 +771,6 @@ private:
     void applyLocalControlToRecipe(const LocalControlVariable& control);
     void refreshVariablePanel();
     void refreshSelectedVariableEditor();
-    void timerCallback() override;
-    void triggerTransportPlay();
-    void stopTransport();
     juce::Array<GraphValidationError> validateGraph() const;
     void compileGraph();
     void showCompileErrorWindow();
@@ -824,8 +820,6 @@ private:
     bool filterNodeEnabled = false;
     bool envelopeNodeEnabled = false;
     bool graphViewportInitialized = false;
-    bool repeatEnabled = false;
-    double repeatDelaySeconds = 0.0;
     bool suppressCallbacks = false;
     bool undoGestureActive = false;
     bool nameEditUndoCaptured = false;
@@ -856,10 +850,6 @@ private:
     juce::Label statusLabel;
     juce::TextButton signalMenuButton { "Signal" };
     juce::TextButton compileButton { "Compile" };
-    juce::TextButton playButton { "Play" };
-    juce::TextButton stopButton { "Stop" };
-    juce::TextButton repeatButton { "Repeat" };
-    juce::Slider repeatDelaySlider; // seconds between repeats -- 0 = back to back
     juce::Label propertiesHeaderLabel;
     juce::Label signalSectionLabel;
     juce::Label variablesSectionLabel;

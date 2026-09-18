@@ -661,6 +661,7 @@ void TimelineModel::clear()
     markers.clear();
     loopStartSeconds = 0.0;
     loopEndSeconds = 0.0;
+    loopDelaySeconds = 0.0;
     loopEnabled = false;
     transportSeconds = 0.0;
 }
@@ -1330,6 +1331,7 @@ juce::ValueTree TimelineModel::createState() const
     state.setProperty("transportSeconds", transportSeconds, nullptr);
     state.setProperty("loopStartSeconds", loopStartSeconds, nullptr);
     state.setProperty("loopEndSeconds", loopEndSeconds, nullptr);
+    state.setProperty("loopDelaySeconds", loopDelaySeconds, nullptr);
     state.setProperty("loopEnabled", loopEnabled, nullptr);
     state.setProperty("timelineSnapEnabled", timelineSnapEnabled, nullptr);
     state.setProperty("timelineGridBeats", timelineGridBeats, nullptr);
@@ -1460,6 +1462,7 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
     setTransportSeconds((double) state.getProperty("transportSeconds", 0.0));
     loopStartSeconds = (double) state.getProperty("loopStartSeconds", 0.0);
     loopEndSeconds = (double) state.getProperty("loopEndSeconds", 0.0);
+    loopDelaySeconds = (double) state.getProperty("loopDelaySeconds", 0.0);
     loopEnabled = (bool) state.getProperty("loopEnabled", false);
     timelineSnapEnabled = (bool) state.getProperty("timelineSnapEnabled", true);
     timelineGridBeats = juce::jmax(0.0078125, (double) state.getProperty("timelineGridBeats", 1.0));

@@ -2,11 +2,15 @@
 #include "MainComponent.h"
 #include <creation/ui/CreationSuiteLogos.h>
 #include <creation/ui/SuiteJUCEApplication.h>
+#include <creation/services/SuiteProcessRegistry.h>
 
 class CreativeWorkstationApplication : public creation::ui::SuiteJUCEApplication
 {
 public:
-    CreativeWorkstationApplication() : SuiteJUCEApplication(creation::ui::SuiteLogoId::station) {}
+    CreativeWorkstationApplication() : SuiteJUCEApplication(creation::ui::SuiteLogoId::station)
+    {
+        processRegistration.RegisterSelf("DjehutiStation");
+    }
 
     const juce::String getApplicationName() override { return "Djehuti Station"; }
     const juce::String getApplicationVersion() override { return "0.5.1"; }
@@ -72,6 +76,8 @@ private:
                 onDecision(true);
         }
     };
+
+    creation::services::SuiteProcessRegistration processRegistration;
 };
 
 START_JUCE_APPLICATION(CreativeWorkstationApplication)
