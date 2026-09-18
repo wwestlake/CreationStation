@@ -799,7 +799,7 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
 
 WorkstationAudioEngine::AssetPreviewSource::AssetPreviewSource()
 {
-    formatManager.registerBasicFormats();
+    formatManager.registerBasicFormats(); formatManager.registerFormat(new juce::WindowsMediaAudioFormat(), false);
 }
 
 void WorkstationAudioEngine::AssetPreviewSource::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
@@ -2198,7 +2198,7 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
                                                      juce::String& errorMessage)
 {
     juce::AudioFormatManager formatManager;
-    formatManager.registerBasicFormats();
+    formatManager.registerBasicFormats(); formatManager.registerFormat(new juce::WindowsMediaAudioFormat(), false);
 
     juce::Array<ArrangementSource::Clip> clips;
 

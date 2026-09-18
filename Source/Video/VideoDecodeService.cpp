@@ -73,13 +73,15 @@ private:
 // thread) - otherwise we'd tear down COM state some other owner on this thread still needs.
 struct ScopedComInitializer
 {
-    ScopedComInitializer() : hr(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {}
-    ~ScopedComInitializer()
+    ScopedComInitializer()
     {
-        if (SUCCEEDED(hr) && hr != S_FALSE)
-            CoUninitialize();
+        static thread_local bool comInitialized = false;
+        if (!comInitialized)
+        {
+            CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            comInitialized = true;
+        }
     }
-    HRESULT hr;
 };
 
 struct SharedD3D
