@@ -167,29 +167,48 @@ bool hasOutgoingConnection(const cw::PatchDocument& patch, const juce::String& i
 }
 }
 
+namespace
+{
+using FrustSineFnPtr = double (*)(double, double);
+
+// One FRust runtime (and its JIT-compiled render_sine) shared by every PatchLiveVoice in the
+// process. The Tracker creates a voice per Signal clip, so compiling the runtime per voice cost
+// hundreds of milliseconds each on the message thread - and the runtimes collided over the
+// process-wide host symbol table ("Duplicate definition of symbol 'sin'"). Deliberately never
+// destroyed: nothing here needs an orderly teardown, and unloading a JIT at process exit only
+// adds shutdown-order risk.
+FrustSineFnPtr sharedFrustSine()
+{
+    struct Holder
+    {
+        std::unique_ptr<creation::frust::PluginRuntime> runtime;
+        FrustSineFnPtr sine = nullptr;
+
+        Holder()
+        {
+            runtime = std::make_unique<creation::frust::PluginRuntime>("creation-station-signal-lab");
+            runtime->registerHostFunction("sin", reinterpret_cast<void*>(static_cast<double (*)(double)>(std::sin)));
+
+            std::string error;
+            if (runtime->load(CS_SIGNAL_LAB_RUNTIME, error))
+                sine = reinterpret_cast<FrustSineFnPtr>(runtime->getFunction("render_sine"));
+
+            if (sine == nullptr)
+                DBG("Signal Lab FRust runtime unavailable: " + juce::String(error));
+        }
+    };
+
+    static Holder* holder = new Holder();
+    return holder->sine;
+}
+}
+
 PatchLiveVoice::PatchLiveVoice()
 {
     for (auto& id : liveMidiSlotNodeIds)
         id = {};
 
-    frustRuntime = std::make_unique<creation::frust::PluginRuntime>("creation-station-signal-lab");
-    frustRuntime->registerHostFunction("sin", reinterpret_cast<void*>(static_cast<double (*)(double)>(std::sin)));
-
-    std::string error;
-    if (frustRuntime->load(CS_SIGNAL_LAB_RUNTIME, error))
-        frustSine = reinterpret_cast<FrustSineFn>(frustRuntime->getFunction("render_sine"));
-
-    if (frustSine == nullptr)
-        DBG("Signal Lab FRust runtime unavailable: " + juce::String(error));
-
-    // See the tapBuffers declaration in the header for why this is
-    // allocated here at runtime rather than compile-time-initialized.
-    for (auto& ring : tapBuffers)
-    {
-        ring = std::make_unique<std::atomic<float>[]>((size_t) kScopeTapCapacity);
-        for (int i = 0; i < kScopeTapCapacity; ++i)
-            ring[(size_t) i].store(0.0f, std::memory_order_relaxed);
-    }
+    frustSine = sharedFrustSine();
 }
 
 PatchLiveVoice::~PatchLiveVoice() = default;
@@ -255,6 +274,51 @@ void PatchLiveVoice::start(double durationSeconds)
 void PatchLiveVoice::stop()
 {
     active.store(false);
+}
+
+void PatchLiveVoice::setPatchDurationSeconds(double seconds)
+{
+    totalDurationSamples.store(juce::jmax<int64>(1, (int64) std::llround(juce::jmax(0.05, seconds) * sampleRate)));
+}
+
+void PatchLiveVoice::adoptPublishedGraphNow()
+{
+    if (auto graph = currentGraph.load())
+        adoptGraphIfChanged(graph);
+}
+
+void PatchLiveVoice::renderAt(int64 patchSamplePosition, juce::AudioBuffer<float>& destination, int destStartSample, int numSamples)
+{
+    auto graph = currentGraph.load();
+    if (graph == nullptr || numSamples <= 0)
+        return;
+
+    adoptGraphIfChanged(graph);
+
+    const auto totalSamples = totalDurationSamples.load();
+    auto position = juce::jmax<int64>(0, patchSamplePosition);
+
+    if (position != elapsedSamples.load())
+    {
+        for (auto* state : runtimeStates)
+        {
+            state->filterDsp.reset();
+            state->bodyState = 0.0f;
+            state->previousEnvelope = 0.0f;
+            state->sampleHoldValue = 0.0f;
+            state->sampleHoldPreviousTrigger = 0.0f;
+        }
+        elapsedSamples.store(position);
+    }
+
+    while (numSamples > 0 && position < totalSamples)
+    {
+        const auto chunk = (int) juce::jmin<int64>((int64) juce::jmin(numSamples, maxBlockSize), totalSamples - position);
+        processOneBlock(*graph, destination, destStartSample, chunk);
+        destStartSample += chunk;
+        numSamples -= chunk;
+        position += chunk;
+    }
 }
 
 void PatchLiveVoice::setLiveMidiValue(const juce::String& nodeId, float value)
@@ -344,6 +408,19 @@ int PatchLiveVoice::registerOrReuseTapSlot(const juce::String& entityId, const j
 
     int slot = tapSlotCount++;
     tapSlotNodeIds[(size_t) slot] = entityId;
+
+    // Allocated the first time a slot is handed out, not for every voice up front: 16 rings of
+    // 131,072 floats is ~8 MB and a couple of million stores, and a Signal clip's voice never
+    // has a scope open. Runs on the message thread before the graph carrying this slot is
+    // published, so the audio thread only ever writes rings that already exist.
+    auto& ring = tapBuffers[(size_t) slot];
+    if (ring == nullptr)
+    {
+        ring = std::make_unique<std::atomic<float>[]>((size_t) kScopeTapCapacity);
+        for (int i = 0; i < kScopeTapCapacity; ++i)
+            ring[(size_t) i].store(0.0f, std::memory_order_relaxed);
+    }
+
     return slot;
 }
 
@@ -905,7 +982,7 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
     {
         auto& finalScratch = runtimeStates[graph.finalEntityIndex]->scratch;
         for (int channel = 0; channel < destBuffer.getNumChannels(); ++channel)
-            destBuffer.addFrom(channel, destStartSample, finalScratch, 0, 0, numSamples, 0.9f);
+            destBuffer.addFrom(channel, destStartSample, finalScratch, 0, 0, numSamples, outputScale);
     }
 
     elapsedSamples.store(startElapsed + numSamples);

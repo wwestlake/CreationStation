@@ -283,6 +283,9 @@ private:
     // Rendered WAV file for each Signal clip's source patch asset, so playback-target builds (which
     // run on every scrub) don't hit the VFS. Cleared whenever a patch is saved.
     std::map<juce::String, juce::File> signalRenderFiles;
+    // Parsed patch (and its content key) for each Signal clip's patch asset, so timeline refreshes
+    // don't re-fetch it from the VFS. Cleared whenever a patch is saved.
+    std::map<juce::String, std::pair<juce::String, cw::PatchDocument>> signalPatchDocs;
     // Which saved arrangement/patch/foley-setup (project asset id) is currently active in each
     // tool tab -- used to auto-restore the right one when the project reopens.
     juce::String currentArrangementAssetId;
@@ -371,9 +374,15 @@ private:
     void pollHostedPluginStateAutosave();
     bool prepareTrackerPlayback();
     void refreshTrackerPlaybackClips();
+    // includeSignalClips=false is the live-playback form: Signal clips are left out of the audio-file
+    // targets (they are run live by the engine, see buildSignalClipTargets) but still count toward
+    // durationSeconds. true (the default) is the offline/render form, which bakes them to WAV.
     bool buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                      double& durationSeconds,
-                                     juce::String& errorMessage);
+                                     juce::String& errorMessage,
+                                     bool includeSignalClips = true);
+    bool buildSignalClipTargets(juce::Array<WorkstationAudioEngine::SignalClipTarget>& targets,
+                                juce::String& errorMessage);
     void previewScrubAudioAt(double timelineSeconds);
     void refreshMidiPlaybackClips();
     bool renderFullMixToProject();
