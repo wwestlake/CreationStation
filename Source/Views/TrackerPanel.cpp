@@ -1730,12 +1730,10 @@ void TrackerPanel::TimelineCanvas::resized()
         if (auto* header = trackHeaders[trackIndex])
             header->setBounds(0, trackTopY(trackIndex), labelWidth, getTrackHeightAt(trackIndex));
     }
+}
 
-    // Floating scrub-preview overlay, top-right corner - only shown while the playhead is over
-    // a video clip (see updateVideoPreview), so it doesn't take up space in audio-only projects.
-    if (videoWindow == nullptr) {
-        videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
-    }
+TrackerPanel::TimelineCanvas::TimelineCanvas() {
+    videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
 }
 
 TrackerPanel::TimelineCanvas::~TimelineCanvas() {
@@ -3295,3 +3293,6 @@ bool TrackerPanel::TimelineCanvas::TrackHeader::isInResizeHotzone(juce::Point<fl
     constexpr int resizeHotzonePixels = 6;
     return position.y >= (float) (getHeight() - resizeHotzonePixels);
 }
+
+
+

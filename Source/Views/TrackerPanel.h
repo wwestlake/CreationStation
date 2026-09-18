@@ -140,6 +140,7 @@ private:
     class TimelineCanvas final : public juce::Component
     {
     public:
+        TimelineCanvas();
         ~TimelineCanvas() override;
         std::function<void(int)> onTrackSelected;
         std::function<void(int, const juce::String&)> onTrackNameChanged;
@@ -441,3 +442,4 @@ private:
     void commitTimingEdits();
     void showArrangementMenu();
 };
+
