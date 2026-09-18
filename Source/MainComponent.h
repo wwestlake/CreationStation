@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <JuceHeader.h>
 #include <array>
 #include <vector>
@@ -279,6 +280,9 @@ private:
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     creation::assets::ProjectSession projectSession;
+    // Rendered WAV file for each Signal clip's source patch asset, so playback-target builds (which
+    // run on every scrub) don't hit the VFS. Cleared whenever a patch is saved.
+    std::map<juce::String, juce::File> signalRenderFiles;
     // Which saved arrangement/patch/foley-setup (project asset id) is currently active in each
     // tool tab -- used to auto-restore the right one when the project reopens.
     juce::String currentArrangementAssetId;

@@ -2616,6 +2616,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
         refreshProjectAssets();
         refreshContentLibrary();
+        // Any Signal clip built from this patch must be re-rendered from the new patch content.
+        signalRenderFiles.clear();
+        refreshTrackerPlaybackClips();
         saveSessionToDisk(true);
         transportBar.setStatusText("Saved Signal Lab design asset: " + patchAsset.displayName);
     };
@@ -8893,7 +8896,108 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
         }
 
         auto clipFile = clip.file;
-        if (! clipFile.existsAsFile() && clip.assetId.isNotEmpty())
+
+        bool haveSignalRender = false;
+        if (clip.kind == cs::ClipKind::signal && clip.assetId.isNotEmpty())
+        {
+            auto cached = signalRenderFiles.find(clip.assetId);
+            if (cached != signalRenderFiles.end() && cached->second.existsAsFile())
+            {
+                clipFile = cached->second;
+                haveSignalRender = true;
+            }
+        }
+
+        if (clip.kind == cs::ClipKind::signal && ! haveSignalRender)
+        {
+            // A Signal clip's source is a patch document (.cspatch), never playable audio. Render it
+            // to a WAV, cached in the project VFS, whether the patch is already a real local file
+            // (resolveTrackerClipAssetFiles materializes it into clip.file) or still has to be
+            // materialized from the project's asset catalog.
+            auto patchFile = clip.file;
+            juce::String matError;
+            creation::assets::MaterializedAssetLease patchLease;
+            // Always re-read the patch from the project when it has an asset: clip.file is only a local
+            // copy made when the project loaded, so it goes stale as soon as the patch is re-saved.
+            if (clip.assetId.isNotEmpty())
+            {
+                auto assetOpt = resolveTimelineClipAsset(clip);
+                if (assetOpt.has_value()
+                    && projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
+                                                       creation::assets::MaterializationAccess::readOnly,
+                                                       patchLease, matError))
+                {
+                    patchFile = patchLease.materializedFile;
+                }
+            }
+
+            if (! patchFile.existsAsFile())
+                continue;
+
+            // Key the cache on the patch content, so editing the patch invalidates the cached render
+            // (the VFS materializer does not preserve source modification times, so mtimes can't be used).
+            const auto patchText = patchFile.loadFileAsString();
+            auto cacheKey = clip.assetId.isNotEmpty() ? clip.assetId : patchFile.getFileNameWithoutExtension();
+            auto cachePath = "cache/signal_render_" + cacheKey.replaceCharacters(":\\/ ", "____")
+                           + "_" + juce::String::toHexString(patchText.hashCode64()) + ".wav";
+            creation::assets::MaterializedAssetLease renderLease;
+
+            const bool needsRender = ! (projectSession.materializeEntry(suiteSettings, cachePath,
+                                                                         creation::assets::MaterializationAccess::readOnly,
+                                                                         renderLease, matError)
+                                        && renderLease.materializedFile.existsAsFile());
+
+            if (needsRender)
+            {
+                cw::PatchDocument doc;
+                if (! cw::parsePatchDocumentJson(patchText, doc, matError))
+                {
+                    errorMessage = "Signal track render failed (parse): " + matError;
+                    return false;
+                }
+
+                PatchRuntimePlayer player;
+                player.prepare(48000.0, 512);
+                juce::AudioBuffer<float> buffer;
+                if (! player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr))
+                {
+                    errorMessage = "Signal track render failed (render): " + matError;
+                    return false;
+                }
+
+                juce::MemoryBlock wavData;
+                juce::WavAudioFormat wavFormat;
+                // The writer takes ownership of (and deletes) the stream, so it must be heap-allocated.
+                auto* wavStream = new juce::MemoryOutputStream(wavData, false);
+                std::unique_ptr<juce::AudioFormatWriter> writer(
+                    wavFormat.createWriterFor(wavStream, 48000.0, (unsigned int) buffer.getNumChannels(), 24, {}, 0));
+                if (writer == nullptr)
+                {
+                    delete wavStream;
+                    errorMessage = "Could not create a WAV writer for the rendered Signal clip.";
+                    return false;
+                }
+                writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+                writer.reset(); // Flushes the WAV header and finalizes wavData
+
+                if (! projectSession.writeEntry(cachePath, wavData, juce::Time::getCurrentTime()))
+                {
+                    errorMessage = "Could not write rendered WAV into VFS.";
+                    return false;
+                }
+
+                if (! projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError))
+                {
+                    errorMessage = "Could not materialize rendered WAV from VFS: " + matError;
+                    return false;
+                }
+            }
+
+            clipFile = renderLease.materializedFile;
+            if (clip.assetId.isNotEmpty())
+                signalRenderFiles[clip.assetId] = clipFile;
+        }
+        else if (clip.kind != cs::ClipKind::signal && ! clipFile.existsAsFile() && clip.assetId.isNotEmpty())
         {
             auto assetOpt = resolveTimelineClipAsset(clip);
             if (assetOpt.has_value())
@@ -8904,59 +9008,7 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
                                                     creation::assets::MaterializationAccess::readOnly,
                                                     lease, matError))
                 {
-                                        if (clip.kind == cs::ClipKind::signal)
-                    {
-                        auto cachePath = "cache/signal_render_" + clip.assetId.replace(":", "_") + ".wav";
-                        creation::assets::MaterializedAssetLease renderLease;
-                        
-                        // Try to read it from the VFS first. If it exists and is newer than the patch file, we can use it.
-                        bool needsRender = true;
-                        if (projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError))
-                        {
-                            if (renderLease.materializedFile.existsAsFile() && renderLease.materializedFile.getLastModificationTime() >= lease.materializedFile.getLastModificationTime())
-                                needsRender = false;
-                        }
-
-                        if (needsRender)
-                        {
-                            cw::PatchDocument doc;
-                            if (!cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, matError)) {
-                                errorMessage = "Signal track render failed (parse): " + matError;
-                                return false;
-                            }
-                            PatchRuntimePlayer player;
-                            player.prepare(48000.0, 512);
-                            juce::AudioBuffer<float> buffer;
-                            if (!player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr)) {
-                                errorMessage = "Signal track render failed (render): " + matError;
-                                return false;
-                            }
-                            
-                            juce::MemoryBlock wavData;
-                            juce::MemoryOutputStream mos(wavData, false);
-                            juce::WavAudioFormat wavFormat;
-                            if (auto writer = std::unique_ptr<juce::AudioFormatWriter>(wavFormat.createWriterFor(&mos, 48000.0, buffer.getNumChannels(), 24, {}, 0)))
-                            {
-                                writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
-                                writer.reset(); // Flush the WAV header
-                            }
-                            
-                            if (!projectSession.writeEntry(cachePath, wavData, juce::Time::getCurrentTime())) {
-                                errorMessage = "Could not write rendered WAV into VFS.";
-                                return false;
-                            }
-                            
-                            if (!projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError)) {
-                                errorMessage = "Could not materialize rendered WAV from VFS: " + matError;
-                                return false;
-                            }
-                        }
-                        clipFile = renderLease.materializedFile;
-                    }
-                    else
-                    {
-                        clipFile = lease.materializedFile;
-                    }
+                    clipFile = lease.materializedFile;
                 }
             }
         }
