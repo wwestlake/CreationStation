@@ -7651,9 +7651,18 @@ bool MainComponent::renderFullMixToProject()
     juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
     double durationSeconds = 0.0;
     juce::String errorMessage;
-    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage))
+    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage, false))
     {
         transportBar.setStatusText(errorMessage);
+        return false;
+    }
+
+    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+    juce::String signalError;
+    buildSignalClipTargets(signalTargets, signalError);
+    if (signalError.isNotEmpty())
+    {
+        transportBar.setStatusText(signalError);
         return false;
     }
 
@@ -7664,7 +7673,7 @@ bool MainComponent::renderFullMixToProject()
 
     juce::AudioBuffer<float> renderedMix;
     transportBar.setStatusText("Rendering full mix...");
-    if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage))
+    if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage, signalTargets))
     {
         transportBar.setStatusText(errorMessage);
         return false;
@@ -7695,10 +7704,19 @@ void MainComponent::exportFullMixAsWav()
     juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
     double durationSeconds = 0.0;
     juce::String errorMessage;
-    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage))
+    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage, false))
     {
         transportBar.setStatusText(errorMessage);
         return;
+    }
+
+    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+    juce::String signalError;
+    buildSignalClipTargets(signalTargets, signalError);
+    if (signalError.isNotEmpty())
+    {
+        transportBar.setStatusText(signalError);
+        return ;
     }
 
     auto defaultName = projectSession.isValid() ? projectSession.getManifest().projectName.toLowerCase().replace(" ", "-") + "-full-mix.wav"
@@ -7710,7 +7728,7 @@ void MainComponent::exportFullMixAsWav()
                                                               true);
     auto chooser = renderExportChooser.get();
     chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-                         [this, chooser, targets, durationSeconds](const juce::FileChooser& result)
+                         [this, chooser, targets, durationSeconds, signalTargets](const juce::FileChooser& result)
                          {
                              auto destination = result.getResult();
                              if (chooser == renderExportChooser.get())
@@ -7730,7 +7748,7 @@ void MainComponent::exportFullMixAsWav()
                              juce::String errorMessage;
                              juce::AudioBuffer<float> renderedMix;
                              transportBar.setStatusText("Exporting full mix...");
-                             if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage))
+                             if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage, signalTargets))
                              {
                                  transportBar.setStatusText(errorMessage);
                                  return;

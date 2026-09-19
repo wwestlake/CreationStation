@@ -2295,10 +2295,11 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
     return true;
 }
 
-bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipTarget>& targets, juce::String& errorMessage)
+std::shared_ptr<const WorkstationAudioEngine::SignalClipSet> WorkstationAudioEngine::buildSignalClipSet(
+    const juce::Array<SignalClipTarget>& targets, double sampleRate, int blockSize,
+    const std::shared_ptr<const SignalClipSet>& reuseFrom) const
 {
-    const auto previous = signalClips.load();
-    auto next = std::make_shared<SignalClipSet>();
+    auto set = std::make_shared<SignalClipSet>();
 
     for (const auto& target : targets)
     {
@@ -2306,11 +2307,11 @@ bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipT
             continue;
 
         std::shared_ptr<PatchLiveVoice> voice;
-        if (previous != nullptr)
+        if (reuseFrom != nullptr)
         {
-            for (const auto& existing : *previous)
+            for (const auto& existing : *reuseFrom)
             {
-                if (existing.clipId == target.clipId && existing.patchKey == target.patchKey && existing.sampleRate == graphSampleRate)
+                if (existing.clipId == target.clipId && existing.patchKey == target.patchKey && existing.sampleRate == sampleRate)
                 {
                     voice = existing.voice;
                     break;
@@ -2321,7 +2322,7 @@ bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipT
         if (voice == nullptr)
         {
             voice = std::make_shared<PatchLiveVoice>();
-            voice->prepareToPlay(graphBlockSize, graphSampleRate);
+            voice->prepareToPlay(blockSize, sampleRate);
             voice->rebuild(target.patch, makeVariableBindingMap(target.patch));
             voice->setPatchDurationSeconds(target.patch.durationSeconds > 0.0 ? target.patch.durationSeconds : 5.0);
             voice->setOutputScale(1.0f); // match the offline render exactly; 0.9 is only Signal Lab's preview headroom
@@ -2332,13 +2333,21 @@ bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipT
         placement.clipId = target.clipId;
         placement.patchKey = target.patchKey;
         placement.trackIndex = target.trackIndex;
-        placement.sampleRate = graphSampleRate;
-        placement.startSample = (int64) std::llround(target.startSeconds * graphSampleRate);
-        placement.lengthSamples = (int64) std::llround(target.durationSeconds * graphSampleRate);
-        placement.sourceStartSample = (int64) std::llround(target.sourceStartSeconds * graphSampleRate);
+        placement.sampleRate = sampleRate;
+        placement.startSample = (int64) std::llround(target.startSeconds * sampleRate);
+        placement.lengthSamples = (int64) std::llround(target.durationSeconds * sampleRate);
+        placement.sourceStartSample = (int64) std::llround(target.sourceStartSeconds * sampleRate);
         placement.voice = std::move(voice);
-        next->push_back(std::move(placement));
+        set->push_back(std::move(placement));
     }
+
+    return set;
+}
+
+bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipTarget>& targets, juce::String& errorMessage)
+{
+    const auto previous = signalClips.load();
+    auto next = buildSignalClipSet(targets, graphSampleRate, graphBlockSize, previous);
 
     retiredSignalClips[1] = std::move(retiredSignalClips[0]);
     retiredSignalClips[0] = previous;
@@ -2492,9 +2501,10 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
                                                       double durationSeconds,
                                                       const RenderSettings& settings,
                                                       juce::AudioBuffer<float>& outputBuffer,
-                                                      juce::String& errorMessage)
+                                                      juce::String& errorMessage,
+                                                      const juce::Array<SignalClipTarget>& signalTargets)
 {
-    if (targets.isEmpty())
+    if (targets.isEmpty() && signalTargets.isEmpty())
     {
         errorMessage = "There are no tracker clips to render.";
         return false;
@@ -2523,8 +2533,15 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
 
     masterInsertSource.prepareToPlay(safeBlockSize, safeSampleRate);
 
+    // The render gets its own voices at the render sample rate. The live ones keep their state and rate for
+    // playback, and are put back below; they must never leak into a render (or a scrub preview).
+    const auto liveSignalClips = signalClips.load();
+    const auto renderSignalClips = buildSignalClipSet(signalTargets, safeSampleRate, safeBlockSize, nullptr);
+    signalClips.store(renderSignalClips);
+
     if (! setTrackerPlaybackClips(targets, errorMessage))
     {
+        signalClips.store(liveSignalClips);
         prepareGraph(previousSampleRate, previousBlockSize);
         playing.store(wasPlaying);
         return false;
@@ -2566,6 +2583,7 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
     }
 
     arrangementSource.setPlaybackPositionSeconds(0.0);
+    signalClips.store(liveSignalClips);
     prepareGraph(previousSampleRate, previousBlockSize);
     for (auto* track : tracks)
         if (track != nullptr)

@@ -678,6 +678,40 @@ target_link_libraries(SignalClipLiveSmoke PRIVATE
     juce::juce_recommended_warning_flags
 )
 
+# Automated checks for the offline render of Signal clips through the real engine (no audio hardware).
+juce_add_console_app(SignalClipRenderSmoke PRODUCT_NAME "SignalClipRenderSmoke")
+juce_generate_juce_header(SignalClipRenderSmoke)
+target_sources(SignalClipRenderSmoke PRIVATE
+    tests/SignalClipRenderSmoke.cpp
+    Source/Audio/WorkstationAudioEngine.cpp
+    Source/Audio/SignalGraphRuntime.cpp
+    Source/Audio/PatchLiveVoice.cpp
+    Source/Audio/PatchRuntimePlayer.cpp
+    Source/Patch/PatchModel.cpp
+    Source/Timeline/TimelineModel.cpp
+)
+target_include_directories(SignalClipRenderSmoke PRIVATE Source)
+target_compile_definitions(SignalClipRenderSmoke PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_PLUGINHOST_VST3=1
+    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
+)
+target_link_libraries(SignalClipRenderSmoke PRIVATE
+    ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_TIMELINE_TARGET}
+    creation_suite_frust_plugin_runtime
+    juce::juce_audio_devices
+    juce::juce_audio_processors
+    juce::juce_audio_formats
+    juce::juce_audio_utils
+    juce::juce_dsp
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
 install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "DjehutiStation")
