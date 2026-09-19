@@ -88,6 +88,17 @@ constexpr int menuIdToolVideo = 2014;
 constexpr int menuIdToolVirtualEngineer = 2012;
 constexpr int menuIdToolTrackInsert = 2013;
 constexpr int menuIdToolResetLayout = 2099;
+constexpr int menuIdFileSave = 1;
+constexpr int menuIdFileSaveArrangement = 2;
+constexpr int menuIdFileLoadArrangement = 3;
+constexpr int menuIdFileRender = 4;
+constexpr int menuIdFileExportWav = 5;
+constexpr int menuIdEditUndo = 101;
+constexpr int menuIdEditRedo = 102;
+constexpr int menuIdEditDuplicate = 103;
+constexpr int menuIdEditDelete = 104;
+constexpr int menuIdEditRename = 105;
+constexpr int menuIdEditSplit = 106;
 constexpr int menuIdHelpTour = 3001;
 constexpr int menuIdHelpResetLayout = 3002;
 constexpr int menuIdHelpFeedback = 3003;
@@ -4578,48 +4589,50 @@ void MainComponent::resized()
 
 juce::StringArray MainComponent::getMenuBarNames()
 {
-    return { "Project", "Creative Mode", "Help" };
+    return { "File", "Edit", "View", "Help" };
 }
 
 juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce::String&)
 {
     juce::PopupMenu menu;
 
+    // Projects belong to the suite (the header creates, opens and switches them); this menu only holds what
+    // this app does with the project it is a tenant in.
     if (topLevelMenuIndex == 0)
     {
-        currentProjectMenuListError.clear();
-        currentProjectMenuProjects = creation::assets::ProjectContainerService::listProjects(
-            suiteSettings,
-            currentProjectMenuListError);
-
-        if (! currentProjectMenuProjects.isEmpty())
-        {
-            for (int index = 0; index < currentProjectMenuProjects.size(); ++index)
-            {
-                const auto& project = currentProjectMenuProjects.getReference(index);
-                auto label = project.manifest.projectName.isNotEmpty() ? project.manifest.projectName : project.projectId;
-                const auto isCurrentProject = projectSession.isValid() && project.projectId == projectSession.getProjectId();
-                menu.addItem(menuIdProjectFirst + index, label, true, isCurrentProject);
-            }
-
-            menu.addSeparator();
-        }
-
-        menu.addItem(1, "Create New Project...");
-        menu.addItem(2, "Create New Project From Template...");
-        menu.addItem(3, "Open Project Browser / Package...");
+        menu.addItem(menuIdFileSave, "Save", projectSession.isValid());
         menu.addSeparator();
-        menu.addItem(4, "Save Project");
-        menu.addItem(5, "Save Project As...");
-        menu.addItem(6, "Save Project As Template...");
-        menu.addItem(7, "Open Project Folder");
+        menu.addItem(menuIdFileSaveArrangement, "Save Arrangement...", projectSession.isValid());
+        menu.addItem(menuIdFileLoadArrangement, "Load Arrangement...", projectSession.isValid());
         menu.addSeparator();
-        menu.addItem(8, "Render Full Mix...");
-        menu.addItem(9, "Export Full Mix as WAV...");
+        menu.addItem(menuIdFileRender, "Render Full Mix...");
+        menu.addItem(menuIdFileExportWav, "Export Full Mix as WAV...");
         return menu;
     }
 
     if (topLevelMenuIndex == 1)
+    {
+        const auto hasClip = selectedClipIndex >= 0;
+        const auto addWithKey = [&menu](int id, const juce::String& label, const juce::String& shortcut, bool enabled)
+        {
+            juce::PopupMenu::Item item(label);
+            item.itemID = id;
+            item.isEnabled = enabled;
+            item.shortcutKeyDescription = shortcut;
+            menu.addItem(item);
+        };
+
+        addWithKey(menuIdEditUndo, "Undo", "Ctrl+Z", true);
+        addWithKey(menuIdEditRedo, "Redo", "Ctrl+Y", true);
+        menu.addSeparator();
+        addWithKey(menuIdEditDuplicate, "Duplicate Clip", "Ctrl+D", hasClip);
+        addWithKey(menuIdEditSplit, "Split at Playhead", "Ctrl+Shift+S", hasClip);
+        addWithKey(menuIdEditRename, "Rename Clip", "F2", hasClip);
+        addWithKey(menuIdEditDelete, "Delete Clip", "Delete", hasClip);
+        return menu;
+    }
+
+    if (topLevelMenuIndex == 2)
     {
         const auto isOpen = [this](const juce::String& id)
         {
@@ -4647,7 +4660,6 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
     }
 
     menu.addItem(menuIdHelpTour, "Guided Tour");
-    menu.addItem(menuIdHelpResetLayout, "Reset Dock Layout");
     menu.addSeparator();
     menu.addItem(menuIdHelpFeedback, "Send Feedback...");
     return menu;
@@ -4660,49 +4672,40 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
 
     if (topLevelMenuIndex == 0)
     {
-        if (menuItemID >= menuIdProjectFirst
-            && menuItemID < menuIdProjectFirst + currentProjectMenuProjects.size())
-        {
-            const auto selectedProject = currentProjectMenuProjects.getReference(menuItemID - menuIdProjectFirst);
-            guardUnsavedProjectChange("opening another project", [this, selectedProject]
-            {
-                juce::String errorMessage;
-                if (! creation::assets::ProjectWorkspaceService::openProject(suiteSettings, selectedProject.projectId, projectSession, errorMessage))
-                {
-                    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
-                                                           "Project Error",
-                                                           errorMessage);
-                    return;
-                }
-
-                transportBar.setProjectLabel(projectSession.getManifest().projectName);
-                settingsPanel.setProjectMetadata(projectSession.getManifest());
-                refreshProjectAssets();
-                loadSessionFromDisk();
-            });
-            return;
-        }
-
         switch (menuItemID)
         {
-            case 1: createNewProject(); break;
-            case 2: createProjectFromTemplate(); break;
-            case 3: openProject(); break;
-            case 4: saveProject(); break;
-            case 5: saveProjectAs(); break;
-            case 6: saveProjectAsTemplate(); break;
-            case 7: revealProjectFolder(); break;
-            case 8: showRenderDialog(RenderRequest::Destination::project); break;
-            case 9: showRenderDialog(RenderRequest::Destination::file); break;
+            case menuIdFileSave: saveProject(); break;
+            case menuIdFileSaveArrangement: trackerPanel.promptSaveArrangement(); break;
+            case menuIdFileLoadArrangement: trackerPanel.requestLoadArrangement(); break;
+            case menuIdFileRender: showRenderDialog(RenderRequest::Destination::project); break;
+            case menuIdFileExportWav: showRenderDialog(RenderRequest::Destination::file); break;
             default: break;
         }
-
-        if (currentProjectMenuListError.isNotEmpty())
-            transportBar.setStatusText("Project list warning: " + currentProjectMenuListError);
         return;
     }
 
     if (topLevelMenuIndex == 1)
+    {
+        const auto clipCount = (int) timelineModel.getClips().size();
+        const auto clipSelected = juce::isPositiveAndBelow(selectedClipIndex, clipCount);
+        switch (menuItemID)
+        {
+            case menuIdEditUndo:
+                if (activeMode == WorkspaceMode::signal) undoSignalEdit(); else undoTimelineEdit();
+                break;
+            case menuIdEditRedo:
+                if (activeMode == WorkspaceMode::signal) redoSignalEdit(); else redoTimelineEdit();
+                break;
+            case menuIdEditDuplicate: if (clipSelected) duplicateClip(selectedClipIndex); break;
+            case menuIdEditSplit: if (clipSelected) splitClipAt(selectedClipIndex, timelineModel.getTransportSeconds()); break;
+            case menuIdEditRename: if (clipSelected) renameClip(selectedClipIndex); break;
+            case menuIdEditDelete: if (clipSelected) deleteClip(selectedClipIndex); break;
+            default: break;
+        }
+        return;
+    }
+
+    if (topLevelMenuIndex == 2)
     {
         switch (menuItemID)
         {
@@ -4730,8 +4733,6 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
 
     if (menuItemID == menuIdHelpTour)
         showTour();
-    else if (menuItemID == menuIdHelpResetLayout)
-        resetDockLayout();
     else if (menuItemID == menuIdHelpFeedback)
         showFeedbackWindow();
 }

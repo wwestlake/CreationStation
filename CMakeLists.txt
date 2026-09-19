@@ -714,6 +714,38 @@ target_link_libraries(SignalClipRenderSmoke PRIVATE
     juce::juce_recommended_warning_flags
 )
 
+# Automated checks for linked clips (a video and its sound) in the timeline model.
+juce_add_console_app(LinkedClipsSmoke PRODUCT_NAME "LinkedClipsSmoke")
+juce_generate_juce_header(LinkedClipsSmoke)
+target_sources(LinkedClipsSmoke PRIVATE
+    tests/LinkedClipsSmoke.cpp
+    Source/Timeline/TimelineModel.cpp
+)
+target_include_directories(LinkedClipsSmoke PRIVATE Source)
+target_compile_definitions(LinkedClipsSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(LinkedClipsSmoke PRIVATE
+    ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_TIMELINE_TARGET}
+    juce::juce_audio_formats
+    juce::juce_data_structures
+    juce::juce_gui_basics
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Automated check that the header bar never loses a control at narrow window widths.
+juce_add_console_app(HeaderLayoutSmoke PRODUCT_NAME "HeaderLayoutSmoke")
+juce_generate_juce_header(HeaderLayoutSmoke)
+target_sources(HeaderLayoutSmoke PRIVATE tests/HeaderLayoutSmoke.cpp)
+target_compile_definitions(HeaderLayoutSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(HeaderLayoutSmoke PRIVATE
+    ${CS_UI_TARGET}
+    juce::juce_gui_extra
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
 install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "DjehutiStation")
