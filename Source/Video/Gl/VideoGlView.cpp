@@ -178,6 +178,7 @@ void VideoGlView::newOpenGLContextCreated()
     renderer.prepare(context);
     rendererError = renderer.getLastError();
     rendererReady.store(renderer.isReady());
+    ++contextsCreated;
 }
 
 void VideoGlView::renderOpenGL()
@@ -188,6 +189,10 @@ void VideoGlView::renderOpenGL()
     const auto width = juce::roundToInt(scale * (float) getWidth());
     const auto height = juce::roundToInt(scale * (float) getHeight());
     renderer.render(*snapshot, width, height);
+    ++framesDrawn;
+    lastLayerCount.store((int) snapshot->layers.size());
+    lastWidth.store(width);
+    lastHeight.store(height);
 
     if (captureRequested.exchange(false) && width > 0 && height > 0)
     {
@@ -267,6 +272,21 @@ juce::Image VideoGlView::renderToImage(int width, int height)
     }, true);
 
     return result;
+}
+
+juce::String VideoGlView::describeState() const
+{
+    juce::String text = "OpenGL ";
+    if (rendererReady.load())
+        text << "ready";
+    else if (rendererError.isNotEmpty())
+        text << "NOT ready: " << rendererError;
+    else
+        text << (context.isAttached() ? "starting..." : "not attached to a window");
+
+    text << "  |  layers " << lastLayerCount.load() << "  |  frames drawn " << (juce::int64) framesDrawn.load()
+         << "  |  " << lastWidth.load() << "x" << lastHeight.load();
+    return text;
 }
 
 void VideoGlView::paint(juce::Graphics& g)

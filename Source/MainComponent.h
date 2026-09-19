@@ -43,6 +43,7 @@
 #include "Video/VideoPreviewComponent.h"
 #include "Video/Gl/VideoGlView.h"
 #include "Video/Gl/VideoLayerParams.h"
+#include "Video/Gl/VideoPanelHost.h"
 #include "Video/VideoScrubPreview.h"
 #include "Views/RenderDialog.h"
 #include "Views/ToastMessage.h"
@@ -291,7 +292,8 @@ private:
 
     // Video. The picture is a dock panel (dock it, float it, resize it); the sound is the video's own audio
     // track, decoded once to a WAV so it plays through the clip's mixer track like any other audio clip.
-    cs::VideoGlView videoView; // the video panel: drawn by OpenGL, effects run on the GPU
+    cs::VideoGlView videoView; // the video picture: drawn by OpenGL, effects run on the GPU
+    cs::VideoPanelHost videoPanelHost { videoView }; // what the video panel shows: the picture plus a status strip
     // One decoder per video clip that is on screen at the playhead (each layer of the picture has its own).
     struct VideoLayerFeed
     {

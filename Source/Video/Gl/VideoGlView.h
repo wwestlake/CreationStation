@@ -92,6 +92,8 @@ public:
     // True once the graphics context is up and the shaders compiled (set on the GL thread).
     bool isRendererReady() const noexcept { return rendererReady.load(); }
     juce::String getRendererError() const { return rendererError; }
+    // One line saying what the graphics side is doing, for the panel's status strip.
+    juce::String describeState() const;
 
     std::function<void()> onSizeChanged;
 
@@ -113,6 +115,11 @@ private:
     std::atomic<bool> rendererReady { false };
     juce::String rendererError;
 
+    std::atomic<std::uint64_t> framesDrawn { 0 };
+    std::atomic<int> contextsCreated { 0 };
+    std::atomic<int> lastLayerCount { 0 };
+    std::atomic<int> lastWidth { 0 };
+    std::atomic<int> lastHeight { 0 };
     std::atomic<bool> captureRequested { false };
     juce::CriticalSection captureLock;
     juce::Image capturedFrame;

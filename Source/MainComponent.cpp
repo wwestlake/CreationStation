@@ -4839,7 +4839,7 @@ CreationDock::DockPanel* MainComponent::registerNamedDockPanel(const juce::Strin
     if (panelId == foleyPanelId)
         return dockManager->registerPanel(panelId, "Foley", std::make_unique<NonOwningPanelHost>(foleyPanel), zone);
     if (panelId == videoPanelId)
-        return dockManager->registerPanel(panelId, "Video", std::make_unique<NonOwningPanelHost>(videoView), zone);
+        return dockManager->registerPanel(panelId, "Video", std::make_unique<NonOwningPanelHost>(videoPanelHost), zone);
     if (panelId == virtualEngineerPanelId)
         return dockManager->registerPanel(panelId, "Virtual Engineer", std::make_unique<NonOwningPanelHost>(aiPanel), zone);
 
@@ -8339,9 +8339,17 @@ void MainComponent::openVideoViewForPlayback()
         if (clip.kind == cs::ClipKind::video)
             hasVideo = true;
 
-    // Already open (docked or floating): leave it exactly where the user put it.
-    if (! hasVideo || dockManager->isRegistered(videoPanelId))
+    if (! hasVideo)
         return;
+
+    // Already open (docked or floating): leave it exactly where the user put it - but if it is open and hidden
+    // (behind another tab), bring it forward so playing actually shows the picture.
+    if (dockManager->isRegistered(videoPanelId))
+    {
+        if (! videoView.isShowing())
+            dockManager->activatePanel(videoPanelId);
+        return;
+    }
 
     // Not open: show the picture in its own window, which can be docked from there.
     if (auto* panel = registerNamedDockPanel(videoPanelId, CreationDock::DockTargetZone::Right))
@@ -8354,7 +8362,10 @@ void MainComponent::updateVideoView(double timelineSeconds)
 {
     // Nothing is decoded while the view is not on screen.
     if (! videoView.isShowing())
+    {
+        videoPanelHost.setExtraInfo("view not on screen: not decoding");
         return;
+    }
 
     // Every video clip under the playhead is a layer. A clip on a track higher in the list is drawn in front of one
     // lower down, so the lowest track is the bottom layer.
@@ -8372,6 +8383,15 @@ void MainComponent::updateVideoView(double timelineSeconds)
     videoActiveOrder.clear();
     for (const auto* clip : active)
         videoActiveOrder.push_back(clip->id);
+
+    {
+        int decoded = 0;
+        for (const auto& feed : videoFeeds)
+            if (feed.second->frame.isValid())
+                ++decoded;
+        videoPanelHost.setExtraInfo("video clips under the playhead " + juce::String((int) active.size()) + ", pictures decoded " + juce::String(decoded)
+                                    + ", playhead " + juce::String(timelineSeconds, 1) + " s");
+    }
 
     // Decoders for clips that are no longer under the playhead are let go.
     for (auto it = videoFeeds.begin(); it != videoFeeds.end();)
