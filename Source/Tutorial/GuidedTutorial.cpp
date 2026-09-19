@@ -59,7 +59,7 @@ endscene
 
 scene modes
 title "Creative Modes"
-say "These modes switch between tracking, signal forging, content browsing, layering, patch design, scripting, capture, and AI help."
+say "These modes switch between tracking, signal forging, content browsing, layering, scripting, capture, and AI help."
 focus modes
 do switch-workspace tracker
 endscene
@@ -94,21 +94,11 @@ endscene
 
 scene plugins
 title "Plugin Studio"
-say "Plugin Studio is where you point Creation Station at your VST folders, rescan the catalog, load inserts, and assign a plugin to the patch graph. This keeps plugin work on-screen instead of buried in popups."
+say "Plugin Studio is where you point Creation Station at your VST folders, rescan the catalog, and load inserts onto your tracks. This keeps plugin work on-screen instead of buried in popups."
 focus plugins
 advanceOnClick false
 next "Next Scene"
 do switch-workspace plugins
-endscene
-
-scene patch
-title "Patch Lab"
-say "This view is for sound-design chains: sources, processors, and printable outputs. The VST Host node now sits in the real signal path, so a third-party plugin can become part of the patch itself with live wet-dry control."
-focus patch
-advanceOnClick false
-next "Next Scene"
-do switch-workspace node
-do apply-graph-macro "Instrument Voice"
 endscene
 
 scene script
@@ -145,51 +135,6 @@ focus transport
 advanceOnClick false
 next "Done"
 do switch-workspace tracker
-endscene
-)NALM";
-}
-
-juce::String getBuiltInVstNodeDemoTutorialSource()
-{
-    return R"NALM(
-tutorial vst-node-demo "VST Node Demo"
-description "A focused walkthrough for showing Plugin Studio and the VST Host node working together."
-
-scene intro
-title "VST Node Demo"
-say "This short demo is built for showing how third-party plugins move from the library of discovered VSTs into the patch graph."
-advanceOnClick false
-connector false
-next "Start Demo"
-do switch-workspace plugins
-endscene
-
-scene pluginstudio
-title "Plugin Studio"
-say "Start here. This workspace keeps VST folders, scans, plugin browsing, and graph assignment visible on one screen."
-focus plugins
-advanceOnClick false
-next "Next Scene"
-do switch-workspace plugins
-endscene
-
-scene patchlab
-title "Patch Lab"
-say "Now the VST Host node sits inside the actual sound path. Once a plugin is assigned, its output is blended with the graph using the node mix control."
-focus patch
-advanceOnClick false
-next "Next Scene"
-do switch-workspace node
-do apply-graph-macro "Instrument Voice"
-endscene
-
-scene finish
-title "Demo Complete"
-say "For the live demo: assign a favorite VST in Plugin Studio, switch back to Patch Lab, and move the VST Host mix control while audio is playing."
-focus patch
-advanceOnClick false
-next "Done"
-do switch-workspace node
 endscene
 )NALM";
 }

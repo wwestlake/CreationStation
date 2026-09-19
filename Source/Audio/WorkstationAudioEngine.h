@@ -5,7 +5,6 @@
 #include <functional>
 #include <memory>
 #include <vector>
-#include "SignalGraphRuntime.h"
 #include "PatchLiveVoice.h"
 #include "../Timeline/TimelineModel.h"
 
@@ -313,30 +312,6 @@ public:
     void setTrackSoloed(int trackIndex, bool shouldSolo);
     void setMasterGain(float gain);
     float getMasterGain() const noexcept { return masterGain.load(); }
-    void setGraphEnabled(bool shouldEnable);
-    bool isGraphEnabled() const noexcept { return graphEnabled.load(); }
-    void setGraphDrive(float amount);
-    float getGraphDrive() const noexcept { return graphDrive.load(); }
-    void setGraphInput(float amount);
-    float getGraphInput() const noexcept { return graphInput.load(); }
-    void setGraphSourceFrequency(float hz);
-    float getGraphSourceFrequency() const noexcept { return graphSourceFrequency.load(); }
-    void setGraphTone(float amount);
-    float getGraphTone() const noexcept { return graphTone.load(); }
-    void setGraphEcho(float amount);
-    float getGraphEcho() const noexcept { return graphEcho.load(); }
-    void setGraphWidth(float amount);
-    float getGraphWidth() const noexcept { return graphWidth.load(); }
-    bool loadGraphVstPlugin(const juce::File& file, juce::String& errorMessage);
-    void unloadGraphVstPlugin();
-    juce::String getGraphVstPluginName() const;
-    juce::File getGraphVstPluginFile() const;
-    bool hasGraphVstPlugin() const noexcept;
-    void setGraphVstEnabled(bool shouldEnable);
-    bool isGraphVstEnabled() const noexcept { return graphVstEnabled.load(); }
-    void setGraphVstMix(float amount);
-    float getGraphVstMix() const noexcept { return graphVstMix.load(); }
-    juce::AudioProcessorEditor* createGraphVstPluginEditor();
 
     bool loadMasterPlugin(const juce::File& file, juce::String& errorMessage);
     void unloadMasterPlugin();
@@ -724,7 +699,6 @@ private:
     static constexpr int echoBufferSize = 4410;
 
     void prepareGraph(double sampleRate, int blockSize);
-    void processGraph(juce::AudioBuffer<float>& buffer);
     void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message) override;
     bool shouldRenderTrack(int trackIndex) const noexcept;
     // True if trackIndex itself is soloed, or any track anywhere in its descendant chain
@@ -764,7 +738,6 @@ private:
     PatchLiveVoice patchLiveVoice;
     ArrangementSource arrangementSource;
     PluginInsertSource masterInsertSource;
-    PluginInsertSource graphVstInsertSource;
     MasterOutputSource masterOutputSource;
     juce::OwnedArray<TrackChannelSource> tracks;
     std::atomic<std::shared_ptr<const TrackRoutingInfo>> cachedTrackRouting;
@@ -848,7 +821,6 @@ private:
     int echoWritePosition = 0;
     double graphSampleRate = 44100.0;
     int graphBlockSize = 512;
-    SignalGraphRuntime signalGraph;
     std::atomic<bool> playing { false };
     std::atomic<bool> recording { false };
     std::atomic<bool> metronomeEnabled { false };
@@ -857,15 +829,6 @@ private:
     std::atomic<int> metronomeBeatsPerMeasure { 4 };
     int64 metronomeSampleCounter = 0;
     std::atomic<float> masterGain { 0.8f };
-    std::atomic<bool> graphEnabled { true };
-    std::atomic<float> graphInput { 0.0f };
-    std::atomic<float> graphSourceFrequency { 220.0f };
-    std::atomic<float> graphDrive { 0.15f };
-    std::atomic<float> graphTone { 0.55f };
-    std::atomic<float> graphEcho { 0.08f };
-    std::atomic<float> graphWidth { 0.5f };
-    std::atomic<bool> graphVstEnabled { true };
-    std::atomic<float> graphVstMix { 0.5f };
     juce::TimeSliceThread recordingThread { "CreationStationRecorder" };
     mutable juce::CriticalSection recordingLock;
     struct TrackRecordingWriter

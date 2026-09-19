@@ -793,7 +793,6 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
         owner.arrangementSource.getNextAudioBlock(bufferToFill);
 
     insert.getNextAudioBlock(bufferToFill);
-    owner.processGraph(*bufferToFill.buffer);
     bufferToFill.buffer->applyGain(bufferToFill.startSample, bufferToFill.numSamples, owner.masterGain.load());
 }
 
@@ -1172,8 +1171,6 @@ void WorkstationAudioEngine::prepareGraph(double sampleRate, int blockSize)
     echoHistoryLeft.fill(0.0f);
     echoHistoryRight.fill(0.0f);
     echoWritePosition = 0;
-    signalGraph.prepare(sampleRate, blockSize);
-    graphVstInsertSource.prepareToPlay(blockSize, sampleRate);
 }
 
 int WorkstationAudioEngine::addTrack(const juce::String& trackName)
@@ -1872,47 +1869,6 @@ void WorkstationAudioEngine::renderMetronome(float* const* outputChannelData,
     }
 }
 
-void WorkstationAudioEngine::processGraph(juce::AudioBuffer<float>& buffer)
-{
-    if (! playing.load())
-        return;
-
-    signalGraph.setEnabled(graphEnabled.load());
-    signalGraph.setSourceLevel(graphInput.load());
-    signalGraph.setSourceFrequency(graphSourceFrequency.load());
-    signalGraph.setDrive(graphDrive.load());
-    signalGraph.setTone(graphTone.load());
-    signalGraph.setEcho(graphEcho.load());
-    signalGraph.setWidth(graphWidth.load());
-    signalGraph.setMasterGain(masterGain.load());
-    signalGraph.render(buffer);
-
-    if (graphVstEnabled.load() && graphVstInsertSource.hasPlugin())
-    {
-        auto mix = juce::jlimit(0.0f, 1.0f, graphVstMix.load());
-        if (mix > 0.0f)
-        {
-            juce::AudioBuffer<float> dryBuffer;
-            juce::AudioBuffer<float> wetBuffer;
-            dryBuffer.makeCopyOf(buffer, true);
-            wetBuffer.makeCopyOf(buffer, true);
-
-            juce::AudioSourceChannelInfo wetInfo(&wetBuffer, 0, wetBuffer.getNumSamples());
-            graphVstInsertSource.getNextAudioBlock(wetInfo);
-
-            auto dryMix = 1.0f - mix;
-            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-            {
-                auto* dest = buffer.getWritePointer(channel);
-                auto* dry = dryBuffer.getReadPointer(channel);
-                auto* wet = wetBuffer.getReadPointer(channel);
-                for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-                    dest[sample] = (dry[sample] * dryMix) + (wet[sample] * mix);
-            }
-        }
-    }
-
-}
 
 bool WorkstationAudioEngine::anyTrackNeedsLiveMonitoring() const noexcept
 {
@@ -2624,7 +2580,6 @@ void WorkstationAudioEngine::reapplyHostedPluginStates()
             track->insertChain.reapplyCachedStates();
 
     masterInsertSource.reapplyCachedState();
-    graphVstInsertSource.reapplyCachedState();
 }
 
 bool WorkstationAudioEngine::startRecordingToFile(const juce::File& file, juce::String& errorMessage)
@@ -2818,88 +2773,6 @@ void WorkstationAudioEngine::setTrackSoloed(int trackIndex, bool shouldSolo)
 void WorkstationAudioEngine::setMasterGain(float gain)
 {
     masterGain.store(gain);
-}
-
-void WorkstationAudioEngine::setGraphEnabled(bool shouldEnable)
-{
-    graphEnabled.store(shouldEnable);
-    signalGraph.setEnabled(shouldEnable);
-}
-
-void WorkstationAudioEngine::setGraphDrive(float amount)
-{
-    graphDrive.store(amount);
-    signalGraph.setDrive(amount);
-}
-
-void WorkstationAudioEngine::setGraphInput(float amount)
-{
-    graphInput.store(amount);
-    signalGraph.setSourceLevel(amount);
-}
-
-void WorkstationAudioEngine::setGraphSourceFrequency(float hz)
-{
-    graphSourceFrequency.store(hz);
-    signalGraph.setSourceFrequency(hz);
-}
-
-void WorkstationAudioEngine::setGraphTone(float amount)
-{
-    graphTone.store(amount);
-    signalGraph.setTone(amount);
-}
-
-void WorkstationAudioEngine::setGraphEcho(float amount)
-{
-    graphEcho.store(amount);
-    signalGraph.setEcho(amount);
-}
-
-void WorkstationAudioEngine::setGraphWidth(float amount)
-{
-    graphWidth.store(amount);
-    signalGraph.setWidth(amount);
-}
-
-bool WorkstationAudioEngine::loadGraphVstPlugin(const juce::File& file, juce::String& errorMessage)
-{
-    return graphVstInsertSource.loadPlugin(file, errorMessage);
-}
-
-void WorkstationAudioEngine::unloadGraphVstPlugin()
-{
-    graphVstInsertSource.unloadPlugin();
-}
-
-juce::String WorkstationAudioEngine::getGraphVstPluginName() const
-{
-    return graphVstInsertSource.getPluginName();
-}
-
-juce::File WorkstationAudioEngine::getGraphVstPluginFile() const
-{
-    return graphVstInsertSource.getPluginFile();
-}
-
-bool WorkstationAudioEngine::hasGraphVstPlugin() const noexcept
-{
-    return graphVstInsertSource.hasPlugin();
-}
-
-void WorkstationAudioEngine::setGraphVstEnabled(bool shouldEnable)
-{
-    graphVstEnabled.store(shouldEnable);
-}
-
-void WorkstationAudioEngine::setGraphVstMix(float amount)
-{
-    graphVstMix.store(juce::jlimit(0.0f, 1.0f, amount));
-}
-
-juce::AudioProcessorEditor* WorkstationAudioEngine::createGraphVstPluginEditor()
-{
-    return graphVstInsertSource.createEditor();
 }
 
 bool WorkstationAudioEngine::loadMasterPlugin(const juce::File& file, juce::String& errorMessage)
@@ -3320,17 +3193,6 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
 
     state.addChild(masterInsert, -1, nullptr);
 
-    juce::ValueTree graphInsert("GraphInsert");
-    graphInsert.setProperty("enabled", graphVstEnabled.load(), nullptr);
-    graphInsert.setProperty("mix", graphVstMix.load(), nullptr);
-    graphInsert.setProperty("file", graphVstInsertSource.getPluginFile().getFullPathName(), nullptr);
-    graphInsert.setProperty("name", graphVstInsertSource.getPluginName(), nullptr);
-
-    juce::MemoryBlock graphState;
-    if (graphVstInsertSource.copyStateTo(graphState))
-        graphInsert.setProperty("state", juce::Base64::toBase64(graphState.getData(), graphState.getSize()), nullptr);
-
-    state.addChild(graphInsert, -1, nullptr);
     return state;
 }
 
@@ -3375,14 +3237,6 @@ juce::String WorkstationAudioEngine::createHostedPluginStateSignature() const
         masterInsert.setProperty("state", juce::Base64::toBase64(masterState.getData(), masterState.getSize()), nullptr);
     state.addChild(masterInsert, -1, nullptr);
 
-    juce::ValueTree graphInsert("GraphInsert");
-    graphInsert.setProperty("enabled", graphVstEnabled.load(), nullptr);
-    graphInsert.setProperty("mix", graphVstMix.load(), nullptr);
-    graphInsert.setProperty("file", graphVstInsertSource.getPluginFile().getFullPathName(), nullptr);
-    juce::MemoryBlock graphState;
-    if (graphVstInsertSource.copyStateTo(graphState))
-        graphInsert.setProperty("state", juce::Base64::toBase64(graphState.getData(), graphState.getSize()), nullptr);
-    state.addChild(graphInsert, -1, nullptr);
 
     if (auto xml = state.createXml())
         return xml->toString();
@@ -3519,25 +3373,6 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
             {
                 masterInsertSource.setBypassed((bool) masterInsert.getProperty("bypassed", false));
             }
-        }
-    }
-
-    if (auto graphInsert = sessionState.getChildWithName("GraphInsert"); graphInsert.isValid())
-    {
-        graphVstEnabled.store((bool) graphInsert.getProperty("enabled", true));
-        graphVstMix.store((float) graphInsert.getProperty("mix", 0.5f));
-
-        auto filePath = graphInsert.getProperty("file").toString();
-        if (filePath.isNotEmpty())
-        {
-            juce::MemoryBlock graphState;
-            auto encoded = graphInsert.getProperty("state").toString();
-            if (encoded.isNotEmpty())
-                graphState.fromBase64Encoding(encoded);
-
-            juce::String loadError;
-            if (! graphVstInsertSource.loadPlugin(juce::File(filePath), graphState.getSize() > 0 ? &graphState : nullptr, loadError))
-                errorMessage = loadError;
         }
     }
 

@@ -45,7 +45,6 @@
 #include "Views/RenderDialog.h"
 #include "Views/ToastMessage.h"
 #include "Views/DslPanel.h"
-#include "Views/GraphPanel.h"
 #include "Views/MidiEditorPanel.h"
 #include "Views/MixerPanel.h"
 #include "Views/PluginBrowserList.h"
@@ -74,7 +73,6 @@ public:
         library,
         mix,
         plugins,
-        node,
         code,
         record,
         score,
@@ -245,7 +243,6 @@ private:
     ContentPanel contentPanel;
     MixerPanel mixerPanel;
     PluginsPanel pluginsPanel;
-    GraphPanel graphPanel;
     DslPanel dslPanel;
     RecordView recordView;
     FoleyPanel foleyPanel;
@@ -570,7 +567,6 @@ private:
                                int trackIndex,
                                juce::Component::SafePointer<juce::Component> editorPointer,
                                int attemptsRemaining);
-    void assignPluginToGraphNode(const juce::File& file);
     void showTour();
     void importProjectSounds();
     void refreshProjectAssets();

@@ -78,7 +78,6 @@ constexpr int menuIdToolSampler = 2002;
 constexpr int menuIdToolSignal = 2003;
 constexpr int menuIdToolLayers = 2004;
 constexpr int menuIdToolPlugins = 2005;
-constexpr int menuIdToolPatch = 2006;
 constexpr int menuIdToolScript = 2007;
 constexpr int menuIdToolCapture = 2008;
 constexpr int menuIdToolScore = 2009;
@@ -108,7 +107,6 @@ const char* samplerPanelId = "sampler";
 const char* signalPanelId = "signal";
 const char* layersPanelId = "layers";
 const char* pluginsPanelId = "plugins";
-const char* patchPanelId = "patch";
 const char* scriptPanelId = "script";
 const char* capturePanelId = "capture";
 const char* scorePanelId = "score";
@@ -755,7 +753,6 @@ juce::String workspaceModeName(MainComponent::WorkspaceMode mode)
         case MainComponent::WorkspaceMode::library: return "Library";
         case MainComponent::WorkspaceMode::mix: return "Layers";
         case MainComponent::WorkspaceMode::plugins: return "Plugins";
-        case MainComponent::WorkspaceMode::node: return "Patch";
         case MainComponent::WorkspaceMode::code: return "Script";
         case MainComponent::WorkspaceMode::record: return "Capture";
         case MainComponent::WorkspaceMode::score: return "Score";
@@ -1359,7 +1356,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         else if (panelId == samplerPanelId) setWorkspaceMode(WorkspaceMode::sampler);
         else if (panelId == signalPanelId) setWorkspaceMode(WorkspaceMode::signal);
         else if (panelId == pluginsPanelId) setWorkspaceMode(WorkspaceMode::plugins);
-        else if (panelId == patchPanelId) setWorkspaceMode(WorkspaceMode::node);
         else if (panelId == scorePanelId) setWorkspaceMode(WorkspaceMode::score);
         else if (panelId == settingsPanelId) setWorkspaceMode(WorkspaceMode::settings);
         else if (panelId == foleyPanelId) setWorkspaceMode(WorkspaceMode::foley);
@@ -3493,105 +3489,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         showFxStackWindow();
     };
 
-    graphPanel.onEnabledChanged = [this](bool shouldEnable)
-    {
-        engine.setGraphEnabled(shouldEnable);
-    };
-
-    graphPanel.onInputChanged = [this](float amount)
-    {
-        engine.setGraphInput(amount);
-    };
-    graphPanel.onOscillatorFrequencyChanged = [this](float hz)
-    {
-        engine.setGraphSourceFrequency(hz);
-    };
-
-    graphPanel.onDriveChanged = [this](float amount)
-    {
-        engine.setGraphDrive(amount);
-    };
-
-    graphPanel.onToneChanged = [this](float amount)
-    {
-        engine.setGraphTone(amount);
-    };
-
-    graphPanel.onEchoChanged = [this](float amount)
-    {
-        engine.setGraphEcho(amount);
-    };
-
-    graphPanel.onWidthChanged = [this](float amount)
-    {
-        engine.setGraphWidth(amount);
-    };
-    graphPanel.onOutputLevelChanged = [this](float amount)
-    {
-        engine.setMasterGain(amount);
-    };
-    graphPanel.onVstMixChanged = [this](float amount)
-    {
-        engine.setGraphVstMix(amount);
-    };
-    graphPanel.onVstEnabledChanged = [this](bool shouldEnable)
-    {
-        engine.setGraphVstEnabled(shouldEnable);
-    };
-    graphPanel.onNodeDeleted = [this](const juce::String& nodeName)
-    {
-        if (nodeName == "Oscillator")
-        {
-            engine.setGraphInput(0.0f);
-            graphPanel.setInput(0.0f);
-            transportBar.setStatusText("Oscillator removed; source tone muted.");
-            return;
-        }
-
-        if (nodeName == "VST Host")
-        {
-            engine.unloadGraphVstPlugin();
-            graphPanel.clearAssignedVstPlugin();
-            transportBar.setStatusText("VST host removed; plugin unloaded.");
-        }
-    };
-    graphPanel.onAssignVstPluginRequested = [this]
-    {
-        showPluginLoadMenu([this](const juce::File& file)
-        {
-            assignPluginToGraphNode(file);
-        });
-    };
-    graphPanel.onOpenAssignedVstRequested = [this]
-    {
-        if (! engine.hasGraphVstPlugin())
-            return;
-
-        constexpr auto* windowKey = "graph-vst";
-        if (auto* existingWindow = findPluginEditorWindow(windowKey))
-        {
-            existingWindow->toFront(true);
-            return;
-        }
-
-        if (auto* editor = engine.createGraphVstPluginEditor())
-        {
-            auto window = std::make_unique<ManagedDocumentWindow>("Patch VST Editor",
-                                                                  juce::Colour(0xff11151c),
-                                                                  juce::DocumentWindow::allButtons,
-                                                                  [this, windowKey]
-                                                                  {
-                                                                      closePluginEditorWindow(windowKey);
-                                                                  });
-            window->setUsingNativeTitleBar(true);
-            window->setResizable(true, true);
-            window->setContentOwned(editor, true);
-            window->centreWithSize(900, 650);
-            window->setVisible(true);
-            pluginEditorWindows.push_back({ windowKey, -1, std::move(window) });
-        }
-    };
-
     pluginsPanel.onAddPathRequested = [this]
     {
         configureVstSearchPaths();
@@ -3630,11 +3527,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     pluginsPanel.onLoadIntoInsertRequested = [this](const VstPluginCatalog::Entry& entry)
     {
         loadPluginIntoCurrentInsert(entry.file);
-    };
-
-    pluginsPanel.onAssignNodeRequested = [this](const VstPluginCatalog::Entry& entry)
-    {
-        assignPluginToGraphNode(entry.file);
     };
 
     mixerPanel.onGainChanged = [this](int index, float value)
@@ -3756,7 +3648,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
         else if (button == creation::ui::surface_actions::assignPlugin)
         {
-            setMode(WorkspaceMode::node);
+            setMode(WorkspaceMode::signal);
         }
         else if (button == creation::ui::surface_actions::assignEq)
         {
@@ -3784,7 +3676,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
         else if (button == "view_audio_instrument")
         {
-            setMode(WorkspaceMode::node);
+            setMode(WorkspaceMode::signal);
         }
         else if (button == "view_aux")
         {
@@ -3820,7 +3712,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
         else if (button == "f5")
         {
-            setMode(WorkspaceMode::node);
+            setMode(WorkspaceMode::signal);
         }
         else if (button == "f6")
         {
@@ -3947,7 +3839,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             }
             else
             {
-                setWorkspaceMode(WorkspaceMode::node);
+                setWorkspaceMode(WorkspaceMode::signal);
             }
         }
         else if (button == creation::ui::surface_actions::scrub)
@@ -4221,12 +4113,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     mixerPanel.setMasterGain(0.5f);
     engine.setMasterGain(0.5f);
-    graphPanel.setEnabled(engine.isGraphEnabled());
-    graphPanel.setInput(engine.getGraphInput());
-    graphPanel.setDrive(engine.getGraphDrive());
-    graphPanel.setTone(engine.getGraphTone());
-    graphPanel.setEcho(engine.getGraphEcho());
-    graphPanel.setWidth(engine.getGraphWidth());
     midiSurface.setMasterFaderValue(0.5f);
     engine.setPlaying(false);
     midiSurface.setTransportState(false, false);
@@ -4644,7 +4530,6 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         menu.addItem(menuIdToolSignal, "Signal", true, isOpen(signalPanelId));
         menu.addItem(menuIdToolLayers, "Layers", true, isOpen(layersPanelId));
         menu.addItem(menuIdToolPlugins, "Plugins", true, isOpen(pluginsPanelId));
-        menu.addItem(menuIdToolPatch, "Patch", true, isOpen(patchPanelId));
         menu.addItem(menuIdToolScript, "Script", true, isOpen(scriptPanelId));
         menu.addItem(menuIdToolCapture, "Capture", true, isOpen(capturePanelId));
         menu.addItem(menuIdToolScore, "Score", true, isOpen(scorePanelId));
@@ -4714,7 +4599,6 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
             case menuIdToolSignal: toggleToolWindow(WorkspaceMode::signal); break;
             case menuIdToolLayers: toggleToolWindow(WorkspaceMode::mix); break;
             case menuIdToolPlugins: toggleToolWindow(WorkspaceMode::plugins); break;
-            case menuIdToolPatch: toggleToolWindow(WorkspaceMode::node); break;
             case menuIdToolScript: toggleToolWindow(WorkspaceMode::code); break;
             case menuIdToolCapture: toggleToolWindow(WorkspaceMode::record); break;
             case menuIdToolScore: toggleToolWindow(WorkspaceMode::score); break;
@@ -4754,8 +4638,6 @@ CreationDock::DockPanel* MainComponent::registerNamedDockPanel(const juce::Strin
         return dockManager->registerPanel(panelId, "Layers", std::make_unique<NonOwningPanelHost>(mixerPanel), zone);
     if (panelId == pluginsPanelId)
         return dockManager->registerPanel(panelId, "Plugins", std::make_unique<NonOwningPanelHost>(pluginsPanel), zone);
-    if (panelId == patchPanelId)
-        return dockManager->registerPanel(panelId, "Patch", std::make_unique<NonOwningPanelHost>(graphPanel), zone);
     if (panelId == scriptPanelId)
         return dockManager->registerPanel(panelId, "Script", std::make_unique<NonOwningPanelHost>(dslPanel), zone);
     if (panelId == capturePanelId)
@@ -4823,7 +4705,6 @@ void MainComponent::setWorkspaceMode(WorkspaceMode mode)
                      : mode == WorkspaceMode::signal ? signalPanelId
                      : mode == WorkspaceMode::mix ? layersPanelId
                      : mode == WorkspaceMode::plugins ? pluginsPanelId
-                     : mode == WorkspaceMode::node ? patchPanelId
                      : mode == WorkspaceMode::code ? scriptPanelId
                      : mode == WorkspaceMode::record ? capturePanelId
                      : mode == WorkspaceMode::score ? scorePanelId
@@ -4858,7 +4739,6 @@ void MainComponent::toggleToolWindow(WorkspaceMode mode)
                         : mode == WorkspaceMode::signal ? signalPanelId
                         : mode == WorkspaceMode::mix ? layersPanelId
                         : mode == WorkspaceMode::plugins ? pluginsPanelId
-                        : mode == WorkspaceMode::node ? patchPanelId
                         : mode == WorkspaceMode::code ? scriptPanelId
                         : mode == WorkspaceMode::record ? capturePanelId
                         : mode == WorkspaceMode::score ? scorePanelId
@@ -5044,7 +4924,6 @@ juce::Component* MainComponent::getWorkspaceComponent(WorkspaceMode mode)
         case WorkspaceMode::library: return nullptr;
         case WorkspaceMode::mix: return &mixerPanel;
         case WorkspaceMode::plugins: return &pluginsPanel;
-        case WorkspaceMode::node: return &graphPanel;
         case WorkspaceMode::code: return &dslPanel;
         case WorkspaceMode::record: return &recordView;
         case WorkspaceMode::foley: return &foleyPanel;
@@ -6151,26 +6030,6 @@ void MainComponent::loadPluginIntoCurrentInsert(const juce::File& file)
     }
 }
 
-void MainComponent::assignPluginToGraphNode(const juce::File& file)
-{
-    juce::String errorMessage;
-    if (! engine.loadGraphVstPlugin(file, errorMessage))
-    {
-        transportBar.setStatusText("Graph VST load failed: " + errorMessage);
-        pluginsPanel.setStatusText("Graph VST load failed: " + errorMessage);
-        return;
-    }
-
-    graphPanel.setAssignedVstPlugin(engine.getGraphVstPluginName().isNotEmpty() ? engine.getGraphVstPluginName()
-                                                                                : file.getFileNameWithoutExtension(),
-                                    file.getFullPathName());
-    engine.setGraphVstEnabled(graphPanel.isVstEnabled());
-    engine.setGraphVstMix(graphPanel.getVstMix());
-    transportBar.setStatusText("Assigned VST node: " + file.getFileNameWithoutExtension());
-    pluginsPanel.setStatusText("Assigned to VST node: " + file.getFileNameWithoutExtension());
-    saveSessionToDisk();
-}
-
 void MainComponent::showTour()
 {
     tourOverlay.start();
@@ -6445,8 +6304,6 @@ MainComponent::WorkspaceMode MainComponent::workspaceModeFromString(const juce::
         return WorkspaceMode::mix;
     if (normalized == "plugins" || normalized == "plugin")
         return WorkspaceMode::plugins;
-    if (normalized == "node" || normalized == "patch")
-        return WorkspaceMode::node;
     if (normalized == "code" || normalized == "script")
         return WorkspaceMode::code;
     if (normalized == "record" || normalized == "capture")
@@ -6478,14 +6335,9 @@ void MainComponent::configureTutorialOverlay()
         auto builtInDirectory = creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("BuiltIn");
         auto sampleFile = builtInDirectory.getChildFile("getting-started-demo.nalm");
         auto builtInSource = cw::tutorial::getBuiltInGettingStartedTutorialSource();
-        auto vstDemoFile = builtInDirectory.getChildFile("vst-node-demo.nalm");
-        auto vstDemoSource = cw::tutorial::getBuiltInVstNodeDemoTutorialSource();
 
         if (! sampleFile.existsAsFile() || sampleFile.loadFileAsString() != builtInSource)
             sampleFile.replaceWithText(builtInSource);
-
-        if (! vstDemoFile.existsAsFile() || vstDemoFile.loadFileAsString() != vstDemoSource)
-            vstDemoFile.replaceWithText(vstDemoSource);
 
         auto userFile = creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("User").getChildFile("getting-started-demo.nalm");
 
@@ -6543,9 +6395,6 @@ void MainComponent::executeTutorialActions(const juce::Array<cw::tutorial::Actio
                 signalLabPanel.applyAiTemplate(action.value);
                 break;
 
-            case cw::tutorial::ActionType::applyGraphMacro:
-                graphPanel.applyAiMacro(action.value);
-                break;
         }
     }
 }
@@ -6566,8 +6415,6 @@ juce::Rectangle<int> MainComponent::tutorialTargetBoundsForId(const juce::String
         return mixerPanel.getBounds();
     if (id == "plugins" || id == "plugin")
         return pluginsPanel.getBounds();
-    if (id == "patch" || id == "node")
-        return graphPanel.getBounds();
     if (id == "code" || id == "script")
         return dslPanel.getBounds();
     if (id == "record" || id == "capture")
@@ -6607,14 +6454,6 @@ void MainComponent::executeAiTaskStep(const CreationStationTaskPlanner::TaskStep
                         actionNotes.add("previewed the current signal");
                     else
                         actionNotes.add("could not preview because no signal is ready yet");
-                }
-                break;
-
-            case CreationStationTaskPlanner::ActionTarget::patchGraph:
-                if (action.command == "apply-macro")
-                {
-                    graphPanel.applyAiMacro(action.stringValue);
-                    actionNotes.add("seeded the patch graph with " + action.stringValue);
                 }
                 break;
 
@@ -9720,17 +9559,9 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     state.setProperty("bankOffset", mixerPanel.getBankOffset(), nullptr);
     state.setProperty("insertContext", pluginRackBar.isTrackContext() ? "track" : "master", nullptr);
     state.setProperty("insertTrackIndex", pluginRackBar.getTrackIndex(), nullptr);
-    state.setProperty("graphEnabled", engine.isGraphEnabled(), nullptr);
-    state.setProperty("graphInput", engine.getGraphInput(), nullptr);
-    state.setProperty("graphSourceFrequency", engine.getGraphSourceFrequency(), nullptr);
-    state.setProperty("graphDrive", engine.getGraphDrive(), nullptr);
-    state.setProperty("graphTone", engine.getGraphTone(), nullptr);
-    state.setProperty("graphEcho", engine.getGraphEcho(), nullptr);
-    state.setProperty("graphWidth", engine.getGraphWidth(), nullptr);
     state.setProperty("workspaceMode", static_cast<int>(activeMode), nullptr);
     state.setProperty("dslSource", dslPanel.getSourceText(), nullptr);
     state.setProperty("selectedClipIndex", selectedClipIndex, nullptr);
-    state.addChild(graphPanel.createState(), -1, nullptr);
     state.addChild(scorePanel.createState(), -1, nullptr);
     state.addChild(timelineModel.createState(), -1, nullptr);
     auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
@@ -10618,41 +10449,12 @@ void MainComponent::loadSessionFromDisk()
         mixerPanel.setSelectedChannel(-1);
     }
 
-    engine.setGraphEnabled((bool) state.getProperty("graphEnabled", true));
-    engine.setGraphInput((float) state.getProperty("graphInput", engine.getGraphInput()));
-    engine.setGraphSourceFrequency((float) state.getProperty("graphSourceFrequency", engine.getGraphSourceFrequency()));
-    engine.setGraphDrive((float) state.getProperty("graphDrive", engine.getGraphDrive()));
-    engine.setGraphTone((float) state.getProperty("graphTone", engine.getGraphTone()));
-    engine.setGraphEcho((float) state.getProperty("graphEcho", engine.getGraphEcho()));
-    engine.setGraphWidth((float) state.getProperty("graphWidth", engine.getGraphWidth()));
-    graphPanel.setEnabled(engine.isGraphEnabled());
-    graphPanel.setInput(engine.getGraphInput());
-    graphPanel.setOscillatorFrequency(engine.getGraphSourceFrequency());
-    graphPanel.setDrive(engine.getGraphDrive());
-    graphPanel.setTone(engine.getGraphTone());
-    graphPanel.setEcho(engine.getGraphEcho());
-    graphPanel.setWidth(engine.getGraphWidth());
-    graphPanel.setOutputLevel(engine.getMasterGain());
 
     if (auto dslSource = state.getProperty("dslSource").toString(); dslSource.isNotEmpty())
         dslPanel.setSourceText(dslSource);
 
     refreshProjectAssets();
     restoreLastActiveAssets(state.getChildWithName("LastActiveAssets"));
-
-    if (auto graphState = state.getChildWithName("NodeGraph"); graphState.isValid())
-        graphPanel.restoreState(graphState);
-
-    if (! graphPanel.hasNode("Oscillator"))
-    {
-        engine.setGraphInput(0.0f);
-        graphPanel.setInput(0.0f);
-    }
-
-    engine.setGraphVstEnabled(graphPanel.isVstEnabled());
-    engine.setGraphVstMix(graphPanel.getVstMix());
-    if (engine.hasGraphVstPlugin() && engine.getGraphVstPluginName().isNotEmpty())
-        graphPanel.setAssignedVstPlugin(engine.getGraphVstPluginName(), engine.getGraphVstPluginFile().getFullPathName());
 
     if (auto scoreState = state.getChildWithName("ScoreView"); scoreState.isValid())
         scorePanel.restoreState(scoreState);
@@ -11494,11 +11296,6 @@ void MainComponent::refreshInsertRack()
         pluginRackBar.setPluginName(engine.getMasterPluginName());
         pluginRackBar.setBypassed(engine.isMasterPluginBypassed());
     }
-
-    graphPanel.setVstEnabled(engine.isGraphVstEnabled());
-    graphPanel.setVstMix(engine.getGraphVstMix());
-    if (engine.hasGraphVstPlugin())
-        graphPanel.setAssignedVstPlugin(engine.getGraphVstPluginName(), engine.getGraphVstPluginFile().getFullPathName());
 
     refreshFxStackWindow();
     refreshPluginsPanel();
