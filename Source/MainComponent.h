@@ -38,6 +38,7 @@
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ContentPanel.h"
+#include "Views/RenderDialog.h"
 #include "Views/DslPanel.h"
 #include "Views/GraphPanel.h"
 #include "Views/MidiEditorPanel.h"
@@ -388,8 +389,15 @@ private:
     bool loadSignalClipPatch(const cs::TimelineClip& clip, cw::PatchDocument& patch, juce::String& patchKey, juce::String& errorMessage);
     void previewScrubAudioAt(double timelineSeconds);
     void refreshMidiPlaybackClips();
-    bool renderFullMixToProject();
-    void exportFullMixAsWav();
+    // The render dialog: what to render, where it goes, and in what format. Opens with `preferredDestination`
+    // selected; the last settings used are remembered for the session.
+    void showRenderDialog(RenderRequest::Destination preferredDestination);
+    void beginRender(const RenderRequest& request);
+    void runRenderJob(const RenderRequest& request, const juce::File& destinationFile);
+    RenderRequest lastRenderRequest;
+    juce::Component::SafePointer<juce::DialogWindow> renderDialogWindow;
+    // The running render (modal progress window + worker thread); kept alive until it has finished.
+    std::unique_ptr<juce::ThreadWithProgressWindow> renderJob;
     // Writes a rendered mix into the project as a Render asset (encoded in memory, no temp file).
     bool saveRenderToProject(const juce::AudioBuffer<float>& buffer, double sampleRate, int bitsPerSample, bool dither,
                              const juce::String& displayName, creation::assets::AssetDescriptor& savedAsset,

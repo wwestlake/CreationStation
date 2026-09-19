@@ -309,6 +309,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/AiPanel.h
     Source/Views/ContentPanel.cpp
     Source/Views/ContentPanel.h
+    Source/Views/RenderDialog.cpp
+    Source/Views/RenderDialog.h
     Source/Views/DslPanel.cpp
     Source/Views/DslPanel.h
     Source/Views/DockingWorkspace.cpp

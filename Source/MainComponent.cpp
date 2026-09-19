@@ -4596,7 +4596,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         menu.addItem(6, "Save Project As Template...");
         menu.addItem(7, "Open Project Folder");
         menu.addSeparator();
-        menu.addItem(8, "Render Full Mix to Project");
+        menu.addItem(8, "Render Full Mix...");
         menu.addItem(9, "Export Full Mix as WAV...");
         return menu;
     }
@@ -4673,8 +4673,8 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
             case 5: saveProjectAs(); break;
             case 6: saveProjectAsTemplate(); break;
             case 7: revealProjectFolder(); break;
-            case 8: renderFullMixToProject(); break;
-            case 9: exportFullMixAsWav(); break;
+            case 8: showRenderDialog(RenderRequest::Destination::project); break;
+            case 9: showRenderDialog(RenderRequest::Destination::file); break;
             default: break;
         }
 
@@ -7778,99 +7778,160 @@ void MainComponent::toggleProjectAssetPreview(const creation::assets::AssetDescr
     contentPanel.setPreviewingAssetId(asset.id);
 }
 
-bool MainComponent::renderFullMixToProject()
+namespace
 {
+// Runs the offline render on a worker thread behind a modal progress window with a Cancel button, so the UI
+// stays alive and the user can see how far along it is.
+class RenderJob final : public juce::ThreadWithProgressWindow
+{
+public:
+    RenderJob(WorkstationAudioEngine& engineToUse,
+              juce::Array<WorkstationAudioEngine::PlaybackClipTarget> clipTargets,
+              juce::Array<WorkstationAudioEngine::SignalClipTarget> signalClipTargets,
+              double lengthSeconds,
+              WorkstationAudioEngine::RenderSettings renderSettings)
+        : juce::ThreadWithProgressWindow("Rendering", true, true, 30000, "Cancel"),
+          engine(engineToUse),
+          targets(std::move(clipTargets)),
+          signalTargets(std::move(signalClipTargets)),
+          durationSeconds(lengthSeconds),
+          settings(std::move(renderSettings))
+    {
+        setStatusMessage("Rendering the master mix...");
+    }
+
+    void run() override
+    {
+        const auto startedAt = juce::Time::getMillisecondCounterHiRes();
+        settings.onProgress = [this, startedAt](float fraction)
+        {
+            const auto elapsed = (juce::Time::getMillisecondCounterHiRes() - startedAt) * 0.001;
+            const auto remaining = fraction > 0.02f ? elapsed * (1.0 - fraction) / fraction : 0.0;
+            setProgress((double) fraction);
+            setStatusMessage("Rendering the master mix\n" + formatClock(durationSeconds * fraction) + " of " + formatClock(durationSeconds)
+                             + "   |   elapsed " + formatClock(elapsed)
+                             + (fraction > 0.02f ? "   |   about " + juce::String((int) std::ceil(remaining)) + " s left" : juce::String()));
+            return ! threadShouldExit();
+        };
+
+        succeeded = engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, rendered, errorMessage, signalTargets);
+    }
+
+    // Called on the message thread when the render has finished or the user cancelled it.
+    void threadComplete(bool userPressedCancel) override
+    {
+        if (onFinished)
+            onFinished(*this, userPressedCancel);
+    }
+
+    static juce::String formatClock(double seconds)
+    {
+        const auto total = (int) std::floor(juce::jmax(0.0, seconds));
+        return juce::String(total / 60) + ":" + juce::String(total % 60).paddedLeft('0', 2);
+    }
+
+    std::function<void(RenderJob&, bool userPressedCancel)> onFinished;
+    bool succeeded = false;
+    juce::AudioBuffer<float> rendered;
+    juce::String errorMessage;
+
+private:
+    WorkstationAudioEngine& engine;
+    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
+    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+    double durationSeconds = 0.0;
+    WorkstationAudioEngine::RenderSettings settings;
+};
+
+juce::String expandRenderName(const juce::String& pattern, const juce::String& projectName)
+{
+    return pattern.replace("$project", projectName.isNotEmpty() ? projectName : "Untitled")
+                  .replace("$date", juce::Time::getCurrentTime().formatted("%Y-%m-%d"));
+}
+}
+
+void MainComponent::showRenderDialog(RenderRequest::Destination preferredDestination)
+{
+    if (renderDialogWindow != nullptr)
+        return;
+
     if (engine.isRecording() || engine.isPlaying())
     {
         transportBar.setStatusText("Stop playback or recording before rendering.");
-        return false;
-    }
-
-    if (! projectSession.isValid())
-    {
-        transportBar.setStatusText("Create or open a project before rendering.");
-        return false;
+        return;
     }
 
     juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
-    double durationSeconds = 0.0;
+    double lengthSeconds = 0.0;
     juce::String errorMessage;
-    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage, false))
+    if (! buildTrackerPlaybackTargets(targets, lengthSeconds, errorMessage, false))
     {
         transportBar.setStatusText(errorMessage);
-        return false;
+        return;
     }
 
-    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
-    juce::String signalError;
-    buildSignalClipTargets(signalTargets, signalError);
-    if (signalError.isNotEmpty())
-    {
-        transportBar.setStatusText(signalError);
-        return false;
-    }
+    auto hasMidiClips = false;
+    for (const auto& clip : timelineModel.getClips())
+        if (clip.kind == cs::ClipKind::midi && ! clip.recording)
+            hasMidiClips = true;
+
+    auto initial = lastRenderRequest;
+    initial.destination = preferredDestination;
+    if (initial.name.isEmpty())
+        initial.name = "$project-mix-$date";
+    if (initial.customEndSeconds <= initial.customStartSeconds)
+        initial.customEndSeconds = lengthSeconds;
 
     auto* currentDevice = deviceManager.getCurrentAudioDevice();
-    WorkstationAudioEngine::RenderSettings settings;
-    settings.sampleRate = currentDevice != nullptr ? currentDevice->getCurrentSampleRate() : 48000.0;
-    settings.blockSize = currentDevice != nullptr ? currentDevice->getCurrentBufferSizeSamples() : 512;
-
-    juce::AudioBuffer<float> renderedMix;
-    transportBar.setStatusText("Rendering full mix...");
-    if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage, signalTargets))
+    auto* dialog = new RenderDialog(initial, lengthSeconds, currentDevice != nullptr ? currentDevice->getCurrentSampleRate() : 48000.0, hasMidiClips);
+    dialog->onCancel = [this]
     {
-        transportBar.setStatusText(errorMessage);
-        return false;
-    }
-
-    creation::assets::AssetDescriptor savedAsset;
-    if (! saveRenderToProject(renderedMix, settings.sampleRate, 24, false,
-                              projectSession.getManifest().projectName + " Full Mix", savedAsset, errorMessage))
+        if (renderDialogWindow != nullptr)
+            renderDialogWindow->exitModalState(0);
+    };
+    dialog->onRender = [this](const RenderRequest& request)
     {
-        transportBar.setStatusText(errorMessage);
-        return false;
-    }
+        if (renderDialogWindow != nullptr)
+            renderDialogWindow->exitModalState(1);
 
-    transportBar.setStatusText("Rendered full mix to project: " + savedAsset.displayName);
-    return true;
+        // Start once the dialog has closed, from a clean message-loop turn.
+        juce::MessageManager::callAsync([safeThis = juce::Component::SafePointer<MainComponent>(this), request]
+        {
+            if (safeThis != nullptr)
+                safeThis->beginRender(request);
+        });
+    };
+
+    juce::DialogWindow::LaunchOptions options;
+    options.content.setOwned(dialog);
+    options.dialogTitle = "Render";
+    options.dialogBackgroundColour = juce::Colour(0xff10151d);
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = false;
+    renderDialogWindow = options.launchAsync();
 }
 
-void MainComponent::exportFullMixAsWav()
+void MainComponent::beginRender(const RenderRequest& request)
 {
-    if (engine.isRecording() || engine.isPlaying())
+    lastRenderRequest = request;
+
+    if (request.destination == RenderRequest::Destination::project)
     {
-        transportBar.setStatusText("Stop playback or recording before exporting.");
+        runRenderJob(request, {});
         return;
     }
 
-    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
-    double durationSeconds = 0.0;
-    juce::String errorMessage;
-    if (! buildTrackerPlaybackTargets(targets, durationSeconds, errorMessage, false))
-    {
-        transportBar.setStatusText(errorMessage);
-        return;
-    }
-
-    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
-    juce::String signalError;
-    buildSignalClipTargets(signalTargets, signalError);
-    if (signalError.isNotEmpty())
-    {
-        transportBar.setStatusText(signalError);
-        return ;
-    }
-
-    auto defaultName = projectSession.isValid() ? projectSession.getManifest().projectName.toLowerCase().replace(" ", "-") + "-full-mix.wav"
-                                                   : "creation-station-full-mix.wav";
-    renderExportChooser = std::make_unique<juce::FileChooser>("Export full mix as WAV",
+    const auto projectName = projectSession.isValid() ? projectSession.getManifest().projectName : juce::String();
+    const auto defaultName = slugForProjectAssetName(expandRenderName(request.name, projectName)) + ".wav";
+    renderExportChooser = std::make_unique<juce::FileChooser>("Save the render as a WAV file",
                                                               juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
                                                                   .getChildFile(defaultName),
                                                               "*.wav",
                                                               true);
     auto chooser = renderExportChooser.get();
     chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-                         [this, chooser, targets, durationSeconds, signalTargets](const juce::FileChooser& result)
+                         [this, chooser, request](const juce::FileChooser& result)
                          {
                              auto destination = result.getResult();
                              if (chooser == renderExportChooser.get())
@@ -7882,34 +7943,155 @@ void MainComponent::exportFullMixAsWav()
                              if (destination.getFileExtension().isEmpty())
                                  destination = destination.withFileExtension(".wav");
 
-                             auto* currentDevice = deviceManager.getCurrentAudioDevice();
-                             WorkstationAudioEngine::RenderSettings settings;
-                             settings.sampleRate = currentDevice != nullptr ? currentDevice->getCurrentSampleRate() : 48000.0;
-                             settings.blockSize = currentDevice != nullptr ? currentDevice->getCurrentBufferSizeSamples() : 512;
-
-                             juce::String errorMessage;
-                             juce::AudioBuffer<float> renderedMix;
-                             transportBar.setStatusText("Exporting full mix...");
-                             if (! engine.renderTrackerMixToBuffer(targets, durationSeconds, settings, renderedMix, errorMessage, signalTargets))
-                             {
-                                 transportBar.setStatusText(errorMessage);
-                                 return;
-                             }
-
-                             if (destination.existsAsFile() && ! destination.deleteFile())
-                             {
-                                 transportBar.setStatusText("Could not replace the existing export file.");
-                                 return;
-                             }
-
-                             if (! writeWavFile(destination, renderedMix, settings.sampleRate, errorMessage))
-                             {
-                                 transportBar.setStatusText(errorMessage);
-                                 return;
-                             }
-
-                             transportBar.setStatusText("Exported full mix: " + destination.getFileName());
+                             runRenderJob(request, destination);
                          });
+}
+
+void MainComponent::runRenderJob(const RenderRequest& request, const juce::File& destinationFile)
+{
+    const auto projectName = projectSession.isValid() ? projectSession.getManifest().projectName : juce::String();
+    const auto displayName = expandRenderName(request.name, projectName);
+
+    // A fresh look at the timeline: what is on it now is what gets rendered.
+    juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
+    double lengthSeconds = 0.0;
+    juce::String errorMessage;
+    if (! buildTrackerPlaybackTargets(targets, lengthSeconds, errorMessage, false))
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Nothing to render", errorMessage);
+        return;
+    }
+
+    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+    juce::String signalError;
+    buildSignalClipTargets(signalTargets, signalError);
+    if (signalError.isNotEmpty())
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Could not render", signalError);
+        return;
+    }
+
+    auto startSeconds = 0.0;
+    auto rangeSeconds = lengthSeconds;
+    if (request.range == RenderRequest::Range::custom)
+    {
+        startSeconds = request.customStartSeconds;
+        rangeSeconds = request.customEndSeconds - request.customStartSeconds;
+    }
+    const auto renderSeconds = rangeSeconds + request.tailSeconds;
+
+    auto* currentDevice = deviceManager.getCurrentAudioDevice();
+    WorkstationAudioEngine::RenderSettings settings;
+    settings.sampleRate = request.sampleRate > 0.0 ? request.sampleRate
+                                                   : (currentDevice != nullptr ? currentDevice->getCurrentSampleRate() : 48000.0);
+    settings.blockSize = currentDevice != nullptr ? currentDevice->getCurrentBufferSizeSamples() : 512;
+    settings.startSeconds = startSeconds;
+    settings.normalizePeak = request.normalize != RenderRequest::Normalize::off;
+    settings.peakTargetDecibels = request.normalize == RenderRequest::Normalize::peakMinus03 ? -0.3f : -1.0f;
+
+    engine.stopAssetPreview();
+    previewingProjectAssetId = {};
+    contentPanel.setPreviewingAssetId({});
+
+    // The render runs on a worker thread, so the live audio callback is taken off the engine for its duration.
+    renderJob = std::make_unique<RenderJob>(engine, targets, signalTargets, renderSeconds, settings);
+    auto* job = static_cast<RenderJob*>(renderJob.get());
+    job->onFinished = [this, request, destinationFile, settings, displayName, renderSeconds, startSeconds]
+                      (RenderJob& job, bool userPressedCancel)
+    {
+        engine.attachToDevice(deviceManager);
+
+        // The job object is finished with once this handler returns; release it from a clean message-loop turn.
+        juce::MessageManager::callAsync([safeThis = juce::Component::SafePointer<MainComponent>(this)]
+        {
+            if (safeThis != nullptr)
+                safeThis->renderJob.reset();
+        });
+
+        juce::String errorMessage;
+        if (! job.succeeded)
+        {
+            if (userPressedCancel || job.errorMessage == "Render cancelled.")
+                transportBar.setStatusText("Render cancelled.");
+            else
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Render failed", job.errorMessage);
+            return;
+        }
+
+        const auto peak = job.rendered.getMagnitude(0, job.rendered.getNumSamples());
+        const auto peakDb = peak > 0.0f ? juce::Decibels::gainToDecibels(peak) : -100.0f;
+        const auto clips = request.bitsPerSample < 32 && peak > 1.0f;
+        const auto ditherOn = request.dither && request.bitsPerSample == 16;
+
+        juce::String where;
+        creation::assets::AssetDescriptor savedAsset;
+        auto savedToProject = false;
+
+        if (request.destination == RenderRequest::Destination::project)
+        {
+            if (! saveRenderToProject(job.rendered, settings.sampleRate, request.bitsPerSample, ditherOn, displayName, savedAsset, errorMessage))
+            {
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Could not save the render", errorMessage);
+                return;
+            }
+
+            savedToProject = true;
+            where = "Saved to the project as \"" + savedAsset.displayName + "\".";
+
+            if (request.placeOnNewTrack)
+            {
+                addTrack();
+                trackerPanel.setSelectedTrack(engine.getTrackCount() - 1);
+                placeProjectAssetOnTracker(savedAsset, startSeconds);
+            }
+        }
+        else
+        {
+            juce::MemoryBlock encoded;
+            if (! encodeWavToMemory(job.rendered, settings.sampleRate, request.bitsPerSample, ditherOn, encoded, errorMessage)
+                || (destinationFile.existsAsFile() && ! destinationFile.deleteFile())
+                || ! destinationFile.getParentDirectory().createDirectory()
+                || ! destinationFile.replaceWithData(encoded.getData(), encoded.getSize()))
+            {
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Could not save the render",
+                                                       errorMessage.isNotEmpty() ? errorMessage : "The file could not be written.");
+                return;
+            }
+
+            where = "Saved to " + destinationFile.getFullPathName();
+        }
+
+        auto hasMidiClips = false;
+        for (const auto& clip : timelineModel.getClips())
+            if (clip.kind == cs::ClipKind::midi && ! clip.recording)
+                hasMidiClips = true;
+
+        const auto bitLabel = request.bitsPerSample == 32 ? juce::String("32-bit float") : juce::String(request.bitsPerSample) + "-bit";
+        juce::String summary = where + "\n\n"
+            + "Length: " + RenderJob::formatClock(renderSeconds) + "  (" + bitLabel + ", " + juce::String((int) settings.sampleRate) + " Hz)\n"
+            + "Peak: " + juce::String(peakDb, 1) + " dBFS\n"
+            + (clips ? "Warning: the peak goes above 0 dBFS, so this " + bitLabel + " file clips. Try Normalize: Peak to -1 dB.\n"
+                     : juce::String("No clipping.\n"));
+        if (hasMidiClips)
+            summary += "\nMIDI instrument tracks were not included in this render.";
+
+        auto options = juce::MessageBoxOptions()
+                           .withIconType(clips ? juce::MessageBoxIconType::WarningIcon : juce::MessageBoxIconType::InfoIcon)
+                           .withTitle("Render finished")
+                           .withMessage(summary)
+                           .withButton(savedToProject ? "Play" : "OK");
+        if (savedToProject)
+            options = options.withButton("Close");
+
+        juce::AlertWindow::showAsync(options, [this, savedAsset, savedToProject](int result)
+        {
+            if (savedToProject && result == 1)
+                toggleProjectAssetPreview(savedAsset);
+        });
+    };
+
+    engine.detachFromDevice(deviceManager);
+    job->launchThread();
 }
 
 void MainComponent::showProjectMenu()
