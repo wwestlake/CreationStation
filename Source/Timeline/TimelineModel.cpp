@@ -1367,6 +1367,7 @@ juce::ValueTree TimelineModel::createState() const
         trackState.setProperty("automationTargetDisplayName", track.automationTarget.displayName, nullptr);
         trackState.setProperty("automationTargetValueMode", toStorageToken(track.automationTarget.valueMode), nullptr);
         trackState.setProperty("automationTargetStepCount", track.automationTarget.stepCount, nullptr);
+        trackState.setProperty("automationTargetClipId", track.automationTarget.targetClipId, nullptr);
         trackState.setProperty("automationRecordMode", toStorageToken(track.automationRecordMode), nullptr);
         trackState.setProperty("automationRecordingPointsPerSecond", track.automationRecordingPointsPerSecond, nullptr);
         tracksState.addChild(trackState, -1, nullptr);
@@ -1513,6 +1514,7 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
             track.automationTarget.displayName = child.getProperty("automationTargetDisplayName").toString();
             track.automationTarget.valueMode = automationValueModeFromStorageToken(child.getProperty("automationTargetValueMode", "continuous").toString());
             track.automationTarget.stepCount = juce::jmax(0, (int) child.getProperty("automationTargetStepCount", 0));
+            track.automationTarget.targetClipId = child.getProperty("automationTargetClipId").toString();
             track.automationRecordMode = automationRecordModeFromStorageToken(child.getProperty("automationRecordMode", "touch").toString());
             track.automationRecordingPointsPerSecond = juce::jlimit(1, 120, (int) child.getProperty("automationRecordingPointsPerSecond", 10));
             if (track.name.trim().isEmpty())

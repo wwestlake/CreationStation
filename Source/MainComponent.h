@@ -383,6 +383,9 @@ private:
                                      bool includeSignalClips = true);
     bool buildSignalClipTargets(juce::Array<WorkstationAudioEngine::SignalClipTarget>& targets,
                                 juce::String& errorMessage);
+    // Reads a Signal clip's patch (cached per asset) and its content key. False (with errorMessage set
+    // for a real read error) when the clip has no readable patch.
+    bool loadSignalClipPatch(const cs::TimelineClip& clip, cw::PatchDocument& patch, juce::String& patchKey, juce::String& errorMessage);
     void previewScrubAudioAt(double timelineSeconds);
     void refreshMidiPlaybackClips();
     bool renderFullMixToProject();

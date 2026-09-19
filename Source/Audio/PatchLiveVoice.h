@@ -83,6 +83,11 @@ struct PatchLiveBindingMap
     }
 };
 
+// Builds the live bindings for a patch from the variables and variable bindings saved in it: each
+// bound port gets a live slot addressed by its variable's id (seeded with the variable's default),
+// so a timeline clip's voice can be driven by variable id alone, with no Signal Lab involved.
+PatchLiveBindingMap makeVariableBindingMap(const cw::PatchDocument& patch);
+
 class PatchLiveVoice final : public juce::AudioSource
 {
 public:
@@ -147,6 +152,9 @@ public:
     // hasn't caught up yet -- harmless, nothing reads a stale slot since
     // slots are keyed to the graph that owns them).
     void setLiveMidiValue(const juce::String& nodeId, float value);
+    // A variable's live slot is addressed by the variable's id (see makeVariableBindingMap); value is
+    // its normalized 0..1 value. Same cost and thread rules as setLiveMidiValue.
+    void setVariableValue(const juce::String& variableId, float normalizedValue) { setLiveMidiValue(variableId, normalizedValue); }
 
     // Live scope tap: up to maxTapSlots rolling ~2.7s mono histories, one per
     // entity a currently-open Scope node is wired to (see
@@ -307,6 +315,12 @@ private:
         float previousEnvelope = 0.0f;    // Mix entity only: persistent, for the transient (rate-of-change) term
         float sampleHoldValue = 0.0f;     // SampleHold entity only: the currently-latched value
         float sampleHoldPreviousTrigger = 0.0f; // SampleHold entity only: for rising-edge detection across blocks
+        // Oscillator Source entities only. Phase is integrated sample by sample (phase += 2*pi*f/fs) instead of
+        // computed as 2*pi*f*t, so a frequency that changes mid-note (a pitch lane, or a live/automated
+        // value) bends the pitch smoothly instead of jumping the phase and clicking. resyncPhase asks the
+        // next sample to re-derive the phase from the transport position (start, loop, scrub).
+        double phase = 0.0;
+        bool resyncPhase = true;
     };
     juce::OwnedArray<RuntimeEntityState> runtimeStates; // audio-thread only
     std::shared_ptr<const EntityGraph> activeGraphForAudioThread; // audio-thread only: last graph this thread adopted
@@ -339,6 +353,7 @@ private:
     std::atomic<int64> elapsedSamples { 0 };
     std::atomic<bool> active { false };
     std::atomic<bool> finished { false };
+    std::atomic<bool> resyncPhaseRequested { false }; // set by start(); consumed by the audio thread
 
     using FrustSineFn = double (*)(double, double);
     FrustSineFn frustSine = nullptr; // shared process-wide FRust render_sine, see sharedFrustSine()

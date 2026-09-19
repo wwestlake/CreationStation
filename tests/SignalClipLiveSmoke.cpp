@@ -31,7 +31,7 @@ void check(bool ok, const juce::String& what)
 
 // One sine oscillator, no mixer/filter/envelope nodes: rebuild() sums unconnected sources through
 // an implicit mixer, so this is the smallest valid patch.
-cw::PatchDocument makePatch()
+cw::PatchDocument makePatch(bool pitchSweep = false)
 {
     cw::PatchDocument doc;
     doc.type = "instrument";
@@ -53,14 +53,32 @@ cw::PatchDocument makePatch()
     sine.frequencyParameter = "baseFrequency";
     doc.sources.add(sine);
 
+    if (pitchSweep)
+    {
+        // Patch-internal motion: the pitch bends across the whole patch, so the oscillator's
+        // frequency changes on every sample.
+        cw::PatchAutomationLane lane;
+        lane.id = "lane_pitch";
+        lane.name = "Pitch";
+        lane.targetParameter = "pitchOffsetSemitones";
+        lane.startTime = 0.0;
+        lane.endTime = 1.0;
+        lane.rangeMin = -12.0;
+        lane.rangeMax = 12.0;
+        lane.points.add({ 0.0, 0.5, "linear" });
+        lane.points.add({ 1.0, 1.0, "linear" });
+        doc.automationLanes.add(lane);
+    }
+
     return doc;
 }
 
-std::unique_ptr<PatchLiveVoice> makeVoice()
+std::unique_ptr<PatchLiveVoice> makeVoice(const cw::PatchDocument& patch = makePatch(),
+                                          const PatchLiveBindingMap& bindings = PatchLiveBindingMap {})
 {
     auto voice = std::make_unique<PatchLiveVoice>();
     voice->prepareToPlay(kBlockSize, kSampleRate);
-    voice->rebuild(makePatch(), PatchLiveBindingMap {});
+    voice->rebuild(patch, bindings);
     voice->setPatchDurationSeconds(kPatchSeconds);
     voice->setOutputScale(1.0f); // as the engine does for a timeline clip voice
     voice->adoptPublishedGraphNow();
@@ -99,6 +117,24 @@ double rms(const juce::AudioBuffer<float>& buffer, int start, int count)
         sum += v * v;
     }
     return std::sqrt(sum / juce::jmax(1, count));
+}
+
+// Largest jump between two consecutive samples of channel 0 - a click shows up as one huge step.
+double maxSampleStep(const juce::AudioBuffer<float>& buffer, int start, int count)
+{
+    double worst = 0.0;
+    for (int i = 1; i < count; ++i)
+        worst = juce::jmax(worst, (double) std::abs(buffer.getSample(0, start + i) - buffer.getSample(0, start + i - 1)));
+    return worst;
+}
+
+int zeroCrossings(const juce::AudioBuffer<float>& buffer, int start, int count)
+{
+    int crossings = 0;
+    for (int i = 1; i < count; ++i)
+        if ((buffer.getSample(0, start + i - 1) < 0.0f) != (buffer.getSample(0, start + i) < 0.0f))
+            ++crossings;
+    return crossings;
 }
 
 // RMS of (a - b) relative to RMS of a, over `count` samples.
@@ -210,6 +246,154 @@ int main()
             check(correlationError < 0.05,
                   "live and offline renders have the same waveform (rel err " + juce::String(correlationError, 5) + ")");
         }
+    }
+
+    // A frequency that changes while the note is sounding (automation writing a new value every
+    // block) must bend the pitch smoothly. With phase = 2*pi*f*t a frequency jump also jumps the
+    // phase, which is a click; the integrated phase is continuous by construction.
+    {
+        PatchLiveBindingMap bindings;
+        bindings.entries.add({ "src_sine", "frequency", "var_freq" });
+        bindings.midiNodeValues.add({ "var_freq", 0.5f });
+
+        auto automated = makeVoice(makePatch(), bindings);
+        juce::AudioBuffer<float> out(2, (int) kPatchSamples);
+        out.clear();
+        const int blocks = (int) kPatchSamples / kBlockSize;
+        for (int b = 0; b < blocks; ++b)
+        {
+            // A stepped automation curve: 0.5 for the first third, then a jump up, then a jump down.
+            const float value = b < blocks / 3 ? 0.5f : (b < 2 * blocks / 3 ? 0.75f : 0.4f);
+            automated->setLiveMidiValue("var_freq", value);
+            automated->renderAt((int64) b * kBlockSize, out, b * kBlockSize, kBlockSize);
+        }
+
+        const auto step = maxSampleStep(out, 0, blocks * kBlockSize);
+
+        // The reference for "no click": the steepest step of *steady* playback at the highest frequency
+        // used above. (The mix stage's saturation steepens the waveform, so a fixed bound derived from
+        // the sine alone would be wrong.) A phase jump at a frequency change would add a step well
+        // beyond anything steady playback produces.
+        auto steadyVoice = makeVoice(makePatch(), bindings);
+        juce::AudioBuffer<float> steady(2, blocks * kBlockSize);
+        steady.clear();
+        for (int b = 0; b < blocks; ++b)
+        {
+            steadyVoice->setLiveMidiValue("var_freq", 0.75f);
+            steadyVoice->renderAt((int64) b * kBlockSize, steady, b * kBlockSize, kBlockSize);
+        }
+        const auto steadyStep = maxSampleStep(steady, 0, blocks * kBlockSize);
+        const auto lowBand = zeroCrossings(out, 0, kBlockSize * (blocks / 3));
+        const auto highBand = zeroCrossings(out, kBlockSize * (blocks / 3), kBlockSize * (blocks / 3));
+        std::printf("INFO: frequency-step render: max sample step %.4f (steady playback at the highest frequency: %.4f), zero crossings low %d / high %d\n",
+                    step, steadyStep, lowBand, highBand);
+        check(highBand > lowBand, "an automated frequency change really changes the pitch");
+        check(step <= steadyStep * 1.05,
+              "automated frequency jumps do not click (max step " + juce::String(step, 4) + " vs steady " + juce::String(steadyStep, 4) + ")");
+    }
+
+    // A patch whose own pitch lane bends the note across its length: live and offline renders must
+    // still match, because both integrate the phase the same way.
+    {
+        const auto sweepPatch = makePatch(true);
+        auto sweepVoice = makeVoice(sweepPatch);
+        const auto liveSweep = renderBlocks(*sweepVoice, 0, (int) kPatchSamples);
+
+        PatchRuntimePlayer sweepPlayer;
+        sweepPlayer.prepare(kSampleRate, kBlockSize);
+        juce::AudioBuffer<float> offlineSweep;
+        juce::String sweepError;
+        const auto ok = sweepPlayer.renderPatchToBuffer(sweepPatch, kPatchSeconds, offlineSweep, sweepError, nullptr);
+        check(ok, "offline renderer accepts a patch with a pitch lane");
+        if (ok)
+        {
+            const auto count = juce::jmin((int) kPatchSamples, offlineSweep.getNumSamples());
+            const auto error = relativeError(offlineSweep, 0, liveSweep, 0, count);
+            std::printf("INFO: pitch-lane live vs offline relative error %.6f, max sample step live %.4f\n", error, maxSampleStep(liveSweep, 0, count));
+            check(error < 0.01, "live and offline agree on a patch with a pitch lane (rel err " + juce::String(error, 6) + ")");
+        }
+    }
+
+    // Variables saved in the patch: a public variable wired to a port must survive save/load, and a
+    // clip's voice must be drivable by the variable's id alone (this is what timeline automation writes).
+    {
+        cw::PatchDocument doc = makePatch();
+
+        cw::PatchVariable crunch;
+        crunch.id = "var_crunch";
+        crunch.name = "FootStepCrunch";
+        crunch.description = "how much crunch is in the step";
+        crunch.valueType = "Float";
+        crunch.isPublic = true;
+        crunch.defaultValue = 1.0;
+        doc.variables.add(crunch);
+
+        cw::PatchVariable hidden;
+        hidden.id = "var_hidden";
+        hidden.name = "Internal";
+        hidden.valueType = "Int";
+        hidden.isPublic = false;
+        hidden.defaultValue = 0.25;
+        doc.variables.add(hidden);
+
+        doc.variableBindings.add({ "var_crunch", "src_sine", "level" });
+
+        const auto json = cw::serialisePatchDocumentJson(doc);
+        cw::PatchDocument parsed;
+        juce::String parseError;
+        const auto parsedOk = cw::parsePatchDocumentJson(json, parsed, parseError);
+        check(parsedOk, "a patch with variables saves and loads");
+        check(parsed.variables.size() == 2
+                  && parsed.variables[0].id == "var_crunch" && parsed.variables[0].name == "FootStepCrunch"
+                  && parsed.variables[0].valueType == "Float" && parsed.variables[0].isPublic
+                  && std::abs(parsed.variables[0].defaultValue - 1.0) < 1e-9
+                  && parsed.variables[1].valueType == "Int" && ! parsed.variables[1].isPublic
+                  && std::abs(parsed.variables[1].defaultValue - 0.25) < 1e-9,
+              "variables (id, name, type, public/private, default) round-trip");
+        check(parsed.variableBindings.size() == 1 && parsed.variableBindings[0].variableId == "var_crunch"
+                  && parsed.variableBindings[0].targetNodeId == "src_sine" && parsed.variableBindings[0].targetPort == "level",
+              "variable-to-port bindings round-trip");
+
+        // A patch saved before variables existed has neither section and must still load.
+        auto rootVar = juce::JSON::parse(json);
+        rootVar.getDynamicObject()->removeProperty("variables");
+        rootVar.getDynamicObject()->removeProperty("variableBindings");
+        cw::PatchDocument legacy;
+        const auto legacyOk = cw::parsePatchDocumentJson(juce::JSON::toString(rootVar), legacy, parseError);
+        check(legacyOk && legacy.variables.isEmpty() && legacy.variableBindings.isEmpty(),
+              "a patch saved before variables existed still loads (exposes nothing)");
+
+        // A voice built from the saved patch alone, driven by variable id.
+        auto rmsWithVariable = [&](float value)
+        {
+            auto voice = makeVoice(parsed, makeVariableBindingMap(parsed));
+            voice->setVariableValue("var_crunch", value);
+            const auto out = renderBlocks(*voice, 0, (int) kPatchSamples);
+            return rms(out, 0, (int) kPatchSamples);
+        };
+        const auto atZero = rmsWithVariable(0.0f);
+        const auto atQuarter = rmsWithVariable(0.25f);
+        const auto atHalf = rmsWithVariable(0.5f);
+        const auto atFull = rmsWithVariable(1.0f);
+        std::printf("INFO: variable -> level: rms at 0 / 0.25 / 0.5 / 1.0 = %.4f / %.4f / %.4f / %.4f\n", atZero, atQuarter, atHalf, atFull);
+        // At 0 the oscillator's contribution is gone; what remains is the mix stage's own noise floor, which
+        // does not depend on any oscillator level.
+        check(atZero < atFull * 0.6, "variable at 0 removes the oscillator it drives (floor " + juce::String(atZero, 4)
+                                         + " vs full " + juce::String(atFull, 4) + ")");
+        check(atQuarter < atHalf && atHalf < atFull, "raising the variable raises the sound (monotonic)");
+
+        // Untouched, the slot holds the variable's saved default.
+        auto defaultVoice = makeVoice(parsed, makeVariableBindingMap(parsed));
+        const auto defaultRender = renderBlocks(*defaultVoice, 0, (int) kPatchSamples);
+        check(std::abs(rms(defaultRender, 0, (int) kPatchSamples) - atFull) < 1e-6,
+              "an unwritten variable holds its saved default (1.0)");
+
+        // A variable that is not wired to anything changes nothing.
+        auto unwiredVoice = makeVoice(parsed, makeVariableBindingMap(parsed));
+        unwiredVoice->setVariableValue("var_hidden", 0.9f);
+        const auto unwiredRender = renderBlocks(*unwiredVoice, 0, (int) kPatchSamples);
+        check(maxAbsDiff(defaultRender, 0, unwiredRender, 0, (int) kPatchSamples) == 0.0,
+              "writing a variable that drives no port has no effect");
     }
 
     // Additive: the voice adds into the track buffer (it must not clobber other clips on the track).

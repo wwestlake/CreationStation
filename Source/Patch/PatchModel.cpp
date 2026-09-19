@@ -172,6 +172,31 @@ juce::String serialisePatchDocumentJson(const PatchDocument& document)
         sources.add(sourceToVar(source));
     root->setProperty("sources", juce::var(sources));
 
+    juce::Array<juce::var> variables;
+    for (const auto& variable : document.variables)
+    {
+        auto* object = new juce::DynamicObject();
+        object->setProperty("id", variable.id);
+        object->setProperty("name", variable.name);
+        object->setProperty("description", variable.description);
+        object->setProperty("type", variable.valueType);
+        object->setProperty("public", variable.isPublic);
+        object->setProperty("default", variable.defaultValue);
+        variables.add(juce::var(object));
+    }
+    root->setProperty("variables", juce::var(variables));
+
+    juce::Array<juce::var> variableBindings;
+    for (const auto& binding : document.variableBindings)
+    {
+        auto* object = new juce::DynamicObject();
+        object->setProperty("variable", binding.variableId);
+        object->setProperty("node", binding.targetNodeId);
+        object->setProperty("port", binding.targetPort);
+        variableBindings.add(juce::var(object));
+    }
+    root->setProperty("variableBindings", juce::var(variableBindings));
+
     auto* graph = new juce::DynamicObject();
     juce::Array<juce::var> nodes;
     for (const auto& node : document.nodes)
@@ -371,6 +396,42 @@ bool parsePatchDocumentJson(const juce::String& jsonText, PatchDocument& documen
 
                     document.connections.add(connection);
                 }
+            }
+        }
+    }
+
+    // Older patches have neither section: they simply expose nothing.
+    if (auto* variables = parseArray(root->getProperty("variables")))
+    {
+        for (const auto& value : *variables)
+        {
+            if (auto* object = value.getDynamicObject())
+            {
+                PatchVariable variable;
+                variable.id = object->getProperty("id").toString();
+                variable.name = object->getProperty("name").toString();
+                variable.description = object->getProperty("description").toString();
+                variable.valueType = object->getProperty("type").toString();
+                if (variable.valueType.isEmpty())
+                    variable.valueType = "Float";
+                variable.isPublic = (bool) object->getProperty("public");
+                variable.defaultValue = (double) object->getProperty("default");
+                document.variables.add(variable);
+            }
+        }
+    }
+
+    if (auto* variableBindings = parseArray(root->getProperty("variableBindings")))
+    {
+        for (const auto& value : *variableBindings)
+        {
+            if (auto* object = value.getDynamicObject())
+            {
+                PatchVariableBinding binding;
+                binding.variableId = object->getProperty("variable").toString();
+                binding.targetNodeId = object->getProperty("node").toString();
+                binding.targetPort = object->getProperty("port").toString();
+                document.variableBindings.add(binding);
             }
         }
     }
