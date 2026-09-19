@@ -23,11 +23,16 @@ public:
     VideoScrubPreview(const VideoScrubPreview&) = delete;
     VideoScrubPreview& operator=(const VideoScrubPreview&) = delete;
 
-    void requestFrame(const juce::File& file, double sourceSeconds, std::function<void(juce::Image)> onFrameReady)
+    // maxWidth/maxHeight: the biggest picture wanted (the view's pixel size); it is never decoded larger than the
+    // video itself, since that would only stretch the picture and cost time.
+    void requestFrame(const juce::File& file, double sourceSeconds, std::function<void(juce::Image)> onFrameReady,
+                      int maxWidth = 320, int maxHeight = 180)
     {
         const juce::ScopedLock sl(lock);
         pendingFile = file;
         pendingSourceSeconds = sourceSeconds;
+        pendingWidth = maxWidth;
+        pendingHeight = maxHeight;
         pendingCallback = std::move(onFrameReady);
         hasPendingRequest = true;
 
@@ -44,11 +49,13 @@ private:
 
         auto file = pendingFile;
         auto sourceSeconds = pendingSourceSeconds;
+        const auto wantWidth = pendingWidth;
+        const auto wantHeight = pendingHeight;
         auto callback = pendingCallback;
         hasPendingRequest = false;
         jobRunning = true;
 
-        pool.addJob([this, file, sourceSeconds, callback]
+        pool.addJob([this, file, sourceSeconds, callback, wantWidth, wantHeight]
         {
             // Real bug fixed here: this used to construct a fresh VideoDecodeService and call
             // open() from scratch on every single tick -- a full Media Foundation source-reader
@@ -58,13 +65,16 @@ private:
             // across calls, and open() only runs again when the scrubbed clip actually changes.
             if (openFile != file || ! openService.isOpen())
             {
-                openValid = openService.open(file).valid;
+                openInfo = openService.open(file);
+                openValid = openInfo.valid;
                 openFile = file;
             }
 
             juce::Image decoded;
             if (openValid)
-                decoded = openService.decodeFrameAt(sourceSeconds, 320, 180);
+                decoded = openService.decodeFrameAt(sourceSeconds,
+                                                    juce::jlimit(16, juce::jmax(16, openInfo.width), wantWidth),
+                                                    juce::jlimit(16, juce::jmax(16, openInfo.height), wantHeight));
 
             if (callback)
                 juce::MessageManager::callAsync([callback, decoded] { callback(decoded); });
@@ -80,12 +90,15 @@ private:
     bool hasPendingRequest = false;
     juce::File pendingFile;
     double pendingSourceSeconds = 0.0;
+    int pendingWidth = 320;
+    int pendingHeight = 180;
     std::function<void(juce::Image)> pendingCallback;
     // Touched only from the ThreadPool's one worker thread (never the message thread), so no
     // lock needed for these despite jobRunning/hasPendingRequest above needing one.
     VideoDecodeService openService;
     juce::File openFile;
     bool openValid = false;
+    VideoStreamInfo openInfo;
     // Declared last so it's destroyed (and its guaranteed wait-for-running-job semantics run)
     // before the state above, closing the same teardown race VideoThumbnailCache avoids.
     juce::ThreadPool pool { 1 };

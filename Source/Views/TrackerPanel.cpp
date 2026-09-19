@@ -645,10 +645,6 @@ void TrackerPanel::refreshTimelineView()
     canvas.repaint();
 }
 
-void TrackerPanel::updateVideoPreview(double timelineSeconds)
-{
-    canvas.updateVideoPreview(timelineSeconds);
-}
 
 void TrackerPanel::centerTransportInView()
 {
@@ -1691,43 +1687,6 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
     }
 }
 
-void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
-{
-    if (timelineModel == nullptr)
-    {
-        if (videoWindow) videoWindow->setVisible(false);
-        return;
-    }
-
-    const cs::TimelineClip* activeClip = nullptr;
-    for (const auto& clip : timelineModel->getClips())
-    {
-        if (clip.kind != cs::ClipKind::video)
-            continue;
-        if (timelineSeconds < clip.startSeconds || timelineSeconds >= clip.startSeconds + clip.durationSeconds)
-            continue;
-
-        activeClip = &clip;
-        break;
-    }
-
-    if (activeClip == nullptr)
-    {
-        if (videoWindow) videoWindow->setVisible(false);
-        return;
-    }
-
-    if (videoWindow) videoWindow->setVisible(true);
-    auto sourceSeconds = activeClip->sourceStartSeconds + (timelineSeconds - activeClip->startSeconds);
-
-    scrubPreview.requestFrame(activeClip->file, sourceSeconds,
-                              [safe = juce::Component::SafePointer<TimelineCanvas>(this)](juce::Image image)
-                              {
-                                  if (safe != nullptr)
-                                      safe->videoWindow->getPreviewComponent().setImage(image);
-                              });
-}
-
 void TrackerPanel::TimelineCanvas::resized()
 {
     constexpr int rulerHeight = 56;
@@ -1813,8 +1772,6 @@ void TrackerPanel::TimelineCanvas::ensureTrackVisible(int trackIndex)
 }
 
 TrackerPanel::TimelineCanvas::TimelineCanvas() {
-    videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
-
     headerHost.setInterceptsMouseClicks(false, true);
     addAndMakeVisible(headerHost);
 
@@ -1824,10 +1781,6 @@ TrackerPanel::TimelineCanvas::TimelineCanvas() {
 }
 
 TrackerPanel::TimelineCanvas::~TimelineCanvas() {
-    if (videoWindow) {
-        videoWindow->setVisible(false);
-        videoWindow.reset();
-    }
 }
 
 void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)

@@ -108,11 +108,6 @@ public:
     void setTimelineModel(cs::TimelineModel* model);
     void refreshTimelineView();
     void centerTransportInView();
-    // Drives the scrub preview overlay: finds whichever video clip covers timelineSeconds (if
-    // any) and requests a decode of the matching source-relative frame. Called every playback
-    // tick from MainComponent::timerCallback - see VideoScrubPreview for how it stays cheap
-    // under a fast, continuously-moving call rate.
-    void updateVideoPreview(double timelineSeconds);
     int getSelectedTrack() const noexcept { return selectedTrack; }
     void setAutomationTargetLabel(int trackIndex, const juce::String& label);
     void setAutomationRecordMode(int trackIndex, cs::AutomationRecordMode mode);
@@ -216,7 +211,6 @@ private:
         void setTrackIndented(int trackIndex, bool indented);
         void setTrackAccentColour(int trackIndex, juce::Colour colour);
         void setScrollSeconds(double seconds);
-        void updateVideoPreview(double timelineSeconds);
         double getTransportSeconds() const noexcept;
         double getVisibleDurationSeconds() const noexcept;
         double getTotalDurationSeconds() const noexcept;
@@ -384,8 +378,6 @@ private:
         // mutable: populated lazily from drawVideoThumbnailStrip, a const paint helper (matching
         // drawAutomationLane's own const-ness, since neither touches this component's layout).
         mutable cs::VideoThumbnailCache videoThumbnailCache;
-        cs::VideoScrubPreview scrubPreview;
-        std::unique_ptr<cs::VideoPlayerWindow> videoWindow;
         bool draggingLoopRegion = false;
         bool loopRegionMoved = false;
         double loopDragStartSeconds = 0.0;
