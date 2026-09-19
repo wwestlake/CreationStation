@@ -73,6 +73,19 @@ public:
     bool splitClip(int clipIndex, double splitSeconds);
     bool hasActiveRecordingClip() const noexcept { return ! activeRecordingClips.empty(); }
 
+    // Linked clips (a video and its sound) edit together: move/trim/split/duplicate/delete on one is applied
+    // to the others in its group. See TimelineClip::linkGroupId.
+    std::vector<int> getLinkedPartnerIndices(int clipIndex) const;
+    bool isClipLinked(int clipIndex) const;
+    bool linkClips(int firstClipIndex, int secondClipIndex);
+    void unlinkClip(int clipIndex); // frees the whole group
+    void setClipSoundDetached(int clipIndex, bool detached);
+    void setClipSourceRange(int clipIndex, double sourceStartSeconds, double sourceDurationSeconds);
+    void setClipSourceTool(int clipIndex, const juce::String& sourceTool);
+    // For a video whose sound was split off (or that sound clip): the other half, when the two are not linked.
+    int findSoundCounterpart(int clipIndex) const;
+    static juce::String videoSoundSourceTool(const juce::String& videoAssetId) { return "video-sound:" + videoAssetId; }
+
     juce::String addMarker(double seconds, const juce::String& name = {});
     void removeMarker(const juce::String& id);
     void renameMarker(const juce::String& id, const juce::String& name);
@@ -187,6 +200,9 @@ public:
     int getAutomationRecordingRate(int trackIndex) const;
 
 private:
+    bool trimClipStartUnlinked(int clipIndex, double newStartSeconds);
+    bool trimClipEndUnlinked(int clipIndex, double newEndSeconds);
+    int indexOfClipId(const juce::String& clipId) const;
     int getAutomationClipIndex(int trackIndex) const;
 
     double tempoBpm = 120.0;

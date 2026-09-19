@@ -342,7 +342,7 @@ void TimelineModel::setClipDuration(int clipIndex, double newDurationSeconds)
     clips[(size_t) clipIndex].durationSeconds = juce::jmax(0.05, newDurationSeconds);
 }
 
-bool TimelineModel::trimClipStart(int clipIndex, double newStartSeconds)
+bool TimelineModel::trimClipStartUnlinked(int clipIndex, double newStartSeconds)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
@@ -369,7 +369,7 @@ bool TimelineModel::trimClipStart(int clipIndex, double newStartSeconds)
     return true;
 }
 
-bool TimelineModel::trimClipEnd(int clipIndex, double newEndSeconds)
+bool TimelineModel::trimClipEndUnlinked(int clipIndex, double newEndSeconds)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
@@ -393,24 +393,248 @@ bool TimelineModel::trimClipEnd(int clipIndex, double newEndSeconds)
     return true;
 }
 
+int TimelineModel::indexOfClipId(const juce::String& clipId) const
+{
+    for (size_t i = 0; i < clips.size(); ++i)
+        if (clips[i].id == clipId)
+            return (int) i;
+    return -1;
+}
+
+std::vector<int> TimelineModel::getLinkedPartnerIndices(int clipIndex) const
+{
+    std::vector<int> partners;
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()) || clips[(size_t) clipIndex].linkGroupId.isEmpty())
+        return partners;
+
+    const auto& group = clips[(size_t) clipIndex].linkGroupId;
+    for (size_t i = 0; i < clips.size(); ++i)
+        if ((int) i != clipIndex && ! clips[i].recording && clips[i].linkGroupId == group)
+            partners.push_back((int) i);
+    return partners;
+}
+
+bool TimelineModel::isClipLinked(int clipIndex) const
+{
+    return ! getLinkedPartnerIndices(clipIndex).empty();
+}
+
+bool TimelineModel::linkClips(int firstClipIndex, int secondClipIndex)
+{
+    if (firstClipIndex == secondClipIndex
+        || ! juce::isPositiveAndBelow(firstClipIndex, (int) clips.size())
+        || ! juce::isPositiveAndBelow(secondClipIndex, (int) clips.size()))
+        return false;
+
+    auto& first = clips[(size_t) firstClipIndex];
+    auto& second = clips[(size_t) secondClipIndex];
+    const auto group = first.linkGroupId.isNotEmpty() ? first.linkGroupId
+                     : second.linkGroupId.isNotEmpty() ? second.linkGroupId
+                     : juce::Uuid().toString();
+    first.linkGroupId = group;
+    second.linkGroupId = group;
+    return true;
+}
+
+void TimelineModel::unlinkClip(int clipIndex)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return;
+
+    const auto group = clips[(size_t) clipIndex].linkGroupId;
+    if (group.isEmpty())
+        return;
+
+    for (auto& clip : clips)
+        if (clip.linkGroupId == group)
+            clip.linkGroupId = {};
+}
+
+void TimelineModel::setClipSoundDetached(int clipIndex, bool detached)
+{
+    if (juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        clips[(size_t) clipIndex].soundDetached = detached;
+}
+
+void TimelineModel::setClipSourceRange(int clipIndex, double sourceStartSeconds, double sourceDurationSeconds)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return;
+
+    clips[(size_t) clipIndex].sourceStartSeconds = juce::jmax(0.0, sourceStartSeconds);
+    clips[(size_t) clipIndex].sourceDurationSeconds = juce::jmax(0.0, sourceDurationSeconds);
+}
+
+void TimelineModel::setClipSourceTool(int clipIndex, const juce::String& sourceTool)
+{
+    if (juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        clips[(size_t) clipIndex].sourceTool = sourceTool;
+}
+
+int TimelineModel::findSoundCounterpart(int clipIndex) const
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return -1;
+
+    const auto& clip = clips[(size_t) clipIndex];
+    if (clip.linkGroupId.isNotEmpty() || clip.recording)
+        return -1;
+
+    int best = -1;
+    double bestDistance = 0.0;
+    for (size_t i = 0; i < clips.size(); ++i)
+    {
+        if ((int) i == clipIndex || clips[i].recording || clips[i].linkGroupId.isNotEmpty())
+            continue;
+
+        const auto& other = clips[i];
+        const auto matches = (clip.kind == ClipKind::video && clip.soundDetached && other.kind == ClipKind::audio
+                              && other.sourceTool == videoSoundSourceTool(clip.assetId))
+                          || (clip.kind == ClipKind::audio && clip.sourceTool.startsWith("video-sound:")
+                              && other.kind == ClipKind::video && other.soundDetached
+                              && clip.sourceTool == videoSoundSourceTool(other.assetId));
+        if (! matches)
+            continue;
+
+        const auto distance = std::abs(other.startSeconds - clip.startSeconds);
+        if (best < 0 || distance < bestDistance)
+        {
+            best = (int) i;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+bool TimelineModel::trimClipStart(int clipIndex, double newStartSeconds)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto partners = getLinkedPartnerIndices(clipIndex);
+    const auto before = clips[(size_t) clipIndex].startSeconds;
+    if (! trimClipStartUnlinked(clipIndex, newStartSeconds))
+        return false;
+
+    const auto delta = clips[(size_t) clipIndex].startSeconds - before;
+    for (auto partner : partners)
+        trimClipStartUnlinked(partner, clips[(size_t) partner].startSeconds + delta);
+    return true;
+}
+
+bool TimelineModel::trimClipEnd(int clipIndex, double newEndSeconds)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto partners = getLinkedPartnerIndices(clipIndex);
+    const auto before = clips[(size_t) clipIndex].startSeconds + clips[(size_t) clipIndex].durationSeconds;
+    if (! trimClipEndUnlinked(clipIndex, newEndSeconds))
+        return false;
+
+    const auto delta = clips[(size_t) clipIndex].startSeconds + clips[(size_t) clipIndex].durationSeconds - before;
+    for (auto partner : partners)
+        trimClipEndUnlinked(partner, clips[(size_t) partner].startSeconds + clips[(size_t) partner].durationSeconds + delta);
+    return true;
+}
+
 bool TimelineModel::moveClip(int clipIndex, int trackIndex, double startSeconds)
 {
-    return creation::timeline::moveClip(clips, tracks, clipIndex, trackIndex, startSeconds);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto partners = getLinkedPartnerIndices(clipIndex);
+    const auto before = clips[(size_t) clipIndex].startSeconds;
+
+    // Linked clips move by the same amount; none of them can go before the start of the timeline.
+    auto delta = juce::jmax(0.0, startSeconds) - before;
+    for (auto partner : partners)
+        delta = juce::jmax(delta, -clips[(size_t) partner].startSeconds);
+
+    if (! creation::timeline::moveClip(clips, tracks, clipIndex, trackIndex, before + delta))
+        return false;
+
+    for (auto partner : partners)
+        creation::timeline::moveClip(clips, tracks, partner, clips[(size_t) partner].trackIndex, clips[(size_t) partner].startSeconds + delta);
+    return true;
 }
 
 bool TimelineModel::duplicateClip(int clipIndex, double startOffsetSeconds)
 {
-    return creation::timeline::duplicateClip(clips, clipIndex, startOffsetSeconds);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    juce::StringArray partnerIds;
+    for (auto partner : getLinkedPartnerIndices(clipIndex))
+        partnerIds.add(clips[(size_t) partner].id);
+
+    if (! creation::timeline::duplicateClip(clips, clipIndex, startOffsetSeconds))
+        return false;
+
+    // The copies form a group of their own, separate from the originals.
+    const auto group = partnerIds.isEmpty() ? juce::String() : juce::Uuid().toString();
+    clips.back().linkGroupId = group;
+
+    for (const auto& id : partnerIds)
+    {
+        const auto partner = indexOfClipId(id);
+        if (partner >= 0 && creation::timeline::duplicateClip(clips, partner, startOffsetSeconds))
+            clips.back().linkGroupId = group;
+    }
+    return true;
 }
 
 bool TimelineModel::deleteClip(int clipIndex)
 {
-    return creation::timeline::deleteClip(clips, clipIndex);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    juce::StringArray partnerIds;
+    for (auto partner : getLinkedPartnerIndices(clipIndex))
+        partnerIds.add(clips[(size_t) partner].id);
+
+    if (! creation::timeline::deleteClip(clips, clipIndex))
+        return false;
+
+    for (const auto& id : partnerIds)
+    {
+        const auto partner = indexOfClipId(id);
+        if (partner >= 0)
+            creation::timeline::deleteClip(clips, partner);
+    }
+    return true;
 }
 
 bool TimelineModel::splitClip(int clipIndex, double splitSeconds)
 {
-    return creation::timeline::splitClip(clips, clipIndex, splitSeconds);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto clipId = clips[(size_t) clipIndex].id;
+    juce::StringArray partnerIds;
+    for (auto partner : getLinkedPartnerIndices(clipIndex))
+        partnerIds.add(clips[(size_t) partner].id);
+
+    if (! creation::timeline::splitClip(clips, clipIndex, splitSeconds))
+        return false;
+
+    // The left halves stay linked together, the right halves become a group of their own.
+    const auto rightGroup = juce::Uuid().toString();
+    auto rightsLinked = 0;
+    for (const auto& id : partnerIds)
+    {
+        const auto partner = indexOfClipId(id);
+        if (partner >= 0 && creation::timeline::splitClip(clips, partner, splitSeconds))
+        {
+            clips[(size_t) partner + 1].linkGroupId = rightGroup;
+            ++rightsLinked;
+        }
+    }
+
+    const auto primary = indexOfClipId(clipId);
+    if (primary >= 0)
+        clips[(size_t) primary + 1].linkGroupId = rightsLinked > 0 ? rightGroup : juce::String();
+    return true;
 }
 
 void TimelineModel::setTrackCount(int count)
@@ -1392,6 +1616,10 @@ juce::ValueTree TimelineModel::createState() const
         clipState.setProperty("sourceStartSeconds", clip.sourceStartSeconds, nullptr);
         clipState.setProperty("sourceDurationSeconds", clip.sourceDurationSeconds, nullptr);
         clipState.setProperty("recording", false, nullptr);
+        if (clip.linkGroupId.isNotEmpty())
+            clipState.setProperty("linkGroupId", clip.linkGroupId, nullptr);
+        if (clip.soundDetached)
+            clipState.setProperty("soundDetached", true, nullptr);
 
         if (! clip.midiNotes.empty())
         {
@@ -1550,6 +1778,8 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
         clip.sourceStartSeconds = (double) child.getProperty("sourceStartSeconds", 0.0);
         clip.sourceDurationSeconds = (double) child.getProperty("sourceDurationSeconds", 0.0);
         clip.recording = false;
+        clip.linkGroupId = child.getProperty("linkGroupId").toString();
+        clip.soundDetached = (bool) child.getProperty("soundDetached", false);
         if (clip.displayName.trim().isEmpty())
             clip.displayName = clip.file.existsAsFile() ? clip.file.getFileNameWithoutExtension()
                                                         : toDisplayName(clip.kind) + " Clip";
