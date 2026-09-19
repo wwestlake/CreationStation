@@ -7186,8 +7186,9 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
         {
             cs::VideoDecodeService decodeService;
             auto info = decodeService.open(sourceFile);
+            auto openError = decodeService.getLastError();
 
-            juce::MessageManager::callAsync([safeThis, asset, targetTrack, startSeconds, sourceFile, info]() mutable
+            juce::MessageManager::callAsync([safeThis, asset, targetTrack, startSeconds, sourceFile, info, openError]() mutable
             {
                 if (safeThis == nullptr) return;
 
@@ -7223,7 +7224,8 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
                 }
                 else
                 {
-                    safeThis->contentPanel.setStatusText("Could not decode video: " + sourceFile.getFileName());
+                    safeThis->contentPanel.setStatusText("Could not open video " + asset.displayName
+                                                         + (openError.isNotEmpty() ? ": " + openError : juce::String()));
                 }
             });
         }).detach();
@@ -7572,8 +7574,9 @@ void MainComponent::importVideoFilesSequentially(juce::StringArray filePaths, in
     {
         cs::VideoDecodeService decodeService;
         auto info = decodeService.open(sourceFile);
+        auto openError = decodeService.getLastError();
 
-        juce::MessageManager::callAsync([safeThis, filePaths, index, trackIndex, startSeconds, sourceFile, info]() mutable
+        juce::MessageManager::callAsync([safeThis, filePaths, index, trackIndex, startSeconds, sourceFile, info, openError]() mutable
         {
             if (safeThis == nullptr)
                 return;
@@ -7595,7 +7598,8 @@ void MainComponent::importVideoFilesSequentially(juce::StringArray filePaths, in
             }
             else
             {
-                safeThis->transportBar.setStatusText("Could not open video: " + sourceFile.getFileName());
+                safeThis->transportBar.setStatusText("Could not open video " + sourceFile.getFileName()
+                                                     + (openError.isNotEmpty() ? ": " + openError : juce::String()));
             }
 
             safeThis->importVideoFilesSequentially(std::move(filePaths), index + 1, trackIndex, nextStart);

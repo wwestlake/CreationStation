@@ -40,6 +40,8 @@ public:
     // thread on. Returns stream info with valid == false on failure (unreadable file, no
     // decodable video stream, no hardware decoder available for the codec).
     VideoStreamInfo open(const juce::File& file);
+    // Why the last open() failed, in words a user can act on ("" after a success).
+    juce::String getLastError() const { return lastError; }
     void close();
     bool isOpen() const noexcept;
 
@@ -57,5 +59,6 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl;
+    juce::String lastError;
 };
 }
