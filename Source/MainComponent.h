@@ -298,6 +298,11 @@ private:
     void openVideoViewForPlayback();
     // The clip menu's video/sound actions (1 split the sound onto its own track, 2 unlink, 3 link, 4 put back).
     void handleClipSoundAction(int clipIndex, int action);
+    // Right-click > Add Clip...: a picker that offers what fits the track, with a picture and facts for each item.
+    void showAddClipPicker(int trackIndex, double startSeconds);
+    // Reads what each video/audio/render/patch asset actually is (length, size of picture, channels, a thumbnail)
+    // for any asset that has no details yet, in a progress window. Returns false when there was nothing to do.
+    bool ensureAssetDetails(std::function<void()> whenDone);
     void splitSoundFromVideo(int clipIndex);
     bool videoClipsNeedAudio() const;
     // Makes sure every video clip's sound is ready (extracting and caching it in the project when it is not),
@@ -594,7 +599,7 @@ private:
     // Adds an already-uploaded video (its bytes are in the project at `logicalPath`) to the project's asset
     // list and puts a clip for it on the track. Fast; message thread.
     int addImportedVideoToTracker(const juce::File& sourceFile, const juce::String& assetId, const juce::String& logicalPath, juce::int64 fileSize,
-                                  const cs::VideoStreamInfo& info, int targetTrack, double startSeconds,
+                                  const cs::VideoStreamInfo& info, const juce::MemoryBlock& thumbnailJpeg, int targetTrack, double startSeconds,
                                   juce::String& errorMessage);
     void importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
     void runVideoImport(juce::StringArray filePaths, int trackIndex, double startSeconds);
