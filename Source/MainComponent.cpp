@@ -7461,27 +7461,10 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
     return true;
 }
 
-int MainComponent::placeVideoAssetOnTracker(const juce::File& sourceFile, const cs::VideoStreamInfo& info,
-                                            int targetTrack, double startSeconds, juce::String& errorMessage)
+int MainComponent::addImportedVideoToTracker(const juce::File& sourceFile, const juce::String& logicalPath, juce::int64 fileSize,
+                                               const cs::VideoStreamInfo& info, int targetTrack, double startSeconds,
+                                               juce::String& errorMessage)
 {
-    // Import the external video file into the VFS container -- same shape as
-    // placeAudioAssetOnTracker/importAudioFilesToTracker's own import step.
-    auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + sourceFile.getFileName();
-
-    juce::MemoryBlock fileData;
-    if (! sourceFile.loadFileAsData(fileData))
-    {
-        errorMessage = "Could not read: " + sourceFile.getFileName();
-        return -1;
-    }
-
-    if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
-    {
-        errorMessage = "Could not import: " + sourceFile.getFileName()
-                       + (projectSession.getLastWriteError().isNotEmpty() ? " - " + projectSession.getLastWriteError() : juce::String());
-        return -1;
-    }
-
     creation::assets::AssetDescriptor importedAsset;
     importedAsset.id = "asset:" + juce::Uuid().toString();
     importedAsset.version = "1";
@@ -7490,7 +7473,7 @@ int MainComponent::placeVideoAssetOnTracker(const juce::File& sourceFile, const 
     importedAsset.logicalPath = logicalPath;
     importedAsset.kind = creation::assets::AssetKind::video;
     importedAsset.mediaType = "video/" + sourceFile.getFileExtension().trimCharactersAtStart(".").toLowerCase();
-    importedAsset.fileSizeBytes = (int64) fileData.getSize();
+    importedAsset.fileSizeBytes = (int64) fileSize;
     importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
     importedAsset.sourceApp = "Djehuti Station";
     projectSession.upsertAssetDescriptor(importedAsset);
@@ -7498,23 +7481,16 @@ int MainComponent::placeVideoAssetOnTracker(const juce::File& sourceFile, const 
     if (! projectSession.commit(errorMessage))
         return -1;
 
-    // Materialize the asset from the VFS container to a real temp file for the decode service
-    // and the Tracker clip itself, same as placeAudioAssetOnTracker does for audio.
-    creation::assets::MaterializedAssetLease lease;
-    if (! projectSession.materializeEntry(suiteSettings, importedAsset.logicalPath,
-                                          creation::assets::MaterializationAccess::readOnly,
-                                          lease, errorMessage))
-        return -1;
-
-    // durationSeconds comes from the caller's probed VideoStreamInfo -- addClip() deliberately
-    // never runs waveform/duration analysis for ClipKind::video (it can't open a video container
-    // as audio), so this is the only source of truth for how long the clip is.
+    // The clip plays from the file that was just imported, so a big video is not copied back out of the
+    // project the moment it goes in. durationSeconds comes from the probed VideoStreamInfo -- addClip()
+    // deliberately never runs waveform/duration analysis for ClipKind::video (it can't open a video
+    // container as audio), so this is the only source of truth for how long the clip is.
     return timelineModel.addClip(cs::ClipKind::video,
                                  targetTrack,
                                  importedAsset.displayName,
                                  importedAsset.id,
                                  "import",
-                                 lease.materializedFile,
+                                 sourceFile,
                                  startSeconds,
                                  info.durationSeconds,
                                  errorMessage);
@@ -7552,69 +7528,160 @@ void MainComponent::importVideoFilesToTracker(const juce::StringArray& filePaths
         engine.setTrackIsAutomationKind(targetTrack, false);
     }
 
-    importVideoFilesSequentially(filePaths, 0, targetTrack, juce::jmax(0.0, startSeconds));
+    runVideoImport(filePaths, targetTrack, juce::jmax(0.0, startSeconds));
 }
 
-void MainComponent::importVideoFilesSequentially(juce::StringArray filePaths, int index, int trackIndex, double startSeconds)
+namespace
 {
-    if (index >= filePaths.size())
+struct VideoImportItem
+{
+    juce::File file;
+    cs::VideoStreamInfo info;
+    juce::String logicalPath;
+    juce::String error; // why this file could not be imported ("" when it went in)
+    bool uploaded = false;
+};
+}
+
+void MainComponent::runVideoImport(juce::StringArray filePaths, int trackIndex, double startSeconds)
+{
+    if (progressTask != nullptr)
     {
-        refreshProjectAssets();
-        trackerPanel.setSelectedTrack(trackIndex);
-        trackerPanel.refreshTimelineView();
-        setWorkspaceMode(WorkspaceMode::tracker);
-        saveSessionToDisk(true);
+        reportError("Could not start the import: another long action is still running. Wait for it to finish, or cancel it.");
         return;
     }
 
-    auto sourceFile = juce::File(filePaths[(int) index]);
-    if (! sourceFile.existsAsFile())
+    auto items = std::make_shared<std::vector<VideoImportItem>>();
+    for (const auto& path : filePaths)
     {
-        importVideoFilesSequentially(std::move(filePaths), index + 1, trackIndex, startSeconds);
-        return;
+        VideoImportItem item;
+        item.file = juce::File(path);
+        item.logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot + item.file.getFileName();
+        items->push_back(std::move(item));
     }
 
-    // VideoDecodeService::open() does file I/O and media-type negotiation with the OS decoder --
-    // explicitly documented as not safe to call on the message thread (see VideoDecodeService.h).
-    // Runs on a helper thread; the actual VFS import + addClip (fast, local) happens back on the
-    // message thread once the real duration is known, matching the pattern this codebase already
-    // uses for other slow-open, fast-finish operations.
     auto safeThis = juce::Component::SafePointer<MainComponent>(this);
-    std::thread([safeThis, filePaths, index, trackIndex, startSeconds, sourceFile]() mutable
-    {
-        cs::VideoDecodeService decodeService;
-        auto info = decodeService.open(sourceFile);
-        auto openError = decodeService.getLastError();
 
-        juce::MessageManager::callAsync([safeThis, filePaths, index, trackIndex, startSeconds, sourceFile, info, openError]() mutable
+    // Everything slow happens on the task's thread: opening the video (file I/O and negotiation with the OS
+    // decoder -- not safe on the message thread, see VideoDecodeService.h) and streaming it into the project
+    // in pieces. Only the quick bookkeeping (asset list, clip) is done afterwards, on the message thread.
+    auto work = [safeThis, items](ProgressTask& task)
+    {
+        const auto count = (int) items->size();
+        for (int i = 0; i < count && ! task.cancelRequested(); ++i)
         {
+            auto& item = (*items)[(size_t) i];
+            const auto name = item.file.getFileName();
+            const auto label = count > 1 ? " (" + juce::String(i + 1) + " of " + juce::String(count) + ")" : juce::String();
+            const auto share = 1.0 / (double) count;
+            const auto base = (double) i * share;
+
+            if (! item.file.existsAsFile())
+            {
+                item.error = "Could not import " + name + ": the file was not found.";
+                continue;
+            }
+
+            task.report(base, "Reading " + name + label + "...");
+            cs::VideoDecodeService decodeService;
+            item.info = decodeService.open(item.file);
+            if (! item.info.valid)
+            {
+                const auto reason = decodeService.getLastError();
+                item.error = "Could not open video " + name + (reason.isNotEmpty() ? ": " + reason : juce::String());
+                continue;
+            }
+
+            // Reading the file is a bit over 5% of the bar; the rest is the upload.
+            juce::String uploadError;
+            const auto sizeText = juce::File::descriptionOfSizeInBytes(item.file.getSize());
+            task.report(base + share * 0.05, "Copying " + name + " (" + sizeText + ") into the project" + label + "...");
+
             if (safeThis == nullptr)
                 return;
 
-            auto nextStart = startSeconds;
-            if (info.valid)
+            // The upload is thread-safe on its own (own client, own connection); only the session's revision
+            // counter is touched, which nothing else reads while this window is up.
+            const auto ok = safeThis->projectSession.writeEntryFromFile(item.logicalPath, item.file, uploadError, 9,
+                [&](double fraction)
+                {
+                    task.report(base + share * (0.05 + 0.95 * fraction),
+                                "Copying " + name + " (" + sizeText + ") into the project" + label + " - " + juce::String((int) std::round(fraction * 100.0)) + "%");
+                    return ! task.cancelRequested();
+                });
+
+            if (! ok)
             {
-                juce::String clipError;
-                auto clipIndex = safeThis->placeVideoAssetOnTracker(sourceFile, info, trackIndex, startSeconds, clipError);
-                if (clipIndex >= 0)
-                {
-                    const auto& clip = safeThis->timelineModel.getClips()[(size_t) clipIndex];
-                    nextStart = clip.startSeconds + clip.durationSeconds;
-                }
-                else if (clipError.isNotEmpty())
-                {
-                    safeThis->transportBar.setStatusText(clipError);
-                }
+                if (! task.cancelRequested() && ! safeThis->projectSession.lastWriteWasCancelled())
+                    item.error = uploadError.isNotEmpty() ? uploadError : "Could not import " + name + ".";
+                continue;
+            }
+
+            item.uploaded = true;
+        }
+    };
+
+    auto finished = [safeThis, items, trackIndex, startSeconds](bool cancelled)
+    {
+        if (safeThis == nullptr)
+            return;
+
+        auto* self = safeThis.getComponent();
+        auto nextStart = startSeconds;
+        juce::StringArray problems;
+        int imported = 0;
+
+        for (auto& item : *items)
+        {
+            if (! item.uploaded)
+            {
+                if (item.error.isNotEmpty())
+                    problems.add(item.error);
+                continue;
+            }
+
+            juce::String clipError;
+            const auto clipIndex = self->addImportedVideoToTracker(item.file, item.logicalPath, item.file.getSize(), item.info,
+                                                                   trackIndex, nextStart, clipError);
+            if (clipIndex >= 0)
+            {
+                const auto& clip = self->timelineModel.getClips()[(size_t) clipIndex];
+                nextStart = clip.startSeconds + clip.durationSeconds;
+                ++imported;
             }
             else
             {
-                safeThis->transportBar.setStatusText("Could not open video " + sourceFile.getFileName()
-                                                     + (openError.isNotEmpty() ? ": " + openError : juce::String()));
+                problems.add("Could not import " + item.file.getFileName() + (clipError.isNotEmpty() ? ": " + clipError : juce::String()));
             }
+        }
 
-            safeThis->importVideoFilesSequentially(std::move(filePaths), index + 1, trackIndex, nextStart);
+        if (imported > 0)
+        {
+            self->refreshProjectAssets();
+            self->trackerPanel.setSelectedTrack(trackIndex);
+            self->trackerPanel.refreshTimelineView();
+            self->setWorkspaceMode(WorkspaceMode::tracker);
+            self->saveSessionToDisk(true);
+        }
+
+        if (problems.isEmpty() && cancelled)
+            self->showToast(imported > 0 ? "Import cancelled - " + juce::String(imported) + " file(s) were already in." : "Import cancelled.");
+        else if (problems.isEmpty() && imported > 0)
+            self->showToast("Imported " + juce::String(imported) + " video file(s).");
+
+        if (! problems.isEmpty())
+            self->reportError(problems.joinIntoString("\n\n"));
+
+        // The window is done; free it once we are out of its own callback.
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->progressTask.reset();
         });
-    }).detach();
+    };
+
+    progressTask = std::make_unique<ProgressTask>("Importing video", std::move(work), std::move(finished));
+    progressTask->start();
 }
 
 std::optional<creation::assets::AssetDescriptor> MainComponent::resolveTimelineClipAsset(const cs::TimelineClip& clip) const

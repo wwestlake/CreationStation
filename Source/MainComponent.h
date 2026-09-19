@@ -38,6 +38,7 @@
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ContentPanel.h"
+#include "Views/ProgressTask.h"
 #include "Views/RenderDialog.h"
 #include "Views/ToastMessage.h"
 #include "Views/DslPanel.h"
@@ -572,10 +573,15 @@ private:
                                  const juce::String& sourceTool,
                                  juce::String& errorMessage);
     bool importAudioFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    int placeVideoAssetOnTracker(const juce::File& sourceFile, const cs::VideoStreamInfo& info,
-                                 int targetTrack, double startSeconds, juce::String& errorMessage);
+    // Adds an already-uploaded video (its bytes are in the project at `logicalPath`) to the project's asset
+    // list and puts a clip for it on the track. Fast; message thread.
+    int addImportedVideoToTracker(const juce::File& sourceFile, const juce::String& logicalPath, juce::int64 fileSize,
+                                  const cs::VideoStreamInfo& info, int targetTrack, double startSeconds,
+                                  juce::String& errorMessage);
     void importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    void importVideoFilesSequentially(juce::StringArray filePaths, int index, int trackIndex, double startSeconds);
+    void runVideoImport(juce::StringArray filePaths, int trackIndex, double startSeconds);
+    // The window for whatever long action is running (import, ...): progress bar, status line, Cancel.
+    std::unique_ptr<ProgressTask> progressTask;
     std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
     void resolveTrackerClipAssetFiles();
     void launchTutorialItem(const ContentPanel::TutorialItem& item);
