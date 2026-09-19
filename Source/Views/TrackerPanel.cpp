@@ -210,9 +210,6 @@ TrackerPanel::TrackerPanel()
     };
     addAndMakeVisible(keySelector);
 
-    arrangementMenuButton.onClick = [this] { showArrangementMenu(); };
-    arrangementMenuButton.setTooltip("Save or load this set of tracks as a named project asset");
-    addAndMakeVisible(arrangementMenuButton);
 
     snapToggleButton.setClickingTogglesState(true);
     snapToggleButton.setToggleState(true, juce::dontSendNotification);
@@ -689,12 +686,16 @@ void TrackerPanel::paint(juce::Graphics& g)
 void TrackerPanel::resized()
 {
     auto area = getLocalBounds().reduced(22, 18);
-    auto header = area.removeFromTop(120);
-    auto controls = header.removeFromRight(420);
+    // In a narrow panel the snap/grid/pitch-pipe controls drop to a row of their own under the info row instead
+    // of taking the right-hand 420 px and squeezing the timing boxes to nothing.
+    const bool narrow = area.getWidth() < 980;
+    auto header = area.removeFromTop(narrow ? 142 : 120);
+    auto controls = narrow ? juce::Rectangle<int>() : header.removeFromRight(420);
     titleLabel.setBounds(header.removeFromTop(32));
     hintLabel.setBounds(header.removeFromTop(24));
     auto infoRow = header.removeFromTop(32);
-    selectionLabel.setBounds(infoRow.removeFromLeft(180));
+    constexpr int fixedInfoWidth = 92 + 62 + 6 + 52 + 6 + 72;
+    selectionLabel.setBounds(infoRow.removeFromLeft(juce::jlimit(60, 180, infoRow.getWidth() - fixedInfoWidth)));
     timingLabel.setBounds(infoRow.removeFromLeft(92));
     bpmEditor.setBounds(infoRow.removeFromLeft(62));
     infoRow.removeFromLeft(6);
@@ -706,16 +707,28 @@ void TrackerPanel::resized()
     // in the blank timeline area, and Remove Track lives behind the per-track "..." menu, both
     // matching the clip context-menu pattern so no destructive/structural action sits adjacent
     // to frequently-clicked buttons and gets mis-hit.
-    auto trackButtons = controls.removeFromTop(32);
-    arrangementMenuButton.setBounds(trackButtons.removeFromLeft(110));
-    trackButtons.removeFromLeft(10);
+    constexpr int pitchPipePadding = 8;
+    juce::Rectangle<int> trackButtons;
+    juce::Rectangle<int> pitchPipeOuter;
+    if (narrow)
+    {
+        header.removeFromTop(6);
+        auto row = header.removeFromTop(44);
+        trackButtons = row.removeFromLeft(166).withTrimmedTop(6).withHeight(32);
+        row.removeFromLeft(16);
+        pitchPipeOuter = row.removeFromLeft(pitchPipePadding * 2 + 70 + 6 + 60 + 6 + 70);
+    }
+    else
+    {
+        trackButtons = controls.removeFromTop(32);
+        controls.removeFromTop(8);
+        pitchPipeOuter = controls.removeFromTop(28 + pitchPipePadding * 2);
+    }
+
     snapToggleButton.setBounds(trackButtons.removeFromLeft(70));
     trackButtons.removeFromLeft(6);
     gridResolutionCombo.setBounds(trackButtons.removeFromLeft(90));
 
-    controls.removeFromTop(8);
-    constexpr int pitchPipePadding = 8;
-    auto pitchPipeOuter = controls.removeFromTop(28 + pitchPipePadding * 2);
     pitchPipeGroupBounds = pitchPipeOuter;
     auto pitchPipeRow = pitchPipeOuter.reduced(pitchPipePadding, pitchPipePadding);
     pitchPipeNoteCombo.setBounds(pitchPipeRow.removeFromLeft(70));
@@ -1114,20 +1127,25 @@ void TrackerPanel::commitTimingEdits()
         onKeyChanged(keySelector.getText());
 }
 
-void TrackerPanel::showArrangementMenu()
+void TrackerPanel::promptSaveArrangement()
 {
-    auto defaultName = currentArrangementName.isNotEmpty() ? currentArrangementName : juce::String("Arrangement");
-    creation::ui::showNamedAssetSaveLoadMenu(arrangementMenuButton, "Arrangement", defaultName,
-        [this](const juce::String& name)
-        {
-            if (onArrangementSaveRequested)
-                onArrangementSaveRequested(name);
-        },
-        [this]
-        {
-            if (onArrangementLoadRequested)
-                onArrangementLoadRequested();
-        });
+    const auto defaultName = currentArrangementName.isNotEmpty() ? currentArrangementName : juce::String("Arrangement");
+
+    auto* prompt = new juce::AlertWindow("Save Arrangement", "Enter a name for this arrangement:", juce::MessageBoxIconType::QuestionIcon);
+    prompt->addTextEditor("name", defaultName);
+    prompt->addButton("Save", 1);
+    prompt->addButton("Cancel", 0);
+
+    prompt->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<TrackerPanel>(this), prompt](int result)
+    {
+        std::unique_ptr<juce::AlertWindow> dialog(prompt);
+        if (result != 1 || safe == nullptr)
+            return;
+
+        const auto name = dialog->getTextEditorContents("name").trim();
+        if (name.isNotEmpty() && safe->onArrangementSaveRequested)
+            safe->onArrangementSaveRequested(name);
+    }), true);
 }
 
 void TrackerPanel::setCurrentArrangementName(const juce::String& name)

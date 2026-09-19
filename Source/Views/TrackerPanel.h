@@ -84,6 +84,9 @@ public:
     // ProjectAssetService::saveGeneratedAsset mechanism -- see the Arrangement toolbar button.
     std::function<void(const juce::String& name)> onArrangementSaveRequested;
     std::function<void()> onArrangementLoadRequested;
+    // File menu: ask for a name (pre-filled with the current arrangement's) and save under it / pick one to load.
+    void promptSaveArrangement();
+    void requestLoadArrangement() { if (onArrangementLoadRequested) onArrangementLoadRequested(); }
 
     // The display name of whichever arrangement is currently active in this project (last
     // saved or loaded), so re-saving defaults to that name instead of always prompting fresh.
@@ -431,7 +434,6 @@ private:
     juce::TextEditor bpmEditor;
     juce::TextEditor timeSignatureEditor;
     juce::ComboBox keySelector;
-    juce::TextButton arrangementMenuButton { "Save/Load" };
     juce::ComboBox pitchPipeNoteCombo;
     juce::ComboBox pitchPipeOctaveCombo;
     juce::TextButton pitchPipePlayButton { "Play" };
@@ -451,6 +453,5 @@ private:
     void refreshSelectionLabel();
     void refreshTimelineScrollBar();
     void commitTimingEdits();
-    void showArrangementMenu();
 };
 

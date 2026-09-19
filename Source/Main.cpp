@@ -54,6 +54,7 @@ private:
             setIcon(creation::ui::getSuiteLogoImage(creation::ui::SuiteLogoId::station));
             setUsingNativeTitleBar(true);
             setResizable(true, true);
+            setResizeLimits(920, 560, 10000, 10000); // below this even the icon-only header would not fit
             setContentOwned(new MainComponent(std::move(startupProgressCallback)), true);
             centreWithSize(1400, 900);
             setVisible(true);
