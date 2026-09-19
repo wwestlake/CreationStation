@@ -24,6 +24,12 @@ bool LiteSemRagApiClient::readJsonResponse(const juce::String& url,
     if (body.isNotEmpty())
         targetUrl = targetUrl.withPOSTData(body);
 
+    // A body here is always JSON. Without an explicit Content-Type, JUCE sends it as form data and the
+    // service rejects it with HTTP 415 (Unsupported Media Type) - which is what the app-context sync showed at launch.
+    auto requestHeaders = buildAuthHeaders(bearerToken);
+    if (body.isNotEmpty())
+        requestHeaders += "Content-Type: application/json\r\n";
+
     auto parameterHandling = (httpVerb == "GET" && body.isEmpty())
         ? juce::URL::ParameterHandling::inAddress
         : juce::URL::ParameterHandling::inPostData;
@@ -32,7 +38,7 @@ bool LiteSemRagApiClient::readJsonResponse(const juce::String& url,
                                                   .withHttpRequestCmd(httpVerb)
                                                   .withConnectionTimeoutMs(15000)
                                                   .withStatusCode(&statusCode)
-                                                  .withExtraHeaders(buildAuthHeaders(bearerToken)));
+                                                  .withExtraHeaders(requestHeaders));
 
     if (stream == nullptr)
     {

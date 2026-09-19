@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <JuceHeader.h>
 #include <array>
 #include <vector>
@@ -38,7 +39,11 @@
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ContentPanel.h"
+#include "Views/ProgressTask.h"
+#include "Video/VideoPreviewComponent.h"
+#include "Video/VideoScrubPreview.h"
 #include "Views/RenderDialog.h"
+#include "Views/ToastMessage.h"
 #include "Views/DslPanel.h"
 #include "Views/GraphPanel.h"
 #include "Views/MidiEditorPanel.h"
@@ -284,6 +289,22 @@ private:
     // Rendered WAV file for each Signal clip's source patch asset, so playback-target builds (which
     // run on every scrub) don't hit the VFS. Cleared whenever a patch is saved.
     std::map<juce::String, juce::File> signalRenderFiles;
+
+    // Video. The picture is a dock panel (dock it, float it, resize it); the sound is the video's own audio
+    // track, decoded once to a WAV so it plays through the clip's mixer track like any other audio clip.
+    cs::VideoPreviewComponent videoView;
+    cs::VideoScrubPreview videoScrub;
+    juce::String lastVideoRequestKey;
+    std::map<juce::String, juce::File> videoAudioFiles; // asset id -> local WAV of that video's sound
+    std::set<juce::String> videosWithoutAudio;          // asset ids whose video has no sound track
+    void updateVideoView(double timelineSeconds);
+    void openVideoViewForPlayback();
+    bool videoClipsNeedAudio() const;
+    // Makes sure every video clip's sound is ready (extracting and caching it in the project when it is not),
+    // in a progress window. Returns false when nothing needed doing.
+    bool prepareVideoAudio(std::function<void()> whenDone = {});
+    juce::File getVideoAudioFolder() const;
+    static juce::String videoAudioCachePath(const juce::String& assetId);
     // Parsed patch (and its content key) for each Signal clip's patch asset, so timeline refreshes
     // don't re-fetch it from the VFS. Cleared whenever a patch is saved.
     std::map<juce::String, std::pair<juce::String, cw::PatchDocument>> signalPatchDocs;
@@ -403,6 +424,17 @@ private:
                              const juce::String& displayName, creation::assets::AssetDescriptor& savedAsset,
                              juce::String& errorMessage);
     void toggleProjectAssetPreview(const creation::assets::AssetDescriptor& asset);
+    // Errors get a dialog with room to read them, a Close button and a Copy button - not the header's small
+    // status label. Errors that arrive while a dialog is open are collected into the next one, so a burst
+    // (say, importing several files that all fail) is one dialog rather than a stack of them.
+    void reportError(const juce::String& message);
+    // Anything that is not an error (confirmations, "stop playback first", ...): a readable message that
+    // clears itself, instead of the header's small status label, which is gone.
+    void showToast(const juce::String& message);
+    ToastMessage toast;
+    void showPendingErrors();
+    juce::StringArray pendingErrors;
+    bool errorDialogShowing = false;
     juce::String previewingProjectAssetId;
     void pushTimelineUndoState();
     void pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit);
@@ -560,10 +592,15 @@ private:
                                  const juce::String& sourceTool,
                                  juce::String& errorMessage);
     bool importAudioFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    int placeVideoAssetOnTracker(const juce::File& sourceFile, const cs::VideoStreamInfo& info,
-                                 int targetTrack, double startSeconds, juce::String& errorMessage);
+    // Adds an already-uploaded video (its bytes are in the project at `logicalPath`) to the project's asset
+    // list and puts a clip for it on the track. Fast; message thread.
+    int addImportedVideoToTracker(const juce::File& sourceFile, const juce::String& assetId, const juce::String& logicalPath, juce::int64 fileSize,
+                                  const cs::VideoStreamInfo& info, int targetTrack, double startSeconds,
+                                  juce::String& errorMessage);
     void importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    void importVideoFilesSequentially(juce::StringArray filePaths, int index, int trackIndex, double startSeconds);
+    void runVideoImport(juce::StringArray filePaths, int trackIndex, double startSeconds);
+    // The window for whatever long action is running (import, ...): progress bar, status line, Cancel.
+    std::unique_ptr<ProgressTask> progressTask;
     std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
     void resolveTrackerClipAssetFiles();
     void launchTutorialItem(const ContentPanel::TutorialItem& item);

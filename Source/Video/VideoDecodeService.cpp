@@ -203,15 +203,22 @@ bool VideoDecodeService::isOpen() const noexcept
 VideoStreamInfo VideoDecodeService::open(const juce::File& file)
 {
     close();
+    lastError = {};
 
     ScopedComInitializer comInit;
     auto* shared = getSharedD3D();
     if (shared == nullptr)
+    {
+        lastError = "the video decoder could not start a Direct3D 11 GPU device";
         return {};
+    }
 
     ComPtr<IMFAttributes> attributes;
     if (FAILED(MFCreateAttributes(attributes.address(), 3)))
+    {
+        lastError = "Windows Media Foundation could not be set up";
         return {};
+    }
 
     attributes->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, shared->deviceManager.get());
     attributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
@@ -220,24 +227,34 @@ VideoStreamInfo VideoDecodeService::open(const juce::File& file)
     ComPtr<IMFSourceReader> reader;
     auto hr = MFCreateSourceReaderFromURL(file.getFullPathName().toWideCharPointer(), attributes.get(), reader.address());
     if (FAILED(hr))
+    {
+        lastError = "Windows could not open the file (error 0x" + juce::String::toHexString((juce::uint32) hr).paddedLeft('0', 8)
+                  + "); this container or codec may not be installed (MKV, WebM and HEVC often need extra codecs)";
         return {};
+    }
 
     // Ask for NV12 explicitly on the video stream. Without this the reader is free to pick its
     // own default output type (often a software-converted RGB32), which would silently defeat
     // the whole point of keeping decoded frames as GPU-resident NV12 textures.
     bool hasVideo = false;
+    HRESULT nv12Result = E_FAIL;
     {
         ComPtr<IMFMediaType> videoType;
         if (SUCCEEDED(MFCreateMediaType(videoType.address())))
         {
             videoType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
             videoType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
-            hasVideo = SUCCEEDED(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, videoType.get()));
+            nv12Result = reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, videoType.get());
+            hasVideo = SUCCEEDED(nv12Result);
         }
     }
 
     if (! hasVideo)
+    {
+        lastError = "the file has no video stream Windows can decode to the GPU (NV12 was refused, error 0x"
+                  + juce::String::toHexString((juce::uint32) nv12Result).paddedLeft('0', 8) + ")";
         return {};
+    }
 
     reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
 

@@ -23,6 +23,8 @@ public:
     void setTutorialItems(const juce::Array<TutorialItem>& newItems);
     void setStoragePath(const juce::String& path);
     void setStatusText(const juce::String& text);
+    // A status message that reads as an error goes here instead of the panel's small label.
+    std::function<void(const juce::String& message)> onErrorStatus;
     void setAuthState(bool isSignedIn, bool isAdmin);
 
     std::function<void()> onRefreshRequested;

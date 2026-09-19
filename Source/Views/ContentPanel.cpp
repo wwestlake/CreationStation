@@ -1,3 +1,4 @@
+#include <creation/ui/CreationSuiteHeaderBar.h>
 #include "ContentPanel.h"
 
 namespace
@@ -130,7 +131,8 @@ void ContentPanel::ProjectAssetCard::setAsset(const creation::assets::AssetDescr
     asset = newAsset;
     const auto isPlaceable = asset.kind == creation::assets::AssetKind::audio || 
                              asset.kind == creation::assets::AssetKind::render || 
-                             asset.kind == creation::assets::AssetKind::patch;
+                             asset.kind == creation::assets::AssetKind::patch ||
+                             asset.kind == creation::assets::AssetKind::video;
     placeButton.setVisible(isPlaceable);
     exportButton.setVisible(asset.kind == creation::assets::AssetKind::audio || asset.kind == creation::assets::AssetKind::render);
     previewButton.setVisible(asset.kind == creation::assets::AssetKind::audio || asset.kind == creation::assets::AssetKind::render);
@@ -422,6 +424,12 @@ void ContentPanel::setStoragePath(const juce::String& path)
 
 void ContentPanel::setStatusText(const juce::String& text)
 {
+    if (onErrorStatus && CreationSuiteHeaderBar::statusTextIsError(text))
+    {
+        onErrorStatus(text);
+        return;
+    }
+
     statusLabel.setText(text, juce::dontSendNotification);
 }
 
