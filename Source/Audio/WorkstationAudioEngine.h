@@ -52,6 +52,21 @@ public:
         double durationSeconds = 0.0;
     };
 
+    // A Signal clip scheduled for live playback: the clip's patch is run in real time by its own
+    // PatchLiveVoice (never baked to a WAV), so its inputs can be changed while it plays. `patchKey`
+    // identifies the patch content - a clip whose key is unchanged keeps its running voice across
+    // timeline refreshes, and a changed key (the patch was re-saved) gets a freshly built voice.
+    struct SignalClipTarget
+    {
+        juce::String clipId;
+        juce::String patchKey;
+        int trackIndex = -1;
+        double startSeconds = 0.0;
+        double sourceStartSeconds = 0.0;
+        double durationSeconds = 0.0;
+        cw::PatchDocument patch;
+    };
+
     // A MIDI clip scheduled for real-time playback: notes are delivered live, sample-accurately,
     // through the same injection path as a live MIDI keyboard - not offline-rendered. This is the
     // safe alternative to bouncing through the instrument plugin ahead of time (which crashed at
@@ -96,6 +111,8 @@ public:
     bool previewAssetFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
     bool previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer, double sampleRate, juce::String& errorMessage);
     bool setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets, juce::String& errorMessage);
+    // Message thread. Replaces the set of live Signal clips; see SignalClipTarget.
+    bool setTrackerSignalClips(const juce::Array<SignalClipTarget>& targets, juce::String& errorMessage);
     void setTrackerMidiClips(const juce::Array<MidiPlaybackClip>& clips);
 
     // Message-thread-safe: queues an immediate note on/off for one specific track's instrument,
@@ -739,6 +756,26 @@ private:
     MasterOutputSource masterOutputSource;
     juce::OwnedArray<TrackChannelSource> tracks;
     std::atomic<std::shared_ptr<const TrackRoutingInfo>> cachedTrackRouting;
+
+    // One Signal clip placed on the timeline. Immutable once published; the PatchLiveVoice it
+    // points at holds the running DSP state and is only ever touched by the audio thread once
+    // published (voices are shared across consecutive sets when a clip's patch is unchanged).
+    struct SignalClipPlacement
+    {
+        juce::String clipId;
+        juce::String patchKey;
+        int trackIndex = -1;
+        double sampleRate = 0.0;
+        int64 startSample = 0;
+        int64 lengthSamples = 0;
+        int64 sourceStartSample = 0;
+        std::shared_ptr<PatchLiveVoice> voice;
+    };
+    using SignalClipSet = std::vector<SignalClipPlacement>;
+    std::atomic<std::shared_ptr<const SignalClipSet>> signalClips;
+    // Message thread only: keeps the last two replaced sets alive so the audio thread is never the
+    // one to drop the final reference (and free a voice) inside the audio callback.
+    std::shared_ptr<const SignalClipSet> retiredSignalClips[2];
     std::vector<MidiPlaybackClip> scheduledMidiClips;
     juce::CriticalSection scheduledMidiClipsLock;
     struct AuditionRequest { int trackIndex = -1; int pitch = 60; int velocity = 100; bool noteOn = true; };

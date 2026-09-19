@@ -2618,6 +2618,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         refreshContentLibrary();
         // Any Signal clip built from this patch must be re-rendered from the new patch content.
         signalRenderFiles.clear();
+        signalPatchDocs.clear();
         refreshTrackerPlaybackClips();
         saveSessionToDisk(true);
         transportBar.setStatusText("Saved Signal Lab design asset: " + patchAsset.displayName);
@@ -8813,7 +8814,7 @@ bool MainComponent::prepareTrackerPlayback()
     double lastClipEnd = 0.0;
     juce::String errorMessage;
 
-    if (! buildTrackerPlaybackTargets(targets, lastClipEnd, errorMessage))
+    if (! buildTrackerPlaybackTargets(targets, lastClipEnd, errorMessage, false))
     {
         transportBar.setStatusText(errorMessage);
         return false;
@@ -8825,13 +8826,21 @@ bool MainComponent::prepareTrackerPlayback()
         return false;
     }
 
+    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+    juce::String signalError;
+    buildSignalClipTargets(signalTargets, signalError);
+    engine.setTrackerSignalClips(signalTargets, signalError);
+    if (signalError.isNotEmpty())
+        transportBar.setStatusText(signalError);
+
     refreshMidiPlaybackClips();
 
     // Play always starts from wherever the playhead currently is - no auto-snap to the
     // first clip. (Previously this reset the transport position whenever it was at or past
     // the last clip's end, which silently discarded the user's chosen playhead position -
     // including immediately before recording, since onRecord also flows through here.)
-    transportBar.setStatusText("Tracker playback ready: " + juce::String(targets.size()) + " clip(s).");
+    if (signalError.isEmpty())
+        transportBar.setStatusText("Tracker playback ready: " + juce::String(targets.size() + signalTargets.size()) + " clip(s).");
     return true;
 }
 
@@ -8845,10 +8854,15 @@ void MainComponent::refreshTrackerPlaybackClips()
     juce::Array<WorkstationAudioEngine::PlaybackClipTarget> targets;
     double lastClipEnd = 0.0;
     juce::String errorMessage;
-    buildTrackerPlaybackTargets(targets, lastClipEnd, errorMessage);
+    buildTrackerPlaybackTargets(targets, lastClipEnd, errorMessage, false);
 
     juce::String engineError;
     engine.setTrackerPlaybackClips(targets, engineError);
+
+    juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+    juce::String signalError;
+    buildSignalClipTargets(signalTargets, signalError);
+    engine.setTrackerSignalClips(signalTargets, signalError);
 
     refreshMidiPlaybackClips();
 }
@@ -8875,7 +8889,8 @@ void MainComponent::refreshMidiPlaybackClips()
 
 bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                                 double& durationSeconds,
-                                                juce::String& errorMessage)
+                                                juce::String& errorMessage,
+                                                bool includeSignalClips)
 {
     targets.clear();
     durationSeconds = 0.0;
@@ -8892,6 +8907,13 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
             // one real-world plugin (a sample-streaming drum sampler) crashes reliably under
             // that load - confirmed by an identical crash signature to the earlier idle-audio
             // instability. Disabled until a safer rendering approach exists; see task #7.
+            continue;
+        }
+
+        if (clip.kind == cs::ClipKind::signal && ! includeSignalClips)
+        {
+            // Run live by the engine instead (buildSignalClipTargets); it still sets how long the timeline is.
+            durationSeconds = juce::jmax(durationSeconds, clip.startSeconds + clip.durationSeconds);
             continue;
         }
 
@@ -9026,10 +9048,72 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
         durationSeconds = juce::jmax(durationSeconds, clip.startSeconds + clip.durationSeconds);
     }
 
-    if (targets.isEmpty())
+    if (targets.isEmpty() && durationSeconds <= 0.0)
     {
         errorMessage = "No recorded or rendered clips are available.";
         return false;
+    }
+
+    return true;
+}
+
+bool MainComponent::buildSignalClipTargets(juce::Array<WorkstationAudioEngine::SignalClipTarget>& targets,
+                                           juce::String& errorMessage)
+{
+    targets.clear();
+
+    for (const auto& clip : timelineModel.getClips())
+    {
+        if (clip.recording || clip.kind != cs::ClipKind::signal)
+            continue;
+
+        WorkstationAudioEngine::SignalClipTarget target;
+        target.clipId = clip.id;
+        target.trackIndex = clip.trackIndex;
+        target.startSeconds = clip.startSeconds;
+        target.sourceStartSeconds = clip.sourceStartSeconds;
+        target.durationSeconds = clip.durationSeconds;
+
+        auto cached = clip.assetId.isNotEmpty() ? signalPatchDocs.find(clip.assetId) : signalPatchDocs.end();
+        if (cached != signalPatchDocs.end())
+        {
+            target.patchKey = cached->second.first;
+            target.patch = cached->second.second;
+        }
+        else
+        {
+            // The project's asset is the source of truth (clip.file is only a local copy made at
+            // load and goes stale once the patch is re-saved); fall back to it for asset-less clips.
+            juce::String patchText, matError;
+            if (clip.assetId.isNotEmpty())
+            {
+                auto assetOpt = resolveTimelineClipAsset(clip);
+                creation::assets::MaterializedAssetLease lease;
+                if (assetOpt.has_value()
+                    && projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
+                                                       creation::assets::MaterializationAccess::readOnly,
+                                                       lease, matError))
+                    patchText = lease.materializedFile.loadFileAsString();
+            }
+
+            if (patchText.isEmpty() && clip.file.existsAsFile())
+                patchText = clip.file.loadFileAsString();
+
+            if (patchText.isEmpty())
+                continue;
+
+            if (! cw::parsePatchDocumentJson(patchText, target.patch, matError))
+            {
+                errorMessage = "Signal clip \"" + clip.displayName + "\" could not be read: " + matError;
+                continue;
+            }
+
+            target.patchKey = juce::String::toHexString(patchText.hashCode64());
+            if (clip.assetId.isNotEmpty())
+                signalPatchDocs[clip.assetId] = { target.patchKey, target.patch };
+        }
+
+        targets.add(std::move(target));
     }
 
     return true;

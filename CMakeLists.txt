@@ -653,6 +653,31 @@ target_link_libraries(StationFrustIntegrationSmoke PRIVATE
     node_system
 )
 
+# Automated checks for PatchLiveVoice::renderAt() -- the entry point that runs a Signal clip's
+# patch live on the timeline. Needs no audio hardware; exit code 0 = pass.
+juce_add_console_app(SignalClipLiveSmoke PRODUCT_NAME "SignalClipLiveSmoke")
+juce_generate_juce_header(SignalClipLiveSmoke)
+target_sources(SignalClipLiveSmoke PRIVATE
+    tests/SignalClipLiveSmoke.cpp
+    Source/Audio/PatchLiveVoice.cpp
+    Source/Audio/PatchRuntimePlayer.cpp
+    Source/Patch/PatchModel.cpp
+)
+target_include_directories(SignalClipLiveSmoke PRIVATE Source)
+target_compile_definitions(SignalClipLiveSmoke PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
+)
+target_link_libraries(SignalClipLiveSmoke PRIVATE
+    creation_suite_frust_plugin_runtime
+    juce::juce_dsp
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
 install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "DjehutiStation")

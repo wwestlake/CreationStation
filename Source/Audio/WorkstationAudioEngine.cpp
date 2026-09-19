@@ -1041,6 +1041,32 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
             renderedAnyClip = true;
         }
 
+        // Live Signal clips: each clip's own PatchLiveVoice renders straight into this track's
+        // buffer at the patch position the transport implies, so play/loop/scrub decide what is heard.
+        if (auto liveSignalClips = owner.signalClips.load())
+        {
+            for (const auto& placement : *liveSignalClips)
+            {
+                if (placement.trackIndex != trackIndex || placement.voice == nullptr)
+                    continue;
+
+                const auto clipStart = placement.startSample;
+                const auto clipEnd = placement.startSample + placement.lengthSamples;
+
+                if (clipEnd <= blockStart || clipStart >= blockEnd)
+                    continue;
+
+                const auto overlapStart = juce::jmax<int64>(clipStart, blockStart);
+                const auto overlapEnd = juce::jmin<int64>(clipEnd, blockEnd);
+
+                placement.voice->renderAt(placement.sourceStartSample + (overlapStart - clipStart),
+                                          destination,
+                                          (int) (overlapStart - blockStart),
+                                          (int) (overlapEnd - overlapStart));
+                renderedAnyClip = true;
+            }
+        }
+
         return renderedAnyClip;
     };
 
@@ -2251,6 +2277,59 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
     }
 
     arrangementSource.setClips(std::move(clips));
+    return true;
+}
+
+bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipTarget>& targets, juce::String& errorMessage)
+{
+    const auto previous = signalClips.load();
+    auto next = std::make_shared<SignalClipSet>();
+
+    for (const auto& target : targets)
+    {
+        if (target.durationSeconds <= 0.0)
+            continue;
+
+        std::shared_ptr<PatchLiveVoice> voice;
+        if (previous != nullptr)
+        {
+            for (const auto& existing : *previous)
+            {
+                if (existing.clipId == target.clipId && existing.patchKey == target.patchKey && existing.sampleRate == graphSampleRate)
+                {
+                    voice = existing.voice;
+                    break;
+                }
+            }
+        }
+
+        if (voice == nullptr)
+        {
+            voice = std::make_shared<PatchLiveVoice>();
+            voice->prepareToPlay(graphBlockSize, graphSampleRate);
+            voice->rebuild(target.patch, PatchLiveBindingMap {});
+            voice->setPatchDurationSeconds(target.patch.durationSeconds > 0.0 ? target.patch.durationSeconds : 5.0);
+            voice->setOutputScale(1.0f); // match the offline render exactly; 0.9 is only Signal Lab's preview headroom
+            voice->adoptPublishedGraphNow();
+        }
+
+        SignalClipPlacement placement;
+        placement.clipId = target.clipId;
+        placement.patchKey = target.patchKey;
+        placement.trackIndex = target.trackIndex;
+        placement.sampleRate = graphSampleRate;
+        placement.startSample = (int64) std::llround(target.startSeconds * graphSampleRate);
+        placement.lengthSamples = (int64) std::llround(target.durationSeconds * graphSampleRate);
+        placement.sourceStartSample = (int64) std::llround(target.sourceStartSeconds * graphSampleRate);
+        placement.voice = std::move(voice);
+        next->push_back(std::move(placement));
+    }
+
+    retiredSignalClips[1] = std::move(retiredSignalClips[0]);
+    retiredSignalClips[0] = previous;
+    signalClips.store(std::move(next));
+
+    juce::ignoreUnused(errorMessage);
     return true;
 }
 
