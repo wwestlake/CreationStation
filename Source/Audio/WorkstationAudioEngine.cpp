@@ -1342,6 +1342,21 @@ void WorkstationAudioEngine::applyAutomationForBlock(double blockStartSeconds)
                 setTrackPluginBypassedRealtime(target.targetTrackIndex, target.pluginSlotIndex, value >= 0.5f);
                 break;
 
+            case cs::AutomationTargetKind::signalClipInput:
+                // Replace, not modulate: the lane's value becomes the clip's variable value for this block.
+                if (auto liveSignalClips = signalClips.load())
+                {
+                    for (const auto& placement : *liveSignalClips)
+                    {
+                        if (placement.voice != nullptr && placement.clipId == target.targetClipId)
+                        {
+                            placement.voice->setVariableValue(target.parameterId, value);
+                            break;
+                        }
+                    }
+                }
+                break;
+
             case cs::AutomationTargetKind::none:
             default:
                 break;

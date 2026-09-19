@@ -9057,6 +9057,49 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
     return true;
 }
 
+bool MainComponent::loadSignalClipPatch(const cs::TimelineClip& clip, cw::PatchDocument& patch, juce::String& patchKey, juce::String& errorMessage)
+{
+    auto cached = clip.assetId.isNotEmpty() ? signalPatchDocs.find(clip.assetId) : signalPatchDocs.end();
+    if (cached != signalPatchDocs.end())
+    {
+        patchKey = cached->second.first;
+        patch = cached->second.second;
+        return true;
+    }
+
+    // The project's asset is the source of truth (clip.file is only a local copy made at
+    // load and goes stale once the patch is re-saved); fall back to it for asset-less clips.
+    juce::String patchText, matError;
+    if (clip.assetId.isNotEmpty())
+    {
+        auto assetOpt = resolveTimelineClipAsset(clip);
+        creation::assets::MaterializedAssetLease lease;
+        if (assetOpt.has_value()
+            && projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
+                                               creation::assets::MaterializationAccess::readOnly,
+                                               lease, matError))
+            patchText = lease.materializedFile.loadFileAsString();
+    }
+
+    if (patchText.isEmpty() && clip.file.existsAsFile())
+        patchText = clip.file.loadFileAsString();
+
+    if (patchText.isEmpty())
+        return false;
+
+    if (! cw::parsePatchDocumentJson(patchText, patch, matError))
+    {
+        errorMessage = "Signal clip \"" + clip.displayName + "\" could not be read: " + matError;
+        return false;
+    }
+
+    patchKey = juce::String::toHexString(patchText.hashCode64());
+    if (clip.assetId.isNotEmpty())
+        signalPatchDocs[clip.assetId] = { patchKey, patch };
+
+    return true;
+}
+
 bool MainComponent::buildSignalClipTargets(juce::Array<WorkstationAudioEngine::SignalClipTarget>& targets,
                                            juce::String& errorMessage)
 {
@@ -9074,44 +9117,8 @@ bool MainComponent::buildSignalClipTargets(juce::Array<WorkstationAudioEngine::S
         target.sourceStartSeconds = clip.sourceStartSeconds;
         target.durationSeconds = clip.durationSeconds;
 
-        auto cached = clip.assetId.isNotEmpty() ? signalPatchDocs.find(clip.assetId) : signalPatchDocs.end();
-        if (cached != signalPatchDocs.end())
-        {
-            target.patchKey = cached->second.first;
-            target.patch = cached->second.second;
-        }
-        else
-        {
-            // The project's asset is the source of truth (clip.file is only a local copy made at
-            // load and goes stale once the patch is re-saved); fall back to it for asset-less clips.
-            juce::String patchText, matError;
-            if (clip.assetId.isNotEmpty())
-            {
-                auto assetOpt = resolveTimelineClipAsset(clip);
-                creation::assets::MaterializedAssetLease lease;
-                if (assetOpt.has_value()
-                    && projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
-                                                       creation::assets::MaterializationAccess::readOnly,
-                                                       lease, matError))
-                    patchText = lease.materializedFile.loadFileAsString();
-            }
-
-            if (patchText.isEmpty() && clip.file.existsAsFile())
-                patchText = clip.file.loadFileAsString();
-
-            if (patchText.isEmpty())
-                continue;
-
-            if (! cw::parsePatchDocumentJson(patchText, target.patch, matError))
-            {
-                errorMessage = "Signal clip \"" + clip.displayName + "\" could not be read: " + matError;
-                continue;
-            }
-
-            target.patchKey = juce::String::toHexString(patchText.hashCode64());
-            if (clip.assetId.isNotEmpty())
-                signalPatchDocs[clip.assetId] = { target.patchKey, target.patch };
-        }
+        if (! loadSignalClipPatch(clip, target.patch, target.patchKey, errorMessage))
+            continue;
 
         targets.add(std::move(target));
     }
@@ -10016,6 +10023,50 @@ void MainComponent::showAutomationTargetPicker(int trackIndex)
             }
 
             trackMenu.addSubMenu(pluginNames[slotIndex], pluginMenu);
+        }
+
+        // Each Signal clip on this track offers its Public variables. Only Public ones are settable from
+        // outside the graph; Float gets a continuous lane and Bool a toggle lane (Int has no range in the
+        // patch yet, so it is not offered).
+        for (const auto& clip : timelineModel.getClips())
+        {
+            if (clip.recording || clip.kind != cs::ClipKind::signal || clip.trackIndex != otherIndex)
+                continue;
+
+            cw::PatchDocument clipPatch;
+            juce::String clipPatchKey, clipPatchError;
+            if (! loadSignalClipPatch(clip, clipPatch, clipPatchKey, clipPatchError))
+                continue;
+
+            juce::PopupMenu clipMenu;
+            int offered = 0;
+            for (const auto& variable : clipPatch.variables)
+            {
+                if (! variable.isPublic || (variable.valueType != "Float" && variable.valueType != "Bool"))
+                    continue;
+
+                cs::AutomationTarget target;
+                target.kind = cs::AutomationTargetKind::signalClipInput;
+                target.targetTrackIndex = otherIndex;
+                target.targetClipId = clip.id;
+                target.parameterId = variable.id;
+                target.displayName = trackName + " \xe2\x86\x92 " + clip.displayName + " \xe2\x86\x92 " + variable.name;
+                if (variable.valueType == "Bool")
+                {
+                    target.valueMode = cs::AutomationValueMode::toggle;
+                    target.stepCount = 2;
+                }
+
+                clipMenu.addItem(nextItemId, variable.name);
+                actions->push_back({ target });
+                ++nextItemId;
+                ++offered;
+            }
+
+            if (offered > 0)
+                trackMenu.addSubMenu("Signal: " + clip.displayName, clipMenu);
+            else
+                trackMenu.addItem(-1, "Signal: " + clip.displayName + " (no public variables)", false);
         }
 
         menu.addSubMenu(trackName, trackMenu);
