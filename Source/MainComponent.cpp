@@ -4647,7 +4647,7 @@ void MainComponent::paint(juce::Graphics& g)
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
-    auto transportArea = area.removeFromTop(92);
+    auto transportArea = area.removeFromTop(118);
     transportBar.setBounds(transportArea);
 
     auto menuArea = area.removeFromTop(28);
