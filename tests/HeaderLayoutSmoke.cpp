@@ -39,7 +39,7 @@ int main()
     int widthsChecked = 0;
     for (int width = 700; width <= 2000; width += 20)
     {
-        bar.setBounds(0, 0, width, 118);
+        bar.setBounds(0, 0, width, CreationSuiteHeaderBar::preferredHeight);
         ++widthsChecked;
 
         const auto label = "width " + juce::String(width) + ": ";
@@ -57,14 +57,20 @@ int main()
             }
         };
 
+        // Two rows that never touch: the title row (utility buttons, sign-in) and the transport row (with its frame).
+        for (const auto* top : { (juce::Component*) &bar.projectButton, (juce::Component*) &bar.audioButton, (juce::Component*) &bar.signInButton })
+            for (const auto* below : { (juce::Component*) &bar.playButton, (juce::Component*) &bar.stopButton, (juce::Component*) &bar.recordButton })
+                check(top->getBottom() + 9 < below->getY(), label + "the transport row clears the title row (frame included)");
+        check(bar.playButton.getHeight() == 42, label + "the transport buttons keep their size");
+
         checkRow(utility, (int) std::size(utility), "utility");
         checkRow(transport, (int) std::size(transport), "transport");
     }
 
     // Wide window: words on the buttons; narrow window: icons (names move to the hover text).
-    bar.setBounds(0, 0, 1800, 118);
+    bar.setBounds(0, 0, 1800, CreationSuiteHeaderBar::preferredHeight);
     check(! bar.projectButton.isCompact() && ! bar.audioButton.isCompact(), "a wide bar keeps the words on its buttons");
-    bar.setBounds(0, 0, 700, 118);
+    bar.setBounds(0, 0, 700, CreationSuiteHeaderBar::preferredHeight);
     check(bar.projectButton.isCompact() && bar.audioButton.isCompact(), "a narrow bar shows icons");
 
     std::printf("%s (%d widths checked, %d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", widthsChecked, failures, failures == 1 ? "" : "s");
