@@ -7468,7 +7468,8 @@ int MainComponent::placeVideoAssetOnTracker(const juce::File& sourceFile, const 
 
     if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
     {
-        errorMessage = "Could not import: " + sourceFile.getFileName();
+        errorMessage = "Could not import: " + sourceFile.getFileName()
+                       + (projectSession.getLastWriteError().isNotEmpty() ? " - " + projectSession.getLastWriteError() : juce::String());
         return -1;
     }
 
