@@ -4351,7 +4351,8 @@ void SignalLabPanel::removeSelectedGraphNode()
         // the array directly rather than gated off by a flag.
         if (type == "sine" || type == "saw" || type == "square" || type == "triangle" || type == "noise"
             || type == "filter" || type == "envelope" || type == "midiFader" || type == "midiButton"
-            || type == "crossfade" || type == "router" || type == "sampleHold")
+            || type == "crossfade" || type == "router" || type == "sampleHold"
+            || type == "valueGet" || type == "valueSet" || type == "value")
             graphNodes.remove(index);
         else if (type == "mix") mixNodeEnabled = false;
         else if (type == "scope") probeSettings.scopeEnabled = false;
