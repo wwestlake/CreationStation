@@ -307,6 +307,12 @@ private:
         float previousEnvelope = 0.0f;    // Mix entity only: persistent, for the transient (rate-of-change) term
         float sampleHoldValue = 0.0f;     // SampleHold entity only: the currently-latched value
         float sampleHoldPreviousTrigger = 0.0f; // SampleHold entity only: for rising-edge detection across blocks
+        // Oscillator Source entities only. Phase is integrated sample by sample (phase += 2*pi*f/fs) instead of
+        // computed as 2*pi*f*t, so a frequency that changes mid-note (a pitch lane, or a live/automated
+        // value) bends the pitch smoothly instead of jumping the phase and clicking. resyncPhase asks the
+        // next sample to re-derive the phase from the transport position (start, loop, scrub).
+        double phase = 0.0;
+        bool resyncPhase = true;
     };
     juce::OwnedArray<RuntimeEntityState> runtimeStates; // audio-thread only
     std::shared_ptr<const EntityGraph> activeGraphForAudioThread; // audio-thread only: last graph this thread adopted
@@ -339,6 +345,7 @@ private:
     std::atomic<int64> elapsedSamples { 0 };
     std::atomic<bool> active { false };
     std::atomic<bool> finished { false };
+    std::atomic<bool> resyncPhaseRequested { false }; // set by start(); consumed by the audio thread
 
     using FrustSineFn = double (*)(double, double);
     FrustSineFn frustSine = nullptr; // shared process-wide FRust render_sine, see sharedFrustSine()

@@ -268,6 +268,7 @@ void PatchLiveVoice::start(double durationSeconds)
     totalDurationSamples.store(juce::jmax<int64>(1, (int64) std::llround(juce::jmax(0.05, durationSeconds) * sampleRate)));
     elapsedSamples.store(0);
     finished.store(false);
+    resyncPhaseRequested.store(true);
     active.store(true);
 }
 
@@ -307,6 +308,7 @@ void PatchLiveVoice::renderAt(int64 patchSamplePosition, juce::AudioBuffer<float
             state->previousEnvelope = 0.0f;
             state->sampleHoldValue = 0.0f;
             state->sampleHoldPreviousTrigger = 0.0f;
+            state->resyncPhase = true;
         }
         elapsedSamples.store(position);
     }
@@ -808,6 +810,10 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
     auto tapBlockStart = tapWritePos.load(std::memory_order_relaxed);
     bool hasAutomationLanes = ! graph.automationLanes.isEmpty();
 
+    if (resyncPhaseRequested.exchange(false))
+        for (auto* state : runtimeStates)
+            state->resyncPhase = true;
+
     for (int localSample = 0; localSample < numSamples; ++localSample)
     {
         auto absoluteSample = startElapsed + localSample;
@@ -841,7 +847,19 @@ void PatchLiveVoice::processOneBlock(const EntityGraph& graph, juce::AudioBuffer
                                                * (double) juce::jmap(weightMotion, 0.0f, 1.0f, 1.16f, 0.86f)
                                                * (double) juce::jmap(sizeMotion, 0.0f, 1.0f, 1.04f, 0.94f);
                     auto frequency = weightedBaseFrequency * std::pow(2.0, pitchSemitones / 12.0);
-                    auto phase = juce::MathConstants<double>::twoPi * frequency * ((double) absoluteSample / sampleRate);
+
+                    constexpr auto twoPi = juce::MathConstants<double>::twoPi;
+                    if (runtime.resyncPhase)
+                    {
+                        // First sample after start/loop/scrub: the phase this frequency would have reached by now.
+                        runtime.phase = std::fmod(twoPi * frequency * ((double) absoluteSample / sampleRate), twoPi);
+                        runtime.resyncPhase = false;
+                    }
+
+                    auto phase = runtime.phase;
+                    runtime.phase += twoPi * frequency / sampleRate;
+                    if (runtime.phase >= twoPi)
+                        runtime.phase = std::fmod(runtime.phase, twoPi);
 
                     float waveform = 0.0f;
                     if (entity.waveform == "sine")

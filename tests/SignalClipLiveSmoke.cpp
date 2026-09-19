@@ -31,7 +31,7 @@ void check(bool ok, const juce::String& what)
 
 // One sine oscillator, no mixer/filter/envelope nodes: rebuild() sums unconnected sources through
 // an implicit mixer, so this is the smallest valid patch.
-cw::PatchDocument makePatch()
+cw::PatchDocument makePatch(bool pitchSweep = false)
 {
     cw::PatchDocument doc;
     doc.type = "instrument";
@@ -53,14 +53,32 @@ cw::PatchDocument makePatch()
     sine.frequencyParameter = "baseFrequency";
     doc.sources.add(sine);
 
+    if (pitchSweep)
+    {
+        // Patch-internal motion: the pitch bends across the whole patch, so the oscillator's
+        // frequency changes on every sample.
+        cw::PatchAutomationLane lane;
+        lane.id = "lane_pitch";
+        lane.name = "Pitch";
+        lane.targetParameter = "pitchOffsetSemitones";
+        lane.startTime = 0.0;
+        lane.endTime = 1.0;
+        lane.rangeMin = -12.0;
+        lane.rangeMax = 12.0;
+        lane.points.add({ 0.0, 0.5, "linear" });
+        lane.points.add({ 1.0, 1.0, "linear" });
+        doc.automationLanes.add(lane);
+    }
+
     return doc;
 }
 
-std::unique_ptr<PatchLiveVoice> makeVoice()
+std::unique_ptr<PatchLiveVoice> makeVoice(const cw::PatchDocument& patch = makePatch(),
+                                          const PatchLiveBindingMap& bindings = PatchLiveBindingMap {})
 {
     auto voice = std::make_unique<PatchLiveVoice>();
     voice->prepareToPlay(kBlockSize, kSampleRate);
-    voice->rebuild(makePatch(), PatchLiveBindingMap {});
+    voice->rebuild(patch, bindings);
     voice->setPatchDurationSeconds(kPatchSeconds);
     voice->setOutputScale(1.0f); // as the engine does for a timeline clip voice
     voice->adoptPublishedGraphNow();
@@ -99,6 +117,24 @@ double rms(const juce::AudioBuffer<float>& buffer, int start, int count)
         sum += v * v;
     }
     return std::sqrt(sum / juce::jmax(1, count));
+}
+
+// Largest jump between two consecutive samples of channel 0 - a click shows up as one huge step.
+double maxSampleStep(const juce::AudioBuffer<float>& buffer, int start, int count)
+{
+    double worst = 0.0;
+    for (int i = 1; i < count; ++i)
+        worst = juce::jmax(worst, (double) std::abs(buffer.getSample(0, start + i) - buffer.getSample(0, start + i - 1)));
+    return worst;
+}
+
+int zeroCrossings(const juce::AudioBuffer<float>& buffer, int start, int count)
+{
+    int crossings = 0;
+    for (int i = 1; i < count; ++i)
+        if ((buffer.getSample(0, start + i - 1) < 0.0f) != (buffer.getSample(0, start + i) < 0.0f))
+            ++crossings;
+    return crossings;
 }
 
 // RMS of (a - b) relative to RMS of a, over `count` samples.
@@ -209,6 +245,72 @@ int main()
                   "live and offline renders have the same loudness (ratio " + juce::String(ratio, 4) + ")");
             check(correlationError < 0.05,
                   "live and offline renders have the same waveform (rel err " + juce::String(correlationError, 5) + ")");
+        }
+    }
+
+    // A frequency that changes while the note is sounding (automation writing a new value every
+    // block) must bend the pitch smoothly. With phase = 2*pi*f*t a frequency jump also jumps the
+    // phase, which is a click; the integrated phase is continuous by construction.
+    {
+        PatchLiveBindingMap bindings;
+        bindings.entries.add({ "src_sine", "frequency", "var_freq" });
+        bindings.midiNodeValues.add({ "var_freq", 0.5f });
+
+        auto automated = makeVoice(makePatch(), bindings);
+        juce::AudioBuffer<float> out(2, (int) kPatchSamples);
+        out.clear();
+        const int blocks = (int) kPatchSamples / kBlockSize;
+        for (int b = 0; b < blocks; ++b)
+        {
+            // A stepped automation curve: 0.5 for the first third, then a jump up, then a jump down.
+            const float value = b < blocks / 3 ? 0.5f : (b < 2 * blocks / 3 ? 0.75f : 0.4f);
+            automated->setLiveMidiValue("var_freq", value);
+            automated->renderAt((int64) b * kBlockSize, out, b * kBlockSize, kBlockSize);
+        }
+
+        const auto step = maxSampleStep(out, 0, blocks * kBlockSize);
+
+        // The reference for "no click": the steepest step of *steady* playback at the highest frequency
+        // used above. (The mix stage's saturation steepens the waveform, so a fixed bound derived from
+        // the sine alone would be wrong.) A phase jump at a frequency change would add a step well
+        // beyond anything steady playback produces.
+        auto steadyVoice = makeVoice(makePatch(), bindings);
+        juce::AudioBuffer<float> steady(2, blocks * kBlockSize);
+        steady.clear();
+        for (int b = 0; b < blocks; ++b)
+        {
+            steadyVoice->setLiveMidiValue("var_freq", 0.75f);
+            steadyVoice->renderAt((int64) b * kBlockSize, steady, b * kBlockSize, kBlockSize);
+        }
+        const auto steadyStep = maxSampleStep(steady, 0, blocks * kBlockSize);
+        const auto lowBand = zeroCrossings(out, 0, kBlockSize * (blocks / 3));
+        const auto highBand = zeroCrossings(out, kBlockSize * (blocks / 3), kBlockSize * (blocks / 3));
+        std::printf("INFO: frequency-step render: max sample step %.4f (steady playback at the highest frequency: %.4f), zero crossings low %d / high %d\n",
+                    step, steadyStep, lowBand, highBand);
+        check(highBand > lowBand, "an automated frequency change really changes the pitch");
+        check(step <= steadyStep * 1.05,
+              "automated frequency jumps do not click (max step " + juce::String(step, 4) + " vs steady " + juce::String(steadyStep, 4) + ")");
+    }
+
+    // A patch whose own pitch lane bends the note across its length: live and offline renders must
+    // still match, because both integrate the phase the same way.
+    {
+        const auto sweepPatch = makePatch(true);
+        auto sweepVoice = makeVoice(sweepPatch);
+        const auto liveSweep = renderBlocks(*sweepVoice, 0, (int) kPatchSamples);
+
+        PatchRuntimePlayer sweepPlayer;
+        sweepPlayer.prepare(kSampleRate, kBlockSize);
+        juce::AudioBuffer<float> offlineSweep;
+        juce::String sweepError;
+        const auto ok = sweepPlayer.renderPatchToBuffer(sweepPatch, kPatchSeconds, offlineSweep, sweepError, nullptr);
+        check(ok, "offline renderer accepts a patch with a pitch lane");
+        if (ok)
+        {
+            const auto count = juce::jmin((int) kPatchSamples, offlineSweep.getNumSamples());
+            const auto error = relativeError(offlineSweep, 0, liveSweep, 0, count);
+            std::printf("INFO: pitch-lane live vs offline relative error %.6f, max sample step live %.4f\n", error, maxSampleStep(liveSweep, 0, count));
+            check(error < 0.01, "live and offline agree on a patch with a pitch lane (rel err " + juce::String(error, 6) + ")");
         }
     }
 
