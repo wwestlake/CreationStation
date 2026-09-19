@@ -78,7 +78,6 @@ constexpr int menuIdToolSampler = 2002;
 constexpr int menuIdToolSignal = 2003;
 constexpr int menuIdToolLayers = 2004;
 constexpr int menuIdToolPlugins = 2005;
-constexpr int menuIdToolPatch = 2006;
 constexpr int menuIdToolScript = 2007;
 constexpr int menuIdToolCapture = 2008;
 constexpr int menuIdToolScore = 2009;
@@ -108,7 +107,6 @@ const char* samplerPanelId = "sampler";
 const char* signalPanelId = "signal";
 const char* layersPanelId = "layers";
 const char* pluginsPanelId = "plugins";
-const char* patchPanelId = "patch";
 const char* scriptPanelId = "script";
 const char* capturePanelId = "capture";
 const char* scorePanelId = "score";
@@ -280,115 +278,308 @@ CreationSuiteHeaderBar::ProfileData makeHeaderProfile(const creation::ui::SuiteD
 
 
 namespace {
-class AssetPickerDialog : public juce::DocumentWindow {
+// ---- What an asset is, in words: used by the Add Clip picker. Details come from the asset's own recorded facts.
+juce::String formatAssetDuration(double seconds)
+{
+    if (seconds <= 0.0)
+        return {};
+
+    const auto whole = (int) std::round(seconds);
+    const auto hours = whole / 3600;
+    const auto minutes = (whole / 60) % 60;
+    const auto secs = whole % 60;
+    if (hours > 0)
+        return juce::String::formatted("%d:%02d:%02d", hours, minutes, secs);
+    if (seconds < 10.0)
+        return juce::String(seconds, 1) + " s";
+    return juce::String::formatted("%d:%02d", minutes, secs);
+}
+
+juce::String describeAsset(const creation::assets::AssetDescriptor& asset)
+{
+    juce::StringArray parts;
+    const auto& d = asset.details;
+    const auto duration = formatAssetDuration(d["durationSeconds"].getDoubleValue());
+
+    switch (asset.kind)
+    {
+        case creation::assets::AssetKind::video:
+            parts.add("Video");
+            if (duration.isNotEmpty()) parts.add(duration);
+            if (d["width"].getIntValue() > 0) parts.add(d["width"] + juce::String(juce::CharPointer_UTF8("\xc3\x97")) + d["height"]);
+            if (d["frameRate"].getDoubleValue() > 0.0) parts.add(juce::String(d["frameRate"].getDoubleValue(), 0) + " fps");
+            if (d["hasAudio"] == "0") parts.add("no sound");
+            break;
+        case creation::assets::AssetKind::audio:
+        case creation::assets::AssetKind::render:
+            parts.add(asset.kind == creation::assets::AssetKind::render ? "Render" : "Audio");
+            if (duration.isNotEmpty()) parts.add(duration);
+            if (d["channels"].getIntValue() > 0) parts.add(d["channels"].getIntValue() == 1 ? "mono" : d["channels"].getIntValue() == 2 ? "stereo" : d["channels"] + " ch");
+            if (d["sampleRate"].getDoubleValue() > 0.0) parts.add(juce::String(d["sampleRate"].getDoubleValue() / 1000.0, 1) + " kHz");
+            break;
+        case creation::assets::AssetKind::patch:
+            parts.add("Signal patch");
+            if (d["variables"].isNotEmpty())
+                parts.add(d["variables"] + (d["variables"].getIntValue() == 1 ? " public variable" : " public variables"));
+            if (duration.isNotEmpty()) parts.add(duration);
+            break;
+        default:
+            parts.add(creation::assets::toDisplayName(asset.kind));
+            break;
+    }
+
+    if (asset.fileSizeBytes > 0)
+        parts.add(juce::File::descriptionOfSizeInBytes((juce::int64) asset.fileSizeBytes));
+
+    return parts.joinIntoString("  " + juce::String(juce::CharPointer_UTF8("\xc2\xb7")) + "  ");
+}
+
+// A small picture of the first stretch of a video, for the picker.
+bool encodeThumbnailJpeg(const juce::Image& image, juce::MemoryBlock& out)
+{
+    if (! image.isValid())
+        return false;
+
+    juce::JPEGImageFormat format;
+    format.setQuality(0.8f);
+    juce::MemoryOutputStream stream(out, false);
+    return format.writeImageToStream(image, stream);
+}
+
+struct PickerRow
+{
+    creation::assets::AssetDescriptor asset;
+    juce::Image thumbnail;
+    juce::String facts;
+};
+
+class AssetPickerDialog : public juce::DocumentWindow
+{
 public:
-    AssetPickerDialog(const juce::Array<creation::assets::AssetDescriptor>& allAssets,
+    AssetPickerDialog(const juce::String& trackDescription,
+                      juce::Array<PickerRow> fittingRows,
+                      juce::Array<PickerRow> otherRows,
                       std::function<void(const creation::assets::AssetDescriptor&)> onSelected)
-        : juce::DocumentWindow("Add Clip...", juce::Colours::darkgrey, juce::DocumentWindow::closeButton),
-          allAssets_(allAssets), onSelected_(onSelected)
+        : juce::DocumentWindow("Add to " + trackDescription, juce::Colour(0xff11151c), juce::DocumentWindow::closeButton),
+          fitting_(std::move(fittingRows)), others_(std::move(otherRows)), onSelected_(std::move(onSelected)), trackDescription_(trackDescription)
     {
         setUsingNativeTitleBar(true);
         setResizable(true, false);
-        setResizeLimits(400, 300, 1000, 800);
-        
+        setResizeLimits(460, 360, 1100, 900);
+
         mainPanel_ = std::make_unique<juce::Component>();
         setContentOwned(mainPanel_.get(), false);
-        
-        searchBox_.setTextToShowWhenEmpty("Search assets...", juce::Colours::lightgrey);
+
+        searchBox_.setTextToShowWhenEmpty("Search by name...", juce::Colours::lightgrey);
         searchBox_.onTextChange = [this] { filterList(); };
         mainPanel_->addAndMakeVisible(searchBox_);
-        
+
+        showAllToggle_.setButtonText("Also show items that do not fit this track");
+        showAllToggle_.onClick = [this] { filterList(); };
+        showAllToggle_.setVisible(! others_.isEmpty());
+        mainPanel_->addAndMakeVisible(showAllToggle_);
+
+        emptyLabel_.setJustificationType(juce::Justification::centred);
+        emptyLabel_.setColour(juce::Label::textColourId, juce::Colour(0xff8ea0b7));
+        emptyLabel_.setMinimumHorizontalScale(1.0f);
+        mainPanel_->addChildComponent(emptyLabel_);
+
         listBox_.setModel(&model_);
-        listBox_.setRowHeight(44);
+        listBox_.setRowHeight(78);
+        listBox_.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff0e1218));
         mainPanel_->addAndMakeVisible(listBox_);
 
         addButton_.setButtonText("Add");
         addButton_.setEnabled(false);
-        addButton_.onClick = [this] {
-            auto row = listBox_.getSelectedRow();
-            if (row >= 0 && row < filteredAssets_.size() && onSelected_) {
-                onSelected_(filteredAssets_[row]);
-                closeButtonPressed();
-            }
-        };
+        addButton_.onClick = [this] { chooseSelected(); };
         mainPanel_->addAndMakeVisible(addButton_);
 
         cancelButton_.setButtonText("Cancel");
         cancelButton_.onClick = [this] { closeButtonPressed(); };
         mainPanel_->addAndMakeVisible(cancelButton_);
-        
+
         filterList();
-        
-        centreWithSize(450, 500);
+        centreWithSize(560, 560);
         setVisible(true);
     }
-    
-    void closeButtonPressed() override {
-        delete this;
-    }
-    
-    void resized() override {
-        juce::DocumentWindow::resized();
-        if (mainPanel_) {
-            auto bounds = mainPanel_->getLocalBounds();
-            searchBox_.setBounds(bounds.removeFromTop(30).reduced(4));
-            
-            auto bottomBounds = bounds.removeFromBottom(40);
-            cancelButton_.setBounds(bottomBounds.removeFromRight(100).reduced(4));
-            addButton_.setBounds(bottomBounds.removeFromRight(100).reduced(4));
 
-            listBox_.setBounds(bounds);
-        }
+    void closeButtonPressed() override { delete this; }
+
+    void resized() override
+    {
+        juce::DocumentWindow::resized();
+        if (mainPanel_ == nullptr)
+            return;
+
+        auto bounds = mainPanel_->getLocalBounds();
+        searchBox_.setBounds(bounds.removeFromTop(34).reduced(6, 4));
+        if (showAllToggle_.isVisible())
+            showAllToggle_.setBounds(bounds.removeFromTop(26).reduced(8, 2));
+
+        auto bottom = bounds.removeFromBottom(44);
+        cancelButton_.setBounds(bottom.removeFromRight(100).reduced(4, 6));
+        addButton_.setBounds(bottom.removeFromRight(100).reduced(4, 6));
+
+        listBox_.setBounds(bounds);
+        emptyLabel_.setBounds(bounds.reduced(24));
     }
 
 private:
-    void filterList() {
-        filteredAssets_.clear();
-        auto query = searchBox_.getText().trim().toLowerCase();
-        for (const auto& a : allAssets_) {
-            if (query.isEmpty() || a.displayName.toLowerCase().contains(query) || a.logicalPath.toLowerCase().contains(query))
-                filteredAssets_.add(a);
+    void chooseSelected()
+    {
+        const auto row = listBox_.getSelectedRow();
+        if (juce::isPositiveAndBelow(row, visible_.size()) && onSelected_)
+        {
+            auto chosen = visible_.getReference(row).asset;
+            auto callback = onSelected_;
+            closeButtonPressed(); // `this` is gone after this line
+            callback(chosen);
         }
-        listBox_.updateContent();
-        listBox_.repaint();
-        addButton_.setEnabled(listBox_.getSelectedRow() >= 0);
     }
 
-    struct Model : public juce::ListBoxModel {
-        Model(AssetPickerDialog* o) : owner(o) {}
-        AssetPickerDialog* owner;
-        int getNumRows() override { return owner->filteredAssets_.size(); }
-        void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override {
-            if (rowIsSelected) g.fillAll(juce::Colour(0xff293d5a));
-            if (rowNumber >= owner->filteredAssets_.size()) return;
-            const auto& a = owner->filteredAssets_.getReference(rowNumber);
-            g.setColour(juce::Colours::white);
-            g.setFont(14.0f);
-            g.drawText(a.displayName, 10, 2, width - 20, height / 2, juce::Justification::centredLeft, true);
-            g.setColour(juce::Colours::grey);
-            g.setFont(11.0f);
-            g.drawText(a.logicalPath, 10, height / 2, width - 20, height / 2, juce::Justification::centredLeft, true);
+    void filterList()
+    {
+        visible_.clear();
+        const auto query = searchBox_.getText().trim().toLowerCase();
+        const auto matches = [&query](const PickerRow& row)
+        {
+            return query.isEmpty() || row.asset.displayName.toLowerCase().contains(query) || row.facts.toLowerCase().contains(query);
+        };
+
+        for (const auto& row : fitting_)
+            if (matches(row))
+                visible_.add(row);
+
+        if (showAllToggle_.getToggleState())
+            for (const auto& row : others_)
+                if (matches(row))
+                    visible_.add(row);
+
+        listBox_.updateContent();
+        listBox_.repaint();
+
+        const auto nothing = visible_.isEmpty();
+        emptyLabel_.setVisible(nothing);
+        if (nothing)
+            emptyLabel_.setText(fitting_.isEmpty() && ! showAllToggle_.getToggleState()
+                                    ? "Nothing in this project fits a " + trackDescription_ + " yet.\nImport a file, or tick the box above to see everything."
+                                    : "Nothing matches your search.",
+                                juce::dontSendNotification);
+        addButton_.setEnabled(listBox_.getSelectedRow() >= 0 && listBox_.getSelectedRow() < visible_.size());
+    }
+
+    static void drawKindGlyph(juce::Graphics& g, juce::Rectangle<float> tile, creation::assets::AssetKind kind)
+    {
+        g.setColour(juce::Colour(0xff1a2432));
+        g.fillRoundedRectangle(tile, 6.0f);
+
+        const auto accent = kind == creation::assets::AssetKind::video ? juce::Colour(0xff5da5ff)
+                          : kind == creation::assets::AssetKind::patch ? juce::Colour(0xffb185ff)
+                          : kind == creation::assets::AssetKind::render ? juce::Colour(0xffffc857)
+                                                                        : juce::Colour(0xff67e8a5);
+        g.setColour(accent);
+        const auto c = tile.getCentre();
+        const auto s = juce::jmin(tile.getWidth(), tile.getHeight()) * 0.5f;
+
+        if (kind == creation::assets::AssetKind::video)
+        {
+            juce::Path p;
+            p.addTriangle(c.x - s * 0.35f, c.y - s * 0.5f, c.x - s * 0.35f, c.y + s * 0.5f, c.x + s * 0.55f, c.y);
+            g.fillPath(p);
         }
-        void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override {
-            if (row < owner->filteredAssets_.size() && owner->onSelected_) {
-                owner->onSelected_(owner->filteredAssets_[row]);
-                owner->closeButtonPressed();
+        else if (kind == creation::assets::AssetKind::patch)
+        {
+            const juce::Point<float> a(c.x - s * 0.7f, c.y + s * 0.3f), b(c.x, c.y - s * 0.4f), d(c.x + s * 0.7f, c.y + s * 0.3f);
+            g.drawLine({ a, b }, 2.0f);
+            g.drawLine({ b, d }, 2.0f);
+            for (auto pt : { a, b, d })
+                g.fillEllipse(pt.x - 5.0f, pt.y - 5.0f, 10.0f, 10.0f);
+        }
+        else
+        {
+            static const float heights[] = { 0.35f, 0.8f, 0.55f, 1.0f, 0.45f, 0.7f, 0.3f };
+            const auto barW = s * 0.18f;
+            for (int i = 0; i < 7; ++i)
+            {
+                const auto h = s * heights[i];
+                g.fillRoundedRectangle(c.x - s * 0.75f + (float) i * (barW + s * 0.06f), c.y - h * 0.5f, barW, h, 1.5f);
             }
         }
-        void selectedRowsChanged(int lastRowSelected) override {
-            owner->addButton_.setEnabled(lastRowSelected >= 0 && lastRowSelected < owner->filteredAssets_.size());
+    }
+
+    struct Model : public juce::ListBoxModel
+    {
+        explicit Model(AssetPickerDialog* o) : owner(o) {}
+        AssetPickerDialog* owner;
+
+        int getNumRows() override { return owner->visible_.size(); }
+
+        void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override
+        {
+            if (! juce::isPositiveAndBelow(rowNumber, owner->visible_.size()))
+                return;
+
+            const auto& row = owner->visible_.getReference(rowNumber);
+            g.fillAll(rowIsSelected ? juce::Colour(0xff293d5a) : (rowNumber % 2 == 0 ? juce::Colour(0xff10151c) : juce::Colour(0xff0e1218)));
+
+            auto content = juce::Rectangle<int>(0, 0, width, height).reduced(10, 7);
+            const auto tile = content.removeFromLeft(112).toFloat();
+            content.removeFromLeft(12);
+
+            if (row.thumbnail.isValid())
+            {
+                g.setColour(juce::Colours::black);
+                g.fillRoundedRectangle(tile, 6.0f);
+                g.drawImage(row.thumbnail, tile.reduced(1.0f), juce::RectanglePlacement::centred);
+            }
+            else
+            {
+                drawKindGlyph(g, tile, row.asset.kind);
+            }
+
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
+            g.drawText(row.asset.displayName, content.removeFromTop(24), juce::Justification::centredLeft, true);
+
+            g.setColour(juce::Colour(0xff9fb3cc));
+            g.setFont(juce::Font(juce::FontOptions(12.5f)));
+            g.drawText(row.facts, content.removeFromTop(20), juce::Justification::centredLeft, true);
+
+            if (row.asset.createdAt.toMilliseconds() > 0)
+            {
+                g.setColour(juce::Colour(0xff657690));
+                g.setFont(juce::Font(juce::FontOptions(11.5f)));
+                g.drawText("Imported " + row.asset.createdAt.formatted("%Y-%m-%d"), content.removeFromTop(18), juce::Justification::centredLeft, true);
+            }
+        }
+
+        void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override
+        {
+            owner->listBox_.selectRow(row);
+            owner->chooseSelected();
+        }
+
+        void returnKeyPressed(int) override { owner->chooseSelected(); }
+
+        void selectedRowsChanged(int lastRowSelected) override
+        {
+            owner->addButton_.setEnabled(lastRowSelected >= 0 && lastRowSelected < owner->visible_.size());
         }
     };
-    
+
     std::unique_ptr<juce::Component> mainPanel_;
     juce::TextEditor searchBox_;
+    juce::ToggleButton showAllToggle_;
+    juce::Label emptyLabel_;
     juce::TextButton addButton_;
     juce::TextButton cancelButton_;
     Model model_ { this };
     juce::ListBox listBox_;
-    juce::Array<creation::assets::AssetDescriptor> allAssets_;
-    juce::Array<creation::assets::AssetDescriptor> filteredAssets_;
+    juce::Array<PickerRow> fitting_;
+    juce::Array<PickerRow> others_;
+    juce::Array<PickerRow> visible_;
     std::function<void(const creation::assets::AssetDescriptor&)> onSelected_;
+    juce::String trackDescription_;
 };
 }
 
@@ -755,7 +946,6 @@ juce::String workspaceModeName(MainComponent::WorkspaceMode mode)
         case MainComponent::WorkspaceMode::library: return "Library";
         case MainComponent::WorkspaceMode::mix: return "Layers";
         case MainComponent::WorkspaceMode::plugins: return "Plugins";
-        case MainComponent::WorkspaceMode::node: return "Patch";
         case MainComponent::WorkspaceMode::code: return "Script";
         case MainComponent::WorkspaceMode::record: return "Capture";
         case MainComponent::WorkspaceMode::score: return "Score";
@@ -1359,7 +1549,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         else if (panelId == samplerPanelId) setWorkspaceMode(WorkspaceMode::sampler);
         else if (panelId == signalPanelId) setWorkspaceMode(WorkspaceMode::signal);
         else if (panelId == pluginsPanelId) setWorkspaceMode(WorkspaceMode::plugins);
-        else if (panelId == patchPanelId) setWorkspaceMode(WorkspaceMode::node);
         else if (panelId == scorePanelId) setWorkspaceMode(WorkspaceMode::score);
         else if (panelId == settingsPanelId) setWorkspaceMode(WorkspaceMode::settings);
         else if (panelId == foleyPanelId) setWorkspaceMode(WorkspaceMode::foley);
@@ -1896,11 +2085,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                 }
                 else if (result == 2)
                 {
-                    juce::Array<creation::assets::AssetDescriptor> allAssets = projectSession.getManifest().assetCatalog.assets;
-                    new AssetPickerDialog(allAssets, [this, trackIndex, startSeconds](const creation::assets::AssetDescriptor& chosen) {
-                        trackerPanel.setSelectedTrack(trackIndex);
-                        placeProjectAssetOnTracker(chosen, startSeconds);
-                    });
+                    showAddClipPicker(trackIndex, startSeconds);
                 }
             });
     };
@@ -3493,105 +3678,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         showFxStackWindow();
     };
 
-    graphPanel.onEnabledChanged = [this](bool shouldEnable)
-    {
-        engine.setGraphEnabled(shouldEnable);
-    };
-
-    graphPanel.onInputChanged = [this](float amount)
-    {
-        engine.setGraphInput(amount);
-    };
-    graphPanel.onOscillatorFrequencyChanged = [this](float hz)
-    {
-        engine.setGraphSourceFrequency(hz);
-    };
-
-    graphPanel.onDriveChanged = [this](float amount)
-    {
-        engine.setGraphDrive(amount);
-    };
-
-    graphPanel.onToneChanged = [this](float amount)
-    {
-        engine.setGraphTone(amount);
-    };
-
-    graphPanel.onEchoChanged = [this](float amount)
-    {
-        engine.setGraphEcho(amount);
-    };
-
-    graphPanel.onWidthChanged = [this](float amount)
-    {
-        engine.setGraphWidth(amount);
-    };
-    graphPanel.onOutputLevelChanged = [this](float amount)
-    {
-        engine.setMasterGain(amount);
-    };
-    graphPanel.onVstMixChanged = [this](float amount)
-    {
-        engine.setGraphVstMix(amount);
-    };
-    graphPanel.onVstEnabledChanged = [this](bool shouldEnable)
-    {
-        engine.setGraphVstEnabled(shouldEnable);
-    };
-    graphPanel.onNodeDeleted = [this](const juce::String& nodeName)
-    {
-        if (nodeName == "Oscillator")
-        {
-            engine.setGraphInput(0.0f);
-            graphPanel.setInput(0.0f);
-            transportBar.setStatusText("Oscillator removed; source tone muted.");
-            return;
-        }
-
-        if (nodeName == "VST Host")
-        {
-            engine.unloadGraphVstPlugin();
-            graphPanel.clearAssignedVstPlugin();
-            transportBar.setStatusText("VST host removed; plugin unloaded.");
-        }
-    };
-    graphPanel.onAssignVstPluginRequested = [this]
-    {
-        showPluginLoadMenu([this](const juce::File& file)
-        {
-            assignPluginToGraphNode(file);
-        });
-    };
-    graphPanel.onOpenAssignedVstRequested = [this]
-    {
-        if (! engine.hasGraphVstPlugin())
-            return;
-
-        constexpr auto* windowKey = "graph-vst";
-        if (auto* existingWindow = findPluginEditorWindow(windowKey))
-        {
-            existingWindow->toFront(true);
-            return;
-        }
-
-        if (auto* editor = engine.createGraphVstPluginEditor())
-        {
-            auto window = std::make_unique<ManagedDocumentWindow>("Patch VST Editor",
-                                                                  juce::Colour(0xff11151c),
-                                                                  juce::DocumentWindow::allButtons,
-                                                                  [this, windowKey]
-                                                                  {
-                                                                      closePluginEditorWindow(windowKey);
-                                                                  });
-            window->setUsingNativeTitleBar(true);
-            window->setResizable(true, true);
-            window->setContentOwned(editor, true);
-            window->centreWithSize(900, 650);
-            window->setVisible(true);
-            pluginEditorWindows.push_back({ windowKey, -1, std::move(window) });
-        }
-    };
-
     pluginsPanel.onAddPathRequested = [this]
     {
         configureVstSearchPaths();
@@ -3630,11 +3716,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     pluginsPanel.onLoadIntoInsertRequested = [this](const VstPluginCatalog::Entry& entry)
     {
         loadPluginIntoCurrentInsert(entry.file);
-    };
-
-    pluginsPanel.onAssignNodeRequested = [this](const VstPluginCatalog::Entry& entry)
-    {
-        assignPluginToGraphNode(entry.file);
     };
 
     mixerPanel.onGainChanged = [this](int index, float value)
@@ -3756,7 +3837,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
         else if (button == creation::ui::surface_actions::assignPlugin)
         {
-            setMode(WorkspaceMode::node);
+            setMode(WorkspaceMode::signal);
         }
         else if (button == creation::ui::surface_actions::assignEq)
         {
@@ -3784,7 +3865,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
         else if (button == "view_audio_instrument")
         {
-            setMode(WorkspaceMode::node);
+            setMode(WorkspaceMode::signal);
         }
         else if (button == "view_aux")
         {
@@ -3820,7 +3901,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         }
         else if (button == "f5")
         {
-            setMode(WorkspaceMode::node);
+            setMode(WorkspaceMode::signal);
         }
         else if (button == "f6")
         {
@@ -3947,7 +4028,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             }
             else
             {
-                setWorkspaceMode(WorkspaceMode::node);
+                setWorkspaceMode(WorkspaceMode::signal);
             }
         }
         else if (button == creation::ui::surface_actions::scrub)
@@ -4221,12 +4302,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     mixerPanel.setMasterGain(0.5f);
     engine.setMasterGain(0.5f);
-    graphPanel.setEnabled(engine.isGraphEnabled());
-    graphPanel.setInput(engine.getGraphInput());
-    graphPanel.setDrive(engine.getGraphDrive());
-    graphPanel.setTone(engine.getGraphTone());
-    graphPanel.setEcho(engine.getGraphEcho());
-    graphPanel.setWidth(engine.getGraphWidth());
     midiSurface.setMasterFaderValue(0.5f);
     engine.setPlaying(false);
     midiSurface.setTransportState(false, false);
@@ -4572,7 +4647,7 @@ void MainComponent::paint(juce::Graphics& g)
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
-    auto transportArea = area.removeFromTop(92);
+    auto transportArea = area.removeFromTop(CreationSuiteHeaderBar::preferredHeight);
     transportBar.setBounds(transportArea);
 
     auto menuArea = area.removeFromTop(28);
@@ -4644,7 +4719,6 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         menu.addItem(menuIdToolSignal, "Signal", true, isOpen(signalPanelId));
         menu.addItem(menuIdToolLayers, "Layers", true, isOpen(layersPanelId));
         menu.addItem(menuIdToolPlugins, "Plugins", true, isOpen(pluginsPanelId));
-        menu.addItem(menuIdToolPatch, "Patch", true, isOpen(patchPanelId));
         menu.addItem(menuIdToolScript, "Script", true, isOpen(scriptPanelId));
         menu.addItem(menuIdToolCapture, "Capture", true, isOpen(capturePanelId));
         menu.addItem(menuIdToolScore, "Score", true, isOpen(scorePanelId));
@@ -4714,7 +4788,6 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
             case menuIdToolSignal: toggleToolWindow(WorkspaceMode::signal); break;
             case menuIdToolLayers: toggleToolWindow(WorkspaceMode::mix); break;
             case menuIdToolPlugins: toggleToolWindow(WorkspaceMode::plugins); break;
-            case menuIdToolPatch: toggleToolWindow(WorkspaceMode::node); break;
             case menuIdToolScript: toggleToolWindow(WorkspaceMode::code); break;
             case menuIdToolCapture: toggleToolWindow(WorkspaceMode::record); break;
             case menuIdToolScore: toggleToolWindow(WorkspaceMode::score); break;
@@ -4754,8 +4827,6 @@ CreationDock::DockPanel* MainComponent::registerNamedDockPanel(const juce::Strin
         return dockManager->registerPanel(panelId, "Layers", std::make_unique<NonOwningPanelHost>(mixerPanel), zone);
     if (panelId == pluginsPanelId)
         return dockManager->registerPanel(panelId, "Plugins", std::make_unique<NonOwningPanelHost>(pluginsPanel), zone);
-    if (panelId == patchPanelId)
-        return dockManager->registerPanel(panelId, "Patch", std::make_unique<NonOwningPanelHost>(graphPanel), zone);
     if (panelId == scriptPanelId)
         return dockManager->registerPanel(panelId, "Script", std::make_unique<NonOwningPanelHost>(dslPanel), zone);
     if (panelId == capturePanelId)
@@ -4771,7 +4842,7 @@ CreationDock::DockPanel* MainComponent::registerNamedDockPanel(const juce::Strin
     if (panelId == virtualEngineerPanelId)
         return dockManager->registerPanel(panelId, "Virtual Engineer", std::make_unique<NonOwningPanelHost>(aiPanel), zone);
 
-    jassertfalse; // unknown panel id
+    // Not a panel this app has (for instance an id from a layout saved by a version that had one that is gone).
     return nullptr;
 }
 
@@ -4823,7 +4894,6 @@ void MainComponent::setWorkspaceMode(WorkspaceMode mode)
                      : mode == WorkspaceMode::signal ? signalPanelId
                      : mode == WorkspaceMode::mix ? layersPanelId
                      : mode == WorkspaceMode::plugins ? pluginsPanelId
-                     : mode == WorkspaceMode::node ? patchPanelId
                      : mode == WorkspaceMode::code ? scriptPanelId
                      : mode == WorkspaceMode::record ? capturePanelId
                      : mode == WorkspaceMode::score ? scorePanelId
@@ -4858,7 +4928,6 @@ void MainComponent::toggleToolWindow(WorkspaceMode mode)
                         : mode == WorkspaceMode::signal ? signalPanelId
                         : mode == WorkspaceMode::mix ? layersPanelId
                         : mode == WorkspaceMode::plugins ? pluginsPanelId
-                        : mode == WorkspaceMode::node ? patchPanelId
                         : mode == WorkspaceMode::code ? scriptPanelId
                         : mode == WorkspaceMode::record ? capturePanelId
                         : mode == WorkspaceMode::score ? scorePanelId
@@ -4952,7 +5021,7 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
         return;
 
     auto savedActiveMode = static_cast<WorkspaceMode>(juce::jlimit(0,
-                                                                    static_cast<int>(WorkspaceMode::sampler),
+                                                                    static_cast<int>(WorkspaceMode::foley),
                                                                     (int) state.getProperty("activeMode", static_cast<int>(WorkspaceMode::tracker))));
     if (savedActiveMode == WorkspaceMode::library)
         savedActiveMode = WorkspaceMode::tracker;
@@ -4963,7 +5032,32 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
 
     auto dockLayoutJson = state.getProperty("dockLayoutJson").toString();
     if (dockManager != nullptr && dockLayoutJson.isNotEmpty())
-        dockManager->applyLayout(juce::JSON::parse(dockLayoutJson));
+    {
+        const auto layout = juce::JSON::parse(dockLayoutJson);
+
+        // The dock manager only re-docks panels that already exist, and only the Tracker does at startup -
+        // so a panel that was open when the app closed (Signal Lab, Plugins, Video, ...) was silently skipped.
+        // Create every panel the saved layout names first, in the zone it was saved in; applyLayout then puts
+        // them back in their saved order, sizes and floating positions.
+        const std::pair<const char*, CreationDock::DockTargetZone> zoneKeys[] = {
+            { "left", CreationDock::DockTargetZone::Left },
+            { "center", CreationDock::DockTargetZone::CenterTab },
+            { "right", CreationDock::DockTargetZone::Right },
+            { "bottom", CreationDock::DockTargetZone::Bottom } };
+
+        for (const auto& [key, zone] : zoneKeys)
+            if (auto* ids = layout.getProperty("zones", {}).getProperty(key, {}).getProperty("panels", {}).getArray())
+                for (const auto& id : *ids)
+                    if (! dockManager->isRegistered(id.toString()))
+                        registerNamedDockPanel(id.toString(), zone);
+
+        if (auto* floating = layout.getProperty("floating", {}).getArray())
+            for (const auto& entry : *floating)
+                if (const auto id = entry.getProperty("id", {}).toString(); id.isNotEmpty() && ! dockManager->isRegistered(id))
+                    registerNamedDockPanel(id, CreationDock::DockTargetZone::CenterTab);
+
+        dockManager->applyLayout(layout);
+    }
 
     refreshModeVisibility();
 
@@ -5044,7 +5138,6 @@ juce::Component* MainComponent::getWorkspaceComponent(WorkspaceMode mode)
         case WorkspaceMode::library: return nullptr;
         case WorkspaceMode::mix: return &mixerPanel;
         case WorkspaceMode::plugins: return &pluginsPanel;
-        case WorkspaceMode::node: return &graphPanel;
         case WorkspaceMode::code: return &dslPanel;
         case WorkspaceMode::record: return &recordView;
         case WorkspaceMode::foley: return &foleyPanel;
@@ -6151,26 +6244,6 @@ void MainComponent::loadPluginIntoCurrentInsert(const juce::File& file)
     }
 }
 
-void MainComponent::assignPluginToGraphNode(const juce::File& file)
-{
-    juce::String errorMessage;
-    if (! engine.loadGraphVstPlugin(file, errorMessage))
-    {
-        transportBar.setStatusText("Graph VST load failed: " + errorMessage);
-        pluginsPanel.setStatusText("Graph VST load failed: " + errorMessage);
-        return;
-    }
-
-    graphPanel.setAssignedVstPlugin(engine.getGraphVstPluginName().isNotEmpty() ? engine.getGraphVstPluginName()
-                                                                                : file.getFileNameWithoutExtension(),
-                                    file.getFullPathName());
-    engine.setGraphVstEnabled(graphPanel.isVstEnabled());
-    engine.setGraphVstMix(graphPanel.getVstMix());
-    transportBar.setStatusText("Assigned VST node: " + file.getFileNameWithoutExtension());
-    pluginsPanel.setStatusText("Assigned to VST node: " + file.getFileNameWithoutExtension());
-    saveSessionToDisk();
-}
-
 void MainComponent::showTour()
 {
     tourOverlay.start();
@@ -6445,8 +6518,6 @@ MainComponent::WorkspaceMode MainComponent::workspaceModeFromString(const juce::
         return WorkspaceMode::mix;
     if (normalized == "plugins" || normalized == "plugin")
         return WorkspaceMode::plugins;
-    if (normalized == "node" || normalized == "patch")
-        return WorkspaceMode::node;
     if (normalized == "code" || normalized == "script")
         return WorkspaceMode::code;
     if (normalized == "record" || normalized == "capture")
@@ -6478,14 +6549,9 @@ void MainComponent::configureTutorialOverlay()
         auto builtInDirectory = creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("BuiltIn");
         auto sampleFile = builtInDirectory.getChildFile("getting-started-demo.nalm");
         auto builtInSource = cw::tutorial::getBuiltInGettingStartedTutorialSource();
-        auto vstDemoFile = builtInDirectory.getChildFile("vst-node-demo.nalm");
-        auto vstDemoSource = cw::tutorial::getBuiltInVstNodeDemoTutorialSource();
 
         if (! sampleFile.existsAsFile() || sampleFile.loadFileAsString() != builtInSource)
             sampleFile.replaceWithText(builtInSource);
-
-        if (! vstDemoFile.existsAsFile() || vstDemoFile.loadFileAsString() != vstDemoSource)
-            vstDemoFile.replaceWithText(vstDemoSource);
 
         auto userFile = creation::suite::getTutorialsDirectory(suiteSettings).getChildFile("User").getChildFile("getting-started-demo.nalm");
 
@@ -6543,9 +6609,6 @@ void MainComponent::executeTutorialActions(const juce::Array<cw::tutorial::Actio
                 signalLabPanel.applyAiTemplate(action.value);
                 break;
 
-            case cw::tutorial::ActionType::applyGraphMacro:
-                graphPanel.applyAiMacro(action.value);
-                break;
         }
     }
 }
@@ -6566,8 +6629,6 @@ juce::Rectangle<int> MainComponent::tutorialTargetBoundsForId(const juce::String
         return mixerPanel.getBounds();
     if (id == "plugins" || id == "plugin")
         return pluginsPanel.getBounds();
-    if (id == "patch" || id == "node")
-        return graphPanel.getBounds();
     if (id == "code" || id == "script")
         return dslPanel.getBounds();
     if (id == "record" || id == "capture")
@@ -6607,14 +6668,6 @@ void MainComponent::executeAiTaskStep(const CreationStationTaskPlanner::TaskStep
                         actionNotes.add("previewed the current signal");
                     else
                         actionNotes.add("could not preview because no signal is ready yet");
-                }
-                break;
-
-            case CreationStationTaskPlanner::ActionTarget::patchGraph:
-                if (action.command == "apply-macro")
-                {
-                    graphPanel.applyAiMacro(action.stringValue);
-                    actionNotes.add("seeded the patch graph with " + action.stringValue);
                 }
                 break;
 
@@ -7198,63 +7251,109 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
             engine.setTrackIsAutomationKind(targetTrack, false);
         }
 
-        creation::assets::MaterializedAssetLease lease;
-        if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath, creation::assets::MaterializationAccess::readOnly, lease, errorMessage))
+        if (progressTask != nullptr)
         {
-            contentPanel.setStatusText("Could not materialize video asset: " + errorMessage);
+            reportError("Could not add the video: another long action is still running. Wait for it to finish, or cancel it.");
             return;
         }
 
-        auto safeThis = juce::Component::SafePointer<MainComponent>(this);
-        auto sourceFile = lease.materializedFile;
-        std::thread([safeThis, asset, targetTrack, startSeconds, sourceFile]() mutable
+        // Copying a big video out of the project and opening it takes seconds: it runs in a progress window (bar,
+        // status, Cancel) instead of freezing the app, and any failure is shown with its reason.
+        struct PlaceVideoResult
         {
-            cs::VideoDecodeService decodeService;
-            auto info = decodeService.open(sourceFile);
-            auto openError = decodeService.getLastError();
+            creation::assets::MaterializedAssetLease lease;
+            cs::VideoStreamInfo info;
+            juce::String error;
+        };
+        auto result = std::make_shared<PlaceVideoResult>();
+        auto safeThis = juce::Component::SafePointer<MainComponent>(this);
 
-            juce::MessageManager::callAsync([safeThis, asset, targetTrack, startSeconds, sourceFile, info, openError]() mutable
+        auto work = [safeThis, asset, result](ProgressTask& task)
+        {
+            if (safeThis == nullptr)
+                return;
+
+            const auto sizeText = juce::File::descriptionOfSizeInBytes((juce::int64) asset.fileSizeBytes);
+            task.report(0.0, "Fetching " + asset.displayName + " (" + sizeText + ") from the project...");
+
+            if (! safeThis->projectSession.materializeEntry(safeThis->suiteSettings, asset.logicalPath,
+                                                            creation::assets::MaterializationAccess::readOnly,
+                                                            result->lease, result->error,
+                                                            [&](double fraction)
+                                                            {
+                                                                task.report(0.9 * fraction, "Fetching " + asset.displayName + " (" + sizeText + ") from the project - "
+                                                                                                + juce::String((int) std::round(fraction * 100.0)) + "%");
+                                                                return ! task.cancelRequested();
+                                                            }))
             {
-                if (safeThis == nullptr) return;
+                if (result->error.isEmpty())
+                    result->error = "the video could not be copied out of the project";
+                return;
+            }
 
-                if (info.valid)
+            task.report(0.92, "Opening the video...");
+            cs::VideoDecodeService decodeService;
+            result->info = decodeService.open(result->lease.materializedFile);
+            if (! result->info.valid)
+            {
+                const auto reason = decodeService.getLastError();
+                result->error = "Could not open video " + asset.displayName + (reason.isNotEmpty() ? ": " + reason : juce::String());
+            }
+        };
+
+        auto finished = [safeThis, asset, targetTrack, startSeconds, result](bool cancelled)
+        {
+            if (safeThis == nullptr)
+                return;
+
+            auto* self = safeThis.getComponent();
+
+            if (result->error.isNotEmpty())
+            {
+                if (! cancelled && result->error != "Cancelled.")
+                    self->reportError(result->error.startsWithIgnoreCase("could not") ? result->error
+                                                                                        : "Could not add " + asset.displayName + " to the Tracker: " + result->error);
+                else
+                    self->showToast("Adding the video was cancelled.");
+
+                if (result->lease.leaseRoot != juce::File())
+                    result->lease.leaseRoot.deleteRecursively();
+            }
+            else if (! cancelled)
+            {
+                juce::String clipError;
+                cs::AssetRef assetRef;
+                assetRef.id = asset.id;
+                assetRef.versionId = asset.versionId;
+                assetRef.mode = creation::assets::AssetReferenceMode::exact;
+
+                const auto clipIndex = self->timelineModel.addClip(cs::ClipKind::video, targetTrack, asset.displayName, asset.id, "project-video",
+                                                                   result->lease.materializedFile, startSeconds,
+                                                                   result->info.durationSeconds > 0.0 ? result->info.durationSeconds : 10.0, clipError);
+                if (clipIndex >= 0)
                 {
-                    juce::String clipError;
-                    cs::AssetRef assetRef;
-                    assetRef.id = asset.id;
-                    assetRef.versionId = asset.versionId;
-                    assetRef.mode = creation::assets::AssetReferenceMode::exact;
-
-                    auto clipIndex = safeThis->timelineModel.addClip(cs::ClipKind::video,
-                                                                     targetTrack,
-                                                                     asset.displayName,
-                                                                     asset.id,
-                                                                     "project-video",
-                                                                     sourceFile,
-                                                                     startSeconds,
-                                                                     info.durationSeconds > 0.0 ? info.durationSeconds : 10.0,
-                                                                     clipError);
-
-                                        if (clipIndex >= 0) {
-                        safeThis->timelineModel.setClipAssetReference(clipIndex, assetRef);
-                        safeThis->trackerPanel.setSelectedTrack(targetTrack);
-                        safeThis->trackerPanel.refreshTimelineView();
-                        safeThis->setWorkspaceMode(WorkspaceMode::tracker);
-                        safeThis->saveSessionToDisk();
-                        safeThis->transportBar.setStatusText("Placed project asset on Tracker: " + asset.displayName);
-                    }
-                    else if (clipError.isNotEmpty()) {
-                        safeThis->contentPanel.setStatusText(clipError);
-                    }
+                    self->timelineModel.setClipAssetReference(clipIndex, assetRef);
+                    self->trackerPanel.setSelectedTrack(targetTrack);
+                    self->trackerPanel.refreshTimelineView();
+                    self->setWorkspaceMode(WorkspaceMode::tracker);
+                    self->saveSessionToDisk();
+                    self->showToast("Added " + asset.displayName + " to the Tracker.");
                 }
                 else
                 {
-                    safeThis->contentPanel.setStatusText("Could not open video " + asset.displayName
-                                                         + (openError.isNotEmpty() ? ": " + openError : juce::String()));
+                    self->reportError("Could not add " + asset.displayName + " to the Tracker" + (clipError.isNotEmpty() ? ": " + clipError : juce::String()));
                 }
-            });
-        }).detach();
+            }
 
+            juce::MessageManager::callAsync([safeThis]
+            {
+                if (safeThis != nullptr)
+                    safeThis->progressTask.reset();
+            });
+        };
+
+        progressTask = std::make_unique<ProgressTask>("Adding video", std::move(work), std::move(finished));
+        progressTask->start();
         return;
     }
 
@@ -7478,7 +7577,7 @@ bool MainComponent::importAudioFilesToTracker(const juce::StringArray& filePaths
 }
 
 int MainComponent::addImportedVideoToTracker(const juce::File& sourceFile, const juce::String& assetId, const juce::String& logicalPath, juce::int64 fileSize,
-                                               const cs::VideoStreamInfo& info, int targetTrack, double startSeconds,
+                                               const cs::VideoStreamInfo& info, const juce::MemoryBlock& thumbnailJpeg, int targetTrack, double startSeconds,
                                                juce::String& errorMessage)
 {
     creation::assets::AssetDescriptor importedAsset;
@@ -7492,6 +7591,25 @@ int MainComponent::addImportedVideoToTracker(const juce::File& sourceFile, const
     importedAsset.fileSizeBytes = (int64) fileSize;
     importedAsset.createdAt = importedAsset.modifiedAt = juce::Time::getCurrentTime();
     importedAsset.sourceApp = "Djehuti Station";
+
+    // What the video is, recorded now so the Add Clip picker can show it.
+    importedAsset.details.set("durationSeconds", juce::String(info.durationSeconds, 3));
+    importedAsset.details.set("width", juce::String(info.width));
+    importedAsset.details.set("height", juce::String(info.height));
+    importedAsset.details.set("frameRate", juce::String(info.frameRate, 3));
+    importedAsset.details.set("hasAudio", info.hasAudio ? "1" : "0");
+    if (info.hasAudio)
+    {
+        importedAsset.details.set("channels", juce::String(info.audioNumChannels));
+        importedAsset.details.set("sampleRate", juce::String(info.audioSampleRate, 0));
+    }
+    if (thumbnailJpeg.getSize() > 0)
+    {
+        const auto thumbnailPath = "Assets/Thumbnails/" + assetId.replaceCharacters(":\\/ ", "____") + ".jpg";
+        if (projectSession.writeEntry(thumbnailPath, thumbnailJpeg, juce::Time::getCurrentTime()))
+            importedAsset.details.set("thumbnail", thumbnailPath);
+    }
+
     projectSession.upsertAssetDescriptor(importedAsset);
 
     if (! projectSession.commit(errorMessage))
@@ -7555,6 +7673,7 @@ struct VideoImportItem
     cs::VideoStreamInfo info;
     juce::String logicalPath;
     juce::String assetId;
+    juce::MemoryBlock thumbnailJpeg; // a small picture from near the start of the video, for the Add Clip picker
     juce::String error; // why this file could not be imported ("" when it went in)
     bool uploaded = false;
     juce::File audioFile; // the video's own sound as a WAV, once extracted
@@ -7781,6 +7900,228 @@ bool MainComponent::prepareVideoAudio(std::function<void()> whenDone)
     };
 
     progressTask = std::make_unique<ProgressTask>("Preparing the video's sound", std::move(work), std::move(finished));
+    progressTask->start();
+    return true;
+}
+
+void MainComponent::showAddClipPicker(int trackIndex, double startSeconds)
+{
+    using Kind = creation::assets::AssetKind;
+    if (! juce::isPositiveAndBelow(trackIndex, timelineModel.getTrackCount()) || ! projectSession.isValid())
+        return;
+
+    // What this kind of track can hold.
+    const auto trackKind = timelineModel.getTrackKind(trackIndex);
+    juce::Array<Kind> fits;
+    juce::String description;
+    switch (trackKind)
+    {
+        case cs::TrackKind::video: fits = { Kind::video }; description = "video track"; break;
+        case cs::TrackKind::signal: fits = { Kind::patch, Kind::audio, Kind::render }; description = "Signal Lab track"; break;
+        case cs::TrackKind::audio: fits = { Kind::audio, Kind::render }; description = "audio track"; break;
+        case cs::TrackKind::foley: fits = { Kind::audio, Kind::render }; description = "Foley track"; break;
+        default: break;
+    }
+
+    if (fits.isEmpty())
+    {
+        showToast("This kind of track cannot hold audio, video or patches.");
+        return;
+    }
+
+    auto open = [this, trackIndex, startSeconds, fits, description]
+    {
+        juce::Array<PickerRow> fitting, others;
+        for (const auto& asset : projectSession.getManifest().assetCatalog.assets)
+        {
+            if (asset.kind != Kind::audio && asset.kind != Kind::render && asset.kind != Kind::video && asset.kind != Kind::patch)
+                continue;
+
+            PickerRow row;
+            row.asset = asset;
+            row.facts = describeAsset(asset);
+
+            if (const auto thumbnailPath = asset.details["thumbnail"]; thumbnailPath.isNotEmpty())
+            {
+                juce::MemoryBlock jpeg;
+                if (projectSession.readEntry(thumbnailPath, jpeg))
+                    row.thumbnail = juce::ImageFileFormat::loadFrom(jpeg.getData(), jpeg.getSize());
+            }
+
+            (fits.contains(asset.kind) ? fitting : others).add(std::move(row));
+        }
+
+        new AssetPickerDialog(description, std::move(fitting), std::move(others),
+                              [this, trackIndex, startSeconds](const creation::assets::AssetDescriptor& chosen)
+                              {
+                                  trackerPanel.setSelectedTrack(trackIndex);
+                                  placeProjectAssetOnTracker(chosen, startSeconds);
+                              });
+    };
+
+    // Older items were never read for their details; do that first (once), so the list can say what each one is.
+    if (! ensureAssetDetails(open))
+        open();
+}
+
+bool MainComponent::ensureAssetDetails(std::function<void()> whenDone)
+{
+    using Kind = creation::assets::AssetKind;
+    if (progressTask != nullptr || ! projectSession.isValid())
+        return false;
+
+    struct Job
+    {
+        creation::assets::AssetDescriptor asset;
+        juce::StringPairArray details;
+        juce::MemoryBlock thumbnailJpeg;
+        juce::String error;
+    };
+
+    auto jobs = std::make_shared<std::vector<Job>>();
+    for (const auto& asset : projectSession.getManifest().assetCatalog.assets)
+        if ((asset.kind == Kind::video || asset.kind == Kind::audio || asset.kind == Kind::render || asset.kind == Kind::patch)
+            && asset.details["durationSeconds"].isEmpty())
+            jobs->push_back({ asset, {}, {}, {} });
+
+    if (jobs->empty())
+        return false;
+
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+
+    auto work = [safeThis, jobs](ProgressTask& task)
+    {
+        const auto count = (int) jobs->size();
+        for (int i = 0; i < count && ! task.cancelRequested() && safeThis != nullptr; ++i)
+        {
+            auto& job = (*jobs)[(size_t) i];
+            const auto base = (double) i / (double) count;
+            const auto share = 1.0 / (double) count;
+            const auto label = " (" + juce::String(i + 1) + " of " + juce::String(count) + ")";
+            task.report(base, "Reading what " + job.asset.displayName + " is" + label + "...");
+
+            creation::assets::MaterializedAssetLease lease;
+            juce::String matError;
+            const auto sizeText = juce::File::descriptionOfSizeInBytes((juce::int64) job.asset.fileSizeBytes);
+            if (! safeThis->projectSession.materializeEntry(safeThis->suiteSettings, job.asset.logicalPath,
+                                                            creation::assets::MaterializationAccess::readOnly, lease, matError,
+                                                            [&](double f)
+                                                            {
+                                                                task.report(base + share * 0.8 * f, "Reading " + job.asset.displayName + " (" + sizeText + ")" + label + "...");
+                                                                return ! task.cancelRequested();
+                                                            }))
+            {
+                job.error = matError;
+                continue;
+            }
+
+            const auto file = lease.materializedFile;
+            if (job.asset.kind == Kind::video)
+            {
+                cs::VideoDecodeService decoder;
+                const auto info = decoder.open(file);
+                if (info.valid)
+                {
+                    job.details.set("durationSeconds", juce::String(info.durationSeconds, 3));
+                    job.details.set("width", juce::String(info.width));
+                    job.details.set("height", juce::String(info.height));
+                    job.details.set("frameRate", juce::String(info.frameRate, 3));
+                    job.details.set("hasAudio", info.hasAudio ? "1" : "0");
+                    if (info.hasAudio)
+                    {
+                        job.details.set("channels", juce::String(info.audioNumChannels));
+                        job.details.set("sampleRate", juce::String(info.audioSampleRate, 0));
+                    }
+                    encodeThumbnailJpeg(decoder.decodeFrameAt(juce::jmin(1.0, info.durationSeconds * 0.1), 320, 180), job.thumbnailJpeg);
+                }
+                else
+                {
+                    job.error = decoder.getLastError();
+                }
+            }
+            else if (job.asset.kind == Kind::patch)
+            {
+                cw::PatchDocument doc;
+                juce::String parseError;
+                if (cw::parsePatchDocumentJson(file.loadFileAsString(), doc, parseError))
+                {
+                    int publicVariables = 0;
+                    for (const auto& variable : doc.variables)
+                        if (variable.isPublic)
+                            ++publicVariables;
+                    job.details.set("durationSeconds", juce::String(doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, 3));
+                    job.details.set("variables", juce::String(publicVariables));
+                }
+                else
+                {
+                    job.error = parseError;
+                }
+            }
+            else
+            {
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+                if (const std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file)); reader != nullptr && reader->sampleRate > 0.0)
+                {
+                    job.details.set("durationSeconds", juce::String((double) reader->lengthInSamples / reader->sampleRate, 3));
+                    job.details.set("channels", juce::String((int) reader->numChannels));
+                    job.details.set("sampleRate", juce::String(reader->sampleRate, 0));
+                }
+                else
+                {
+                    job.error = "the audio could not be read";
+                }
+            }
+
+            lease.leaseRoot.deleteRecursively(); // nothing to keep: this was only to look at the file
+
+            if (job.thumbnailJpeg.getSize() > 0)
+            {
+                const auto thumbnailPath = "Assets/Thumbnails/" + job.asset.id.replaceCharacters(":\\\\/ ", "____") + ".jpg";
+                if (safeThis->projectSession.writeEntry(thumbnailPath, job.thumbnailJpeg, juce::Time::getCurrentTime()))
+                    job.details.set("thumbnail", thumbnailPath);
+            }
+        }
+    };
+
+    auto finished = [safeThis, jobs, whenDone](bool cancelled)
+    {
+        if (safeThis == nullptr)
+            return;
+
+        auto* self = safeThis.getComponent();
+        bool changed = false;
+        for (auto& job : *jobs)
+        {
+            if (job.details.size() == 0)
+                continue;
+
+            auto updated = job.asset;
+            updated.details = job.details;
+            self->projectSession.upsertAssetDescriptor(updated);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            juce::String commitError;
+            self->projectSession.commit(commitError);
+            self->refreshProjectAssets();
+        }
+
+        // A cancelled read still opens the picker, with whatever was learned so far.
+        if (whenDone)
+            whenDone();
+        juce::ignoreUnused(cancelled);
+
+        juce::MessageManager::callAsync([safeThis]
+        {
+            if (safeThis != nullptr)
+                safeThis->progressTask.reset();
+        });
+    };
+
+    progressTask = std::make_unique<ProgressTask>("Reading what is in your project", std::move(work), std::move(finished));
     progressTask->start();
     return true;
 }
@@ -8097,6 +8438,8 @@ void MainComponent::runVideoImport(juce::StringArray filePaths, int trackIndex, 
                 continue;
             }
 
+            encodeThumbnailJpeg(decodeService.decodeFrameAt(juce::jmin(1.0, item.info.durationSeconds * 0.1), 320, 180), item.thumbnailJpeg);
+
             // Reading the file is a bit over 5% of the bar; the rest is the upload.
             juce::String uploadError;
             const auto sizeText = juce::File::descriptionOfSizeInBytes(item.file.getSize());
@@ -8180,7 +8523,7 @@ void MainComponent::runVideoImport(juce::StringArray filePaths, int trackIndex, 
             else if (! item.hasAudio && ! item.info.hasAudio)
                 self->videosWithoutAudio.insert(item.assetId);
 
-            const auto clipIndex = self->addImportedVideoToTracker(item.file, item.assetId, item.logicalPath, item.file.getSize(), item.info,
+            const auto clipIndex = self->addImportedVideoToTracker(item.file, item.assetId, item.logicalPath, item.file.getSize(), item.info, item.thumbnailJpeg,
                                                                    trackIndex, nextStart, clipError);
             if (clipIndex >= 0)
             {
@@ -9720,17 +10063,9 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     state.setProperty("bankOffset", mixerPanel.getBankOffset(), nullptr);
     state.setProperty("insertContext", pluginRackBar.isTrackContext() ? "track" : "master", nullptr);
     state.setProperty("insertTrackIndex", pluginRackBar.getTrackIndex(), nullptr);
-    state.setProperty("graphEnabled", engine.isGraphEnabled(), nullptr);
-    state.setProperty("graphInput", engine.getGraphInput(), nullptr);
-    state.setProperty("graphSourceFrequency", engine.getGraphSourceFrequency(), nullptr);
-    state.setProperty("graphDrive", engine.getGraphDrive(), nullptr);
-    state.setProperty("graphTone", engine.getGraphTone(), nullptr);
-    state.setProperty("graphEcho", engine.getGraphEcho(), nullptr);
-    state.setProperty("graphWidth", engine.getGraphWidth(), nullptr);
     state.setProperty("workspaceMode", static_cast<int>(activeMode), nullptr);
     state.setProperty("dslSource", dslPanel.getSourceText(), nullptr);
     state.setProperty("selectedClipIndex", selectedClipIndex, nullptr);
-    state.addChild(graphPanel.createState(), -1, nullptr);
     state.addChild(scorePanel.createState(), -1, nullptr);
     state.addChild(timelineModel.createState(), -1, nullptr);
     auto& timelineUndoContext = undoService.getOrCreateContext(timelineUndoContextId, 100);
@@ -10618,41 +10953,12 @@ void MainComponent::loadSessionFromDisk()
         mixerPanel.setSelectedChannel(-1);
     }
 
-    engine.setGraphEnabled((bool) state.getProperty("graphEnabled", true));
-    engine.setGraphInput((float) state.getProperty("graphInput", engine.getGraphInput()));
-    engine.setGraphSourceFrequency((float) state.getProperty("graphSourceFrequency", engine.getGraphSourceFrequency()));
-    engine.setGraphDrive((float) state.getProperty("graphDrive", engine.getGraphDrive()));
-    engine.setGraphTone((float) state.getProperty("graphTone", engine.getGraphTone()));
-    engine.setGraphEcho((float) state.getProperty("graphEcho", engine.getGraphEcho()));
-    engine.setGraphWidth((float) state.getProperty("graphWidth", engine.getGraphWidth()));
-    graphPanel.setEnabled(engine.isGraphEnabled());
-    graphPanel.setInput(engine.getGraphInput());
-    graphPanel.setOscillatorFrequency(engine.getGraphSourceFrequency());
-    graphPanel.setDrive(engine.getGraphDrive());
-    graphPanel.setTone(engine.getGraphTone());
-    graphPanel.setEcho(engine.getGraphEcho());
-    graphPanel.setWidth(engine.getGraphWidth());
-    graphPanel.setOutputLevel(engine.getMasterGain());
 
     if (auto dslSource = state.getProperty("dslSource").toString(); dslSource.isNotEmpty())
         dslPanel.setSourceText(dslSource);
 
     refreshProjectAssets();
     restoreLastActiveAssets(state.getChildWithName("LastActiveAssets"));
-
-    if (auto graphState = state.getChildWithName("NodeGraph"); graphState.isValid())
-        graphPanel.restoreState(graphState);
-
-    if (! graphPanel.hasNode("Oscillator"))
-    {
-        engine.setGraphInput(0.0f);
-        graphPanel.setInput(0.0f);
-    }
-
-    engine.setGraphVstEnabled(graphPanel.isVstEnabled());
-    engine.setGraphVstMix(graphPanel.getVstMix());
-    if (engine.hasGraphVstPlugin() && engine.getGraphVstPluginName().isNotEmpty())
-        graphPanel.setAssignedVstPlugin(engine.getGraphVstPluginName(), engine.getGraphVstPluginFile().getFullPathName());
 
     if (auto scoreState = state.getChildWithName("ScoreView"); scoreState.isValid())
         scorePanel.restoreState(scoreState);
@@ -11494,11 +11800,6 @@ void MainComponent::refreshInsertRack()
         pluginRackBar.setPluginName(engine.getMasterPluginName());
         pluginRackBar.setBypassed(engine.isMasterPluginBypassed());
     }
-
-    graphPanel.setVstEnabled(engine.isGraphVstEnabled());
-    graphPanel.setVstMix(engine.getGraphVstMix());
-    if (engine.hasGraphVstPlugin())
-        graphPanel.setAssignedVstPlugin(engine.getGraphVstPluginName(), engine.getGraphVstPluginFile().getFullPathName());
 
     refreshFxStackWindow();
     refreshPluginsPanel();

@@ -245,8 +245,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Audio/PatchRuntimePlayer.h
     Source/Audio/PatchLiveVoice.cpp
     Source/Audio/PatchLiveVoice.h
-    Source/Audio/SignalGraphRuntime.cpp
-    Source/Audio/SignalGraphRuntime.h
     Source/Audio/VstPluginCatalog.cpp
     Source/Audio/VstPluginCatalog.h
     Source/Audio/SamplePackBuilder/PitchDetector.cpp
@@ -293,8 +291,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
-    Source/Language/SignalGraph.cpp
-    Source/Language/SignalGraph.h
     Source/Language/AudioNodeCatalog.cpp
     Source/Language/AudioNodeCatalog.h
     Source/Language/AudioGraphCodegen.cpp
@@ -315,8 +311,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/DslPanel.h
     Source/Views/DockingWorkspace.cpp
     Source/Views/DockingWorkspace.h
-    Source/Views/GraphPanel.cpp
-    Source/Views/GraphPanel.h
     Source/Views/TourGuideOverlay.cpp
     Source/Views/TourGuideOverlay.h
     Source/Views/FeedbackDialog.cpp
@@ -686,7 +680,6 @@ juce_generate_juce_header(SignalClipRenderSmoke)
 target_sources(SignalClipRenderSmoke PRIVATE
     tests/SignalClipRenderSmoke.cpp
     Source/Audio/WorkstationAudioEngine.cpp
-    Source/Audio/SignalGraphRuntime.cpp
     Source/Audio/PatchLiveVoice.cpp
     Source/Audio/PatchRuntimePlayer.cpp
     Source/Patch/PatchModel.cpp

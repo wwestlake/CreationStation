@@ -7,8 +7,7 @@ namespace cw::tutorial
 enum class ActionType
 {
     switchWorkspace,
-    applySignalTemplate,
-    applyGraphMacro
+    applySignalTemplate
 };
 
 struct Action
@@ -38,6 +37,5 @@ struct Script
 };
 
 juce::String getBuiltInGettingStartedTutorialSource();
-juce::String getBuiltInVstNodeDemoTutorialSource();
 Script makeGettingStartedTutorial();
 }

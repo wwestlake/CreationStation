@@ -18,7 +18,6 @@ public:
     std::function<void(int)> onRemovePathRequested;
     std::function<void()> onRescanRequested;
     std::function<void(const VstPluginCatalog::Entry&)> onLoadIntoInsertRequested;
-    std::function<void(const VstPluginCatalog::Entry&)> onAssignNodeRequested;
     std::function<void()> onBuildSamplePackRequested;
 
     void paint(juce::Graphics& g) override;
@@ -47,14 +46,12 @@ private:
         PluginItem();
         void setEntry(const VstPluginCatalog::Entry& newEntry);
         std::function<void(const VstPluginCatalog::Entry&)> onLoadRequested;
-        std::function<void(const VstPluginCatalog::Entry&)> onAssignRequested;
         void paint(juce::Graphics& g) override;
         void resized() override;
 
     private:
         VstPluginCatalog::Entry entry;
         juce::TextButton loadButton { "Load To Insert" };
-        juce::TextButton assignButton { "Assign To VST Node" };
     };
 
     class CategorySection final : public juce::Component
@@ -65,7 +62,6 @@ private:
         void setCollapsed(bool shouldCollapse);
         bool isCollapsed() const { return collapsed; }
         std::function<void(const VstPluginCatalog::Entry&)> onLoadRequested;
-        std::function<void(const VstPluginCatalog::Entry&)> onAssignRequested;
         std::function<void()> onToggled;
         void paint(juce::Graphics& g) override;
         void resized() override;

@@ -67,14 +67,6 @@ PluginsPanel::PluginItem::PluginItem()
     };
     loadButton.setTooltip("Load this plugin into the selected track's insert chain");
     addAndMakeVisible(loadButton);
-
-    assignButton.onClick = [this]
-    {
-        if (onAssignRequested)
-            onAssignRequested(entry);
-    };
-    assignButton.setTooltip("Assign this plugin to the VST node in the signal graph");
-    addAndMakeVisible(assignButton);
 }
 
 void PluginsPanel::PluginItem::setEntry(const VstPluginCatalog::Entry& newEntry)
@@ -108,8 +100,6 @@ void PluginsPanel::PluginItem::resized()
 {
     auto buttons = getLocalBounds().removeFromRight(266).reduced(12, 12);
     loadButton.setBounds(buttons.removeFromTop(26));
-    buttons.removeFromTop(6);
-    assignButton.setBounds(buttons.removeFromTop(26));
 }
 
 PluginsPanel::CategorySection::CategorySection(const juce::String& name, bool isCS)
@@ -126,7 +116,6 @@ void PluginsPanel::CategorySection::setPlugins(const juce::Array<VstPluginCatalo
         auto* item = pluginItems.add(new PluginItem());
         item->setEntry(entry);
         item->onLoadRequested = onLoadRequested;
-        item->onAssignRequested = onAssignRequested;
         addAndMakeVisible(item);
     }
 
@@ -217,7 +206,7 @@ PluginsPanel::PluginsPanel()
     titleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
     addAndMakeVisible(titleLabel);
 
-    subtitleLabel.setText("Manage VST folders, browse discovered plugins, load inserts, and assign plugins to VST nodes.", juce::dontSendNotification);
+    subtitleLabel.setText("Manage VST folders, browse discovered plugins, and load inserts onto your tracks.", juce::dontSendNotification);
     subtitleLabel.setColour(juce::Label::textColourId, dimText());
     addAndMakeVisible(subtitleLabel);
 
@@ -333,11 +322,6 @@ void PluginsPanel::rebuildPluginsList()
             if (onLoadIntoInsertRequested)
                 onLoadIntoInsertRequested(entry);
         };
-        csSection->onAssignRequested = [this](const VstPluginCatalog::Entry& entry)
-        {
-            if (onAssignNodeRequested)
-                onAssignNodeRequested(entry);
-        };
         csSection->onToggled = [this] { resized(); };
         csSection->setCollapsed(false);
         pluginsHost.addAndMakeVisible(csSection);
@@ -359,11 +343,6 @@ void PluginsPanel::rebuildPluginsList()
         {
             if (onLoadIntoInsertRequested)
                 onLoadIntoInsertRequested(entry);
-        };
-        instSection->onAssignRequested = [this](const VstPluginCatalog::Entry& entry)
-        {
-            if (onAssignNodeRequested)
-                onAssignNodeRequested(entry);
         };
         instSection->onToggled = [this] { resized(); };
         instSection->setCollapsed(true);
@@ -405,11 +384,6 @@ void PluginsPanel::rebuildPluginsList()
                 if (onLoadIntoInsertRequested)
                     onLoadIntoInsertRequested(entry);
             };
-            catSection->onAssignRequested = [this](const VstPluginCatalog::Entry& entry)
-            {
-                if (onAssignNodeRequested)
-                    onAssignNodeRequested(entry);
-            };
             catSection->onToggled = [this] { resized(); };
             catSection->setCollapsed(true);
             pluginsHost.addAndMakeVisible(catSection);
@@ -440,11 +414,6 @@ void PluginsPanel::rebuildPluginsList()
         {
             if (onLoadIntoInsertRequested)
                 onLoadIntoInsertRequested(entry);
-        };
-        devSection->onAssignRequested = [this](const VstPluginCatalog::Entry& entry)
-        {
-            if (onAssignNodeRequested)
-                onAssignNodeRequested(entry);
         };
         devSection->onToggled = [this] { resized(); };
         devSection->setCollapsed(true);
