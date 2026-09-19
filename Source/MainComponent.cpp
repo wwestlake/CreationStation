@@ -7062,63 +7062,109 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
             engine.setTrackIsAutomationKind(targetTrack, false);
         }
 
-        creation::assets::MaterializedAssetLease lease;
-        if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath, creation::assets::MaterializationAccess::readOnly, lease, errorMessage))
+        if (progressTask != nullptr)
         {
-            contentPanel.setStatusText("Could not materialize video asset: " + errorMessage);
+            reportError("Could not add the video: another long action is still running. Wait for it to finish, or cancel it.");
             return;
         }
 
-        auto safeThis = juce::Component::SafePointer<MainComponent>(this);
-        auto sourceFile = lease.materializedFile;
-        std::thread([safeThis, asset, targetTrack, startSeconds, sourceFile]() mutable
+        // Copying a big video out of the project and opening it takes seconds: it runs in a progress window (bar,
+        // status, Cancel) instead of freezing the app, and any failure is shown with its reason.
+        struct PlaceVideoResult
         {
-            cs::VideoDecodeService decodeService;
-            auto info = decodeService.open(sourceFile);
-            auto openError = decodeService.getLastError();
+            creation::assets::MaterializedAssetLease lease;
+            cs::VideoStreamInfo info;
+            juce::String error;
+        };
+        auto result = std::make_shared<PlaceVideoResult>();
+        auto safeThis = juce::Component::SafePointer<MainComponent>(this);
 
-            juce::MessageManager::callAsync([safeThis, asset, targetTrack, startSeconds, sourceFile, info, openError]() mutable
+        auto work = [safeThis, asset, result](ProgressTask& task)
+        {
+            if (safeThis == nullptr)
+                return;
+
+            const auto sizeText = juce::File::descriptionOfSizeInBytes((juce::int64) asset.fileSizeBytes);
+            task.report(0.0, "Fetching " + asset.displayName + " (" + sizeText + ") from the project...");
+
+            if (! safeThis->projectSession.materializeEntry(safeThis->suiteSettings, asset.logicalPath,
+                                                            creation::assets::MaterializationAccess::readOnly,
+                                                            result->lease, result->error,
+                                                            [&](double fraction)
+                                                            {
+                                                                task.report(0.9 * fraction, "Fetching " + asset.displayName + " (" + sizeText + ") from the project - "
+                                                                                                + juce::String((int) std::round(fraction * 100.0)) + "%");
+                                                                return ! task.cancelRequested();
+                                                            }))
             {
-                if (safeThis == nullptr) return;
+                if (result->error.isEmpty())
+                    result->error = "the video could not be copied out of the project";
+                return;
+            }
 
-                if (info.valid)
+            task.report(0.92, "Opening the video...");
+            cs::VideoDecodeService decodeService;
+            result->info = decodeService.open(result->lease.materializedFile);
+            if (! result->info.valid)
+            {
+                const auto reason = decodeService.getLastError();
+                result->error = "Could not open video " + asset.displayName + (reason.isNotEmpty() ? ": " + reason : juce::String());
+            }
+        };
+
+        auto finished = [safeThis, asset, targetTrack, startSeconds, result](bool cancelled)
+        {
+            if (safeThis == nullptr)
+                return;
+
+            auto* self = safeThis.getComponent();
+
+            if (result->error.isNotEmpty())
+            {
+                if (! cancelled && result->error != "Cancelled.")
+                    self->reportError(result->error.startsWithIgnoreCase("could not") ? result->error
+                                                                                        : "Could not add " + asset.displayName + " to the Tracker: " + result->error);
+                else
+                    self->showToast("Adding the video was cancelled.");
+
+                if (result->lease.leaseRoot != juce::File())
+                    result->lease.leaseRoot.deleteRecursively();
+            }
+            else if (! cancelled)
+            {
+                juce::String clipError;
+                cs::AssetRef assetRef;
+                assetRef.id = asset.id;
+                assetRef.versionId = asset.versionId;
+                assetRef.mode = creation::assets::AssetReferenceMode::exact;
+
+                const auto clipIndex = self->timelineModel.addClip(cs::ClipKind::video, targetTrack, asset.displayName, asset.id, "project-video",
+                                                                   result->lease.materializedFile, startSeconds,
+                                                                   result->info.durationSeconds > 0.0 ? result->info.durationSeconds : 10.0, clipError);
+                if (clipIndex >= 0)
                 {
-                    juce::String clipError;
-                    cs::AssetRef assetRef;
-                    assetRef.id = asset.id;
-                    assetRef.versionId = asset.versionId;
-                    assetRef.mode = creation::assets::AssetReferenceMode::exact;
-
-                    auto clipIndex = safeThis->timelineModel.addClip(cs::ClipKind::video,
-                                                                     targetTrack,
-                                                                     asset.displayName,
-                                                                     asset.id,
-                                                                     "project-video",
-                                                                     sourceFile,
-                                                                     startSeconds,
-                                                                     info.durationSeconds > 0.0 ? info.durationSeconds : 10.0,
-                                                                     clipError);
-
-                                        if (clipIndex >= 0) {
-                        safeThis->timelineModel.setClipAssetReference(clipIndex, assetRef);
-                        safeThis->trackerPanel.setSelectedTrack(targetTrack);
-                        safeThis->trackerPanel.refreshTimelineView();
-                        safeThis->setWorkspaceMode(WorkspaceMode::tracker);
-                        safeThis->saveSessionToDisk();
-                        safeThis->transportBar.setStatusText("Placed project asset on Tracker: " + asset.displayName);
-                    }
-                    else if (clipError.isNotEmpty()) {
-                        safeThis->contentPanel.setStatusText(clipError);
-                    }
+                    self->timelineModel.setClipAssetReference(clipIndex, assetRef);
+                    self->trackerPanel.setSelectedTrack(targetTrack);
+                    self->trackerPanel.refreshTimelineView();
+                    self->setWorkspaceMode(WorkspaceMode::tracker);
+                    self->saveSessionToDisk();
+                    self->showToast("Added " + asset.displayName + " to the Tracker.");
                 }
                 else
                 {
-                    safeThis->contentPanel.setStatusText("Could not open video " + asset.displayName
-                                                         + (openError.isNotEmpty() ? ": " + openError : juce::String()));
+                    self->reportError("Could not add " + asset.displayName + " to the Tracker" + (clipError.isNotEmpty() ? ": " + clipError : juce::String()));
                 }
-            });
-        }).detach();
+            }
 
+            juce::MessageManager::callAsync([safeThis]
+            {
+                if (safeThis != nullptr)
+                    safeThis->progressTask.reset();
+            });
+        };
+
+        progressTask = std::make_unique<ProgressTask>("Adding video", std::move(work), std::move(finished));
+        progressTask->start();
         return;
     }
 
