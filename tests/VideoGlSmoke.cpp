@@ -180,6 +180,35 @@ int main()
     out = view.renderToImage(64, 64);
     check(isNear(at(out, 32, 32), 127, 0, 127, 30), "opacity blends a layer with what is below it");
 
+    // 6b. Real video pictures are odd sizes, and a second clip can have a different shape (portrait): both must draw.
+    {
+        auto wideRed = juce::Image(juce::Image::ARGB, 318, 180, true);
+        { juce::Graphics g(wideRed); g.fillAll(juce::Colour::fromRGB(255, 0, 0)); }
+        auto tallBlue = juce::Image(juce::Image::ARGB, 180, 320, true);
+        { juce::Graphics g(tallBlue); g.fillAll(juce::Colour::fromRGB(0, 0, 255)); }
+
+        auto top = layer(tallBlue);
+        top.scale = 0.5f;
+        view.setLayers({ layer(wideRed), top });
+        out = view.renderToImage(320, 180);
+        check(isNear(at(out, 160, 90), 0, 0, 255) && isNear(at(out, 10, 10), 255, 0, 0),
+              "odd-sized and differently shaped layers both draw (tall blue over wide red)");
+
+        // A different set of layers every frame, as during playback (new pictures each time).
+        bool everyFrameDraws = true;
+        for (int frame = 0; frame < 6 && everyFrameDraws; ++frame)
+        {
+            auto next = juce::Image(juce::Image::ARGB, 318, 180, true);
+            { juce::Graphics g(next); g.fillAll(juce::Colour::fromRGB(255, 0, 0)); }
+            auto smallTop = layer(juce::Image(tallBlue.createCopy()));
+            smallTop.scale = 0.3f + 0.05f * (float) frame;
+            view.setLayers({ layer(next), smallTop });
+            out = view.renderToImage(320, 180);
+            everyFrameDraws = isNear(at(out, 160, 90), 0, 0, 255) && isNear(at(out, 10, 10), 255, 0, 0);
+        }
+        check(everyFrameDraws, "two layers keep drawing as new pictures arrive every frame");
+    }
+
     // 7. Nothing at the playhead: no picture.
     view.setIdle();
     out = view.renderToImage(64, 64);

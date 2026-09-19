@@ -2,6 +2,7 @@
 #include "Bt709NV12Shader.h"
 
 #include <d3d11.h>
+#include <d3d11_4.h>
 #include <d3dcompiler.h>
 #include <dxgi.h>
 #include <mfapi.h>
@@ -90,6 +91,9 @@ struct SharedD3D
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IMFDXGIDeviceManager> deviceManager;
     UINT resetToken = 0;
+    // Every use of the device's one drawing context (turning a decoded frame into a picture) goes through this, so
+    // several video layers decoding at once take turns instead of trampling each other's GPU commands.
+    juce::CriticalSection decodeLock;
 };
 
 // Lazily created on first use and kept for the rest of the process's life. Recreating a D3D11
@@ -119,6 +123,14 @@ SharedD3D* getSharedD3D()
                                 candidate->context.address());
     if (FAILED(hr))
         return nullptr;
+
+    // Media Foundation uses this device from its own threads while we use it from ours: Windows requires the device
+    // to be made safe for that when it is shared this way.
+    {
+        ComPtr<ID3D11Multithread> multithread;
+        if (SUCCEEDED(candidate->device->QueryInterface(IID_PPV_ARGS(multithread.address()))))
+            multithread->SetMultithreadProtected(TRUE);
+    }
 
     hr = MFCreateDXGIDeviceManager(&candidate->resetToken, candidate->deviceManager.address());
     if (FAILED(hr))
@@ -212,6 +224,8 @@ VideoStreamInfo VideoDecodeService::open(const juce::File& file)
         lastError = "the video decoder could not start a Direct3D 11 GPU device";
         return {};
     }
+
+    const juce::ScopedLock decodeGuard(shared->decodeLock);
 
     ComPtr<IMFAttributes> attributes;
     if (FAILED(MFCreateAttributes(attributes.address(), 3)))
@@ -341,6 +355,8 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
     auto* shared = getSharedD3D();
     if (shared == nullptr)
         DECODE_FAIL();
+
+    const juce::ScopedLock decodeGuard(shared->decodeLock);
 
     {
         PROPVARIANT seekVar;

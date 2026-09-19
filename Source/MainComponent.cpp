@@ -8439,7 +8439,12 @@ void MainComponent::updateVideoView(double timelineSeconds)
                                     if (found == safeThis->videoFeeds.end())
                                         return;
 
-                                    found->second->frame = std::move(image);
+                                    // A failed decode must not wipe out the last good picture (that would black out the
+                                    // layer), and it should be tried again on the next tick.
+                                    if (image.isValid())
+                                        found->second->frame = std::move(image);
+                                    else
+                                        found->second->requestKey = {};
                                     safeThis->refreshVideoLayers();
                                 },
                                 width, height);
