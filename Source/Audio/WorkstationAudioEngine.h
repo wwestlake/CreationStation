@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <vector>
 #include "SignalGraphRuntime.h"
@@ -85,6 +86,12 @@ public:
         int blockSize = 512;
         bool normalizePeak = false;
         float peakTargetDecibels = -1.0f;
+        // Where on the timeline the render starts; the render is durationSeconds long from here. Automation,
+        // clip positions and Signal clip voices all follow the timeline, so a custom range sounds exactly
+        // like that stretch of the full render.
+        double startSeconds = 0.0;
+        // Called after every block with the fraction done (0..1); return false to cancel the render.
+        std::function<bool(float progress)> onProgress;
     };
 
     WorkstationAudioEngine();
@@ -216,11 +223,16 @@ public:
     bool isMidiRecording() const noexcept { return midiRecordingActive.load(); }
     // Message-thread-safe: drains and returns everything captured since the last call.
     std::vector<RecordedMidiEvent> takeRecordedMidiEvents();
+    // Renders the mix offline through the very same arrangement/mixer path playback uses, block by block, so
+    // automation, insert chains and gain/pan all apply. Signal clips come in as signalTargets and get their
+    // own fresh voices at the render sample rate (the live voices are set aside and put back afterwards),
+    // so a render never carries stale live voices and never plays a Signal clip twice.
     bool renderTrackerMixToBuffer(const juce::Array<PlaybackClipTarget>& targets,
                                   double durationSeconds,
                                   const RenderSettings& settings,
                                   juce::AudioBuffer<float>& outputBuffer,
-                                  juce::String& errorMessage);
+                                  juce::String& errorMessage,
+                                  const juce::Array<SignalClipTarget>& signalTargets = {});
     void reapplyHostedPluginStates();
     void stopAssetPreview();
     bool isPreviewingAsset() const noexcept;
@@ -772,6 +784,12 @@ private:
         std::shared_ptr<PatchLiveVoice> voice;
     };
     using SignalClipSet = std::vector<SignalClipPlacement>;
+    // Builds a set of live Signal clip placements (one voice each) for the given sample rate and block size.
+    // A voice from `reuseFrom` with the same clip, patch content and sample rate is kept, so its DSP state
+    // survives a timeline refresh; pass nullptr to always build fresh voices, as a render does.
+    std::shared_ptr<const SignalClipSet> buildSignalClipSet(const juce::Array<SignalClipTarget>& targets,
+                                                            double sampleRate, int blockSize,
+                                                            const std::shared_ptr<const SignalClipSet>& reuseFrom) const;
     std::atomic<std::shared_ptr<const SignalClipSet>> signalClips;
     // Message thread only: keeps the last two replaced sets alive so the audio thread is never the
     // one to drop the final reference (and free a voice) inside the audio callback.
