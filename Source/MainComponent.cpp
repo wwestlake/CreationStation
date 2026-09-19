@@ -7982,7 +7982,7 @@ bool MainComponent::ensureAssetDetails(std::function<void()> whenDone)
     auto jobs = std::make_shared<std::vector<Job>>();
     for (const auto& asset : projectSession.getManifest().assetCatalog.assets)
         if ((asset.kind == Kind::video || asset.kind == Kind::audio || asset.kind == Kind::render || asset.kind == Kind::patch)
-            && asset.details["durationSeconds"].isEmpty())
+            && (asset.details["durationSeconds"].isEmpty() || (asset.kind == Kind::video && asset.details["thumbnail"].isEmpty())))
             jobs->push_back({ asset, {}, {}, {} });
 
     if (jobs->empty())
@@ -8389,8 +8389,14 @@ void MainComponent::updateVideoView(double timelineSeconds)
         for (const auto& feed : videoFeeds)
             if (feed.second->frame.isValid())
                 ++decoded;
+        juce::String decodeProblem;
+        for (const auto& feed : videoFeeds)
+            if (const auto reason = feed.second->scrub.getLastError(); reason.isNotEmpty())
+                decodeProblem = reason;
+
         videoPanelHost.setExtraInfo("video clips under the playhead " + juce::String((int) active.size()) + ", pictures decoded " + juce::String(decoded)
-                                    + ", playhead " + juce::String(timelineSeconds, 1) + " s");
+                                    + ", playhead " + juce::String(timelineSeconds, 1) + " s"
+                                    + (decodeProblem.isNotEmpty() ? "  |  DECODE PROBLEM: " + decodeProblem : juce::String()));
     }
 
     // Decoders for clips that are no longer under the playhead are let go.

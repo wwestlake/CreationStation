@@ -326,15 +326,21 @@ VideoStreamInfo VideoDecodeService::open(const juce::File& file)
     return streamInfo;
 }
 
+// A frame decode that stops says where (the line), because these exits are otherwise silent and a hardware-decode
+// video that will not produce a picture is very hard to tell apart from one that is merely slow.
+#define DECODE_FAIL() do { if (lastError.isEmpty()) lastError = "frame decode stopped at VideoDecodeService.cpp line " + juce::String(__LINE__); return {}; } while (0)
+
 juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutputWidth, int maxOutputHeight)
 {
+    lastError = {};
+
     if (! isOpen())
-        return {};
+        DECODE_FAIL();
 
     ScopedComInitializer comInit;
     auto* shared = getSharedD3D();
     if (shared == nullptr)
-        return {};
+        DECODE_FAIL();
 
     {
         PROPVARIANT seekVar;
@@ -356,28 +362,36 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
             LONGLONG timestamp = 0;
             auto hr = impl->sourceReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
                                                       &actualStreamIndex, &flags, &timestamp, sample.address());
-            if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0)
-                return {};
+            if (FAILED(hr))
+            {
+                lastError = "the decoder could not read a frame (Media Foundation error 0x" + juce::String::toHexString((int) hr) + ")";
+                DECODE_FAIL();
+            }
+            if ((flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0)
+            {
+                lastError = "the decoder reached the end of the video before a frame (position " + juce::String(sourceSeconds, 2) + " s)";
+                DECODE_FAIL();
+            }
         }
     }
 
     if (! sample)
-        return {};
+        DECODE_FAIL();
 
     ComPtr<IMFMediaBuffer> buffer;
     if (FAILED(sample->ConvertToContiguousBuffer(buffer.address())))
-        return {};
+        DECODE_FAIL();
 
     // Only a hardware-backed sample hands back a D3D11 texture through this interface - a sample
     // that doesn't means the decoder fell back to software (no hardware decoder for this codec),
     // which this service doesn't attempt to handle via a CPU path per its own design brief.
     ComPtr<IMFDXGIBuffer> dxgiBuffer;
     if (FAILED(buffer->QueryInterface(IID_PPV_ARGS(dxgiBuffer.address()))))
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11Texture2D> sourceTexture;
     if (FAILED(dxgiBuffer->GetResource(IID_PPV_ARGS(sourceTexture.address()))))
-        return {};
+        DECODE_FAIL();
 
     UINT subresourceIndex = 0;
     dxgiBuffer->GetSubresourceIndex(&subresourceIndex);
@@ -385,28 +399,70 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
     D3D11_TEXTURE2D_DESC sourceDesc {};
     sourceTexture->GetDesc(&sourceDesc);
     if (sourceDesc.Width == 0 || sourceDesc.Height == 0)
-        return {};
+        DECODE_FAIL();
 
     // Decoder-pool textures are arrays (one slice reused per in-flight frame), so the views need
     // TEXTURE2DARRAY pointed at this sample's specific slice, not a plain TEXTURE2D view.
+    //
+    // Some decoders create those textures for decoding only (bind flags without SHADER_RESOURCE), and a shader cannot
+    // read such a texture at all (creating the view fails with E_INVALIDARG). Then the frame is copied into a plain
+    // texture of our own that a shader can read, and the views look at that copy instead.
+    ComPtr<ID3D11Texture2D> copyTexture; // keeps the copy alive while the views use it
+    ID3D11Texture2D* viewTexture = sourceTexture.get();
+    bool viewIsArraySlice = true;
+    if ((sourceDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE) == 0)
+    {
+        D3D11_TEXTURE2D_DESC copyDesc = sourceDesc;
+        copyDesc.ArraySize = 1;
+        copyDesc.MipLevels = 1;
+        copyDesc.Usage = D3D11_USAGE_DEFAULT;
+        copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        copyDesc.CPUAccessFlags = 0;
+        copyDesc.MiscFlags = 0;
+
+        if (const auto copyResult = shared->device->CreateTexture2D(&copyDesc, nullptr, copyTexture.address()); FAILED(copyResult))
+        {
+            lastError = "the decoded picture could not be copied to a GPU texture a shader can read (error 0x" + juce::String::toHexString((int) copyResult) + ")";
+            return {};
+        }
+
+        shared->context->CopySubresourceRegion(copyTexture.get(), 0, 0, 0, 0, sourceTexture.get(), subresourceIndex, nullptr);
+        viewTexture = copyTexture.get();
+        viewIsArraySlice = false;
+    }
+
     D3D11_SHADER_RESOURCE_VIEW_DESC lumaDesc {};
     lumaDesc.Format = DXGI_FORMAT_R8_UNORM;
-    lumaDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    lumaDesc.Texture2DArray.MostDetailedMip = 0;
-    lumaDesc.Texture2DArray.MipLevels = 1;
-    lumaDesc.Texture2DArray.FirstArraySlice = subresourceIndex;
-    lumaDesc.Texture2DArray.ArraySize = 1;
+    if (viewIsArraySlice)
+    {
+        lumaDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        lumaDesc.Texture2DArray.MostDetailedMip = 0;
+        lumaDesc.Texture2DArray.MipLevels = 1;
+        lumaDesc.Texture2DArray.FirstArraySlice = subresourceIndex;
+        lumaDesc.Texture2DArray.ArraySize = 1;
+    }
+    else
+    {
+        lumaDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        lumaDesc.Texture2D.MostDetailedMip = 0;
+        lumaDesc.Texture2D.MipLevels = 1;
+    }
 
     ComPtr<ID3D11ShaderResourceView> lumaSrv;
-    if (FAILED(shared->device->CreateShaderResourceView(sourceTexture.get(), &lumaDesc, lumaSrv.address())))
+    if (const auto srvResult = shared->device->CreateShaderResourceView(viewTexture, &lumaDesc, lumaSrv.address()); FAILED(srvResult))
+    {
+        lastError = "the decoded picture cannot be read by the GPU shader (texture format " + juce::String((int) sourceDesc.Format)
+                  + ", bind flags 0x" + juce::String::toHexString((int) sourceDesc.BindFlags) + ", array size " + juce::String((int) sourceDesc.ArraySize)
+                  + ", error 0x" + juce::String::toHexString((int) srvResult) + ")";
         return {};
+    }
 
     D3D11_SHADER_RESOURCE_VIEW_DESC chromaDesc = lumaDesc;
     chromaDesc.Format = DXGI_FORMAT_R8G8_UNORM;
 
     ComPtr<ID3D11ShaderResourceView> chromaSrv;
-    if (FAILED(shared->device->CreateShaderResourceView(sourceTexture.get(), &chromaDesc, chromaSrv.address())))
-        return {};
+    if (FAILED(shared->device->CreateShaderResourceView(viewTexture, &chromaDesc, chromaSrv.address())))
+        DECODE_FAIL();
 
     const auto sourceWidth = (int) sourceDesc.Width;
     const auto sourceHeight = (int) sourceDesc.Height;
@@ -427,26 +483,26 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
 
     ComPtr<ID3D11Texture2D> renderTargetTexture;
     if (FAILED(shared->device->CreateTexture2D(&rtDesc, nullptr, renderTargetTexture.address())))
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11RenderTargetView> renderTargetView;
     if (FAILED(shared->device->CreateRenderTargetView(renderTargetTexture.get(), nullptr, renderTargetView.address())))
-        return {};
+        DECODE_FAIL();
 
     auto vertexShaderBlob = compileShader("VSMain", "vs_4_0");
     auto pixelShaderBlob = compileShader("PSMain", "ps_4_0");
     if (! vertexShaderBlob || ! pixelShaderBlob)
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11VertexShader> vertexShader;
     if (FAILED(shared->device->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(),
                                                   nullptr, vertexShader.address())))
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11PixelShader> pixelShader;
     if (FAILED(shared->device->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(),
                                                  nullptr, pixelShader.address())))
-        return {};
+        DECODE_FAIL();
 
     D3D11_SAMPLER_DESC samplerDesc {};
     samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -457,7 +513,7 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
 
     ComPtr<ID3D11SamplerState> samplerState;
     if (FAILED(shared->device->CreateSamplerState(&samplerDesc, samplerState.address())))
-        return {};
+        DECODE_FAIL();
 
     auto* context = shared->context.get();
 
@@ -494,13 +550,13 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
 
     ComPtr<ID3D11Texture2D> stagingTexture;
     if (FAILED(shared->device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.address())))
-        return {};
+        DECODE_FAIL();
 
     context->CopyResource(stagingTexture.get(), renderTargetTexture.get());
 
     D3D11_MAPPED_SUBRESOURCE mapped {};
     if (FAILED(context->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped)))
-        return {};
+        DECODE_FAIL();
 
     juce::Image image(juce::Image::ARGB, outputWidth, outputHeight, false);
     {
