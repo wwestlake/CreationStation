@@ -2534,27 +2534,134 @@ SignalLabPanel::FloatingWindow::FloatingWindow(SignalLabPanel& ownerRef, Kind ki
     setInterceptsMouseClicks(true, true);
 }
 
+namespace
+{
+juce::Colour variableTypeColour(const juce::String& valueType)
+{
+    if (valueType == "Bool")
+        return juce::Colour(0xffe0665f);
+    if (valueType == "Int")
+        return juce::Colour(0xff5aa7ff);
+    return juce::Colour(0xff5cc98a); // Float
+}
+
+// A small eye: open = Public (settable from outside the graph), closed with a slash = Private.
+void drawVisibilityEye(juce::Graphics& g, juce::Rectangle<float> area, bool open, juce::Colour colour)
+{
+    const auto centre = area.getCentre();
+    const float w = area.getWidth();
+    const float h = area.getHeight() * 0.62f;
+
+    juce::Path eye;
+    eye.startNewSubPath(centre.x - w * 0.5f, centre.y);
+    eye.quadraticTo(centre.x, centre.y - h * 1.15f, centre.x + w * 0.5f, centre.y);
+    eye.quadraticTo(centre.x, centre.y + h * 1.15f, centre.x - w * 0.5f, centre.y);
+    eye.closeSubPath();
+
+    g.setColour(colour);
+    g.strokePath(eye, juce::PathStrokeType(1.5f));
+    if (open)
+        g.fillEllipse(centre.x - h * 0.42f, centre.y - h * 0.42f, h * 0.84f, h * 0.84f);
+    else
+        g.drawLine(centre.x - w * 0.4f, centre.y + h * 0.9f, centre.x + w * 0.4f, centre.y - h * 0.9f, 1.5f);
+}
+
+constexpr int kVariableRowHeight = 32;
+}
+
 SignalLabPanel::NodeToolboxPane::NodeToolboxPane()
 {
-    // Title and Add button live outside the pane (SignalLabPanel's fixed
-    // "Variables" header + addLocalControlButton) so they stay put while
-    // this pane's row list scrolls beneath them.
+    // Title and Add button live outside the pane (SignalLabPanel's fixed "Variables" header and
+    // addLocalControlButton). The pane is just the list, at its natural height inside the column.
 }
 
-void SignalLabPanel::NodeToolboxPane::VariableButton::mouseDown(const juce::MouseEvent& event)
+juce::Rectangle<int> SignalLabPanel::NodeToolboxPane::VariableRow::eyeBounds() const
 {
-    juce::TextButton::mouseDown(event);
+    return { getWidth() - 62, 0, 30, getHeight() };
+}
+
+juce::Rectangle<int> SignalLabPanel::NodeToolboxPane::VariableRow::removeBounds() const
+{
+    return { getWidth() - 32, 0, 28, getHeight() };
+}
+
+void SignalLabPanel::NodeToolboxPane::VariableRow::setVariable(const LocalControlVariable& variable, bool isSelectedRow)
+{
+    name = variable.name;
+    valueType = variable.valueType;
+    isPublic = variable.isPublic;
+    isSelected = isSelectedRow;
+    repaint();
+}
+
+void SignalLabPanel::NodeToolboxPane::VariableRow::paint(juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds();
+    if (isSelected)
+    {
+        g.setColour(juce::Colour(0x442f6fdc));
+        g.fillRect(bounds);
+    }
+
+    g.setColour(juce::Colour(0xff283243));
+    g.drawLine(0.0f, (float) bounds.getBottom() - 0.5f, (float) bounds.getRight(), (float) bounds.getBottom() - 0.5f, 1.0f);
+
+    g.setColour(juce::Colour(0xff5f7189)); // grip
+    for (int dotRow = 0; dotRow < 3; ++dotRow)
+        for (int dotColumn = 0; dotColumn < 2; ++dotColumn)
+            g.fillEllipse(8.0f + (float) dotColumn * 4.0f, 10.0f + (float) dotRow * 5.0f, 2.0f, 2.0f);
+
+    const auto typeColour = variableTypeColour(valueType);
+    g.setColour(typeColour);
+    g.fillEllipse(22.0f, (float) getHeight() * 0.5f - 4.5f, 9.0f, 9.0f);
+
+    const auto pill = juce::Rectangle<int>(eyeBounds().getX() - 46, (getHeight() - 16) / 2, 42, 16);
+    g.setColour(typeColour.withAlpha(0.18f));
+    g.fillRoundedRectangle(pill.toFloat(), 8.0f);
+    g.setColour(typeColour);
+    g.setFont(juce::Font(10.5f));
+    g.drawText(valueType, pill, juce::Justification::centred);
+
+    g.setColour(juce::Colours::white);
+    g.setFont(juce::Font(13.0f));
+    g.drawText(name, juce::Rectangle<int>(38, 0, juce::jmax(10, pill.getX() - 44), getHeight()), juce::Justification::centredLeft, true);
+
+    drawVisibilityEye(g, eyeBounds().toFloat().reduced(5.0f, 9.0f), isPublic,
+                      isPublic ? juce::Colour(0xff5cc98a) : juce::Colour(0xff72839b));
+
+    const auto cross = removeBounds().toFloat().reduced(10.0f, 12.0f);
+    g.setColour(juce::Colour(0xff72839b));
+    g.drawLine(cross.getX(), cross.getY(), cross.getRight(), cross.getBottom(), 1.5f);
+    g.drawLine(cross.getX(), cross.getBottom(), cross.getRight(), cross.getY(), 1.5f);
+}
+
+void SignalLabPanel::NodeToolboxPane::VariableRow::mouseDown(const juce::MouseEvent& event)
+{
     mouseDownScreenPosition = event.getMouseDownScreenPosition();
     dragStarted = false;
+
+    if (eyeBounds().contains(event.getPosition()))
+        press = Press::eye;
+    else if (removeBounds().contains(event.getPosition()))
+        press = Press::remove;
+    else
+    {
+        press = Press::body;
+        if (onSelected)
+            onSelected(variableId);
+    }
 }
 
-void SignalLabPanel::NodeToolboxPane::VariableButton::mouseDrag(const juce::MouseEvent& event)
+void SignalLabPanel::NodeToolboxPane::VariableRow::mouseDrag(const juce::MouseEvent& event)
 {
-    juce::TextButton::mouseDrag(event);
-    auto screenPoint = event.getScreenPosition().roundToInt();
+    if (press != Press::body)
+        return;
+
+    const auto screenPoint = event.getScreenPosition().roundToInt();
     if (! dragStarted && mouseDownScreenPosition.getDistanceFrom(screenPoint) > 6)
     {
         dragStarted = true;
+        setMouseCursor(juce::MouseCursor::DraggingHandCursor);
         if (onDragStarted)
             onDragStarted(variableId, screenPoint);
     }
@@ -2563,93 +2670,111 @@ void SignalLabPanel::NodeToolboxPane::VariableButton::mouseDrag(const juce::Mous
         onDragMoved(variableId, screenPoint);
 }
 
-void SignalLabPanel::NodeToolboxPane::VariableButton::mouseUp(const juce::MouseEvent& event)
+void SignalLabPanel::NodeToolboxPane::VariableRow::mouseUp(const juce::MouseEvent& event)
 {
-    juce::TextButton::mouseUp(event);
-    if (dragStarted && onDragEnded)
-        onDragEnded(variableId, event.getScreenPosition().roundToInt());
+    const auto pressed = press;
+    const auto wasDragging = dragStarted;
+    press = Press::none;
     dragStarted = false;
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+
+    // Copy the id first: a callback below can rebuild the list this row belongs to.
+    const auto id = variableId;
+
+    if (wasDragging)
+    {
+        if (onDragEnded)
+            onDragEnded(id, event.getScreenPosition().roundToInt(), event.mods.isAltDown());
+    }
+    else if (pressed == Press::eye && eyeBounds().contains(event.getPosition()))
+    {
+        if (onPublicToggled)
+            onPublicToggled(id);
+    }
+    else if (pressed == Press::remove && removeBounds().contains(event.getPosition()))
+    {
+        if (onRemoveRequested)
+            onRemoveRequested(id);
+    }
+}
+
+void SignalLabPanel::PublicToggleButton::paintButton(juce::Graphics& g, bool isMouseOver, bool)
+{
+    const auto bounds = getLocalBounds().toFloat().reduced(0.5f);
+    g.setColour(isMouseOver ? juce::Colour(0xff222c3d) : juce::Colour(0xff1a2230));
+    g.fillRoundedRectangle(bounds, 8.0f);
+    g.setColour(juce::Colour(0xff283243));
+    g.drawRoundedRectangle(bounds, 8.0f, 1.0f);
+
+    const auto accent = isPublicState ? juce::Colour(0xff5cc98a) : juce::Colour(0xff72839b);
+    drawVisibilityEye(g, juce::Rectangle<float>(10.0f, 0.0f, 24.0f, (float) getHeight()).reduced(0.0f, 10.0f), isPublicState, accent);
+
+    g.setColour(isPublicState ? juce::Colour(0xffd6e6dc) : juce::Colour(0xff9aafc8));
+    g.setFont(juce::Font(12.5f));
+    g.drawText(isPublicState ? "Public: the timeline can control this" : "Private: only used inside this graph",
+               juce::Rectangle<int>(42, 0, getWidth() - 48, getHeight()), juce::Justification::centredLeft, true);
 }
 
 void SignalLabPanel::NodeToolboxPane::paint(juce::Graphics& g)
 {
-    auto bounds = getLocalBounds().toFloat();
+    const auto bounds = getLocalBounds().toFloat();
     g.setColour(juce::Colour(0xff131922));
     g.fillRoundedRectangle(bounds, 10.0f);
     g.setColour(juce::Colour(0xff283243));
     g.drawRoundedRectangle(bounds.reduced(1.0f), 10.0f, 1.0f);
+
+    if (localVariables.isEmpty())
+    {
+        g.setColour(juce::Colour(0xff72839b));
+        g.setFont(juce::Font(12.5f));
+        g.drawText("No variables yet. Add one with + Variable.", getLocalBounds().reduced(10, 0), juce::Justification::centred, true);
+    }
 }
 
 void SignalLabPanel::NodeToolboxPane::resized()
 {
-    auto area = getLocalBounds().reduced(10);
-    for (int index = 0; index < variableButtons.size(); ++index)
-    {
-        auto row = area.removeFromTop(42);
-        removeButtons[index]->setBounds(row.removeFromRight(28));
-        row.removeFromRight(6);
-        variableButtons[index]->setBounds(row);
-        area.removeFromTop(6);
-    }
+    auto area = getLocalBounds().reduced(1, 4);
+    for (int index = 0; index < rows.size(); ++index)
+        rows[index]->setBounds(area.removeFromTop(kVariableRowHeight));
 }
 
 int SignalLabPanel::NodeToolboxPane::getRequiredHeight() const
 {
-    return 20 + localVariables.size() * (42 + 6);
+    return juce::jmax(52, 8 + localVariables.size() * kVariableRowHeight);
 }
 
-void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalControlVariable>& variables)
+void SignalLabPanel::NodeToolboxPane::setVariables(const juce::Array<LocalControlVariable>& variables, const juce::String& selectedVariableId)
 {
     localVariables = variables;
-    while (variableButtons.size() < localVariables.size())
+
+    while (rows.size() < localVariables.size())
     {
-        auto* button = variableButtons.add(new VariableButton({}));
-        addAndMakeVisible(button);
-        auto* removeButton = removeButtons.add(new juce::TextButton("x"));
-        addAndMakeVisible(removeButton);
+        auto* row = rows.add(new VariableRow({}));
+        addAndMakeVisible(row);
+        row->onSelected = [this](const juce::String& id) { if (onVariableSelected) onVariableSelected(id); };
+        row->onPublicToggled = [this](const juce::String& id) { if (onVariablePublicToggled) onVariablePublicToggled(id); };
+        row->onRemoveRequested = [this](const juce::String& id) { if (onVariableRemoveRequested) onVariableRemoveRequested(id); };
+        row->onDragStarted = [this](const juce::String& id, juce::Point<int> p) { if (onVariableDragStarted) onVariableDragStarted(id, p); };
+        row->onDragMoved = [this](const juce::String& id, juce::Point<int> p) { if (onVariableDragMoved) onVariableDragMoved(id, p); };
+        row->onDragEnded = [this](const juce::String& id, juce::Point<int> p, bool setter) { if (onVariableDragEnded) onVariableDragEnded(id, p, setter); };
     }
 
-    for (int index = 0; index < variableButtons.size(); ++index)
+    // Rows past the end are hidden, not deleted, so a row can safely trigger the removal that hides it.
+    for (int index = 0; index < rows.size(); ++index)
     {
-        auto visible = index < localVariables.size();
-        variableButtons[index]->setVisible(visible);
-        removeButtons[index]->setVisible(visible);
+        const auto visible = index < localVariables.size();
+        rows[index]->setVisible(visible);
         if (! visible)
             continue;
 
-        auto variable = localVariables.getReference(index);
-        variableButtons[index]->variableId = variable.id;
-        auto text = variable.name + "\n" + variable.valueType;
-        variableButtons[index]->setButtonText(text);
-        variableButtons[index]->onClick = [this, variableId = variable.id]
-        {
-            if (onVariableSelected)
-                onVariableSelected(variableId);
-        };
-        removeButtons[index]->onClick = [this, variableId = variable.id]
-        {
-            if (onVariableRemoveRequested)
-                onVariableRemoveRequested(variableId);
-        };
-        variableButtons[index]->onDragStarted = [this](const juce::String& variableId, juce::Point<int> screenPoint)
-        {
-            if (onVariableDragStarted)
-                onVariableDragStarted(variableId, screenPoint);
-        };
-        variableButtons[index]->onDragMoved = [this](const juce::String& variableId, juce::Point<int> screenPoint)
-        {
-            if (onVariableDragMoved)
-                onVariableDragMoved(variableId, screenPoint);
-        };
-        variableButtons[index]->onDragEnded = [this](const juce::String& variableId, juce::Point<int> screenPoint)
-        {
-            if (onVariableDragEnded)
-                onVariableDragEnded(variableId, screenPoint);
-        };
+        const auto& variable = localVariables.getReference(index);
+        rows[index]->variableId = variable.id;
+        rows[index]->setVariable(variable, variable.id == selectedVariableId);
     }
 
     setSize(getWidth(), getRequiredHeight());
     resized();
+    repaint();
 }
 
 SignalLabPanel::NodeSearchPanel::NodeSearchPanel()
@@ -2872,34 +2997,25 @@ SignalLabPanel::SignalLabPanel()
     compileButton.onClick = [this] { compileGraph(); };
     addAndMakeVisible(compileButton);
 
-    toolboxPane.onAddVariableRequested = [this]
-    {
-        captureUndoCheckpoint("Add graph variable");
-        LocalControlVariable control;
-        control.id = "localControl" + juce::String(localControls.size() + 1);
-        control.name = "Value " + juce::String(localControls.size() + 1);
-        control.targetParameter = "outputGain";
-        control.value = 1.0f;
-        localControls.add(control);
-        rebuildLocalControlChrome();
-        refreshVariablePanel();
-    };
-    toolboxPane.onPlaceVariableRequested = [this](const juce::String& variableId)
-    {
-        auto dropPoint = juce::Point<int>(220, 80 + graphNodes.size() * 18);
-        bool isAutomated = false;
-        for (auto& variable : localControls)
-            if (variable.id == variableId)
-                isAutomated = variable.exposedToAutomation;
-        auto nodeType = (isAutomated && ! hasSetterNodeForVariable(variableId)) ? "valueSet" : "valueGet";
-        addGraphNode(nodeType, dropPoint, variableId);
-    };
     toolboxPane.onVariableSelected = [this](const juce::String& variableId)
     {
         for (int index = 0; index < localControls.size(); ++index)
             if (localControls.getReference(index).id == variableId)
                 selectedLocalControlIndex = index;
-        refreshSelectedVariableEditor();
+        refreshVariablePanel();
+    };
+    toolboxPane.onVariablePublicToggled = [this](const juce::String& variableId)
+    {
+        for (auto& variable : localControls)
+        {
+            if (variable.id == variableId)
+            {
+                captureUndoCheckpoint("Change variable access");
+                variable.isPublic = ! variable.isPublic;
+                break;
+            }
+        }
+        refreshVariablePanel();
     };
     toolboxPane.onVariableRemoveRequested = [this](const juce::String& variableId)
     {
@@ -2914,19 +3030,18 @@ SignalLabPanel::SignalLabPanel()
         }
         if (selectedLocalControlIndex >= localControls.size())
             selectedLocalControlIndex = localControls.size() - 1;
-        rebuildLocalControlChrome();
         refreshVariablePanel();
         nodeGraphCanvas.repaint();
     };
-    variablesViewport.setViewedComponent(&toolboxPane, false);
-    variablesViewport.setScrollBarsShown(true, false);
-    variablesViewport.setScrollBarThickness(10);
-    addAndMakeVisible(variablesViewport);
+    toolboxPane.onVariableDragEnded = [this](const juce::String& variableId, juce::Point<int> screenPoint, bool placeAsSetter)
+    {
+        // Dropped over the graph: a Get node lands there (Alt: a Set node), like dragging a variable into a
+        // Blueprint graph. Anywhere else, the drag is ignored.
+        if (! graphViewport.getLocalBounds().contains(graphViewport.getLocalPoint(nullptr, screenPoint)))
+            return;
 
-    variableDetailsViewport.setViewedComponent(&variableDetailsContent, false);
-    variableDetailsViewport.setScrollBarsShown(true, false);
-    variableDetailsViewport.setScrollBarThickness(10);
-    addAndMakeVisible(variableDetailsViewport);
+        addGraphNode(placeAsSetter ? "valueSet" : "valueGet", nodeGraphCanvas.getLocalPoint(nullptr, screenPoint), variableId);
+    };
     nodeGraphCanvas.setWantsKeyboardFocus(true);
     graphViewport.setViewedComponent(&nodeGraphCanvas, false);
     graphViewport.setScrollBarsShown(false, false);
@@ -2944,16 +3059,15 @@ SignalLabPanel::SignalLabPanel()
     {
         captureUndoCheckpoint("Add graph variable");
         LocalControlVariable control;
-        control.id = "localControl" + juce::String(localControls.size() + 1);
-        control.name = "Value " + juce::String(localControls.size() + 1);
+        control.id = "var_" + juce::Uuid().toString().substring(0, 8);
+        control.name = "NewVariable" + juce::String(localControls.size() + 1);
         control.valueType = "Float";
-        control.targetParameter = "outputGain";
-        control.value = 1.0f;
-        control.exposedToAutomation = true;
+        control.value = 0.5f;
         localControls.add(control);
         selectedLocalControlIndex = localControls.size() - 1;
-        rebuildLocalControlChrome();
         refreshVariablePanel();
+        variableNameEditor.grabKeyboardFocus();
+        variableNameEditor.selectAll();
     };
 
     inspectorTitleLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -3078,51 +3192,73 @@ SignalLabPanel::SignalLabPanel()
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
             return;
-        localControls.getReference(selectedLocalControlIndex).valueType = variableTypeSelector.getText();
+        auto& variable = localControls.getReference(selectedLocalControlIndex);
+        variable.valueType = variableTypeSelector.getText();
+        if (variable.valueType == "Bool")
+            variable.value = variable.value >= 0.5f ? 1.0f : 0.0f;
+        else if (variable.valueType == "Int")
+            variable.value = (float) juce::roundToInt(variable.value);
+        else
+            variable.value = juce::jlimit(0.0f, 1.0f, variable.value);
         refreshVariablePanel();
+        regenerateSignal();
     };
 
-    variableAccessLabel.setText("Access", juce::dontSendNotification);
-    variableAccessLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    variableDetailsContent.addAndMakeVisible(variableAccessLabel);
-    variableAccessSelector.addItem("Private", 1);
-    variableAccessSelector.addItem("Public", 2);
-    variableDetailsContent.addAndMakeVisible(variableAccessSelector);
-    variableAccessSelector.onChange = [this]
+    variableValueLabel.setText("Default value", juce::dontSendNotification);
+    variableValueLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    variableDetailsContent.addAndMakeVisible(variableValueLabel);
+
+    variableValueSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    variableValueSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 22);
+    variableValueSlider.setRange(0.0, 1.0, 0.001);
+    variableValueSlider.onValueChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
             return;
-        localControls.getReference(selectedLocalControlIndex).accessScope = variableAccessSelector.getText();
+        localControls.getReference(selectedLocalControlIndex).value = (float) variableValueSlider.getValue();
+        regenerateSignal();
     };
+    variableDetailsContent.addAndMakeVisible(variableValueSlider);
 
-    variableValueLabel.setText("Value", juce::dontSendNotification);
-    variableValueLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    variableDetailsContent.addAndMakeVisible(variableValueLabel);
-    variableDetailsContent.addAndMakeVisible(variableValueEditor);
+    variableBoolToggle.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+    variableBoolToggle.onClick = [this]
+    {
+        if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
+            return;
+        localControls.getReference(selectedLocalControlIndex).value = variableBoolToggle.getToggleState() ? 1.0f : 0.0f;
+        regenerateSignal();
+    };
+    variableDetailsContent.addAndMakeVisible(variableBoolToggle);
+
     variableValueEditor.onTextChange = [this]
     {
         if (suppressCallbacks || selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
             return;
-        auto text = variableValueEditor.getText().trim();
-        auto& variable = localControls.getReference(selectedLocalControlIndex);
-        if (variable.valueType == "Bool")
-            variable.value = (text.equalsIgnoreCase("true") || text == "1") ? 1.0f : 0.0f;
-        else if (variable.valueType == "Int")
-            variable.value = (float) text.getIntValue();
-        else
-            variable.value = text.getFloatValue();
-        applyLocalControlToRecipe(variable);
+        localControls.getReference(selectedLocalControlIndex).value = (float) variableValueEditor.getText().trim().getIntValue();
         regenerateSignal();
     };
+    variableDetailsContent.addAndMakeVisible(variableValueEditor);
 
-    variableDetailsContent.addAndMakeVisible(variableAutomationToggle);
-    variableAutomationToggle.onClick = [this]
+    variablePublicButton.onClick = [this]
     {
         if (selectedLocalControlIndex < 0 || selectedLocalControlIndex >= localControls.size())
             return;
-        localControls.getReference(selectedLocalControlIndex).exposedToAutomation = variableAutomationToggle.getToggleState();
-        variableValueEditor.setEnabled(! variableAutomationToggle.getToggleState());
+        captureUndoCheckpoint("Change variable access");
+        auto& variable = localControls.getReference(selectedLocalControlIndex);
+        variable.isPublic = ! variable.isPublic;
+        refreshVariablePanel();
     };
+    variableDetailsContent.addAndMakeVisible(variablePublicButton);
+
+    variableEmptyLabel.setText("Select a variable in the list to edit it.", juce::dontSendNotification);
+    variableEmptyLabel.setColour(juce::Label::textColourId, juce::Colour(0xff72839b));
+    variableEmptyLabel.setJustificationType(juce::Justification::topLeft);
+    variableDetailsContent.addAndMakeVisible(variableEmptyLabel);
+
+    variablesHintLabel.setText("Drag a variable onto the graph to place a Get node. Hold Alt to place a Set node.", juce::dontSendNotification);
+    variablesHintLabel.setColour(juce::Label::textColourId, juce::Colour(0xff72839b));
+    variablesHintLabel.setFont(juce::Font(11.5f));
+    variablesHintLabel.setJustificationType(juce::Justification::topLeft);
 
     templateLabel.setText("Template", juce::dontSendNotification);
     templateLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -3513,7 +3649,6 @@ SignalLabPanel::SignalLabPanel()
     addAutomationLaneButton.setVisible(false);
     automationViewport.setVisible(false);
 
-    rebuildLocalControlChrome();
     refreshVariablePanel();
     rebuildAutomationChrome();
     rebuildNodeGraphFromRecipe();
@@ -3522,6 +3657,25 @@ SignalLabPanel::SignalLabPanel()
     graphNodes.clear();
     nodeGraphCanvas.repaint();
     updateCanvasWorkspace();
+
+    // The whole left column (Signal, Variables, Selected Variable) is one scrolling area, each section at
+    // its natural height - no boxes with their own little scrollers inside.
+    for (juce::Component* component : { (juce::Component*) &signalPropertiesPanel, (juce::Component*) &signalSectionLabel,
+                                        (juce::Component*) &nameLabel, (juce::Component*) &nameEditor,
+                                        (juce::Component*) &descriptionLabel, (juce::Component*) &descriptionEditor,
+                                        (juce::Component*) &signalMetaLabel,
+                                        (juce::Component*) &variablesPanel, (juce::Component*) &variablesSectionLabel,
+                                        (juce::Component*) &addLocalControlButton, (juce::Component*) &toolboxPane,
+                                        (juce::Component*) &variablesHintLabel,
+                                        (juce::Component*) &variableDetailsPanel, (juce::Component*) &selectedVariableSectionLabel,
+                                        (juce::Component*) &variableDetailsContent })
+        propertiesColumnContent.addAndMakeVisible(component);
+
+    propertiesColumnViewport.setViewedComponent(&propertiesColumnContent, false);
+    propertiesColumnViewport.setScrollBarsShown(true, false);
+    propertiesColumnViewport.setScrollBarThickness(10);
+    addAndMakeVisible(propertiesColumnViewport);
+
 }
 
 void SignalLabPanel::rebuildNodeGraphFromRecipe()
@@ -3998,7 +4152,6 @@ void SignalLabPanel::createNewSignal()
     probeSettings = {};
     localControls.clear();
     selectedLocalControlIndex = -1;
-    rebuildLocalControlChrome();
     refreshVariablePanel();
     refreshControlsFromRecipe();
     regenerateSignal();
@@ -5144,7 +5297,6 @@ void SignalLabPanel::openNodeEditorForSelection()
                     if (control.id == variableId)
                     {
                         control.value = (float) valueSlider.getValue();
-                        applyLocalControlToRecipe(control);
                         refreshVariablePanel();
                         regenerateSignal();
                         break;
@@ -5237,168 +5389,24 @@ void SignalLabPanel::ensureDefaultLocalControls()
 {
 }
 
-void SignalLabPanel::rebuildLocalControlChrome()
-{
-    while (localControlNameEditors.size() < localControls.size())
-    {
-        auto* nameEditor = localControlNameEditors.add(new juce::TextEditor());
-        auto* targetSelector = localControlTargetSelectors.add(new juce::ComboBox());
-        auto* valueSlider = localControlValueSliders.add(new juce::Slider());
-        auto* removeButton = removeLocalControlButtons.add(new juce::TextButton("×"));
-
-        for (const auto& spec : getAutomationTargetSpecs())
-            targetSelector->addItem(spec.title, targetSelector->getNumItems() + 1);
-
-        configureSlider(*valueSlider, 0.0, 1.0, 0.001);
-        addAndMakeVisible(nameEditor);
-        addAndMakeVisible(targetSelector);
-        addAndMakeVisible(removeButton);
-
-        nameEditor->onTextChange = [this, nameEditor]
-        {
-            if (suppressCallbacks)
-                return;
-            auto index = localControlNameEditors.indexOf(nameEditor);
-            if (index >= 0 && index < localControls.size())
-            {
-                localControls.getReference(index).name = nameEditor->getText().trim();
-                refreshVariablePanel();
-                nodeGraphCanvas.repaint();
-            }
-        };
-
-        targetSelector->onChange = [this, targetSelector]
-        {
-            if (suppressCallbacks)
-                return;
-            auto index = localControlTargetSelectors.indexOf(targetSelector);
-            if (index >= 0 && index < localControls.size())
-            {
-                auto selected = targetSelector->getSelectedItemIndex();
-                if (selected >= 0 && selected < (int) getAutomationTargetSpecs().size())
-                {
-                    localControls.getReference(index).targetParameter = getAutomationTargetSpecs()[(size_t) selected].parameterId;
-                    applyLocalControlToRecipe(localControls.getReference(index));
-                    refreshVariablePanel();
-                    regenerateSignal();
-                }
-            }
-        };
-
-        valueSlider->onValueChange = [this, valueSlider]
-        {
-            if (suppressCallbacks)
-                return;
-            auto index = localControlValueSliders.indexOf(valueSlider);
-            if (index >= 0 && index < localControls.size())
-            {
-                localControls.getReference(index).value = (float) valueSlider->getValue();
-                applyLocalControlToRecipe(localControls.getReference(index));
-                refreshVariablePanel();
-                regenerateSignal();
-            }
-        };
-
-        removeButton->onClick = [this, removeButton]
-        {
-            auto index = removeLocalControlButtons.indexOf(removeButton);
-            if (index >= 0 && index < localControls.size())
-            {
-                captureUndoCheckpoint("Remove local control variable");
-                localControls.remove(index);
-                rebuildLocalControlChrome();
-                refreshVariablePanel();
-                layoutFloatingWindows();
-                nodeGraphCanvas.repaint();
-            }
-        };
-    }
-
-    suppressCallbacks = true;
-    for (int index = 0; index < localControls.size(); ++index)
-    {
-        auto& control = localControls.getReference(index);
-        localControlNameEditors[index]->setText(control.name, juce::dontSendNotification);
-        localControlValueSliders[index]->setValue(control.value, juce::dontSendNotification);
-        for (int itemIndex = 0; itemIndex < (int) getAutomationTargetSpecs().size(); ++itemIndex)
-        {
-            if (control.targetParameter == juce::String(getAutomationTargetSpecs()[(size_t) itemIndex].parameterId))
-            {
-                localControlTargetSelectors[index]->setSelectedItemIndex(itemIndex, juce::dontSendNotification);
-                break;
-            }
-        }
-    }
-    suppressCallbacks = false;
-
-    for (int index = 0; index < localControlNameEditors.size(); ++index)
-    {
-        auto visible = index < localControls.size();
-        localControlNameEditors[index]->setVisible(visible && controlPadVisible);
-        localControlTargetSelectors[index]->setVisible(visible && controlPadVisible);
-        localControlValueSliders[index]->setVisible(visible && controlPadVisible);
-        removeLocalControlButtons[index]->setVisible(visible && controlPadVisible);
-    }
-}
-
-void SignalLabPanel::applyLocalControlToRecipe(const LocalControlVariable& control)
-{
-    auto value = juce::jlimit(0.0f, 1.0f, control.value);
-    auto assignLevel = [&](float& target) { target = value; };
-
-    if (control.targetParameter == "outputGain")
-    {
-        setLaneValues(recipe, "outputGain", { value, value, value, value });
-        return;
-    }
-    if (control.targetParameter == "filterCutoff")
-    {
-        recipe.filterCutoffHz = normalizedToCutoff(value);
-        return;
-    }
-    if (control.targetParameter == "filterResonance")
-    {
-        recipe.filterResonance = (float) juce::jmap((double) value, getTargetSpec("filterResonance").rangeMin, getTargetSpec("filterResonance").rangeMax);
-        return;
-    }
-    if (control.targetParameter == "filterEnvelopeAmount")
-    {
-        recipe.filterEnvelopeAmount = (float) juce::jmap((double) value, -1.0, 1.0);
-        return;
-    }
-    if (control.targetParameter == "baseFrequency")
-    {
-        recipe.baseFrequencyHz = (float) juce::jmap((double) value, getTargetSpec("baseFrequency").rangeMin, getTargetSpec("baseFrequency").rangeMax);
-        return;
-    }
-    if (control.targetParameter == "pitchOffsetSemitones")
-    {
-        recipe.pitchSweepSemitones = (float) juce::jmap((double) value, -12.0, 12.0);
-        return;
-    }
-    if (control.targetParameter == "sineLevel") { assignLevel(recipe.sineLevel); return; }
-    if (control.targetParameter == "sawLevel") { assignLevel(recipe.sawLevel); return; }
-    if (control.targetParameter == "squareLevel") { assignLevel(recipe.squareLevel); return; }
-    if (control.targetParameter == "triangleLevel") { assignLevel(recipe.triangleLevel); return; }
-    if (control.targetParameter == "noiseLevel") { assignLevel(recipe.noiseLevel); return; }
-    if (control.targetParameter == "macroHardness") { recipe.macroHardness = value; return; }
-    if (control.targetParameter == "macroWeight") { recipe.macroWeight = value; return; }
-    if (control.targetParameter == "macroAir") { recipe.macroAir = value; return; }
-    if (control.targetParameter == "macroGrit") { recipe.macroGrit = value; return; }
-    if (control.targetParameter == "macroSize") { recipe.macroSize = value; return; }
-}
-
 void SignalLabPanel::refreshVariablePanel()
 {
-    toolboxPane.setVariables(localControls);
     if (selectedLocalControlIndex >= localControls.size())
-        selectedLocalControlIndex = localControls.isEmpty() ? -1 : 0;
+        selectedLocalControlIndex = localControls.isEmpty() ? -1 : localControls.size() - 1;
+
+    juce::String selectedId;
+    if (selectedLocalControlIndex >= 0 && selectedLocalControlIndex < localControls.size())
+        selectedId = localControls.getReference(selectedLocalControlIndex).id;
+
+    toolboxPane.setVariables(localControls, selectedId);
     refreshSelectedVariableEditor();
+    resized();
 }
 
 void SignalLabPanel::refreshSelectedVariableEditor()
 {
-    auto hasSelection = selectedLocalControlIndex >= 0 && selectedLocalControlIndex < localControls.size();
+    const auto hasSelection = selectedLocalControlIndex >= 0 && selectedLocalControlIndex < localControls.size();
+    const auto valueType = hasSelection ? localControls.getReference(selectedLocalControlIndex).valueType : juce::String();
 
     variableNameLabel.setVisible(hasSelection);
     variableNameEditor.setVisible(hasSelection);
@@ -5406,11 +5414,12 @@ void SignalLabPanel::refreshSelectedVariableEditor()
     variableDescriptionEditor.setVisible(hasSelection);
     variableTypeLabel.setVisible(hasSelection);
     variableTypeSelector.setVisible(hasSelection);
-    variableAccessLabel.setVisible(hasSelection);
-    variableAccessSelector.setVisible(hasSelection);
     variableValueLabel.setVisible(hasSelection);
-    variableValueEditor.setVisible(hasSelection);
-    variableAutomationToggle.setVisible(hasSelection);
+    variableValueSlider.setVisible(hasSelection && valueType != "Bool" && valueType != "Int");
+    variableBoolToggle.setVisible(hasSelection && valueType == "Bool");
+    variableValueEditor.setVisible(hasSelection && valueType == "Int");
+    variablePublicButton.setVisible(hasSelection);
+    variableEmptyLabel.setVisible(! hasSelection);
 
     if (! hasSelection)
     {
@@ -5420,18 +5429,14 @@ void SignalLabPanel::refreshSelectedVariableEditor()
 
     suppressCallbacks = true;
     auto& variable = localControls.getReference(selectedLocalControlIndex);
-    variableNameEditor.setText(variable.name, juce::dontSendNotification);
+    if (! variableNameEditor.hasKeyboardFocus(true))
+        variableNameEditor.setText(variable.name, juce::dontSendNotification);
     variableDescriptionEditor.setText(variable.description, juce::dontSendNotification);
     variableTypeSelector.setText(variable.valueType, juce::dontSendNotification);
-    variableAccessSelector.setText(variable.accessScope, juce::dontSendNotification);
-    if (variable.valueType == "Bool")
-        variableValueEditor.setText(variable.value >= 0.5f ? "true" : "false", juce::dontSendNotification);
-    else if (variable.valueType == "Int")
-        variableValueEditor.setText(juce::String((int) std::round(variable.value)), juce::dontSendNotification);
-    else
-        variableValueEditor.setText(juce::String(variable.value, 3), juce::dontSendNotification);
-    variableAutomationToggle.setToggleState(variable.exposedToAutomation, juce::dontSendNotification);
-    variableValueEditor.setEnabled(! variable.exposedToAutomation);
+    variableValueSlider.setValue(variable.value, juce::dontSendNotification);
+    variableBoolToggle.setToggleState(variable.value >= 0.5f, juce::dontSendNotification);
+    variableValueEditor.setText(juce::String((int) std::round(variable.value)), juce::dontSendNotification);
+    variablePublicButton.setPublic(variable.isPublic);
     suppressCallbacks = false;
 
     signalMetaLabel.setText("Samples: " + juce::String((int) recipe.sampleRate)
@@ -6232,10 +6237,84 @@ bool SignalLabPanel::loadPatchDocument(const cw::PatchDocument& document, juce::
         graphConnections.add(graphConnection);
     }
 
+    // The variables saved in the patch, and a Get node wired back into each port they drove. Node positions
+    // are not saved, so each Get node is placed just left of the port it feeds.
+    localControls.clear();
+    for (const auto& saved : document.variables)
+    {
+        LocalControlVariable variable;
+        variable.id = saved.id;
+        variable.name = saved.name;
+        variable.description = saved.description;
+        variable.valueType = saved.valueType;
+        variable.isPublic = saved.isPublic;
+        variable.value = (float) saved.defaultValue;
+        localControls.add(variable);
+    }
+    selectedLocalControlIndex = localControls.isEmpty() ? -1 : 0;
+
+    juce::StringArray stackedTargets; // how many Get nodes already feed each target, to fan them out vertically
+    for (const auto& binding : document.variableBindings)
+    {
+        juce::String guiPortId;
+        forEachBindablePort([&](const juce::String& nodeId, const juce::String& voicePort, const juce::String& portId)
+        {
+            if (nodeId == binding.targetNodeId && voicePort == binding.targetPort)
+                guiPortId = portId;
+        });
+        if (guiPortId.isEmpty())
+            continue;
+
+        bool foundTarget = false;
+        juce::Point<int> targetPosition;
+        for (auto& candidate : graphNodes)
+        {
+            if (candidate.id == binding.targetNodeId)
+            {
+                targetPosition = candidate.position;
+                foundTarget = true;
+                break;
+            }
+        }
+        if (! foundTarget)
+            continue;
+
+        juce::String variableName = binding.variableId;
+        for (auto& variable : localControls)
+            if (variable.id == binding.variableId)
+                variableName = variable.name;
+
+        int alreadyStacked = 0;
+        for (auto& target : stackedTargets)
+            if (target == binding.targetNodeId)
+                ++alreadyStacked;
+        stackedTargets.add(binding.targetNodeId);
+
+        GraphNodeModel getNode;
+        getNode.id = "valueGet:" + binding.variableId + ":" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        getNode.type = "valueGet";
+        getNode.title = "Get " + variableName;
+        getNode.targetParameter = binding.variableId;
+        getNode.position = { targetPosition.x - 230, targetPosition.y + alreadyStacked * 60 };
+        getNode.accent = graphNodeAccent("valueGet");
+        graphNodes.add(getNode);
+
+        GraphConnection wire;
+        wire.id = "conn:" + juce::String(juce::Random::getSystemRandom().nextInt64());
+        wire.fromNodeId = getNode.id;
+        wire.fromPortId = "valueOut";
+        wire.toNodeId = binding.targetNodeId;
+        wire.toPortId = guiPortId;
+        wire.isExec = false;
+        wire.valueType = PortValueType::Float;
+        graphConnections.add(wire);
+    }
+
     ensureRecipe(recipe);
     rebuildAutomationChrome();
     refreshControlsFromRecipe();
     regenerateSignal();
+    refreshVariablePanel();
     return true;
 }
 
@@ -6599,7 +6678,13 @@ void SignalLabPanel::resized()
     propertiesHeaderLabel.setBounds(propertiesArea.removeFromTop(28));
     propertiesArea.removeFromTop(8);
 
-    auto signalArea = propertiesArea.removeFromTop(210);
+    propertiesColumnViewport.setBounds(propertiesArea);
+    const int columnWidth = juce::jmax(1, propertiesArea.getWidth() - propertiesColumnViewport.getScrollBarThickness());
+    const int sectionGap = 10;
+    int columnY = 0;
+
+    // Signal
+    const auto signalArea = juce::Rectangle<int>(0, columnY, columnWidth, 210);
     signalPropertiesPanel.setBounds(signalArea);
     auto signalContent = signalArea.reduced(12);
     signalSectionLabel.setBounds(signalContent.removeFromTop(22));
@@ -6615,10 +6700,11 @@ void SignalLabPanel::resized()
     descriptionEditor.setBounds(signalContent.removeFromTop(50));
     signalContent.removeFromTop(8);
     signalMetaLabel.setBounds(signalContent);
+    columnY = signalArea.getBottom() + sectionGap;
 
-    propertiesArea.removeFromTop(10);
-    auto variableSectionHeight = juce::jmax(160, propertiesArea.getHeight() / 2);
-    auto variableArea = propertiesArea.removeFromTop(variableSectionHeight);
+    // Variables: the list takes exactly the height its rows need, so it grows as variables are added.
+    const int listHeight = toolboxPane.getRequiredHeight();
+    const auto variableArea = juce::Rectangle<int>(0, columnY, columnWidth, 12 + 22 + 6 + 26 + 6 + listHeight + 6 + 34 + 12);
     variablesPanel.setBounds(variableArea);
     auto variableContent = variableArea.reduced(12);
     variablesSectionLabel.setBounds(variableContent.removeFromTop(22));
@@ -6626,33 +6712,45 @@ void SignalLabPanel::resized()
     addLocalControlButton.setVisible(true);
     addLocalControlButton.setBounds(variableContent.removeFromTop(26));
     variableContent.removeFromTop(6);
-    variablesViewport.setBounds(variableContent);
-    toolboxPane.setSize(variableContent.getWidth(), juce::jmax(variableContent.getHeight(), toolboxPane.getRequiredHeight()));
+    toolboxPane.setBounds(variableContent.removeFromTop(listHeight));
+    variableContent.removeFromTop(6);
+    variablesHintLabel.setBounds(variableContent.removeFromTop(34));
+    columnY = variableArea.getBottom() + sectionGap;
 
-    propertiesArea.removeFromTop(10);
-    variableDetailsPanel.setBounds(propertiesArea);
-    auto detailContent = propertiesArea.reduced(12);
+    // Selected variable: every field at its natural height.
+    const bool hasVariableSelection = selectedLocalControlIndex >= 0 && selectedLocalControlIndex < localControls.size();
+    const int fieldsHeight = hasVariableSelection ? 304 : 40;
+    const auto detailArea = juce::Rectangle<int>(0, columnY, columnWidth, 12 + 22 + 6 + fieldsHeight + 12);
+    variableDetailsPanel.setBounds(detailArea);
+    auto detailContent = detailArea.reduced(12);
     selectedVariableSectionLabel.setBounds(detailContent.removeFromTop(22));
     detailContent.removeFromTop(6);
-    variableDetailsViewport.setBounds(detailContent);
+    variableDetailsContent.setBounds(detailContent);
 
-    auto layoutDetailField = [](juce::Rectangle<int>& content, juce::Component& label, juce::Component& field, int fieldHeight)
+    auto fields = variableDetailsContent.getLocalBounds();
+    auto placeField = [&fields](juce::Component& label, juce::Component& field, int fieldHeight)
     {
-        label.setBounds(content.removeFromTop(20));
-        content.removeFromTop(4);
-        field.setBounds(content.removeFromTop(fieldHeight));
-        content.removeFromTop(6);
+        label.setBounds(fields.removeFromTop(20));
+        fields.removeFromTop(4);
+        field.setBounds(fields.removeFromTop(fieldHeight));
+        fields.removeFromTop(8);
     };
+    variableEmptyLabel.setBounds(variableDetailsContent.getLocalBounds().removeFromTop(40));
+    placeField(variableNameLabel, variableNameEditor, 24);
+    placeField(variableTypeLabel, variableTypeSelector, 24);
+    variableValueLabel.setBounds(fields.removeFromTop(20));
+    fields.removeFromTop(4);
+    const auto valueRow = fields.removeFromTop(24);
+    fields.removeFromTop(8);
+    variableValueSlider.setBounds(valueRow);
+    variableBoolToggle.setBounds(valueRow);
+    variableValueEditor.setBounds(valueRow);
+    variablePublicButton.setBounds(fields.removeFromTop(38));
+    fields.removeFromTop(8);
+    placeField(variableDescriptionLabel, variableDescriptionEditor, 56);
+    columnY = detailArea.getBottom() + sectionGap;
 
-    auto scratchArea = juce::Rectangle<int>(0, 0, juce::jmax(1, detailContent.getWidth()), 4000);
-    layoutDetailField(scratchArea, variableNameLabel, variableNameEditor, 24);
-    layoutDetailField(scratchArea, variableDescriptionLabel, variableDescriptionEditor, 44);
-    layoutDetailField(scratchArea, variableTypeLabel, variableTypeSelector, 24);
-    layoutDetailField(scratchArea, variableAccessLabel, variableAccessSelector, 24);
-    layoutDetailField(scratchArea, variableValueLabel, variableValueEditor, 24);
-    variableAutomationToggle.setBounds(scratchArea.removeFromTop(24));
-
-    variableDetailsContent.setSize(detailContent.getWidth(), 4000 - scratchArea.getHeight());
+    propertiesColumnContent.setSize(columnWidth, columnY);
 
     area.removeFromLeft(10);
     graphViewport.setBounds(area);
@@ -7255,7 +7353,7 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
         saved.name = variable.name;
         saved.description = variable.description;
         saved.valueType = variable.valueType;
-        saved.isPublic = variable.accessScope == "Public";
+        saved.isPublic = variable.isPublic;
         saved.defaultValue = variable.value;
         document.variables.add(saved);
     }

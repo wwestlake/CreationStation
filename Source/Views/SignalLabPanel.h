@@ -287,10 +287,10 @@ private:
         juce::String name;
         juce::String description;
         juce::String valueType { "Float" };
-        juce::String accessScope { "Private" };
-        juce::String targetParameter;
-        float value = 0.5f;
-        bool exposedToAutomation = true;
+        // Public = settable from outside the graph: the timeline's automation picker lists exactly the
+        // Public variables. Private = used only inside this graph.
+        bool isPublic = false;
+        float value = 0.5f; // default value: normalized 0..1 for Float, 0 or 1 for Bool
     };
 
     struct ProbeSettings
@@ -536,22 +536,39 @@ private:
     class NodeToolboxPane final : public juce::Component
     {
     public:
-        class VariableButton final : public juce::TextButton
+        // One variable in the list, Blueprint-style: a grip, a dot and pill colored by type, the name, an
+        // eye (open = Public, settable from outside the graph), and a remove button. Click selects it,
+        // clicking the eye toggles Public, and dragging it onto the graph places a Get node (Alt: Set).
+        class VariableRow final : public juce::Component
         {
         public:
-            explicit VariableButton(const juce::String& variableIdToUse) : variableId(variableIdToUse) {}
+            explicit VariableRow(const juce::String& variableIdToUse) : variableId(variableIdToUse) {}
 
+            void setVariable(const LocalControlVariable& variable, bool isSelectedRow);
+            void paint(juce::Graphics& g) override;
             void mouseDown(const juce::MouseEvent& event) override;
             void mouseDrag(const juce::MouseEvent& event) override;
             void mouseUp(const juce::MouseEvent& event) override;
 
+            std::function<void(const juce::String& variableId)> onSelected;
+            std::function<void(const juce::String& variableId)> onPublicToggled;
+            std::function<void(const juce::String& variableId)> onRemoveRequested;
             std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onDragStarted;
             std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onDragMoved;
-            std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onDragEnded;
+            std::function<void(const juce::String& variableId, juce::Point<int> screenPoint, bool placeAsSetter)> onDragEnded;
 
             juce::String variableId;
 
         private:
+            juce::Rectangle<int> eyeBounds() const;
+            juce::Rectangle<int> removeBounds() const;
+
+            juce::String name;
+            juce::String valueType { "Float" };
+            bool isPublic = false;
+            bool isSelected = false;
+            enum class Press { none, body, eye, remove };
+            Press press = Press::none;
             bool dragStarted = false;
             juce::Point<int> mouseDownScreenPosition;
         };
@@ -560,23 +577,31 @@ private:
         void resized() override;
         void paint(juce::Graphics& g) override;
 
-        void setVariables(const juce::Array<LocalControlVariable>& variables);
+        void setVariables(const juce::Array<LocalControlVariable>& variables, const juce::String& selectedVariableId);
         int getRequiredHeight() const;
 
-        std::function<void()> onAddVariableRequested;
-        std::function<void(const juce::String& variableId)> onPlaceVariableRequested;
+        std::function<void(const juce::String& variableId)> onVariableSelected;
+        std::function<void(const juce::String& variableId)> onVariablePublicToggled;
+        std::function<void(const juce::String& variableId)> onVariableRemoveRequested;
         std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragStarted;
         std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragMoved;
-        std::function<void(const juce::String& variableId, juce::Point<int> screenPoint)> onVariableDragEnded;
-        std::function<void(const juce::String& variableId)> onVariableSelected;
-        std::function<void(const juce::String& variableId)> onVariableRemoveRequested;
+        std::function<void(const juce::String& variableId, juce::Point<int> screenPoint, bool placeAsSetter)> onVariableDragEnded;
 
     private:
-        juce::Label titleLabel;
-        juce::TextButton addVariableButton { "+ Variable" };
-        juce::OwnedArray<VariableButton> variableButtons;
-        juce::OwnedArray<juce::TextButton> removeButtons;
+        juce::OwnedArray<VariableRow> rows;
         juce::Array<LocalControlVariable> localVariables;
+    };
+
+    // The Public / Private control: an eye plus a plain-words line saying what the choice means.
+    class PublicToggleButton final : public juce::Button
+    {
+    public:
+        PublicToggleButton() : juce::Button("Public") {}
+        void setPublic(bool shouldBePublic) { isPublicState = shouldBePublic; repaint(); }
+        void paintButton(juce::Graphics& g, bool isMouseOver, bool isButtonDown) override;
+
+    private:
+        bool isPublicState = false;
     };
 
     class NodeSearchPanel final : public juce::Component
@@ -773,8 +798,6 @@ private:
     void closeToolWindowForNode(const juce::String& nodeId);
     void toggleControlPad();
     void ensureDefaultLocalControls();
-    void rebuildLocalControlChrome();
-    void applyLocalControlToRecipe(const LocalControlVariable& control);
     void refreshVariablePanel();
     void refreshSelectedVariableEditor();
     juce::Array<GraphValidationError> validateGraph() const;
@@ -865,9 +888,15 @@ private:
     SectionPanel variablesPanel;
     SectionPanel variableDetailsPanel;
     NodeToolboxPane toolboxPane;
-    juce::Viewport variablesViewport;
     juce::Component variableDetailsContent;
-    juce::Viewport variableDetailsViewport;
+    // The whole left column (Signal, Variables, Selected Variable) scrolls as one area.
+    juce::Component propertiesColumnContent;
+    juce::Viewport propertiesColumnViewport;
+    juce::Label variablesHintLabel;
+    juce::Label variableEmptyLabel;
+    juce::Slider variableValueSlider;
+    juce::ToggleButton variableBoolToggle { "On" };
+    PublicToggleButton variablePublicButton;
     juce::Viewport graphViewport;
     NodeGraphCanvas nodeGraphCanvas { *this };
     FloatingWindow nodeEditorWindow { *this, FloatingWindow::Kind::NodeEditor };
@@ -887,11 +916,8 @@ private:
     juce::TextEditor variableDescriptionEditor;
     juce::Label variableTypeLabel;
     juce::ComboBox variableTypeSelector;
-    juce::Label variableAccessLabel;
-    juce::ComboBox variableAccessSelector;
     juce::Label variableValueLabel;
     juce::TextEditor variableValueEditor;
-    juce::ToggleButton variableAutomationToggle { "Expose to automation" };
     juce::Label templateLabel;
     juce::ComboBox templateSelector;
     juce::Label frequencyLabel;
@@ -953,10 +979,6 @@ private:
     juce::OwnedArray<juce::ComboBox> automationTargetSelectors;
     juce::OwnedArray<juce::ComboBox> automationCurveSelectors;
     juce::OwnedArray<juce::TextButton> removeAutomationLaneButtons;
-    juce::OwnedArray<juce::TextEditor> localControlNameEditors;
-    juce::OwnedArray<juce::ComboBox> localControlTargetSelectors;
-    juce::OwnedArray<juce::Slider> localControlValueSliders;
-    juce::OwnedArray<juce::TextButton> removeLocalControlButtons;
     ScopePanel scopePanel;
     // Tool-window Scope instances are created fresh (new ScopePanel()) each
     // time a scope node's window is opened and owned by that window's
