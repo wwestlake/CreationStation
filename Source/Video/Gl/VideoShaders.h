@@ -9,15 +9,17 @@ namespace cs::videogl
 // same way). Generated shader text (the GLSL a node graph compiles to) can be served through the same provider.
 inline bool findVideoShaderSource(const juce::String& path, juce::String& out)
 {
-    static const char* kFullscreenVert = R"glsl(#version 330 core
-// One triangle that covers the whole target: no vertex buffer, the corners come from the vertex id.
+    static const char* kQuadVert = R"glsl(#version 330 core
+// A rectangle drawn as a 4-vertex strip. uRect is the rectangle in clip space (x0, y0, x1, y1); the corners come from
+// the vertex id, so there is no vertex buffer.
+uniform vec4 uRect;
 out vec2 vUV;
 
 void main()
 {
-    vec2 corner = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    vec2 corner = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
     vUV = corner;
-    gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
+    gl_Position = vec4(mix(uRect.xy, uRect.zw, corner), 0.0, 1.0);
 }
 )glsl";
 
@@ -64,6 +66,19 @@ vec3 suppressSpill(vec3 rgb, vec3 keyColor, float amount)
 }
 )glsl";
 
+    static const char* kBackgroundFrag = R"glsl(#version 330 core
+#include "library/video_common.glsl"
+
+out vec4 fragColor;
+
+void main()
+{
+    fragColor = vec4(transparencyChecker(gl_FragCoord.xy), 1.0);
+}
+)glsl";
+
+    // One layer. Output is premultiplied (colour already multiplied by its alpha) so layers stack with plain
+    // "one, one-minus-source-alpha" blending.
     static const char* kFrameFrag = R"glsl(#version 330 core
 #include "library/video_common.glsl"
 
@@ -71,6 +86,7 @@ in vec2 vUV;
 out vec4 fragColor;
 
 uniform sampler2D uFrame;
+uniform float uOpacity;
 uniform int uKeyEnabled;
 uniform vec3 uKeyColor;
 uniform float uTolerance;
@@ -88,11 +104,13 @@ void main()
         rgb = suppressSpill(rgb, uKeyColor, uSpill);
     }
 
-    fragColor = vec4(mix(transparencyChecker(gl_FragCoord.xy), rgb, alpha), 1.0);
+    alpha *= clamp(uOpacity, 0.0, 1.0);
+    fragColor = vec4(rgb * alpha, alpha);
 }
 )glsl";
 
-    if (path == "programs/video_fullscreen.vert") { out = kFullscreenVert; return true; }
+    if (path == "programs/video_quad.vert") { out = kQuadVert; return true; }
+    if (path == "programs/video_background.frag") { out = kBackgroundFrag; return true; }
     if (path == "programs/video_frame.frag") { out = kFrameFrag; return true; }
     if (path == "library/video_common.glsl") { out = kCommon; return true; }
     return false;

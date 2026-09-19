@@ -80,6 +80,7 @@ public:
     bool linkClips(int firstClipIndex, int secondClipIndex);
     void unlinkClip(int clipIndex); // frees the whole group
     void setClipSoundDetached(int clipIndex, bool detached);
+    void setClipVideoParams(int clipIndex, const juce::NamedValueSet& params);
     void setClipSourceRange(int clipIndex, double sourceStartSeconds, double sourceDurationSeconds);
     void setClipSourceTool(int clipIndex, const juce::String& sourceTool);
     // For a video whose sound was split off (or that sound clip): the other half, when the two are not linked.

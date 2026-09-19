@@ -2019,6 +2019,12 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                 const auto counterpart = timelineModel->findSoundCounterpart(draggingClipIndex);
                 const auto isVideo = menuClip.kind == cs::ClipKind::video;
                 const auto isVideoSound = menuClip.kind == cs::ClipKind::audio && menuClip.sourceTool.startsWith("video-sound:");
+                if (isVideo)
+                {
+                    menu.addSeparator();
+                    menu.addItem(14, "Video effects and layout...");
+                }
+
                 if (isVideo || isVideoSound)
                 {
                     menu.addSeparator();
@@ -2048,7 +2054,7 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                                             safe->onClipDuplicateRequested(clipIndex);
                                         else if (result == 4 && safe->onClipDeleteRequested)
                                             safe->onClipDeleteRequested(clipIndex);
-                                        else if (result >= 10 && result <= 13 && safe->onClipSoundAction)
+                                        else if (result >= 10 && result <= 14 && safe->onClipSoundAction)
                                             safe->onClipSoundAction(clipIndex, result - 9);
                                     });
                 draggingClipIndex = -1;

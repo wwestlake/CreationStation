@@ -2,6 +2,7 @@
 #include <creation/assets/AssetMaterializer.h>
 #include <creation/assets/AssetTypes.h>
 #include "MainComponent.h"
+#include "Views/VideoClipSettingsPanel.h"
 #include "Audio/PatchRuntimePlayer.h"
 #include "Branding.h"
 #include "Patch/PatchModel.h"
@@ -1542,7 +1543,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     menuBar->setColour(juce::TextButton::textColourOnId, juce::Colours::white);
     dockManager = std::make_unique<CreationDock::DockManager>(*this);
     // A resized video view asks for its next frame at the new size, so a bigger window is a sharper picture.
-    videoView.onSizeChanged = [this] { lastVideoRequestKey = {}; };
+    videoView.onSizeChanged = [this] { for (auto& feed : videoFeeds) feed.second->requestKey = {}; };
     dockManager->onPanelActivated = [this](const juce::String& panelId)
     {
         if (panelId == trackerPanelId) setWorkspaceMode(WorkspaceMode::tracker);
@@ -8138,6 +8139,12 @@ void MainComponent::handleClipSoundAction(int clipIndex, int action)
         return;
     }
 
+    if (action == 5)
+    {
+        showVideoClipSettings(clipIndex);
+        return;
+    }
+
     auto stateBeforeEdit = timelineModel.createState();
     juce::String done;
 
@@ -8349,42 +8356,141 @@ void MainComponent::updateVideoView(double timelineSeconds)
     if (! videoView.isShowing())
         return;
 
-    const cs::TimelineClip* activeClip = nullptr;
+    // Every video clip under the playhead is a layer. A clip on a track higher in the list is drawn in front of one
+    // lower down, so the lowest track is the bottom layer.
+    std::vector<const cs::TimelineClip*> active;
     for (const auto& clip : timelineModel.getClips())
     {
         if (clip.kind != cs::ClipKind::video || clip.recording)
             continue;
         if (timelineSeconds < clip.startSeconds || timelineSeconds >= clip.startSeconds + clip.durationSeconds)
             continue;
-
-        activeClip = &clip;
-        break;
+        active.push_back(&clip);
     }
+    std::stable_sort(active.begin(), active.end(), [](const cs::TimelineClip* a, const cs::TimelineClip* b) { return a->trackIndex > b->trackIndex; });
 
-    if (activeClip == nullptr)
+    videoActiveOrder.clear();
+    for (const auto* clip : active)
+        videoActiveOrder.push_back(clip->id);
+
+    // Decoders for clips that are no longer under the playhead are let go.
+    for (auto it = videoFeeds.begin(); it != videoFeeds.end();)
+        it = std::find(videoActiveOrder.begin(), videoActiveOrder.end(), it->first) == videoActiveOrder.end() ? videoFeeds.erase(it) : std::next(it);
+
+    if (active.empty())
     {
         videoView.setIdle();
-        lastVideoRequestKey = {};
         return;
     }
 
-    const auto width = juce::jmax(32, videoView.getWidth());
-    const auto height = juce::jmax(32, videoView.getHeight());
-    const auto sourceSeconds = activeClip->sourceStartSeconds + (timelineSeconds - activeClip->startSeconds);
+    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
+    for (const auto* clip : active)
+    {
+        auto& feedSlot = videoFeeds[clip->id];
+        if (feedSlot == nullptr)
+            feedSlot = std::make_unique<VideoLayerFeed>();
+        auto& feed = *feedSlot;
 
-    // Paused and nothing changed: no new decode.
-    const auto key = activeClip->file.getFullPathName() + "|" + juce::String(sourceSeconds, 3) + "|" + juce::String(width) + "x" + juce::String(height);
-    if (key == lastVideoRequestKey)
+        // Decode at the size the layer is drawn at, never above it: a small picture-in-picture costs less.
+        const auto scale = juce::jlimit(0.05f, 1.0f, cs::videoparams::number(clip->videoParams, cs::videoparams::layoutScale, 1.0f));
+        const auto width = juce::jmax(32, juce::roundToInt((float) videoView.getWidth() * scale));
+        const auto height = juce::jmax(32, juce::roundToInt((float) videoView.getHeight() * scale));
+        const auto sourceSeconds = clip->sourceStartSeconds + (timelineSeconds - clip->startSeconds);
+
+        // Paused and nothing changed: no new decode.
+        const auto key = clip->file.getFullPathName() + "|" + juce::String(sourceSeconds, 3) + "|" + juce::String(width) + "x" + juce::String(height);
+        if (key == feed.requestKey)
+            continue;
+        feed.requestKey = key;
+
+        feed.scrub.requestFrame(clip->file, sourceSeconds,
+                                [safeThis, clipId = clip->id](juce::Image image)
+                                {
+                                    if (safeThis == nullptr)
+                                        return;
+
+                                    const auto found = safeThis->videoFeeds.find(clipId);
+                                    if (found == safeThis->videoFeeds.end())
+                                        return;
+
+                                    found->second->frame = std::move(image);
+                                    safeThis->refreshVideoLayers();
+                                },
+                                width, height);
+    }
+
+    refreshVideoLayers();
+}
+
+void MainComponent::refreshVideoLayers()
+{
+    std::vector<cs::VideoLayer> layers;
+    for (const auto& clipId : videoActiveOrder)
+    {
+        const auto feed = videoFeeds.find(clipId);
+        if (feed == videoFeeds.end() || ! feed->second->frame.isValid())
+            continue; // its first picture has not arrived yet
+
+        for (const auto& clip : timelineModel.getClips())
+            if (clip.id == clipId)
+            {
+                layers.push_back(cs::videoparams::toLayer(feed->second->frame, clip.videoParams));
+                break;
+            }
+    }
+
+    if (layers.empty())
+        videoView.setIdle();
+    else
+        videoView.setLayers(std::move(layers));
+}
+
+void MainComponent::showVideoClipSettings(int clipIndex)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) timelineModel.getClips().size()) || timelineModel.getClips()[(size_t) clipIndex].kind != cs::ClipKind::video)
         return;
-    lastVideoRequestKey = key;
 
-    videoScrub.requestFrame(activeClip->file, sourceSeconds,
-                            [safe = juce::Component::SafePointer<juce::Component>(&videoView)](juce::Image image)
-                            {
-                                if (safe != nullptr)
-                                    static_cast<cs::VideoGlView*>(safe.getComponent())->setImage(image);
-                            },
-                            width, height);
+    if (videoSettingsWindow != nullptr)
+    {
+        videoSettingsWindow->toFront(true); // one at a time: close it to open another clip's
+        return;
+    }
+
+    const auto clip = timelineModel.getClips()[(size_t) clipIndex];
+    auto stateBeforeEdit = std::make_shared<juce::ValueTree>(timelineModel.createState());
+    auto edited = std::make_shared<bool>(false);
+    const auto clipId = clip.id;
+
+    auto panel = std::make_unique<VideoClipSettingsPanel>(clip.videoParams);
+    panel->onSettingsChanged = [this, clipId, edited](const juce::NamedValueSet& values)
+    {
+        for (size_t i = 0; i < timelineModel.getClips().size(); ++i)
+            if (timelineModel.getClips()[i].id == clipId)
+                timelineModel.setClipVideoParams((int) i, values);
+
+        *edited = true;
+        refreshVideoLayers(); // the picture updates while a slider moves
+    };
+
+    // One undo step for everything done in this window, and the project is saved when it closes.
+    auto window = std::make_unique<ManagedDocumentWindow>("Video effects and layout - " + clip.displayName, juce::Colour(0xff141a24), juce::DocumentWindow::closeButton,
+                                                          [this, stateBeforeEdit, edited]
+                                                          {
+                                                              if (*edited)
+                                                              {
+                                                                  pushTimelineUndoState(*stateBeforeEdit);
+                                                                  projectDirty = true;
+                                                                  saveSessionToDisk();
+                                                              }
+
+                                                              videoSettingsWindow.reset(); // runs after the window has finished closing
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setContentOwned(panel.release(), true);
+    window->setAlwaysOnTop(true);
+    window->centreAroundComponent(this, window->getWidth(), window->getHeight());
+    window->setVisible(true);
+    videoSettingsWindow = std::move(window);
 }
 
 void MainComponent::runVideoImport(juce::StringArray filePaths, int trackIndex, double startSeconds)

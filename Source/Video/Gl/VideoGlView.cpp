@@ -5,6 +5,19 @@ using namespace juce::gl;
 
 namespace cs
 {
+namespace
+{
+// A rectangle in pixels (origin top-left) as clip-space (x0, y0, x1, y1) for a target of the given size.
+void setRect(juce::OpenGLShaderProgram& program, juce::Rectangle<float> pixels, int targetWidth, int targetHeight)
+{
+    const auto x0 = pixels.getX() / (float) targetWidth * 2.0f - 1.0f;
+    const auto x1 = pixels.getRight() / (float) targetWidth * 2.0f - 1.0f;
+    const auto y0 = 1.0f - pixels.getBottom() / (float) targetHeight * 2.0f; // bottom edge
+    const auto y1 = 1.0f - pixels.getY() / (float) targetHeight * 2.0f;      // top edge
+    program.setUniform("uRect", x0, y0, x1, y1);
+}
+}
+
 // ------------------------------------------------------------------------------------------------ renderer
 VideoGlRenderer::VideoGlRenderer()
     : composer(ce::ShaderComposer::SourceProvider(videogl::findVideoShaderSource))
@@ -16,12 +29,13 @@ VideoGlRenderer::~VideoGlRenderer() = default;
 void VideoGlRenderer::prepare(juce::OpenGLContext& context)
 {
     lastError = {};
-    program = composer.GetProgram(context, "programs/video_fullscreen.vert", "programs/video_frame.frag");
-    if (program == nullptr)
-        lastError = "the video shader could not be compiled";
+    frameProgram = composer.GetProgram(context, "programs/video_quad.vert", "programs/video_frame.frag");
+    backgroundProgram = composer.GetProgram(context, "programs/video_quad.vert", "programs/video_background.frag");
+    if (frameProgram == nullptr || backgroundProgram == nullptr)
+        lastError = "the video shaders could not be compiled";
 
-    texture = std::make_unique<juce::OpenGLTexture>();
-    uploadedFrameId = 0;
+    textures.clear();
+    uploadedFrameIds.clear();
 
     GLuint vao = 0;
     glGenVertexArrays(1, &vao);
@@ -37,11 +51,14 @@ void VideoGlRenderer::release()
         vertexArray = 0;
     }
 
-    texture.reset();
-    program = nullptr;
+    textures.clear();
+    uploadedFrameIds.clear();
+    frameProgram = nullptr;
+    backgroundProgram = nullptr;
+    composer.ClearCache(); // compiled programs belong to this context, which is going away
 }
 
-void VideoGlRenderer::render(juce::OpenGLContext&, const VideoFrameSnapshot& snapshot, juce::Rectangle<int> area, int targetWidth, int targetHeight)
+void VideoGlRenderer::render(const VideoFrameSnapshot& snapshot, int targetWidth, int targetHeight)
 {
     glViewport(0, 0, targetWidth, targetHeight);
     glDisable(GL_DEPTH_TEST);
@@ -49,45 +66,74 @@ void VideoGlRenderer::render(juce::OpenGLContext&, const VideoFrameSnapshot& sna
     glClearColor(0.04f, 0.05f, 0.07f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    if (program == nullptr || texture == nullptr || snapshot.idle || ! snapshot.frame.isValid())
+    if (! isReady() || snapshot.layers.empty() || targetWidth <= 0 || targetHeight <= 0)
         return;
 
-    if (snapshot.frameId != uploadedFrameId)
-    {
-        texture->loadImage(snapshot.frame);
-        uploadedFrameId = snapshot.frameId;
-    }
-
-    // Fit the picture inside `area` without stretching it.
-    const auto imageAspect = (float) snapshot.frame.getWidth() / (float) juce::jmax(1, snapshot.frame.getHeight());
-    auto fitted = area;
-    if ((float) area.getWidth() / (float) juce::jmax(1, area.getHeight()) > imageAspect)
-        fitted = area.withSizeKeepingCentre(juce::roundToInt((float) area.getHeight() * imageAspect), area.getHeight());
-    else
-        fitted = area.withSizeKeepingCentre(area.getWidth(), juce::roundToInt((float) area.getWidth() / imageAspect));
-
-    // GL's origin is the bottom-left of the target; `area` is measured from the top-left.
-    glViewport(fitted.getX(), targetHeight - fitted.getBottom(), fitted.getWidth(), fitted.getHeight());
-
-    program->use();
-    glActiveTexture(GL_TEXTURE0);
-    texture->bind();
-    program->setUniform("uFrame", 0);
-    program->setUniform("uKeyEnabled", snapshot.keyEnabled ? 1 : 0);
-    program->setUniform("uKeyColor", snapshot.keyColor[0], snapshot.keyColor[1], snapshot.keyColor[2]);
-    program->setUniform("uTolerance", snapshot.tolerance);
-    program->setUniform("uSoftness", snapshot.softness);
-    program->setUniform("uSpill", snapshot.spill);
+    // The canvas: the video frame, fitted (letterboxed) inside the target.
+    const auto targetRect = juce::Rectangle<float>(0.0f, 0.0f, (float) targetWidth, (float) targetHeight);
+    const auto canvasWidth = juce::jmin((float) targetWidth, (float) targetHeight * snapshot.canvasAspect);
+    const auto canvasHeight = canvasWidth / snapshot.canvasAspect;
+    const auto canvas = juce::Rectangle<float>(canvasWidth, canvasHeight).withCentre(targetRect.getCentre());
 
     glBindVertexArray(vertexArray);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    backgroundProgram->use();
+    setRect(*backgroundProgram, canvas, targetWidth, targetHeight);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); // layers are premultiplied by the shader
+
+    frameProgram->use();
+    for (size_t i = 0; i < snapshot.layers.size(); ++i)
+    {
+        const auto& layer = snapshot.layers[i];
+        if (! layer.frame.isValid())
+            continue;
+
+        if (textures.size() <= i)
+        {
+            textures.resize(i + 1);
+            uploadedFrameIds.resize(i + 1, 0);
+        }
+        if (textures[i] == nullptr)
+            textures[i] = std::make_unique<juce::OpenGLTexture>();
+
+        if (layer.frameId != uploadedFrameIds[i])
+        {
+            textures[i]->loadImage(layer.frame);
+            uploadedFrameIds[i] = layer.frameId;
+        }
+
+        // Where the layer sits: fitted inside the canvas, scaled, then moved by a fraction of the canvas.
+        const auto pictureAspect = (float) layer.frame.getWidth() / (float) juce::jmax(1, layer.frame.getHeight());
+        auto size = juce::Rectangle<float>(canvas.getWidth(), canvas.getWidth() / pictureAspect);
+        if (size.getHeight() > canvas.getHeight())
+            size = juce::Rectangle<float>(canvas.getHeight() * pictureAspect, canvas.getHeight());
+        size = size * juce::jmax(0.0f, layer.scale);
+        const auto centre = canvas.getCentre() + juce::Point<float>(layer.x * canvas.getWidth(), layer.y * canvas.getHeight());
+
+        glActiveTexture(GL_TEXTURE0);
+        textures[i]->bind();
+        setRect(*frameProgram, size.withCentre(centre), targetWidth, targetHeight);
+        frameProgram->setUniform("uFrame", 0);
+        frameProgram->setUniform("uOpacity", layer.opacity);
+        frameProgram->setUniform("uKeyEnabled", layer.keyEnabled ? 1 : 0);
+        frameProgram->setUniform("uKeyColor", layer.keyColor[0], layer.keyColor[1], layer.keyColor[2]);
+        frameProgram->setUniform("uTolerance", layer.tolerance);
+        frameProgram->setUniform("uSoftness", layer.softness);
+        frameProgram->setUniform("uSpill", layer.spill);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+
+    glDisable(GL_BLEND);
     glBindVertexArray(0);
 }
 
 // ------------------------------------------------------------------------------------------------ view
 VideoGlView::VideoGlView()
 {
-    published.store(std::make_shared<const VideoFrameSnapshot>(working));
+    published.store(std::make_shared<const VideoFrameSnapshot>());
 
     context.setRenderer(this);
     context.setContinuousRepainting(false); // drawn when a new snapshot arrives, not in a busy loop
@@ -101,50 +147,30 @@ VideoGlView::~VideoGlView()
     context.detach();
 }
 
-void VideoGlView::publish()
+void VideoGlView::setLayers(std::vector<VideoLayer> layers)
 {
-    published.store(std::make_shared<const VideoFrameSnapshot>(working));
+    // A layer whose picture is the very same one as last time keeps its id, so it is not uploaded again.
+    lastPixelData.resize(layers.size(), nullptr);
+    lastFrameIds.resize(layers.size(), 0);
+    for (size_t i = 0; i < layers.size(); ++i)
+    {
+        const void* pixels = layers[i].frame.isValid() ? layers[i].frame.getPixelData().get() : nullptr;
+        if (pixels != lastPixelData[i] || lastFrameIds[i] == 0)
+        {
+            lastPixelData[i] = pixels;
+            lastFrameIds[i] = nextFrameId++;
+        }
+        layers[i].frameId = lastFrameIds[i];
+    }
+
+    auto snapshot = std::make_shared<VideoFrameSnapshot>();
+    snapshot->layers = std::move(layers);
+    if (! snapshot->layers.empty() && snapshot->layers.front().frame.isValid())
+        snapshot->canvasAspect = (float) snapshot->layers.front().frame.getWidth() / (float) juce::jmax(1, snapshot->layers.front().frame.getHeight());
+
+    published.store(std::move(snapshot));
     context.triggerRepaint();
     repaint();
-}
-
-void VideoGlView::setImage(juce::Image newImage)
-{
-    working.frame = std::move(newImage);
-    working.frameId = nextFrameId++;
-    working.idle = ! working.frame.isValid();
-    publish();
-}
-
-void VideoGlView::setIdle()
-{
-    if (working.idle)
-        return;
-
-    working.idle = true;
-    working.frame = {};
-    publish();
-}
-
-void VideoGlView::setKeyEnabled(bool enabled)
-{
-    working.keyEnabled = enabled;
-    publish();
-}
-
-void VideoGlView::setKeyColor(float r, float g, float b)
-{
-    working.keyColor[0] = r;
-    working.keyColor[1] = g;
-    working.keyColor[2] = b;
-    publish();
-}
-
-void VideoGlView::setKeyTolerance(float tolerance, float softness)
-{
-    working.tolerance = tolerance;
-    working.softness = softness;
-    publish();
 }
 
 void VideoGlView::newOpenGLContextCreated()
@@ -161,7 +187,50 @@ void VideoGlView::renderOpenGL()
     const auto scale = (float) context.getRenderingScale();
     const auto width = juce::roundToInt(scale * (float) getWidth());
     const auto height = juce::roundToInt(scale * (float) getHeight());
-    renderer.render(context, *snapshot, { 0, 0, width, height }, width, height);
+    renderer.render(*snapshot, width, height);
+
+    if (captureRequested.exchange(false) && width > 0 && height > 0)
+    {
+        std::vector<std::uint8_t> rgba((size_t) width * (size_t) height * 4);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, context.getFrameBufferID());
+        glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+
+        juce::Image image(juce::Image::ARGB, width, height, true);
+        juce::Image::BitmapData data(image, juce::Image::BitmapData::writeOnly);
+        for (int y = 0; y < height; ++y) // GL rows are bottom-first
+            for (int x = 0; x < width; ++x)
+            {
+                const auto* p = rgba.data() + ((size_t) (height - 1 - y) * (size_t) width + (size_t) x) * 4;
+                data.setPixelColour(x, y, juce::Colour::fromRGB(p[0], p[1], p[2]));
+            }
+
+        const juce::ScopedLock lock(captureLock);
+        capturedFrame = image;
+    }
+}
+
+juce::Image VideoGlView::captureOnScreenFrame()
+{
+    {
+        const juce::ScopedLock lock(captureLock);
+        capturedFrame = {};
+    }
+
+    captureRequested.store(true);
+    context.triggerRepaint();
+
+    const auto deadline = juce::Time::getMillisecondCounter() + 3000;
+    while (juce::Time::getMillisecondCounter() < deadline)
+    {
+        juce::Thread::sleep(20); // the GL thread does the drawing; nothing here needs the message loop
+        {
+            const juce::ScopedLock lock(captureLock);
+            if (capturedFrame.isValid())
+                return capturedFrame;
+        }
+        context.triggerRepaint();
+    }
+    return {};
 }
 
 void VideoGlView::openGLContextClosing()
@@ -184,7 +253,7 @@ juce::Image VideoGlView::renderToImage(int width, int height)
             return;
 
         buffer.makeCurrentRenderingTarget();
-        renderer.render(glContext, *snapshot, { 0, 0, width, height }, width, height);
+        renderer.render(*snapshot, width, height);
         buffer.releaseAsRenderingTarget();
 
         // GL hands the rows back bottom-first; an Image is top-first.
@@ -204,7 +273,7 @@ void VideoGlView::paint(juce::Graphics& g)
 {
     // Only seen if OpenGL is unavailable: say so, rather than showing a blank panel.
     g.fillAll(juce::Colour(0xff0a0e14));
-    if (! context.isAttached() || ! renderer.isReady())
+    if (! context.isAttached() || ! rendererReady.load())
     {
         g.setColour(juce::Colour(0xff8ea0b7));
         g.setFont(juce::Font(juce::FontOptions(13.0f)));
@@ -216,39 +285,5 @@ void VideoGlView::resized()
 {
     if (onSizeChanged)
         onSizeChanged();
-}
-
-void VideoGlView::mouseDown(const juce::MouseEvent& event)
-{
-    if (! event.mods.isPopupMenu())
-        return;
-
-    juce::PopupMenu menu;
-    menu.addItem(1, "Green screen (test effect)", true, working.keyEnabled);
-    menu.addSeparator();
-    menu.addItem(2, "Key colour: green", true, working.keyColor[1] > 0.5f && working.keyColor[2] < 0.5f);
-    menu.addItem(3, "Key colour: blue", true, working.keyColor[2] > 0.5f && working.keyColor[1] < 0.5f);
-    menu.addSeparator();
-    menu.addItem(4, "Tight", true, working.tolerance < 0.2f);
-    menu.addItem(5, "Normal", true, working.tolerance >= 0.2f && working.tolerance < 0.4f);
-    menu.addItem(6, "Loose", true, working.tolerance >= 0.4f);
-
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea({ event.getScreenX(), event.getScreenY(), 1, 1 }),
-                       [safe = juce::Component::SafePointer<VideoGlView>(this)](int result)
-                       {
-                           if (safe == nullptr)
-                               return;
-
-                           switch (result)
-                           {
-                               case 1: safe->setKeyEnabled(! safe->working.keyEnabled); break;
-                               case 2: safe->setKeyColor(0.0f, 1.0f, 0.0f); break;
-                               case 3: safe->setKeyColor(0.0f, 0.0f, 1.0f); break;
-                               case 4: safe->setKeyTolerance(0.12f, 0.05f); break;
-                               case 5: safe->setKeyTolerance(0.30f, 0.10f); break;
-                               case 6: safe->setKeyTolerance(0.50f, 0.15f); break;
-                               default: break;
-                           }
-                       });
 }
 }

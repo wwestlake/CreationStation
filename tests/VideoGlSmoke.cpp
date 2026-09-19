@@ -1,7 +1,7 @@
-// Headless check of the GPU video renderer: renders a known picture offscreen through the real GLSL shader and
-// checks actual pixels - orientation, that the green-screen effect removes only the key colour, and that the
-// parameters published as a snapshot are what the shader uses. Needs an OpenGL driver; if none is available the test
-// says so and exits 77 (skipped) instead of failing. Exit 0 = pass.
+// Headless check of the GPU video compositor: renders known pictures offscreen through the real GLSL shaders and
+// checks actual pixels - orientation, the green-screen effect, picture-in-picture layout, layer stacking, and opacity.
+// Needs an OpenGL driver; if none is available the test says so and exits 77 (skipped) instead of failing.
+// Exit 0 = pass.
 #include <JuceHeader.h>
 
 #include "Video/Gl/VideoGlView.h"
@@ -24,8 +24,16 @@ bool isNear(juce::Colour c, int r, int g, int b, int tolerance = 40)
         && std::abs((int) c.getBlue() - b) <= tolerance;
 }
 
-// The picture: top-left blue, top-right green, bottom-left red, bottom-right green.
-juce::Image makeTestPicture()
+juce::Image solid(juce::Colour colour)
+{
+    juce::Image image(juce::Image::ARGB, 64, 64, true);
+    juce::Graphics g(image);
+    g.fillAll(colour);
+    return image;
+}
+
+// Top-left blue, top-right green, bottom-left red, bottom-right green.
+juce::Image quadrants()
 {
     juce::Image image(juce::Image::ARGB, 64, 64, true);
     juce::Graphics g(image);
@@ -34,6 +42,13 @@ juce::Image makeTestPicture()
     g.setColour(juce::Colour::fromRGB(255, 0, 0));   g.fillRect(0, 32, 32, 32);
     g.setColour(juce::Colour::fromRGB(0, 255, 0));   g.fillRect(32, 32, 32, 32);
     return image;
+}
+
+cs::VideoLayer layer(juce::Image frame)
+{
+    cs::VideoLayer l;
+    l.frame = std::move(frame);
+    return l;
 }
 
 juce::Colour at(const juce::Image& image, int x, int y) { return image.getPixelAt(x, y); }
@@ -51,7 +66,6 @@ int main()
     window.addToDesktop(juce::ComponentPeer::windowIsTemporary);
     window.setVisible(true);
 
-    // Wait for the graphics context to come up.
     const auto deadline = juce::Time::getMillisecondCounter() + 8000;
     while (! view.isRendererReady() && juce::Time::getMillisecondCounter() < deadline)
         juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
@@ -62,39 +76,114 @@ int main()
         return 77;
     }
 
-    view.setImage(makeTestPicture());
-
-    // 1. No effect: the picture comes out as it went in, the right way up.
+    // 1. One layer, no effect: the picture comes out as it went in, the right way up.
+    view.setLayers({ layer(quadrants()) });
     auto out = view.renderToImage(64, 64);
-    for (auto [x, y] : { std::pair{ 16, 16 }, std::pair{ 48, 16 }, std::pair{ 16, 48 }, std::pair{ 48, 48 } })
-        std::printf("   pixel (%d,%d) = rgb(%d,%d,%d)\n", x, y, (int) at(out, x, y).getRed(), (int) at(out, x, y).getGreen(), (int) at(out, x, y).getBlue());
     check(isNear(at(out, 16, 16), 0, 0, 255), "top-left is blue (right way up)");
     check(isNear(at(out, 48, 16), 0, 255, 0), "top-right is green");
     check(isNear(at(out, 16, 48), 255, 0, 0), "bottom-left is red");
     check(isNear(at(out, 48, 48), 0, 255, 0), "bottom-right is green");
 
-    // 2. Green screen on: green disappears (checker shows through), other colours stay.
-    view.setKeyEnabled(true);
+    // 1b. The ON-SCREEN path (what the app really shows): let the context draw a few frames, then read its frame buffer.
+    auto screen = view.captureOnScreenFrame();
+    if (screen.isValid() && screen.getWidth() > 8)
+    {
+        const auto w = screen.getWidth(), h = screen.getHeight();
+        // The picture is square, letterboxed in the middle of the view; sample inside each quadrant of it.
+        const auto side = juce::jmin(w, h);
+        const auto x0 = (w - side) / 2, y0 = (h - side) / 2;
+        const auto q = [&](float fx, float fy) { return screen.getPixelAt(x0 + (int) (fx * (float) side), y0 + (int) (fy * (float) side)); };
+        check(isNear(q(0.25f, 0.25f), 0, 0, 255) && isNear(q(0.75f, 0.25f), 0, 255, 0) && isNear(q(0.25f, 0.75f), 255, 0, 0),
+              "the ON-SCREEN context draws the picture, the right way up");
+    }
+    else
+    {
+        check(false, "the on-screen context produced no frame to read back");
+    }
+
+    // 1c. The app docks the video panel and then floats it into its own window: the view gets a new window, and the
+    // graphics context is torn down and recreated. Drawing must still work afterwards (compiled shaders belong to
+    // the context that made them).
+    {
+        juce::DocumentWindow second("video gl smoke 2", juce::Colours::black, 0);
+        second.setUsingNativeTitleBar(false);
+        second.setBounds(-4000, -3600, 256, 256);
+        second.addToDesktop(juce::ComponentPeer::windowIsTemporary);
+        second.setVisible(true);
+        second.setContentNonOwned(&view, true); // the view moves to the second window
+
+        const auto until = juce::Time::getMillisecondCounter() + 8000;
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(200);
+        while (! view.isRendererReady() && juce::Time::getMillisecondCounter() < until)
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
+
+        view.setLayers({ layer(quadrants()) });
+        const auto moved = view.captureOnScreenFrame();
+        bool drawsAfterMove = false;
+        if (moved.isValid() && moved.getWidth() > 8)
+        {
+            const auto side = juce::jmin(moved.getWidth(), moved.getHeight());
+            const auto ox = (moved.getWidth() - side) / 2, oy = (moved.getHeight() - side) / 2;
+            drawsAfterMove = isNear(moved.getPixelAt(ox + side / 4, oy + side / 4), 0, 0, 255)
+                          && isNear(moved.getPixelAt(ox + side * 3 / 4, oy + side / 4), 0, 255, 0);
+        }
+        check(drawsAfterMove, "after the view moves to another window (new graphics context) it still draws");
+
+        second.clearContentComponent();
+        window.clearContentComponent(); // it still remembers the view; without this it would not re-add it
+        window.setContentNonOwned(&view, true); // hand the view back so the rest of the test uses the first window
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(300);
+        const auto again = juce::Time::getMillisecondCounter() + 8000;
+        while (! view.isRendererReady() && juce::Time::getMillisecondCounter() < again)
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+    }
+
+    // 2. Green screen: green disappears (the dark backdrop shows through), other colours stay.
+    auto keyed = layer(quadrants());
+    keyed.keyEnabled = true;
+    view.setLayers({ keyed });
     out = view.renderToImage(64, 64);
     check(at(out, 48, 16).getGreen() < 90 && at(out, 48, 48).getGreen() < 90, "green screen removes the green");
-    check(isNear(at(out, 16, 16), 0, 0, 255), "blue is left alone by a green key");
-    check(isNear(at(out, 16, 48), 255, 0, 0), "red is left alone by a green key");
+    check(isNear(at(out, 16, 16), 0, 0, 255) && isNear(at(out, 16, 48), 255, 0, 0), "blue and red are left alone by a green key");
 
-    // 3. The key colour is a parameter: switching it to blue removes blue and keeps green.
-    view.setKeyColor(0.0f, 0.0f, 1.0f);
+    // 3. The key colour is a parameter.
+    keyed.keyColor[0] = 0.0f; keyed.keyColor[1] = 0.0f; keyed.keyColor[2] = 1.0f;
+    view.setLayers({ keyed });
     out = view.renderToImage(64, 64);
-    check(at(out, 16, 16).getBlue() < 90, "a blue key removes the blue");
-    check(isNear(at(out, 48, 16), 0, 255, 0), "green is left alone by a blue key");
+    check(at(out, 16, 16).getBlue() < 90 && isNear(at(out, 48, 16), 0, 255, 0), "a blue key removes the blue and keeps the green");
 
-    // 4. Turning the effect off puts everything back.
-    view.setKeyEnabled(false);
+    // 4. Picture-in-picture: a small blue layer over a red background.
+    auto small = layer(solid(juce::Colour::fromRGB(0, 0, 255)));
+    small.scale = 0.5f;
+    view.setLayers({ layer(solid(juce::Colour::fromRGB(255, 0, 0))), small });
     out = view.renderToImage(64, 64);
-    check(isNear(at(out, 16, 16), 0, 0, 255) && isNear(at(out, 48, 16), 0, 255, 0), "effect off: the picture is untouched");
+    check(isNear(at(out, 32, 32), 0, 0, 255) && isNear(at(out, 4, 4), 255, 0, 0), "a half-size layer sits in the middle over the background");
 
-    // 5. Nothing at the playhead: a plain dark frame, no picture.
+    small.x = 0.25f; // move it right by a quarter of the canvas
+    view.setLayers({ layer(solid(juce::Colour::fromRGB(255, 0, 0))), small });
+    out = view.renderToImage(64, 64);
+    check(isNear(at(out, 48, 32), 0, 0, 255) && isNear(at(out, 16, 32), 255, 0, 0), "moving a layer moves it on the canvas");
+
+    // 5. Green screen over a background: the keyed-out area shows the layer below, not a backdrop.
+    auto overlay = layer(quadrants());
+    overlay.keyEnabled = true;
+    view.setLayers({ layer(solid(juce::Colour::fromRGB(255, 255, 0))), overlay });
+    out = view.renderToImage(64, 64);
+    check(isNear(at(out, 48, 16), 255, 255, 0) && isNear(at(out, 48, 48), 255, 255, 0), "keyed-out green shows the layer underneath");
+    check(isNear(at(out, 16, 16), 0, 0, 255), "the rest of the keyed layer stays on top");
+
+    // 6. Opacity: half-transparent blue over red is half of each.
+    auto faded = layer(solid(juce::Colour::fromRGB(0, 0, 255)));
+    faded.opacity = 0.5f;
+    view.setLayers({ layer(solid(juce::Colour::fromRGB(255, 0, 0))), faded });
+    out = view.renderToImage(64, 64);
+    check(isNear(at(out, 32, 32), 127, 0, 127, 30), "opacity blends a layer with what is below it");
+
+    // 7. Nothing at the playhead: no picture.
     view.setIdle();
     out = view.renderToImage(64, 64);
-    check(at(out, 16, 16).getBrightness() < 0.2f && at(out, 48, 48).getBrightness() < 0.2f, "idle draws no picture");
+    check(at(out, 16, 16).getBrightness() < 0.2f && at(out, 48, 48).getBrightness() < 0.2f, "no layers draws no picture");
 
     std::printf("%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     window.setVisible(false);
