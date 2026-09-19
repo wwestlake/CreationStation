@@ -213,6 +213,19 @@ PatchLiveVoice::PatchLiveVoice()
 
 PatchLiveVoice::~PatchLiveVoice() = default;
 
+PatchLiveBindingMap makeVariableBindingMap(const cw::PatchDocument& patch)
+{
+    PatchLiveBindingMap map;
+
+    for (const auto& variable : patch.variables)
+        map.midiNodeValues.add({ variable.id, (float) juce::jlimit(0.0, 1.0, variable.defaultValue) });
+
+    for (const auto& binding : patch.variableBindings)
+        map.entries.add({ binding.targetNodeId, binding.targetPort, binding.variableId });
+
+    return map;
+}
+
 void PatchLiveVoice::prepareToPlay(int samplesPerBlockExpected, double newSampleRate)
 {
     sampleRate = newSampleRate;

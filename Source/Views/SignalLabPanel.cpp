@@ -7246,6 +7246,27 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
     document.output.gain = 0.9;
     document.output.pan = 0.0;
 
+    // The variables this graph declares, and which ports their Get nodes are wired into, so a clip built
+    // from the saved patch alone can bind a live slot to each (see makeVariableBindingMap).
+    for (auto& variable : localControls)
+    {
+        cw::PatchVariable saved;
+        saved.id = variable.id;
+        saved.name = variable.name;
+        saved.description = variable.description;
+        saved.valueType = variable.valueType;
+        saved.isPublic = variable.accessScope == "Public";
+        saved.defaultValue = variable.value;
+        document.variables.add(saved);
+    }
+
+    forEachBindablePort([&](const juce::String& nodeId, const juce::String& voicePort, const juce::String& guiPortId)
+    {
+        auto variableId = findWiredVariableId(nodeId, guiPortId);
+        if (variableId.isNotEmpty())
+            document.variableBindings.add({ variableId, nodeId, voicePort });
+    });
+
     return document;
 }
 
@@ -7256,70 +7277,79 @@ cw::PatchDocument SignalLabPanel::buildPatchDocument(const SignalRecipe& activeR
 // document is meant to be a portable, resolved format. PatchLiveVoice needs
 // that extra "which node" information to keep reading a parameter live
 // after the graph is compiled -- this is where it comes from.
+juce::String SignalLabPanel::findWiredVariableId(const juce::String& nodeId, const juce::String& portId) const
+{
+    for (auto& connection : graphConnections)
+    {
+        if (connection.isExec || connection.toNodeId != nodeId || connection.toPortId != portId)
+            continue;
+
+        for (auto& sourceNode : graphNodes)
+        {
+            if (sourceNode.id != connection.fromNodeId || sourceNode.type != "valueGet")
+                continue;
+
+            for (auto& variable : localControls)
+                if (variable.id == sourceNode.targetParameter)
+                    return variable.id;
+        }
+    }
+    return {};
+}
+
+void SignalLabPanel::forEachBindablePort(const std::function<void(const juce::String& nodeId, const juce::String& voicePort, const juce::String& guiPortId)>& visit) const
+{
+    for (auto& node : graphNodes)
+    {
+        if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
+        {
+            visit(node.id, "level", "param:" + node.type + "Level");
+            visit(node.id, "frequency", "param:" + node.type + "Frequency");
+        }
+        else if (node.type == "noise")
+        {
+            visit(node.id, "level", "param:noiseLevel");
+        }
+        else if (node.type == "filter")
+        {
+            visit(node.id, "cutoff", "param:filterCutoff");
+            visit(node.id, "resonance", "param:filterResonance");
+            visit(node.id, "envelopeAmount", "param:filterEnvelopeAmount");
+        }
+        else if (node.type == "mix")
+        {
+            for (int channelIndex = 0; channelIndex < node.mixerInputVolumes.size(); ++channelIndex)
+                visit(node.id, "mixWeight:" + juce::String(channelIndex), "mixWeight:" + juce::String(channelIndex));
+        }
+        else if (node.type == "crossfade")
+        {
+            visit(node.id, "blend", "param:crossfadeBlend");
+        }
+        else if (node.type == "router")
+        {
+            visit(node.id, "select", "param:routerSelect");
+        }
+        else if (node.type == "sampleHold")
+        {
+            visit(node.id, "trigger", "param:sampleHoldTrigger");
+        }
+    }
+}
+
 PatchLiveBindingMap SignalLabPanel::buildLiveBindingMap(const cw::PatchDocument& patch) const
 {
     PatchLiveBindingMap map;
 
     for (auto& node : graphNodes)
-    {
         if (node.type == "midiFader" || node.type == "midiButton")
             map.midiNodeValues.add({ node.id, node.midiLiveValue });
 
-        if (node.type == "sine" || node.type == "saw" || node.type == "square" || node.type == "triangle")
-        {
-            auto midiNodeId = findWiredMidiSourceNodeId(node.id, "param:" + node.type + "Level");
-            if (midiNodeId.isNotEmpty())
-                map.entries.add({ node.id, "level", midiNodeId });
-            auto freqMidiId = findWiredMidiSourceNodeId(node.id, "param:" + node.type + "Frequency");
-            if (freqMidiId.isNotEmpty())
-                map.entries.add({ node.id, "frequency", freqMidiId });
-        }
-        else if (node.type == "noise")
-        {
-            auto midiNodeId = findWiredMidiSourceNodeId(node.id, "param:noiseLevel");
-            if (midiNodeId.isNotEmpty())
-                map.entries.add({ node.id, "level", midiNodeId });
-        }
-        else if (node.type == "filter")
-        {
-            auto cutoffMidiId = findWiredMidiSourceNodeId(node.id, "param:filterCutoff");
-            if (cutoffMidiId.isNotEmpty())
-                map.entries.add({ node.id, "cutoff", cutoffMidiId });
-            auto resonanceMidiId = findWiredMidiSourceNodeId(node.id, "param:filterResonance");
-            if (resonanceMidiId.isNotEmpty())
-                map.entries.add({ node.id, "resonance", resonanceMidiId });
-            auto envAmountMidiId = findWiredMidiSourceNodeId(node.id, "param:filterEnvelopeAmount");
-            if (envAmountMidiId.isNotEmpty())
-                map.entries.add({ node.id, "envelopeAmount", envAmountMidiId });
-        }
-        else if (node.type == "mix")
-        {
-            for (int channelIndex = 0; channelIndex < node.mixerInputVolumes.size(); ++channelIndex)
-            {
-                auto weightMidiId = findWiredMidiSourceNodeId(node.id, "mixWeight:" + juce::String(channelIndex));
-                if (weightMidiId.isNotEmpty())
-                    map.entries.add({ node.id, "mixWeight:" + juce::String(channelIndex), weightMidiId });
-            }
-        }
-        else if (node.type == "crossfade")
-        {
-            auto blendMidiId = findWiredMidiSourceNodeId(node.id, "param:crossfadeBlend");
-            if (blendMidiId.isNotEmpty())
-                map.entries.add({ node.id, "blend", blendMidiId });
-        }
-        else if (node.type == "router")
-        {
-            auto selectMidiId = findWiredMidiSourceNodeId(node.id, "param:routerSelect");
-            if (selectMidiId.isNotEmpty())
-                map.entries.add({ node.id, "select", selectMidiId });
-        }
-        else if (node.type == "sampleHold")
-        {
-            auto triggerMidiId = findWiredMidiSourceNodeId(node.id, "param:sampleHoldTrigger");
-            if (triggerMidiId.isNotEmpty())
-                map.entries.add({ node.id, "trigger", triggerMidiId });
-        }
-    }
+    forEachBindablePort([&](const juce::String& nodeId, const juce::String& voicePort, const juce::String& guiPortId)
+    {
+        auto midiNodeId = findWiredMidiSourceNodeId(nodeId, guiPortId);
+        if (midiNodeId.isNotEmpty())
+            map.entries.add({ nodeId, voicePort, midiNodeId });
+    });
 
     map.tapNodeIds = resolveScopeTapNodeIds(patch);
     return map;

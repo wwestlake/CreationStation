@@ -314,6 +314,88 @@ int main()
         }
     }
 
+    // Variables saved in the patch: a public variable wired to a port must survive save/load, and a
+    // clip's voice must be drivable by the variable's id alone (this is what timeline automation writes).
+    {
+        cw::PatchDocument doc = makePatch();
+
+        cw::PatchVariable crunch;
+        crunch.id = "var_crunch";
+        crunch.name = "FootStepCrunch";
+        crunch.description = "how much crunch is in the step";
+        crunch.valueType = "Float";
+        crunch.isPublic = true;
+        crunch.defaultValue = 1.0;
+        doc.variables.add(crunch);
+
+        cw::PatchVariable hidden;
+        hidden.id = "var_hidden";
+        hidden.name = "Internal";
+        hidden.valueType = "Int";
+        hidden.isPublic = false;
+        hidden.defaultValue = 0.25;
+        doc.variables.add(hidden);
+
+        doc.variableBindings.add({ "var_crunch", "src_sine", "level" });
+
+        const auto json = cw::serialisePatchDocumentJson(doc);
+        cw::PatchDocument parsed;
+        juce::String parseError;
+        const auto parsedOk = cw::parsePatchDocumentJson(json, parsed, parseError);
+        check(parsedOk, "a patch with variables saves and loads");
+        check(parsed.variables.size() == 2
+                  && parsed.variables[0].id == "var_crunch" && parsed.variables[0].name == "FootStepCrunch"
+                  && parsed.variables[0].valueType == "Float" && parsed.variables[0].isPublic
+                  && std::abs(parsed.variables[0].defaultValue - 1.0) < 1e-9
+                  && parsed.variables[1].valueType == "Int" && ! parsed.variables[1].isPublic
+                  && std::abs(parsed.variables[1].defaultValue - 0.25) < 1e-9,
+              "variables (id, name, type, public/private, default) round-trip");
+        check(parsed.variableBindings.size() == 1 && parsed.variableBindings[0].variableId == "var_crunch"
+                  && parsed.variableBindings[0].targetNodeId == "src_sine" && parsed.variableBindings[0].targetPort == "level",
+              "variable-to-port bindings round-trip");
+
+        // A patch saved before variables existed has neither section and must still load.
+        auto rootVar = juce::JSON::parse(json);
+        rootVar.getDynamicObject()->removeProperty("variables");
+        rootVar.getDynamicObject()->removeProperty("variableBindings");
+        cw::PatchDocument legacy;
+        const auto legacyOk = cw::parsePatchDocumentJson(juce::JSON::toString(rootVar), legacy, parseError);
+        check(legacyOk && legacy.variables.isEmpty() && legacy.variableBindings.isEmpty(),
+              "a patch saved before variables existed still loads (exposes nothing)");
+
+        // A voice built from the saved patch alone, driven by variable id.
+        auto rmsWithVariable = [&](float value)
+        {
+            auto voice = makeVoice(parsed, makeVariableBindingMap(parsed));
+            voice->setVariableValue("var_crunch", value);
+            const auto out = renderBlocks(*voice, 0, (int) kPatchSamples);
+            return rms(out, 0, (int) kPatchSamples);
+        };
+        const auto atZero = rmsWithVariable(0.0f);
+        const auto atQuarter = rmsWithVariable(0.25f);
+        const auto atHalf = rmsWithVariable(0.5f);
+        const auto atFull = rmsWithVariable(1.0f);
+        std::printf("INFO: variable -> level: rms at 0 / 0.25 / 0.5 / 1.0 = %.4f / %.4f / %.4f / %.4f\n", atZero, atQuarter, atHalf, atFull);
+        // At 0 the oscillator's contribution is gone; what remains is the mix stage's own noise floor, which
+        // does not depend on any oscillator level.
+        check(atZero < atFull * 0.6, "variable at 0 removes the oscillator it drives (floor " + juce::String(atZero, 4)
+                                         + " vs full " + juce::String(atFull, 4) + ")");
+        check(atQuarter < atHalf && atHalf < atFull, "raising the variable raises the sound (monotonic)");
+
+        // Untouched, the slot holds the variable's saved default.
+        auto defaultVoice = makeVoice(parsed, makeVariableBindingMap(parsed));
+        const auto defaultRender = renderBlocks(*defaultVoice, 0, (int) kPatchSamples);
+        check(std::abs(rms(defaultRender, 0, (int) kPatchSamples) - atFull) < 1e-6,
+              "an unwritten variable holds its saved default (1.0)");
+
+        // A variable that is not wired to anything changes nothing.
+        auto unwiredVoice = makeVoice(parsed, makeVariableBindingMap(parsed));
+        unwiredVoice->setVariableValue("var_hidden", 0.9f);
+        const auto unwiredRender = renderBlocks(*unwiredVoice, 0, (int) kPatchSamples);
+        check(maxAbsDiff(defaultRender, 0, unwiredRender, 0, (int) kPatchSamples) == 0.0,
+              "writing a variable that drives no port has no effect");
+    }
+
     // Additive: the voice adds into the track buffer (it must not clobber other clips on the track).
     {
         auto adding = makeVoice();

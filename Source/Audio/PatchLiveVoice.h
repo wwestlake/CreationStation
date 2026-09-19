@@ -83,6 +83,11 @@ struct PatchLiveBindingMap
     }
 };
 
+// Builds the live bindings for a patch from the variables and variable bindings saved in it: each
+// bound port gets a live slot addressed by its variable's id (seeded with the variable's default),
+// so a timeline clip's voice can be driven by variable id alone, with no Signal Lab involved.
+PatchLiveBindingMap makeVariableBindingMap(const cw::PatchDocument& patch);
+
 class PatchLiveVoice final : public juce::AudioSource
 {
 public:
@@ -147,6 +152,9 @@ public:
     // hasn't caught up yet -- harmless, nothing reads a stale slot since
     // slots are keyed to the graph that owns them).
     void setLiveMidiValue(const juce::String& nodeId, float value);
+    // A variable's live slot is addressed by the variable's id (see makeVariableBindingMap); value is
+    // its normalized 0..1 value. Same cost and thread rules as setLiveMidiValue.
+    void setVariableValue(const juce::String& variableId, float normalizedValue) { setLiveMidiValue(variableId, normalizedValue); }
 
     // Live scope tap: up to maxTapSlots rolling ~2.7s mono histories, one per
     // entity a currently-open Scope node is wired to (see

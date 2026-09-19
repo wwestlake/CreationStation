@@ -2307,7 +2307,7 @@ bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipT
         {
             voice = std::make_shared<PatchLiveVoice>();
             voice->prepareToPlay(graphBlockSize, graphSampleRate);
-            voice->rebuild(target.patch, PatchLiveBindingMap {});
+            voice->rebuild(target.patch, makeVariableBindingMap(target.patch));
             voice->setPatchDurationSeconds(target.patch.durationSeconds > 0.0 ? target.patch.durationSeconds : 5.0);
             voice->setOutputScale(1.0f); // match the offline render exactly; 0.9 is only Signal Lab's preview headroom
             voice->adoptPublishedGraphNow();

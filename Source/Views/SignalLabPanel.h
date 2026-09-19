@@ -692,6 +692,12 @@ private:
     void seedOscillatorNodesFromRecipeLevels();
     bool findWiredParameterValue(const juce::String& nodeId, const juce::String& portId, double& outValue) const;
     juce::String findWiredMidiSourceNodeId(const juce::String& nodeId, const juce::String& portId) const;
+    // The variable id feeding a port through a Get-variable node, or empty if the port isn't wired to one.
+    juce::String findWiredVariableId(const juce::String& nodeId, const juce::String& portId) const;
+    // Every port a wired value source can drive: the node id, the live voice's own name for the port
+    // (e.g. "cutoff", "mixWeight:1"), and this panel's port id. One list, so the live MIDI bindings and
+    // the saved variable bindings cannot disagree about which ports are bindable.
+    void forEachBindablePort(const std::function<void(const juce::String& nodeId, const juce::String& voicePort, const juce::String& guiPortId)>& visit) const;
     // True only when the port is wired to a Fader Control node specifically
     // (not a Button Control, not a Get-variable) -- these are the only
     // wired sources where the on-screen slider should stay live rather than
