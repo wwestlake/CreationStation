@@ -390,6 +390,12 @@ private:
     void refreshMidiPlaybackClips();
     bool renderFullMixToProject();
     void exportFullMixAsWav();
+    // Writes a rendered mix into the project as a Render asset (encoded in memory, no temp file).
+    bool saveRenderToProject(const juce::AudioBuffer<float>& buffer, double sampleRate, int bitsPerSample, bool dither,
+                             const juce::String& displayName, creation::assets::AssetDescriptor& savedAsset,
+                             juce::String& errorMessage);
+    void toggleProjectAssetPreview(const creation::assets::AssetDescriptor& asset);
+    juce::String previewingProjectAssetId;
     void pushTimelineUndoState();
     void pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit);
     void undoTimelineEdit();

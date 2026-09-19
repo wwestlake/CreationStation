@@ -639,6 +639,57 @@ private:
     juce::TextButton applyManualButton, closeButton;
 };
 
+// Encodes a rendered buffer as a WAV in memory: 16/24-bit PCM or 32-bit float. Reducing to a fixed-point depth
+// can apply TPDF dither (the low-level noise that keeps quantization from turning into distortion on quiet
+// material). The dither uses a fixed seed, so the same render always gives the same file.
+bool encodeWavToMemory(const juce::AudioBuffer<float>& source,
+                       double sampleRate,
+                       int bitsPerSample,
+                       bool dither,
+                       juce::MemoryBlock& encoded,
+                       juce::String& errorMessage)
+{
+    if (source.getNumChannels() <= 0 || source.getNumSamples() <= 0)
+    {
+        errorMessage = "There is no audio to save.";
+        return false;
+    }
+
+    juce::AudioBuffer<float> work(source);
+    if (dither && bitsPerSample < 32)
+    {
+        const float lsb = 1.0f / (float) (1 << (bitsPerSample - 1));
+        juce::Random random(0x5eed);
+        for (int channel = 0; channel < work.getNumChannels(); ++channel)
+        {
+            auto* samples = work.getWritePointer(channel);
+            for (int i = 0; i < work.getNumSamples(); ++i)
+                samples[i] += (random.nextFloat() - random.nextFloat()) * lsb;
+        }
+    }
+
+    juce::WavAudioFormat wavFormat;
+    // The writer takes ownership of (and deletes) the stream, so it must be heap-allocated.
+    auto* stream = new juce::MemoryOutputStream(encoded, false);
+    std::unique_ptr<juce::AudioFormatWriter> writer(
+        wavFormat.createWriterFor(stream, sampleRate, (unsigned int) work.getNumChannels(), bitsPerSample, {}, 0));
+    if (writer == nullptr)
+    {
+        delete stream;
+        errorMessage = "Could not create a WAV writer for that format.";
+        return false;
+    }
+
+    if (! writer->writeFromAudioSampleBuffer(work, 0, work.getNumSamples()))
+    {
+        errorMessage = "Could not encode the render as a WAV.";
+        return false;
+    }
+
+    writer.reset(); // finalizes the header and the block
+    return true;
+}
+
 bool writeWavFile(const juce::File& destination,
                   const juce::AudioBuffer<float>& buffer,
                   double sampleRate,
@@ -3255,6 +3306,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         placeProjectAssetOnTracker(asset);
     };
 
+    contentPanel.onPreviewProjectAssetRequested = [this](const creation::assets::AssetDescriptor& asset)
+    {
+        toggleProjectAssetPreview(asset);
+    };
     contentPanel.onExportProjectAssetRequested = [this](const creation::assets::AssetDescriptor& asset)
     {
         exportProjectAssetRaw(asset);
@@ -4252,6 +4307,13 @@ void MainComponent::confirmCloseApplication(const std::function<void(bool should
 
 void MainComponent::timerCallback()
 {
+    // A preview started from the asset list ends by itself; flip its card back from Stop to Play.
+    if (previewingProjectAssetId.isNotEmpty() && ! engine.isPreviewingAsset())
+    {
+        previewingProjectAssetId = {};
+        contentPanel.setPreviewingAssetId({});
+    }
+
     refreshTrackInputSources();
 
     pollHostedPluginStateAutosave();
@@ -7634,6 +7696,88 @@ void MainComponent::exportProjectAssetRaw(const creation::assets::AssetDescripto
                          });
 }
 
+bool MainComponent::saveRenderToProject(const juce::AudioBuffer<float>& buffer, double sampleRate, int bitsPerSample, bool dither,
+                                        const juce::String& displayName, creation::assets::AssetDescriptor& savedAsset,
+                                        juce::String& errorMessage)
+{
+    juce::String projectError;
+    if (! ensureProjectSessionActive(projectError))
+    {
+        errorMessage = projectError.isNotEmpty() ? projectError : "Could not initialize the project for a render.";
+        return false;
+    }
+
+    juce::MemoryBlock encoded;
+    if (! encodeWavToMemory(buffer, sampleRate, bitsPerSample, dither, encoded, errorMessage))
+        return false;
+
+    const auto logicalPath = creation::assets::ProjectContainerPaths::derivedAssetRoot
+                           + slugForProjectAssetName(displayName) + "-" + makeRecordingTimestamp() + ".wav";
+    if (! projectSession.writeEntry(logicalPath, encoded, juce::Time::getCurrentTime()))
+    {
+        errorMessage = "Could not write the render into the project.";
+        return false;
+    }
+
+    savedAsset = {};
+    savedAsset.id = "asset:" + juce::Uuid().toString();
+    savedAsset.version = "1";
+    savedAsset.versionId = savedAsset.id + "@1";
+    savedAsset.displayName = displayName;
+    savedAsset.logicalPath = logicalPath;
+    savedAsset.kind = creation::assets::AssetKind::render;
+    savedAsset.mediaType = "audio/wav";
+    savedAsset.fileSizeBytes = (int64) encoded.getSize();
+    savedAsset.createdAt = savedAsset.modifiedAt = juce::Time::getCurrentTime();
+    savedAsset.sourceApp = "Djehuti Station";
+    savedAsset.description = "Rendered from the Tracker.";
+    projectSession.upsertAssetDescriptor(savedAsset);
+
+    if (! projectSession.commit(errorMessage))
+    {
+        if (errorMessage.isEmpty())
+            errorMessage = "Could not save the render into the project.";
+        return false;
+    }
+
+    refreshProjectAssets();
+    refreshContentLibrary();
+    saveSessionToDisk(true);
+    return true;
+}
+
+void MainComponent::toggleProjectAssetPreview(const creation::assets::AssetDescriptor& asset)
+{
+    if (previewingProjectAssetId == asset.id && engine.isPreviewingAsset())
+    {
+        engine.stopAssetPreview();
+        previewingProjectAssetId = {};
+        contentPanel.setPreviewingAssetId({});
+        return;
+    }
+
+    creation::assets::MaterializedAssetLease lease;
+    juce::String error;
+    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
+                                          creation::assets::MaterializationAccess::readOnly, lease, error))
+    {
+        transportBar.setStatusText(error.isNotEmpty() ? error : "Could not open that asset to play it.");
+        return;
+    }
+
+    engine.stopAssetPreview();
+    if (! engine.previewAssetFile(lease.materializedFile, error))
+    {
+        transportBar.setStatusText(error.isNotEmpty() ? error : "Could not play that asset.");
+        previewingProjectAssetId = {};
+        contentPanel.setPreviewingAssetId({});
+        return;
+    }
+
+    previewingProjectAssetId = asset.id;
+    contentPanel.setPreviewingAssetId(asset.id);
+}
+
 bool MainComponent::renderFullMixToProject()
 {
     if (engine.isRecording() || engine.isPlaying())
@@ -7679,17 +7823,15 @@ bool MainComponent::renderFullMixToProject()
         return false;
     }
 
-    auto renderName = projectSession.getManifest().projectName.toLowerCase().replace(" ", "-") + "-full-mix";
-    auto renderFile = juce::File();
-    if (! renderFile.existsAsFile())
+    creation::assets::AssetDescriptor savedAsset;
+    if (! saveRenderToProject(renderedMix, settings.sampleRate, 24, false,
+                              projectSession.getManifest().projectName + " Full Mix", savedAsset, errorMessage))
     {
         transportBar.setStatusText(errorMessage);
         return false;
     }
 
-    refreshProjectAssets();
-    saveSessionToDisk();
-    transportBar.setStatusText("Rendered full mix to project: " + renderFile.getFileName());
+    transportBar.setStatusText("Rendered full mix to project: " + savedAsset.displayName);
     return true;
 }
 

@@ -189,6 +189,72 @@ int main()
     const auto afterAll = render(engine, false, false);
     check(maxAbsDiff(plain, afterAll) == 0.0, "renders after an automated render are unaffected by it");
 
+    // Progress and cancel: the render reports how far along it is, can be stopped part way, and leaves the
+    // engine perfectly usable afterwards.
+    {
+        juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+        signalTargets.add(makeClipTarget());
+        engine.setTrackAutomationData(1, cs::AutomationTarget {}, {});
+
+        WorkstationAudioEngine::RenderSettings settings;
+        settings.sampleRate = kSampleRate;
+        settings.blockSize = 512;
+
+        std::vector<float> reported;
+        settings.onProgress = [&reported](float fraction)
+        {
+            reported.push_back(fraction);
+            return true;
+        };
+        juce::AudioBuffer<float> out;
+        juce::String error;
+        const auto ok = engine.renderTrackerMixToBuffer({}, kSeconds, settings, out, error, signalTargets);
+        bool increasing = ! reported.empty();
+        for (size_t i = 1; i < reported.size(); ++i)
+            increasing = increasing && reported[i] >= reported[i - 1];
+        check(ok && increasing && reported.back() > 0.999f,
+              "progress is reported after every block, increasing to 100% (" + juce::String((int) reported.size()) + " updates)");
+        check(maxAbsDiff(plain, out) == 0.0, "a render with a progress callback is identical to one without");
+
+        settings.onProgress = [](float fraction) { return fraction < 0.5f; };
+        juce::AudioBuffer<float> cancelledOut;
+        juce::String cancelError;
+        const auto cancelledOk = engine.renderTrackerMixToBuffer({}, kSeconds, settings, cancelledOut, cancelError, signalTargets);
+        check(! cancelledOk && cancelError == "Render cancelled.", "returning false from the progress callback cancels the render");
+
+        const auto afterCancel = render(engine, false, false);
+        check(maxAbsDiff(plain, afterCancel) == 0.0, "the engine renders normally after a cancelled render");
+    }
+
+    // A custom range starts where asked: rendering [0.5 s, 1.0 s] must sound like that stretch of the full render.
+    {
+        juce::Array<WorkstationAudioEngine::SignalClipTarget> signalTargets;
+        signalTargets.add(makeClipTarget());
+
+        WorkstationAudioEngine::RenderSettings settings;
+        settings.sampleRate = kSampleRate;
+        settings.blockSize = 512;
+        settings.startSeconds = 0.5;
+
+        juce::AudioBuffer<float> partial;
+        juce::String error;
+        const auto ok = engine.renderTrackerMixToBuffer({}, 0.5, settings, partial, error, signalTargets);
+        check(ok && partial.getNumSamples() == (int) (0.5 * kSampleRate), "a custom range renders exactly the requested length");
+
+        // Compare after a short settling period: filter state starts fresh at the range start.
+        double diff = 0.0, ref = 0.0;
+        const int offset = (int) (0.5 * kSampleRate);
+        for (int i = 4096; i < partial.getNumSamples(); ++i)
+        {
+            const double a = plain.getSample(0, offset + i), b = partial.getSample(0, i);
+            diff += (a - b) * (a - b);
+            ref += a * a;
+        }
+        const auto relative = std::sqrt(diff / juce::jmax(1e-12, ref));
+        std::printf("INFO: custom range vs same stretch of the full render, relative error %.5f\n", relative);
+        check(relative < 0.05, "a custom range sounds like that stretch of the full render (rel err " + juce::String(relative, 5) + ")");
+    }
+
     std::printf("%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }

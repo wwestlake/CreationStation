@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <vector>
 #include "SignalGraphRuntime.h"
@@ -85,6 +86,12 @@ public:
         int blockSize = 512;
         bool normalizePeak = false;
         float peakTargetDecibels = -1.0f;
+        // Where on the timeline the render starts; the render is durationSeconds long from here. Automation,
+        // clip positions and Signal clip voices all follow the timeline, so a custom range sounds exactly
+        // like that stretch of the full render.
+        double startSeconds = 0.0;
+        // Called after every block with the fraction done (0..1); return false to cancel the render.
+        std::function<bool(float progress)> onProgress;
     };
 
     WorkstationAudioEngine();

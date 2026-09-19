@@ -2548,13 +2548,14 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
     }
 
     arrangementSource.prepareToPlay(safeBlockSize, safeSampleRate);
-    arrangementSource.setPlaybackPositionSeconds(0.0);
+    arrangementSource.setPlaybackPositionSeconds(juce::jmax(0.0, settings.startSeconds));
 
     outputBuffer.setSize(2, totalSamples, false, false, true);
     outputBuffer.clear();
 
     juce::AudioBuffer<float> blockBuffer(2, safeBlockSize);
     auto renderedSamples = 0;
+    auto cancelled = false;
 
     while (renderedSamples < totalSamples)
     {
@@ -2570,9 +2571,15 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
             outputBuffer.copyFrom(channel, renderedSamples, blockBuffer, channel, 0, samplesThisBlock);
 
         renderedSamples += samplesThisBlock;
+
+        if (settings.onProgress && ! settings.onProgress((float) renderedSamples / (float) totalSamples))
+        {
+            cancelled = true;
+            break;
+        }
     }
 
-    if (settings.normalizePeak)
+    if (! cancelled && settings.normalizePeak)
     {
         const auto peak = outputBuffer.getMagnitude(0, outputBuffer.getNumSamples());
         if (peak > 0.0f)
@@ -2590,6 +2597,13 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
             track->prepareToPlay(previousBlockSize, previousSampleRate);
     masterInsertSource.prepareToPlay(previousBlockSize, previousSampleRate);
     playing.store(wasPlaying);
+
+    if (cancelled)
+    {
+        errorMessage = "Render cancelled.";
+        return false;
+    }
+
     return true;
 }
 
