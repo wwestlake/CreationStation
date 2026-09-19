@@ -137,11 +137,17 @@ private:
     void applyWheelNavigation(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel);
     void scrollTimelineTo(double newRangeStart);
 
-    class TimelineCanvas final : public juce::Component
+    class TimelineCanvas final : public juce::Component,
+                                 private juce::ScrollBar::Listener
     {
     public:
         TimelineCanvas();
         ~TimelineCanvas() override;
+
+        // Vertical scrolling: the ruler stays put and the tracks scroll beneath it. Over the track headers the
+        // wheel scrolls this way; over the lanes it keeps scrolling the timeline sideways.
+        void scrollTracksBy(int deltaPixels);
+        void ensureTrackVisible(int trackIndex);
         std::function<void(int)> onTrackSelected;
         std::function<void(int, const juce::String&)> onTrackNameChanged;
         std::function<void(int, cs::TrackKind)> onTrackKindChanged;
@@ -411,6 +417,15 @@ private:
         std::vector<float> trackGains;
         juce::Array<juce::String> inputSourceNames;
         juce::OwnedArray<TrackHeader> trackHeaders;
+
+        void scrollBarMoved(juce::ScrollBar* scrollBarThatHasMoved, double newRangeStart) override;
+        int getTracksTotalHeight() const noexcept;
+        void clampVerticalScroll() noexcept;
+        void updateVerticalScrollBar();
+
+        int verticalScrollPixels = 0;
+        juce::ScrollBar verticalScrollBar { true };
+        juce::Component headerHost; // clips the track headers to the area below the ruler
     };
 
     juce::Label titleLabel;

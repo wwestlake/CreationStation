@@ -1069,7 +1069,7 @@ void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
             if (onTrackHeightCommitted)
                 onTrackHeightCommitted(index);
         };
-        addAndMakeVisible(header);
+        headerHost.addAndMakeVisible(header);
         header->setInputSources(inputSourceNames);
         trackHeaders.add(header);
     }
@@ -1241,6 +1241,7 @@ void TrackerPanel::TimelineCanvas::setTrackInput(int trackIndex, int inputChanne
 void TrackerPanel::TimelineCanvas::setSelectedTrack(int trackIndex)
 {
     selectedTrack = trackIndex;
+    ensureTrackVisible(trackIndex);
     for (int index = 0; index < trackHeaders.size(); ++index)
         if (auto* header = trackHeaders[index])
             header->setSelected(index == selectedTrack);
@@ -1435,6 +1436,10 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
         return;
     }
 
+    // The ruler stays put: tracks scrolled up beneath it must not paint over it.
+    g.saveState();
+    g.reduceClipRegion(0, rulerHeight, getWidth(), juce::jmax(0, getHeight() - rulerHeight));
+
     for (int trackIndex = 0; trackIndex < trackCount; ++trackIndex)
     {
         auto lane = juce::Rectangle<int>(0, trackTopY(trackIndex), getWidth(), getTrackHeightAt(trackIndex));
@@ -1594,6 +1599,8 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
         }
     }
 
+    g.restoreState();
+
     if (timelineModel != nullptr)
     {
         auto loopStart = timelineModel->getLoopStartSeconds();
@@ -1723,17 +1730,97 @@ void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
 
 void TrackerPanel::TimelineCanvas::resized()
 {
-    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    constexpr int rulerHeight = 56;
+    const auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    const auto belowRuler = juce::jmax(0, getHeight() - rulerHeight);
 
+    clampVerticalScroll();
+    updateVerticalScrollBar();
+    headerHost.setBounds(0, rulerHeight, labelWidth, belowRuler);
+    verticalScrollBar.setBounds(getWidth() - 12, rulerHeight, 12, belowRuler);
+
+    // Headers sit inside headerHost (which starts under the ruler), so scrolling slides them beneath the ruler.
     for (int trackIndex = 0; trackIndex < trackHeaders.size(); ++trackIndex)
     {
         if (auto* header = trackHeaders[trackIndex])
-            header->setBounds(0, trackTopY(trackIndex), labelWidth, getTrackHeightAt(trackIndex));
+            header->setBounds(0, trackTopY(trackIndex) - rulerHeight, labelWidth, getTrackHeightAt(trackIndex));
     }
+}
+
+int TrackerPanel::TimelineCanvas::getTracksTotalHeight() const noexcept
+{
+    if (timelineModel == nullptr)
+        return trackCount * 100;
+
+    int total = 0;
+    for (int i = 0; i < timelineModel->getTrackCount(); ++i)
+        total += juce::jmax(1, timelineModel->getTrackHeight(i));
+    return total;
+}
+
+void TrackerPanel::TimelineCanvas::clampVerticalScroll() noexcept
+{
+    constexpr int rulerHeight = 56;
+    constexpr int bottomPadding = 12;
+    const auto maxScroll = juce::jmax(0, getTracksTotalHeight() + bottomPadding - juce::jmax(0, getHeight() - rulerHeight));
+    verticalScrollPixels = juce::jlimit(0, maxScroll, verticalScrollPixels);
+}
+
+void TrackerPanel::TimelineCanvas::updateVerticalScrollBar()
+{
+    constexpr int rulerHeight = 56;
+    constexpr int bottomPadding = 12;
+    const auto visible = juce::jmax(1, getHeight() - rulerHeight);
+    const auto total = getTracksTotalHeight() + bottomPadding;
+
+    verticalScrollBar.setRangeLimits(0.0, (double) juce::jmax(total, visible), juce::dontSendNotification);
+    verticalScrollBar.setCurrentRange((double) verticalScrollPixels, (double) visible, juce::dontSendNotification);
+    verticalScrollBar.setVisible(total > visible);
+}
+
+void TrackerPanel::TimelineCanvas::scrollBarMoved(juce::ScrollBar*, double newRangeStart)
+{
+    verticalScrollPixels = (int) std::lround(newRangeStart);
+    resized();
+    repaint();
+}
+
+void TrackerPanel::TimelineCanvas::scrollTracksBy(int deltaPixels)
+{
+    const auto before = verticalScrollPixels;
+    verticalScrollPixels += deltaPixels;
+    clampVerticalScroll();
+
+    if (verticalScrollPixels != before)
+    {
+        resized();
+        repaint();
+    }
+}
+
+void TrackerPanel::TimelineCanvas::ensureTrackVisible(int trackIndex)
+{
+    constexpr int rulerHeight = 56;
+    if (! juce::isPositiveAndBelow(trackIndex, trackCount) || getHeight() <= rulerHeight)
+        return;
+
+    const auto top = trackTopY(trackIndex);
+    const auto bottom = top + getTrackHeightAt(trackIndex);
+    if (top < rulerHeight)
+        scrollTracksBy(top - rulerHeight);
+    else if (bottom > getHeight())
+        scrollTracksBy(bottom - getHeight());
 }
 
 TrackerPanel::TimelineCanvas::TimelineCanvas() {
     videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
+
+    headerHost.setInterceptsMouseClicks(false, true);
+    addAndMakeVisible(headerHost);
+
+    verticalScrollBar.setSingleStepSize(32.0);
+    verticalScrollBar.addListener(this);
+    addChildComponent(verticalScrollBar);
 }
 
 TrackerPanel::TimelineCanvas::~TimelineCanvas() {
@@ -2145,6 +2232,23 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
 
 void TrackerPanel::TimelineCanvas::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
+    constexpr int rulerHeight = 56;
+    const auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    const auto canvasPoint = event.getEventRelativeTo(this).position.toInt();
+    const auto zoomGesture = event.mods.isCtrlDown() || event.mods.isAltDown() || event.mods.isCommandDown();
+
+    // Over the track headers the wheel scrolls the tracks up and down; over the lanes it keeps scrolling
+    // the timeline sideways (and zooming with a modifier), handled by the panel.
+    if (! zoomGesture && canvasPoint.x < labelWidth && canvasPoint.y >= rulerHeight)
+    {
+        const auto vertical = std::abs(wheel.deltaY) >= std::abs(wheel.deltaX) ? wheel.deltaY : 0.0f;
+        if (std::abs(vertical) > 0.0001f)
+        {
+            scrollTracksBy((int) std::lround(-vertical * 180.0f));
+            return;
+        }
+    }
+
     if (onMouseWheelUsed)
         onMouseWheelUsed(event, wheel);
 }
@@ -2294,7 +2398,7 @@ int TrackerPanel::TimelineCanvas::trackTopY(int trackIndex) const noexcept
     auto count = timelineModel->getTrackCount();
     for (int i = 0; i < trackIndex && i < count; ++i)
         y += juce::jmax(1, timelineModel->getTrackHeight(i));
-    return y;
+    return y - verticalScrollPixels;
 }
 
 int TrackerPanel::TimelineCanvas::getTrackHeightAt(int trackIndex) const noexcept
@@ -2305,6 +2409,10 @@ int TrackerPanel::TimelineCanvas::getTrackHeightAt(int trackIndex) const noexcep
 int TrackerPanel::TimelineCanvas::yToTrackIndex(int y) const noexcept
 {
     constexpr int laneStart = 56;
+
+    // Below the ruler, undo the vertical scroll so the walk below is in unscrolled track space.
+    if (y >= laneStart)
+        y += verticalScrollPixels;
 
     if (timelineModel == nullptr || timelineModel->getTrackCount() <= 0)
         return (y - laneStart) / 100;
@@ -3257,7 +3365,7 @@ void TrackerPanel::TimelineCanvas::TrackHeader::mouseDrag(const juce::MouseEvent
 
     reorderDragActive = true;
     if (onReorderDragged)
-        onReorderDragged(trackIndex, getY() + event.position.roundToInt().y);
+        onReorderDragged(trackIndex, (getParentComponent() != nullptr ? getParentComponent()->getY() : 0) + getY() + event.position.roundToInt().y);
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseUp(const juce::MouseEvent& event)
@@ -3279,7 +3387,7 @@ void TrackerPanel::TimelineCanvas::TrackHeader::mouseUp(const juce::MouseEvent& 
 
     reorderDragActive = false;
     if (onReorderCommitted)
-        onReorderCommitted(trackIndex, getY() + event.position.roundToInt().y);
+        onReorderCommitted(trackIndex, (getParentComponent() != nullptr ? getParentComponent()->getY() : 0) + getY() + event.position.roundToInt().y);
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseMove(const juce::MouseEvent& event)
