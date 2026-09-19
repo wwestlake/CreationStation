@@ -299,6 +299,9 @@ private:
     std::set<juce::String> videosWithoutAudio;          // asset ids whose video has no sound track
     void updateVideoView(double timelineSeconds);
     void openVideoViewForPlayback();
+    // The clip menu's video/sound actions (1 split the sound onto its own track, 2 unlink, 3 link, 4 put back).
+    void handleClipSoundAction(int clipIndex, int action);
+    void splitSoundFromVideo(int clipIndex);
     bool videoClipsNeedAudio() const;
     // Makes sure every video clip's sound is ready (extracting and caching it in the project when it is not),
     // in a progress window. Returns false when nothing needed doing.

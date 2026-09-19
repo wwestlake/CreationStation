@@ -435,6 +435,11 @@ TrackerPanel::TrackerPanel()
         if (onClipDuplicateRequested)
             onClipDuplicateRequested(clipIndex);
     };
+    canvas.onClipSoundAction = [this](int clipIndex, int action)
+    {
+        if (onClipSoundAction)
+            onClipSoundAction(clipIndex, action);
+    };
     canvas.onClipDeleteRequested = [this](int clipIndex)
     {
         if (onClipDeleteRequested)
@@ -1591,6 +1596,15 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                            clipBounds.reduced(8, 4).removeFromTop(16),
                            juce::Justification::centredLeft,
                            true);
+
+                // Two interlocked links mark clips that edit together (a video and its sound).
+                if (clip.linkGroupId.isNotEmpty() && clipBounds.getWidth() > 60)
+                {
+                    const auto first = juce::Rectangle<float>((float) clipBounds.getRight() - 30.0f, (float) clipBounds.getY() + 7.0f, 14.0f, 8.0f);
+                    g.setColour(juce::Colours::white.withAlpha(0.9f));
+                    g.drawRoundedRectangle(first, 4.0f, 1.6f);
+                    g.drawRoundedRectangle(first.translated(8.0f, 0.0f), 4.0f, 1.6f);
+                }
             }
         }
     }
@@ -1980,6 +1994,25 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                 menu.addSeparator();
                 menu.addItem(3, "Duplicate clip");
                 menu.addItem(4, "Delete clip");
+
+                // Video and its sound (Premiere-style): split the sound out, edit them apart, link them again.
+                const auto& menuClip = timelineModel->getClips()[(size_t) draggingClipIndex];
+                const auto isLinked = timelineModel->isClipLinked(draggingClipIndex);
+                const auto counterpart = timelineModel->findSoundCounterpart(draggingClipIndex);
+                const auto isVideo = menuClip.kind == cs::ClipKind::video;
+                const auto isVideoSound = menuClip.kind == cs::ClipKind::audio && menuClip.sourceTool.startsWith("video-sound:");
+                if (isVideo || isVideoSound)
+                {
+                    menu.addSeparator();
+                    if (isVideo && ! menuClip.soundDetached)
+                        menu.addItem(10, "Split sound onto its own track");
+                    if (isLinked)
+                        menu.addItem(11, "Unlink picture and sound");
+                    if (counterpart >= 0)
+                        menu.addItem(12, "Link picture and sound");
+                    if (isVideo && menuClip.soundDetached)
+                        menu.addItem(13, "Put sound back into the video");
+                }
                 auto clickArea = juce::Rectangle<int>(event.x, event.y, 1, 1);
                 menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
                                                             .withTargetScreenArea(localAreaToGlobal(clickArea)),
@@ -1997,6 +2030,8 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                                             safe->onClipDuplicateRequested(clipIndex);
                                         else if (result == 4 && safe->onClipDeleteRequested)
                                             safe->onClipDeleteRequested(clipIndex);
+                                        else if (result >= 10 && result <= 13 && safe->onClipSoundAction)
+                                            safe->onClipSoundAction(clipIndex, result - 9);
                                     });
                 draggingClipIndex = -1;
                 repaint();

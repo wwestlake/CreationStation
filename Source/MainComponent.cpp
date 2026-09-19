@@ -2325,6 +2325,11 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         duplicateClip(clipIndex);
     };
 
+    trackerPanel.onClipSoundAction = [this](int clipIndex, int action)
+    {
+        handleClipSoundAction(clipIndex, action);
+    };
+
     trackerPanel.onClipDeleteRequested = [this](int clipIndex)
     {
         deleteClip(clipIndex);
@@ -7779,6 +7784,202 @@ bool MainComponent::prepareVideoAudio(std::function<void()> whenDone)
     return true;
 }
 
+void MainComponent::handleClipSoundAction(int clipIndex, int action)
+{
+    const auto& clips = timelineModel.getClips();
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return;
+
+    if (action == 1)
+    {
+        splitSoundFromVideo(clipIndex);
+        return;
+    }
+
+    auto stateBeforeEdit = timelineModel.createState();
+    juce::String done;
+
+    if (action == 2)
+    {
+        timelineModel.unlinkClip(clipIndex);
+        done = "Unlinked. The picture and its sound now move separately.";
+    }
+    else if (action == 3)
+    {
+        const auto other = timelineModel.findSoundCounterpart(clipIndex);
+        if (other < 0 || ! timelineModel.linkClips(clipIndex, other))
+        {
+            showToast("There is no picture or sound here to link.");
+            return;
+        }
+        done = "Linked. The picture and its sound move together again.";
+    }
+    else if (action == 4)
+    {
+        // The video is either the clicked clip or the one the clicked sound belongs to.
+        auto videoIndex = clips[(size_t) clipIndex].kind == cs::ClipKind::video ? clipIndex : -1;
+        auto soundIndex = -1;
+        if (videoIndex >= 0)
+        {
+            for (auto partner : timelineModel.getLinkedPartnerIndices(videoIndex))
+                if (clips[(size_t) partner].sourceTool == cs::TimelineModel::videoSoundSourceTool(clips[(size_t) videoIndex].assetId))
+                    soundIndex = partner;
+            if (soundIndex < 0)
+                soundIndex = timelineModel.findSoundCounterpart(videoIndex);
+        }
+
+        if (videoIndex < 0 || soundIndex < 0)
+        {
+            showToast("Could not find this video's sound clip to put back.");
+            return;
+        }
+
+        const auto videoId = clips[(size_t) videoIndex].id;
+        timelineModel.unlinkClip(videoIndex);
+        timelineModel.deleteClip(soundIndex);
+        for (size_t i = 0; i < timelineModel.getClips().size(); ++i)
+            if (timelineModel.getClips()[i].id == videoId)
+                timelineModel.setClipSoundDetached((int) i, false);
+        done = "The sound is back inside the video.";
+    }
+    else
+    {
+        return;
+    }
+
+    pushTimelineUndoState(stateBeforeEdit);
+    trackerPanel.refreshTimelineView();
+    refreshTrackerPlaybackClips();
+    projectDirty = true;
+    saveSessionToDisk();
+    showToast(done);
+}
+
+void MainComponent::splitSoundFromVideo(int clipIndex)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) timelineModel.getClips().size()))
+        return;
+
+    const auto clip = timelineModel.getClips()[(size_t) clipIndex];
+    if (clip.kind != cs::ClipKind::video || clip.soundDetached || clip.assetId.isEmpty())
+    {
+        showToast("The sound of this clip is already split off.");
+        return;
+    }
+
+    if (videosWithoutAudio.count(clip.assetId) > 0)
+    {
+        showToast("This video has no sound to split off.");
+        return;
+    }
+
+    // The video's sound has to be extracted first (a progress window); the split carries on once it is.
+    const auto found = videoAudioFiles.find(clip.assetId);
+    if (found == videoAudioFiles.end() || ! found->second.existsAsFile())
+    {
+        const auto clipId = clip.id;
+        const auto started = prepareVideoAudio([this, clipId]
+        {
+            for (size_t i = 0; i < timelineModel.getClips().size(); ++i)
+                if (timelineModel.getClips()[i].id == clipId)
+                {
+                    splitSoundFromVideo((int) i);
+                    return;
+                }
+        });
+
+        if (! started)
+            reportError("Could not split the sound: another long action is still running. Try again when it has finished.");
+        return;
+    }
+
+    const auto wavFile = found->second;
+
+    // Keep the sound in the project's asset list, so it survives closing and reopening the project.
+    creation::assets::AssetDescriptor soundAsset;
+    const auto soundPath = videoAudioCachePath(clip.assetId);
+    for (const auto& existing : projectSession.getManifest().assetCatalog.assets)
+        if (existing.logicalPath == soundPath && existing.kind == creation::assets::AssetKind::audio)
+            soundAsset = existing;
+
+    if (soundAsset.id.isEmpty())
+    {
+        soundAsset.id = "asset:" + juce::Uuid().toString();
+        soundAsset.version = "1";
+        soundAsset.versionId = soundAsset.id + "@1";
+        soundAsset.displayName = clip.displayName + " sound";
+        soundAsset.logicalPath = soundPath;
+        soundAsset.kind = creation::assets::AssetKind::audio;
+        soundAsset.mediaType = "audio/wav";
+        soundAsset.fileSizeBytes = (int64) wavFile.getSize();
+        soundAsset.createdAt = soundAsset.modifiedAt = juce::Time::getCurrentTime();
+        soundAsset.sourceApp = "Djehuti Station";
+        projectSession.upsertAssetDescriptor(soundAsset);
+
+        juce::String commitError;
+        if (! projectSession.commit(commitError))
+        {
+            reportError("Could not split the sound: " + commitError);
+            return;
+        }
+    }
+
+    // A new audio track directly under the video's track.
+    const auto videoTrackIndex = clip.trackIndex;
+    addTrack();
+    const auto newTrackIndex = engine.getTrackCount() - 1;
+    if (newTrackIndex < 0)
+    {
+        reportError("Could not split the sound: a new track could not be added.");
+        return;
+    }
+
+    auto soundTrackIndex = newTrackIndex;
+    if (newTrackIndex != videoTrackIndex + 1)
+    {
+        if (performTrackMove(newTrackIndex, videoTrackIndex + 1))
+            soundTrackIndex = videoTrackIndex + 1;
+        else
+            showToast("The sound is on a new track at the bottom (it could not be placed under the video).");
+    }
+    engine.setTrackName(soundTrackIndex, clip.displayName + " sound");
+    syncTrackViews();
+
+    // Everything from here is one undoable step (adding the empty track was its own).
+    auto stateBeforeEdit = timelineModel.createState();
+
+    // Find the video clip again: the track move can renumber tracks.
+    auto videoIndex = -1;
+    for (size_t i = 0; i < timelineModel.getClips().size(); ++i)
+        if (timelineModel.getClips()[i].id == clip.id)
+            videoIndex = (int) i;
+    if (videoIndex < 0)
+        return;
+
+    juce::String clipError;
+    const auto soundIndex = timelineModel.addClip(cs::ClipKind::audio, soundTrackIndex, clip.displayName + " sound", soundAsset.id,
+                                                  cs::TimelineModel::videoSoundSourceTool(clip.assetId), wavFile,
+                                                  clip.startSeconds, clip.durationSeconds, clipError);
+    if (soundIndex < 0)
+    {
+        reportError("Could not split the sound: " + (clipError.isNotEmpty() ? clipError : juce::String("the sound clip could not be added.")));
+        return;
+    }
+
+    // The sound shows the same stretch of the video that the picture does.
+    timelineModel.setClipSourceRange(soundIndex, clip.sourceStartSeconds, timelineModel.getClips()[(size_t) soundIndex].sourceDurationSeconds);
+    timelineModel.setClipDuration(soundIndex, clip.durationSeconds);
+    timelineModel.setClipSoundDetached(videoIndex, true);
+    timelineModel.linkClips(videoIndex, soundIndex);
+
+    pushTimelineUndoState(stateBeforeEdit);
+    trackerPanel.refreshTimelineView();
+    refreshTrackerPlaybackClips();
+    projectDirty = true;
+    saveSessionToDisk();
+    showToast("Sound split onto its own track, linked to the picture.");
+}
+
 void MainComponent::openVideoViewForPlayback()
 {
     if (dockManager == nullptr)
@@ -9753,6 +9954,9 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
             // The picture is not audio. The clip's sound plays from the WAV extracted from the video (see
             // prepareVideoAudio); until that exists the clip is simply silent.
             durationSeconds = juce::jmax(durationSeconds, clip.startSeconds + clip.durationSeconds);
+            if (clip.soundDetached)
+                continue; // its sound is a clip of its own now; playing it here too would double it
+
             const auto extracted = videoAudioFiles.find(clip.assetId);
             if (extracted == videoAudioFiles.end() || ! extracted->second.existsAsFile())
                 continue;

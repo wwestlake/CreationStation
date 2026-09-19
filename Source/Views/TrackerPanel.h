@@ -60,6 +60,9 @@ public:
     std::function<void(int, double)> onClipSplitRequested;
     std::function<void(int)> onClipDuplicateRequested;
     std::function<void(int)> onClipDeleteRequested;
+    // Video/sound actions from the clip menu: 1 split the sound onto its own track, 2 unlink, 3 link the two
+    // halves again, 4 put the sound back inside the video.
+    std::function<void(int clipIndex, int action)> onClipSoundAction;
     std::function<void(int)> onClipEditRequested;
     std::function<void(int, double)> onEmptyMidiClipRequested;
     std::function<void(double)> onTempoChanged;
@@ -176,6 +179,7 @@ private:
         std::function<void(int, double)> onClipSplitRequested;
         std::function<void(int)> onClipDuplicateRequested;
         std::function<void(int)> onClipDeleteRequested;
+        std::function<void(int clipIndex, int action)> onClipSoundAction;
         std::function<void(int)> onClipEditRequested;
         std::function<void(int, double)> onEmptyMidiClipRequested;
         std::function<void(int)> onAutomationTargetRequested;
