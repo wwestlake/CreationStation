@@ -3306,6 +3306,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         placeProjectAssetOnTracker(asset);
     };
 
+    // The header's small status label is gone: an error there went unnoticed for an hour. Errors get a
+    // dialog; everything else gets a toast that is large enough to read and clears itself.
+    addChildComponent(toast);
+    transportBar.onErrorStatus = [this](const juce::String& message) { reportError(message); };
+    transportBar.onInfoStatus = [this](const juce::String& message) { showToast(message); };
+    transportBar.setStatusLabelVisible(false);
+    contentPanel.onErrorStatus = [this](const juce::String& message) { reportError(message); };
     contentPanel.onPreviewProjectAssetRequested = [this](const creation::assets::AssetDescriptor& asset)
     {
         toggleProjectAssetPreview(asset);
@@ -6822,8 +6829,10 @@ void MainComponent::syncSemanticAppContext()
                 return;
             }
 
+            // A background sync at launch that fails is not something the user can act on, so it is logged, not
+            // shown in a dialog on every launch.
             if (errorMessage.isNotEmpty())
-                safeThis->transportBar.setStatusText(errorMessage);
+                DBG("LiteSemRAG app-context sync failed: " + errorMessage);
         });
     }).detach();
 }
@@ -7749,6 +7758,64 @@ bool MainComponent::saveRenderToProject(const juce::AudioBuffer<float>& buffer, 
     refreshContentLibrary();
     saveSessionToDisk(true);
     return true;
+}
+
+void MainComponent::showToast(const juce::String& message)
+{
+    if (message.trim().isEmpty())
+    {
+        toast.dismiss();
+        return;
+    }
+
+    if (toast.isVisible() && toast.getMessage() == message)
+        return;
+
+    const auto width = juce::jmax(200, juce::jmin(720, getWidth() - 40));
+    const auto height = ToastMessage::preferredHeight(message, width);
+    toast.setBounds((getWidth() - width) / 2, getHeight() - height - 28, width, height);
+    toast.show(message);
+}
+
+void MainComponent::reportError(const juce::String& message)
+{
+    if (message.trim().isEmpty())
+        return;
+
+    pendingErrors.addIfNotAlreadyThere(message.trim());
+    if (! errorDialogShowing)
+        showPendingErrors();
+}
+
+void MainComponent::showPendingErrors()
+{
+    if (pendingErrors.isEmpty())
+        return;
+
+    errorDialogShowing = true;
+    const auto count = pendingErrors.size();
+    const auto text = pendingErrors.joinIntoString("\n\n");
+    pendingErrors.clear();
+
+    // JUCE numbers a two-button box's results 1 (first) and 0 (second, also bound to Escape).
+    auto options = juce::MessageBoxOptions()
+                       .withIconType(juce::MessageBoxIconType::WarningIcon)
+                       .withTitle(count > 1 ? "Something went wrong (" + juce::String(count) + " problems)" : juce::String("Something went wrong"))
+                       .withMessage(text)
+                       .withButton("Copy details")
+                       .withButton("Close");
+
+    juce::AlertWindow::showAsync(options, [safeThis = juce::Component::SafePointer<MainComponent>(this), text](int result)
+    {
+        if (result == 1)
+            juce::SystemClipboard::copyTextToClipboard(text);
+
+        if (safeThis != nullptr)
+        {
+            safeThis->errorDialogShowing = false;
+            safeThis->showPendingErrors(); // anything that arrived while this was open
+        }
+    });
 }
 
 void MainComponent::toggleProjectAssetPreview(const creation::assets::AssetDescriptor& asset)

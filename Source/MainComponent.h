@@ -39,6 +39,7 @@
 #include "Views/AiPanel.h"
 #include "Views/ContentPanel.h"
 #include "Views/RenderDialog.h"
+#include "Views/ToastMessage.h"
 #include "Views/DslPanel.h"
 #include "Views/GraphPanel.h"
 #include "Views/MidiEditorPanel.h"
@@ -403,6 +404,17 @@ private:
                              const juce::String& displayName, creation::assets::AssetDescriptor& savedAsset,
                              juce::String& errorMessage);
     void toggleProjectAssetPreview(const creation::assets::AssetDescriptor& asset);
+    // Errors get a dialog with room to read them, a Close button and a Copy button - not the header's small
+    // status label. Errors that arrive while a dialog is open are collected into the next one, so a burst
+    // (say, importing several files that all fail) is one dialog rather than a stack of them.
+    void reportError(const juce::String& message);
+    // Anything that is not an error (confirmations, "stop playback first", ...): a readable message that
+    // clears itself, instead of the header's small status label, which is gone.
+    void showToast(const juce::String& message);
+    ToastMessage toast;
+    void showPendingErrors();
+    juce::StringArray pendingErrors;
+    bool errorDialogShowing = false;
     juce::String previewingProjectAssetId;
     void pushTimelineUndoState();
     void pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit);

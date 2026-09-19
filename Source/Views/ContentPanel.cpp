@@ -1,3 +1,4 @@
+#include <creation/ui/CreationSuiteHeaderBar.h>
 #include "ContentPanel.h"
 
 namespace
@@ -423,6 +424,12 @@ void ContentPanel::setStoragePath(const juce::String& path)
 
 void ContentPanel::setStatusText(const juce::String& text)
 {
+    if (onErrorStatus && CreationSuiteHeaderBar::statusTextIsError(text))
+    {
+        onErrorStatus(text);
+        return;
+    }
+
     statusLabel.setText(text, juce::dontSendNotification);
 }
 
