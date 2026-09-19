@@ -4653,7 +4653,7 @@ CreationDock::DockPanel* MainComponent::registerNamedDockPanel(const juce::Strin
     if (panelId == virtualEngineerPanelId)
         return dockManager->registerPanel(panelId, "Virtual Engineer", std::make_unique<NonOwningPanelHost>(aiPanel), zone);
 
-    jassertfalse; // unknown panel id
+    // Not a panel this app has (for instance an id from a layout saved by a version that had one that is gone).
     return nullptr;
 }
 
@@ -4832,7 +4832,7 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
         return;
 
     auto savedActiveMode = static_cast<WorkspaceMode>(juce::jlimit(0,
-                                                                    static_cast<int>(WorkspaceMode::sampler),
+                                                                    static_cast<int>(WorkspaceMode::foley),
                                                                     (int) state.getProperty("activeMode", static_cast<int>(WorkspaceMode::tracker))));
     if (savedActiveMode == WorkspaceMode::library)
         savedActiveMode = WorkspaceMode::tracker;
@@ -4843,7 +4843,32 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
 
     auto dockLayoutJson = state.getProperty("dockLayoutJson").toString();
     if (dockManager != nullptr && dockLayoutJson.isNotEmpty())
-        dockManager->applyLayout(juce::JSON::parse(dockLayoutJson));
+    {
+        const auto layout = juce::JSON::parse(dockLayoutJson);
+
+        // The dock manager only re-docks panels that already exist, and only the Tracker does at startup -
+        // so a panel that was open when the app closed (Signal Lab, Plugins, Video, ...) was silently skipped.
+        // Create every panel the saved layout names first, in the zone it was saved in; applyLayout then puts
+        // them back in their saved order, sizes and floating positions.
+        const std::pair<const char*, CreationDock::DockTargetZone> zoneKeys[] = {
+            { "left", CreationDock::DockTargetZone::Left },
+            { "center", CreationDock::DockTargetZone::CenterTab },
+            { "right", CreationDock::DockTargetZone::Right },
+            { "bottom", CreationDock::DockTargetZone::Bottom } };
+
+        for (const auto& [key, zone] : zoneKeys)
+            if (auto* ids = layout.getProperty("zones", {}).getProperty(key, {}).getProperty("panels", {}).getArray())
+                for (const auto& id : *ids)
+                    if (! dockManager->isRegistered(id.toString()))
+                        registerNamedDockPanel(id.toString(), zone);
+
+        if (auto* floating = layout.getProperty("floating", {}).getArray())
+            for (const auto& entry : *floating)
+                if (const auto id = entry.getProperty("id", {}).toString(); id.isNotEmpty() && ! dockManager->isRegistered(id))
+                    registerNamedDockPanel(id, CreationDock::DockTargetZone::CenterTab);
+
+        dockManager->applyLayout(layout);
+    }
 
     refreshModeVisibility();
 
