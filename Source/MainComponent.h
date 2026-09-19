@@ -41,6 +41,7 @@
 #include "Views/ContentPanel.h"
 #include "Views/ProgressTask.h"
 #include "Video/VideoPreviewComponent.h"
+#include "Video/Gl/VideoGlView.h"
 #include "Video/VideoScrubPreview.h"
 #include "Views/RenderDialog.h"
 #include "Views/ToastMessage.h"
@@ -289,7 +290,7 @@ private:
 
     // Video. The picture is a dock panel (dock it, float it, resize it); the sound is the video's own audio
     // track, decoded once to a WAV so it plays through the clip's mixer track like any other audio clip.
-    cs::VideoPreviewComponent videoView;
+    cs::VideoGlView videoView; // the video panel: drawn by OpenGL, effects run on the GPU
     cs::VideoScrubPreview videoScrub;
     juce::String lastVideoRequestKey;
     std::map<juce::String, juce::File> videoAudioFiles; // asset id -> local WAV of that video's sound

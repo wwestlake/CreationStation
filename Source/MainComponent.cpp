@@ -8382,7 +8382,7 @@ void MainComponent::updateVideoView(double timelineSeconds)
                             [safe = juce::Component::SafePointer<juce::Component>(&videoView)](juce::Image image)
                             {
                                 if (safe != nullptr)
-                                    static_cast<cs::VideoPreviewComponent*>(safe.getComponent())->setImage(image);
+                                    static_cast<cs::VideoGlView*>(safe.getComponent())->setImage(image);
                             },
                             width, height);
 }

@@ -106,6 +106,15 @@ endif()
 # Not yet linked into CreativeWorkstation itself - nothing in the app consumes it as a live video
 # FX graph host yet (no video-FX panel/editor exists). Built here so it compiles/links/smoke-tests
 # as part of the normal build, same as every other shared library, ahead of having a real consumer.
+# The shared OpenGL renderer (ShaderComposer and friends): Station draws video through it, the same way the Engine draws
+# its scenes.
+set(CS_RENDER_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Render/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Render"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedRender")
+    set(CS_RENDER_TARGET creation_suite_render)
+endif()
+
 set(CS_VIDEO_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Video/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Video"
@@ -286,6 +295,9 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Video/VideoThumbnailCache.h
     Source/Video/VideoScrubPreview.h
     Source/Video/VideoPreviewComponent.h
+    Source/Video/Gl/VideoGlView.cpp
+    Source/Video/Gl/VideoGlView.h
+    Source/Video/Gl/VideoShaders.h
     Source/Patch/PatchModel.cpp
     Source/Patch/PatchModel.h
     Source/Main.cpp
@@ -416,6 +428,8 @@ endif()
 
 target_link_libraries(CreativeWorkstation PRIVATE
     ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_RENDER_TARGET}
+    juce::juce_opengl
     ${CS_SERVICES_TARGET}
     ${CS_UI_TARGET}
     ${CS_INTEROP_TARGET}
@@ -735,6 +749,22 @@ target_compile_definitions(HeaderLayoutSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE
 target_link_libraries(HeaderLayoutSmoke PRIVATE
     ${CS_UI_TARGET}
     juce::juce_gui_extra
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Renders a known picture through the GPU video shader offscreen and checks real pixels (green screen, orientation,
+# parameters). Needs an OpenGL driver; exits 77 (skipped) where there is none.
+juce_add_console_app(VideoGlSmoke PRODUCT_NAME "VideoGlSmoke")
+juce_generate_juce_header(VideoGlSmoke)
+target_sources(VideoGlSmoke PRIVATE tests/VideoGlSmoke.cpp Source/Video/Gl/VideoGlView.cpp)
+target_include_directories(VideoGlSmoke PRIVATE Source)
+target_compile_definitions(VideoGlSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(VideoGlSmoke PRIVATE
+    ${CS_RENDER_TARGET}
+    juce::juce_opengl
+    juce::juce_gui_basics
+    juce::juce_graphics
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
 )
