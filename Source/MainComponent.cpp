@@ -3077,6 +3077,20 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         transportBar.setStatusText(status);
     };
 
+    dslPanel.onCompileRequested = [this](const juce::String& sourceText) -> DslPanel::CompileOutcome
+    {
+        DslPanel::CompileOutcome outcome;
+        if (! projectSession.isValid())
+        {
+            outcome.output = "Open or create a project first: FRust source is kept in the project.";
+            return outcome;
+        }
+        const auto result = frustPodService.checkScript(projectSession, sourceText);
+        outcome.ok = result.ok;
+        outcome.output = result.output;
+        return outcome;
+    };
+
     dslPanel.onSourceExportRequested = [this](const juce::String& sourceText, const juce::String& suggestedName)
     {
         auto startDirectory = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);

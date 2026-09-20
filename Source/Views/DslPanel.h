@@ -16,6 +16,15 @@ public:
     // separate compiled-artifact format to summarize.
     void loadSourceFromFile(const juce::File& sourceFile);
 
+    // Compiling is the host's job: the Script panel hands over the text and shows the result. The host
+    // stores the source in the project VFS and compiles it there.
+    struct CompileOutcome
+    {
+        bool ok = false;
+        juce::String output;
+    };
+    std::function<CompileOutcome(const juce::String& sourceText)> onCompileRequested;
+
     std::function<void(const juce::String& sourceText, const juce::String& suggestedName)> onSourceExportRequested;
     std::function<void(const juce::String& sourceText, const juce::String& suggestedName)> onSourceSaveToLibraryRequested;
     std::function<void()> onSourceLoadRequested;

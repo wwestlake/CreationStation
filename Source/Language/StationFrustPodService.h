@@ -2,22 +2,23 @@
 
 #include <creation/assets/ProjectSession.h>
 #include <creation/frust/PluginRuntime.h>
+#include <creation/frust/SuiteFrust.h>
 #include <creation/services/SuiteVfsServiceClient.h>
 #include <node_system/node_library.h>
 
 #include <frate/FrateRegistryClient.h>
-#include <frate/PodArchive.h>
-#include <frate/PodBuild.h>
 
 namespace cw {
 
-// Station's FRust pods, held entirely in the project VFS and the Suite pod cache
-// (also in the VFS). Building compiles the pod in memory; loading hands its source
-// text straight to the plugin runtime. No folder is created, no temporary file
-// is written, and no other program (frate, the compiler) is started.
+// Station's use of FRust and Frate. The compiler and Frate are libraries linked into the app;
+// SuiteFrust gives them the project VFS as their file system and log. Nothing here creates a
+// folder, writes a temporary file, or starts another program.
 class StationFrustPodService final {
 public:
     StationFrustPodService();
+
+    // The Script panel: stores the text in the project VFS and compiles it from there (check only).
+    creation::frust::FrustOutcome checkScript(creation::assets::ProjectSession& session, const juce::String& source);
 
     bool buildGeneratedNodePod(creation::assets::ProjectSession& session,
                                const juce::String& podName,
@@ -40,10 +41,6 @@ private:
     bool registerLoadedLibraries(const std::string& key,
                                  ce::node_system::NodeLibraryRegistry& destination,
                                  juce::String& error);
-    bool loadPodFromMemory(const std::string& key,
-                           const frate::PodFiles& pod,
-                           frate::PodSource& dependencies,
-                           juce::String& error);
     static juce::String wrapAsPluginSource(const juce::String& podName,
                                            const juce::String& generatedSource);
 };
