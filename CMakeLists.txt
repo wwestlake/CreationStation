@@ -384,17 +384,12 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     # CE_CORE_NODE_LIBRARY uses for CoreNodesLibrary.frust.
     CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
     CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
-    CS_FRATE_EXECUTABLE="$<TARGET_FILE:frate_cli>"
 )
 
 target_include_directories(CreativeWorkstation PRIVATE
     "${CREATION_SUITE_SHARED_DIR}/JuceDocking/include"
 )
 
-# The Script panel compiles in-process (frust::Compile, from frust_lang) and
-# needs no compiler executable. The frust_compiler CLI is still built alongside
-# Station because frate, which Station uses for pods, launches it.
-add_dependencies(CreativeWorkstation frust_compiler)
 
 if(CREATION_STATION_ENABLE_ASIO)
     if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
