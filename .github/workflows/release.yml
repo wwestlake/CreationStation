@@ -254,6 +254,24 @@ jobs:
             Copy-Item -Path $betaGuide -Destination (Join-Path $installRoot "Beta-Tester-Guide.md") -Force
           }
 
+          # Requirement: the application is self-contained and ships no library of ours.
+          $shippedLibraries = Get-ChildItem $installRoot -Recurse -File -Filter *.dll
+          if ($shippedLibraries) {
+            $shippedLibraries | ForEach-Object { Write-Host "SHIPPED LIBRARY: $($_.FullName)" }
+            throw "The package contains library files. The application must ship none."
+          }
+
+          # Its own imports may only be Windows system libraries and the Visual C++ runtime.
+          $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find "**\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          if (-not $dumpbin) { throw "Could not find dumpbin to check the executable's imports." }
+          $imports = & $dumpbin /dependents $exe.FullName | Where-Object { $_ -match '\.dll' } | ForEach-Object { $_.Trim().ToLower() }
+          $allowed = '^(kernel32|user32|gdi32|advapi32|shell32|shlwapi|ole32|oleaut32|comdlg32|comctl32|imm32|version|winmm|ws2_32|wsock32|wininet|winhttp|dbghelp|dwmapi|opengl32|d3d11|dxgi|d2d1|dcomp|d3dcompiler_47|mfplat|mfreadwrite|mf|mfuuid|setupapi|rpcrt4|crypt32|bcrypt|secur32|iphlpapi|psapi|userenv|uxtheme|windowscodecs|msvcp140(_\w+)?|vcruntime140(_1)?|concrt140|ucrtbase|api-ms-win-crt-[\w-]+l\d-\d-\d)\.dll$'
+          $foreign = $imports | Where-Object { $_ -notmatch $allowed }
+          if ($foreign) {
+            $foreign | ForEach-Object { Write-Host "NON-SYSTEM IMPORT: $_" }
+            throw "The executable imports libraries that are not part of Windows or the Visual C++ runtime."
+          }
+
           $zipName = Join-Path $PWD ("artifacts\{0}.zip" -f "${{ steps.classify.outputs.tag }}")
           if (Test-Path $zipName) {
             Remove-Item $zipName -Force

@@ -3,6 +3,8 @@
 #include <cmath>
 #include <creation/frust/PluginRuntime.h>
 
+#include "BuiltInFrustData.h"
+
 // Design note on why runtime DSP state (filter internals, one-pole
 // smoothing state) is NOT part of EntityGraph even though EntityGraph is
 // the thing rebuild() publishes: EntityGraph is atomically swapped via
@@ -189,8 +191,29 @@ FrustSineFnPtr sharedFrustSine()
             runtime = std::make_unique<creation::frust::PluginRuntime>("creation-station-signal-lab");
             runtime->registerHostFunction("sin", reinterpret_cast<void*>(static_cast<double (*)(double)>(std::sin)));
 
+            // Compiled into the app (BuiltInFrustData); loaded from memory, never from a path.
+            const auto embedded = [](const char* resource) -> std::string
+            {
+                int size = 0;
+                const char* data = BuiltInFrustData::getNamedResource(resource, size);
+                return data != nullptr ? std::string(data, (size_t) size) : std::string();
+            };
+
+            ::frust::CompileRequest request;
+            request.sources.push_back({ "builtin/SignalLabRuntime.frust", embedded("SignalLabRuntime_frust") });
+            request.siblingFiles = [embedded](const std::string& name, std::string& text)
+            {
+                static const std::string wanted = "SignalLabNodesLibrary.frust";
+                if (name.size() >= wanted.size() && name.compare(name.size() - wanted.size(), wanted.size(), wanted) == 0)
+                {
+                    text = embedded("SignalLabNodesLibrary_frust");
+                    return ! text.empty();
+                }
+                return false;
+            };
+
             std::string error;
-            if (runtime->load(CS_SIGNAL_LAB_RUNTIME, error))
+            if (runtime->loadSource(creation::frust::PluginRuntime::defaultPluginKey, request, error))
                 sine = reinterpret_cast<FrustSineFnPtr>(runtime->getFunction("render_sine"));
 
             if (sine == nullptr)

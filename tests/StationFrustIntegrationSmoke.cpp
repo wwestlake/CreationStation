@@ -4,7 +4,7 @@
 
 #include <creation/frust/PluginRuntime.h>
 
-#include "Language/AudioGraphSelfTest.h"
+#include "AudioGraphSelfTest.h"
 
 namespace
 {
