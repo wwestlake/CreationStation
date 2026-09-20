@@ -3056,7 +3056,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             return;
         }
         juce::String status;
-        const bool ok = frustPodService.buildGeneratedNodePod(projectSession, suiteSettings, podName, source,
+        const bool ok = frustPodService.buildGeneratedNodePod(projectSession, podName, source,
                                                                foleyPanel.nodeLibraries(), status);
         if (ok)
         {
@@ -3070,7 +3070,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     foleyPanel.onRegistryPodLoadRequested = [this](const juce::String& podName, const juce::String& version)
     {
         juce::String status;
-        const bool ok = frustPodService.loadRegistryNodePod(suiteSettings, podName, version,
+        const bool ok = frustPodService.loadRegistryNodePod(projectSession, podName, version,
                                                             foleyPanel.nodeLibraries(), status);
         if (ok) foleyPanel.refreshNodePalette();
         foleyPanel.setBuildStatus(status, ok);
