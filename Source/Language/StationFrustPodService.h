@@ -7,6 +7,7 @@
 
 #include <frate/FrateRegistryClient.h>
 #include <frate/PodArchive.h>
+#include <frate/PodBuild.h>
 
 namespace cw {
 
