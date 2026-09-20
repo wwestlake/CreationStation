@@ -23,14 +23,14 @@
   },
   "contexts": [
     {
-      "helpId": "djehuti.station.mixer.channel",
-      "anchorBlockId": "what",
-      "verifiedBehaviorSignature": "sha256:9d170696c742ea1ef87b62b3154b8c61b6a2931f1479c62b687bbb4db4c57096"
-    },
-    {
       "helpId": "djehuti.station.view.layers",
       "anchorBlockId": "what",
       "verifiedBehaviorSignature": "sha256:4d89cf6c3a84cb22209c7f6e1a6dc6c3518ea080726486ab23a95adc1e2d5633"
+    },
+    {
+      "helpId": "djehuti.station.mixer.channel",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:9d170696c742ea1ef87b62b3154b8c61b6a2931f1479c62b687bbb4db4c57096"
     }
   ],
   "keywords": [

@@ -1139,6 +1139,19 @@
       "documentation": "recommended",
       "behaviorSignature": "sha256:6881c9973107da0a0701dfbe0370146343ab8e60d16eaea55a41efda88064e5e",
       "sourceRef": "apps/CreationStation/Source/shared/AssetSystem/src/SuiteVfsServiceClient.cpp"
+    },
+    {
+      "helpId": "djehuti.station.help.contents",
+      "kind": "command",
+      "label": "Help Topics",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:29c9d583c271f512a340515dc8513c55cf0f41e7e0a378dd3d316034f1d73817",
+      "sourceRef": "apps/CreationStation/Source/Help/HelpPanel.cpp; MainComponent.cpp (showHelpWindow)",
+      "uiPath": [
+        "Help",
+        "Help Topics"
+      ]
     }
   ]
 }

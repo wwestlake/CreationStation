@@ -110,6 +110,7 @@ constexpr int menuIdEditSplit = 106;
 constexpr int menuIdHelpTour = 3001;
 constexpr int menuIdHelpResetLayout = 3002;
 constexpr int menuIdHelpFeedback = 3003;
+constexpr int menuIdHelpContents = 3004;
 
 const char* trackerPanelId = "tracker";
 const char* samplerPanelId = "sampler";
@@ -1539,6 +1540,14 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         juce::JUCEApplicationBase::getInstance() != nullptr
             ? juce::JUCEApplicationBase::getInstance()->getApplicationVersion()
             : "0.5.1");
+
+    {
+        juce::String helpError;
+        if (! helpLibrary.loadEmbedded(helpError))
+            juce::Logger::writeToLog("Help failed to load: " + helpError);
+        for (const auto& problem : helpLibrary.validate())
+            juce::Logger::writeToLog("Help: " + problem);
+    }
 
     reportStartup("Opening audio engine...", 0.18f);
     {
@@ -3261,6 +3270,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     {
         refreshAiContextStore();
         pendingAiPrompt = submittedPrompt;
+        pendingAiQuestion = aiPanel.getLastQuestion();
 
         CreationStationContextEngine::RetrievalRequest request;
         request.prompt = pendingAiPrompt;
@@ -4815,6 +4825,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         return menu;
     }
 
+    menu.addItem(menuIdHelpContents, "Help Topics	F1");
     menu.addItem(menuIdHelpTour, "Guided Tour");
     menu.addSeparator();
     menu.addItem(menuIdHelpFeedback, "Send Feedback...");
@@ -4892,7 +4903,9 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
         return;
     }
 
-    if (menuItemID == menuIdHelpTour)
+    if (menuItemID == menuIdHelpContents)
+        showHelpWindow();
+    else if (menuItemID == menuIdHelpTour)
         showTour();
     else if (menuItemID == menuIdHelpFeedback)
         showFeedbackWindow();
@@ -5468,6 +5481,77 @@ void MainComponent::showFeedbackWindow()
     window->setVisible(true);
     feedbackWindow = std::move(window);
     feedbackDialogPanel = panelRaw;
+}
+
+juce::String MainComponent::currentHelpId() const
+{
+    const auto isInside = [](const juce::Component& panel, const juce::Component* focused)
+    {
+        return focused != nullptr && (focused == &panel || panel.isParentOf(focused));
+    };
+    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
+
+    if (isInside(signalLabPanel, focused)) return "djehuti.station.view.signal-lab";
+    if (isInside(trackerPanel, focused)) return "djehuti.station.view.tracker";
+    if (isInside(samplePackBuilderPanel, focused)) return "djehuti.station.view.sampler";
+    if (isInside(mixerPanel, focused)) return "djehuti.station.view.layers";
+    if (isInside(pluginsPanel, focused)) return "djehuti.station.view.plugins";
+    if (isInside(dslPanel, focused)) return "djehuti.station.view.script";
+    if (isInside(recordView, focused)) return "djehuti.station.view.capture";
+    if (isInside(foleyPanel, focused)) return "djehuti.station.view.foley";
+    if (isInside(scorePanel, focused)) return "djehuti.station.view.score";
+    if (isInside(aiPanel, focused)) return "djehuti.station.view.virtual-engineer";
+    if (isInside(settingsPanel, focused)) return "djehuti.station.view.settings";
+
+    switch (activeMode)
+    {
+        case WorkspaceMode::signal: return "djehuti.station.view.signal-lab";
+        case WorkspaceMode::tracker: return "djehuti.station.view.tracker";
+        default: break;
+    }
+    return {};
+}
+
+void MainComponent::showHelpWindow(const juce::String& helpIdIn)
+{
+    if (helpLibrary.topics().empty())
+    {
+        transportBar.setStatusText("Help is not available in this build.");
+        return;
+    }
+
+    const auto helpId = helpIdIn.isNotEmpty() ? helpIdIn : currentHelpId();
+
+    if (helpWindow != nullptr && helpPanel != nullptr)
+    {
+        if (helpId.isNotEmpty())
+            helpPanel->showHelpId(helpId);
+        helpWindow->setVisible(true);
+        helpWindow->toFront(true);
+        return;
+    }
+
+    auto panel = std::make_unique<cs::help::HelpPanel>(helpLibrary);
+    auto* panelRaw = panel.get();
+    if (helpId.isNotEmpty())
+        panel->showHelpId(helpId);
+
+    auto window = std::make_unique<ManagedDocumentWindow>("Djehuti Station - Help",
+                                                          juce::Colour(0xff11151c),
+                                                          juce::DocumentWindow::allButtons,
+                                                          [this]
+                                                          {
+                                                              helpPanel = nullptr;
+                                                              helpWindow.reset();
+                                                          });
+    window->setUsingNativeTitleBar(true);
+    window->setResizable(true, true);
+    window->setResizeLimits(640, 420, 1600, 1200);
+    window->setContentOwned(panel.release(), true);
+    window->centreWithSize(980, 640);
+    window->setVisible(true);
+    helpWindow = std::move(window);
+    helpPanel = panelRaw;
 }
 
 void MainComponent::showMidiEditorWindow(int clipIndex)
@@ -6824,11 +6908,30 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
         contextBlock << "\n";
     }
 
-    userPrompt = contextBlock + userPrompt;
+    // Station's own help, chosen for this question and the panel the user is in. The same topics are what the Help window
+    // shows, so the assistant and the manual never disagree.
+    juce::String helpBlock;
+    const auto helpExcerpts = helpLibrary.buildPromptContext(pendingAiQuestion, currentHelpId(), 7000);
+    juce::String suppliedHelp;
+    for (const auto* topic : helpLibrary.topicsForPrompt(pendingAiQuestion, currentHelpId()))
+        suppliedHelp << (suppliedHelp.isEmpty() ? "" : "; ") << topic->title;
+    if (helpExcerpts.isNotEmpty())
+    {
+        systemPrompt << "\n\nStation help: the user's message begins with excerpts from Station's own help. When they ask how "
+                        "Station works or how to do something, answer from those excerpts: follow their steps and menu names "
+                        "exactly, and name the help topic (its title) you used. The excerpts are the best information available, "
+                        "even where a topic is marked draft, so use them. Only if none of the excerpts relates to the question, "
+                        "say so plainly and point to Help Topics (F1). The Station help overrides any older description of the "
+                        "app elsewhere in these instructions.";
+        helpBlock << "Station help (relevant excerpts; each is labelled with its topic):\n\n" << helpExcerpts << "\n";
+    }
+
+    userPrompt = helpBlock + contextBlock + userPrompt;
 
     std::thread([safeThis = juce::Component::SafePointer<MainComponent>(this),
                  systemPrompt = std::move(systemPrompt),
-                 userPrompt = std::move(userPrompt)]() mutable
+                 userPrompt = std::move(userPrompt),
+                 suppliedHelp]() mutable
     {
         if (safeThis == nullptr)
             return;
@@ -6841,6 +6944,7 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
 
         juce::MessageManager::callAsync([safeThis,
                                          ok,
+                                         suppliedHelp,
                                          result = std::move(result)]() mutable
         {
             if (safeThis == nullptr)
@@ -6850,7 +6954,9 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
 
             if (ok)
             {
-                safeThis->aiPanel.setAssistantResponse(result.text);
+                // Show which help topics the assistant was given, so an answer can be checked against its sources.
+                safeThis->aiPanel.setAssistantResponse(
+                    suppliedHelp.isNotEmpty() ? result.text + "\n\n_Help topics supplied: " + suppliedHelp + "_" : result.text);
                 safeThis->transportBar.setStatusText("AI response ready.");
             }
             else
@@ -11092,6 +11198,12 @@ bool MainComponent::handleGlobalKeyPress(const juce::KeyPress& key)
     // JUCE returns the *uppercase* letter for alphabetic keys from getKeyCode(); normalise so the
     // shortcuts fire regardless of case (comparing against lowercase 'z' alone silently never matched).
     auto letter = (juce::juce_wchar) juce::CharacterFunctions::toUpperCase((juce::juce_wchar) code);
+
+    if (key == juce::KeyPress::F1Key)
+    {
+        showHelpWindow();
+        return true;
+    }
 
     if (mods.isCommandDown() && ! mods.isShiftDown() && letter == 'Z')
     {

@@ -80,6 +80,11 @@
       "text": "Ctrl+Z undo. Ctrl+Y or Ctrl+Shift+Z redo. Ctrl+D duplicate the selected clip. Ctrl+Shift+S split the selected clip at the playhead. F2 rename the selected clip. Delete or Backspace delete the selected clip."
     },
     {
+      "id": "f1",
+      "kind": "note",
+      "text": "F1 opens the Help window on the topic for the panel you are working in."
+    },
+    {
       "id": "focus",
       "kind": "note",
       "text": "Undo and Redo act on the panel that has focus: in the Signal Lab they undo the graph edit, elsewhere they undo the Tracker edit. Clip shortcuts need a selected clip."

@@ -7,11 +7,26 @@ have stable `helpId` values, and each topic records the behavior signature it wa
 
 ## What is here
 
-- `topics/en-US/*.json` - 47 topics (tutorial, how-to, reference, explanation, troubleshooting), one file each. Topic
+- `topics/en-US/*.json` - 48 topics (tutorial, how-to, reference, explanation, troubleshooting), one file each. Topic
   IDs are `djehuti.station.<subject>`. This is the canonical source: edit these files.
-- `help-inventory.json` - an inventory of Station's public features (88 items: panels, menu commands, transport
+- `help-inventory.json` - an inventory of Station's public features (89 items: panels, menu commands, transport
   controls, workflows, settings, errors), each with a stable `helpId` and a `behaviorSignature`.
 - `inventory-descriptors.json` - the behavior descriptor each signature was computed from.
+
+## How Station uses it
+
+The topics and inventory are compiled into the executable (`StationHelpData` in CMakeLists.txt); nothing is read from
+the computer at run time. `Source/Help/HelpLibrary` loads them and serves both readers:
+
+- **Help window** (`Source/Help/HelpPanel`): Help > Help Topics, or F1 for the panel you are in. Search, topic list,
+  rendered topic, related-topic buttons. Works with no AI account.
+- **Virtual Engineer** (`MainComponent::launchAiCompletion`): each question gets the topics for the panel the user is in
+  plus the best search matches, labelled with their topic ids, and the system prompt tells the assistant to answer from
+  them, name the topic, and say so when the help does not cover the question.
+
+`tests/HelpLibrarySmoke.cpp` (target `HelpLibrarySmoke`) checks that the embedded help loads, is consistent, and finds
+the right topics. Editing a topic or the inventory needs a rebuild to take effect. The panel-to-help-ID mapping for F1 is
+`MainComponent::currentHelpId`.
 
 ## Status: draft, written from the source
 
@@ -33,7 +48,7 @@ prototype directory:
 
 It exits nonzero for schema errors, uncovered required `helpId`s, stale behavior signatures, broken relations or
 duplicate IDs, and writes `help-catalog.json`, `context-map.json`, `semantic-cards.jsonl` (for the Virtual Engineer) and
-`sync-report.json`. At the time of writing it compiles 47 topics into 267 semantic cards with no errors or warnings.
+`sync-report.json`. At the time of writing it compiles 48 topics into 274 semantic cards with no errors or warnings.
 
 ## When Station changes
 

@@ -54,6 +54,10 @@
     {
       "type": "related",
       "topicId": "djehuti.station.settings-panel"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.using-help"
     }
   ],
   "blocks": [
@@ -96,6 +100,11 @@
       "id": "accounts",
       "kind": "note",
       "text": "AI accounts are set up in the suite settings (gear button) on the Suite AI Accounts tab. The assistant chooses among the accounts by name; it does not configure a provider itself."
+    },
+    {
+      "id": "help-grounded",
+      "kind": "note",
+      "text": "When you ask how Station works, the assistant is given the most relevant help topics and names the topic it used. If the help does not cover your question it should say so. You can read the same help yourself with F1 or Help > Help Topics."
     }
   ],
   "verification": {

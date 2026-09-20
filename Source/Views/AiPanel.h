@@ -56,6 +56,8 @@ public:
     void setAssistantResponse(const juce::String& responseText);
     void appendUserMessage(const juce::String& promptText);
     juce::String getPromptText() const;
+    // What the user typed in the message they last sent, without the mode and access text added to what is sent to the model.
+    juce::String getLastQuestion() const { return lastQuestion; }
     juce::String buildSubmissionPrompt() const;
     void setCollapsed(bool shouldCollapse);
     bool isCollapsed() const noexcept { return collapsed; }
@@ -103,6 +105,7 @@ private:
     juce::Viewport transcriptViewport;
     std::unique_ptr<ChatTranscriptComponent> transcriptContent;
     juce::TextEditor promptEditor;
+    juce::String lastQuestion;
     juce::TextButton sendButton { "Send" };
     juce::TextButton collapseButton { "Hide" };
     juce::Label footerHintLabel;

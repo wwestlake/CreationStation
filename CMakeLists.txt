@@ -235,7 +235,20 @@ else()
     target_compile_definitions(creation_station_language_host PUBLIC CS_ENABLE_SCRIPTING=0)
 endif()
 
+# Station's help (structured JSON topics) is compiled into the executable so the help window and the Virtual Engineer
+# both read it without any file on the computer.
+file(GLOB CS_HELP_TOPIC_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/help/topics/en-US/*.json")
+juce_add_binary_data(StationHelpData
+    HEADER_NAME HelpData.h
+    NAMESPACE HelpData
+    SOURCES ${CS_HELP_TOPIC_FILES} "${CMAKE_CURRENT_SOURCE_DIR}/help/help-inventory.json")
+set_target_properties(StationHelpData PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_sources(CreativeWorkstation PRIVATE
+    Source/Help/HelpLibrary.cpp
+    Source/Help/HelpLibrary.h
+    Source/Help/HelpPanel.cpp
+    Source/Help/HelpPanel.h
     Source/AI/CreationStationContextEngine.cpp
     Source/AI/CreationStationContextEngine.h
     Source/AI/CreationStationContextStore.cpp
@@ -427,6 +440,7 @@ if(CREATION_STATION_ENABLE_LTO)
 endif()
 
 target_link_libraries(CreativeWorkstation PRIVATE
+    StationHelpData
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_RENDER_TARGET}
     juce::juce_opengl
@@ -661,6 +675,23 @@ target_compile_definitions(StationFrustIntegrationSmoke PRIVATE
 target_link_libraries(StationFrustIntegrationSmoke PRIVATE
     creation_suite_frust_plugin_runtime
     node_system
+)
+
+# Checks that Station's embedded help loads, is consistent, and answers questions for both the help window and the
+# Virtual Engineer. Needs no audio hardware; exit code 0 = pass.
+juce_add_console_app(HelpLibrarySmoke PRODUCT_NAME "HelpLibrarySmoke")
+juce_generate_juce_header(HelpLibrarySmoke)
+target_sources(HelpLibrarySmoke PRIVATE
+    tests/HelpLibrarySmoke.cpp
+    Source/Help/HelpLibrary.cpp
+)
+target_include_directories(HelpLibrarySmoke PRIVATE Source/Help)
+target_compile_definitions(HelpLibrarySmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(HelpLibrarySmoke PRIVATE
+    StationHelpData
+    juce::juce_core
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
 )
 
 # Automated checks for PatchLiveVoice::renderAt() -- the entry point that runs a Signal clip's

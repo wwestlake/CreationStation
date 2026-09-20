@@ -62,6 +62,8 @@
 #include "Views/TrackerPanel.h"
 #include "Views/TourGuideOverlay.h"
 #include "Views/FeedbackDialog.h"
+#include "Help/HelpLibrary.h"
+#include "Help/HelpPanel.h"
 #include <creation/ui/SuiteSettingsPanel.h>
 
 class MainComponent final : public juce::Component,
@@ -279,6 +281,13 @@ private:
     creation_station::FeedbackMetricsClient feedbackMetricsClient;
     creation_station::MetricsCollector metricsCollector;
     void showFeedbackWindow();
+    cs::help::Library helpLibrary;
+    std::unique_ptr<juce::DocumentWindow> helpWindow;
+    juce::Component::SafePointer<cs::help::HelpPanel> helpPanel;
+    // Opens the help browser on the topic for a feature (empty = the panel you are working in).
+    void showHelpWindow(const juce::String& helpId = {});
+    // The help ID of the panel that has focus, or empty when nothing specific has.
+    juce::String currentHelpId() const;
     std::unique_ptr<juce::DocumentWindow> midiEditorWindow;
     juce::Component::SafePointer<MidiEditorPanel> midiEditorPanel;
     std::array<std::unique_ptr<juce::DocumentWindow>, 12> workspacePopoutWindows;
@@ -384,6 +393,7 @@ private:
     bool appContextSyncInProgress = false;
     juce::String appContextLastPublishedChecksum;
     juce::String pendingAiPrompt;
+    juce::String pendingAiQuestion; // what the user typed, without the mode and access preamble
     CreationStationContextEngine::ContextPacket pendingAiContextPacket;
     bool pendingAiContextPacketValid = false;
     bool aiCompletionInFlight = false;

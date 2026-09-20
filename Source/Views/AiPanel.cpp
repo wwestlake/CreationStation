@@ -180,6 +180,15 @@ namespace
     class ChatBubbleComponent final : public juce::Component
     {
     public:
+        ChatBubbleComponent()
+        {
+            setWantsKeyboardFocus(true);
+            setMouseCursor(juce::MouseCursor::IBeamCursor);
+        }
+
+        // Called when the user starts selecting in this bubble, so the transcript can clear the others.
+        std::function<void(ChatBubbleComponent*)> onSelectionStarted;
+
         bool isUserMessage() const noexcept { return isUser; }
 
         void setMessage(bool user, const juce::String& badge, const juce::String& content)
@@ -187,7 +196,17 @@ namespace
             isUser = user;
             badgeText = badge;
             bodyText = content;
+            selection = {};
             repaint();
+        }
+
+        void clearSelection()
+        {
+            if (! selection.isEmpty())
+            {
+                selection = {};
+                repaint();
+            }
         }
 
         int getPreferredHeight(int width) const
@@ -210,16 +229,198 @@ namespace
             g.setColour(outlineColour.withAlpha(0.9f));
             g.drawRoundedRectangle(bounds, 16.0f, 1.0f);
 
-            auto textArea = bounds.reduced(14.0f, 10.0f);
             juce::TextLayout layout;
-            layout.createLayout(buildMarkdownAttributedString(badgeText, bodyText, isUser), textArea.getWidth());
+            auto textArea = makeLayout(layout);
+
+            if (! selection.isEmpty())
+            {
+                g.setColour(juce::Colour(0xff3d78c4).withAlpha(0.75f));
+                forEachGlyph(layout, textArea, [&](int index, juce::Rectangle<float> box)
+                {
+                    if (selection.contains(index))
+                        g.fillRect(box);
+                    return true;
+                });
+            }
+
             layout.draw(g, textArea);
+        }
+
+        void mouseDown(const juce::MouseEvent& event) override
+        {
+            grabKeyboardFocus();
+
+            if (event.mods.isPopupMenu())
+            {
+                showContextMenu();
+                return;
+            }
+
+            if (onSelectionStarted)
+                onSelectionStarted(this);
+
+            dragAnchor = characterIndexAt(event.position);
+            selection = {};
+            repaint();
+        }
+
+        void mouseDrag(const juce::MouseEvent& event) override
+        {
+            if (event.mods.isPopupMenu())
+                return;
+            const auto here = characterIndexAt(event.position);
+            selection = juce::Range<int>::between(dragAnchor, here);
+            repaint();
+        }
+
+        void mouseDoubleClick(const juce::MouseEvent& event) override
+        {
+            const auto text = shownText();
+            auto index = juce::jlimit(0, juce::jmax(0, text.length() - 1), characterIndexAt(event.position));
+            auto isWordChar = [&](int i) { return juce::CharacterFunctions::isLetterOrDigit(text[i]) || text[i] == '_'; };
+            auto start = index;
+            auto end = index;
+            while (start > 0 && isWordChar(start - 1))
+                --start;
+            while (end < text.length() && isWordChar(end))
+                ++end;
+            selection = { start, end };
+            repaint();
+        }
+
+        bool keyPressed(const juce::KeyPress& key) override
+        {
+            if (key.getModifiers().isCommandDown())
+            {
+                const auto letter = juce::CharacterFunctions::toUpperCase((juce::juce_wchar) key.getKeyCode());
+                if (letter == 'C')
+                {
+                    copySelection();
+                    return true;
+                }
+                if (letter == 'A')
+                {
+                    selection = { 0, shownText().length() };
+                    repaint();
+                    return true;
+                }
+            }
+            return false;
         }
 
     private:
         bool isUser = false;
         juce::String badgeText;
         juce::String bodyText;
+        juce::Range<int> selection;
+        int dragAnchor = 0;
+
+        juce::String shownText() const
+        {
+            return buildMarkdownAttributedString(badgeText, bodyText, isUser).getText();
+        }
+
+        juce::Rectangle<float> makeLayout(juce::TextLayout& layout) const
+        {
+            auto textArea = getLocalBounds().toFloat().reduced(2.0f).reduced(14.0f, 10.0f);
+            layout.createLayout(buildMarkdownAttributedString(badgeText, bodyText, isUser), textArea.getWidth());
+            return textArea;
+        }
+
+        // Calls fn(characterIndex, boxInComponentSpace) for every glyph; stops if fn returns false.
+        template <typename Fn>
+        static void forEachGlyph(const juce::TextLayout& layout, juce::Rectangle<float> textArea, Fn&& fn)
+        {
+            for (int l = 0; l < layout.getNumLines(); ++l)
+            {
+                const auto& line = layout.getLine(l);
+                const auto lineBounds = line.getLineBounds();
+                for (const auto* run : line.runs)
+                {
+                    for (int i = 0; i < run->glyphs.size(); ++i)
+                    {
+                        const auto& glyph = run->glyphs.getReference(i);
+                        const auto index = run->stringRange.getStart() + i;
+                        const juce::Rectangle<float> box(textArea.getX() + line.lineOrigin.x + glyph.anchor.x,
+                                                        textArea.getY() + lineBounds.getY(),
+                                                        glyph.width, lineBounds.getHeight());
+                        if (! fn(index, box))
+                            return;
+                    }
+                }
+            }
+        }
+
+        int characterIndexAt(juce::Point<float> point) const
+        {
+            juce::TextLayout layout;
+            const auto textArea = makeLayout(layout);
+            const auto total = shownText().length();
+            if (layout.getNumLines() == 0)
+                return 0;
+
+            // Pick the line under the point (clamped to the first or last line), then the nearest glyph edge on it.
+            int chosenLine = layout.getNumLines() - 1;
+            for (int l = 0; l < layout.getNumLines(); ++l)
+            {
+                const auto b = layout.getLine(l).getLineBounds();
+                if (point.y < textArea.getY() + b.getBottom())
+                {
+                    chosenLine = l;
+                    break;
+                }
+            }
+
+            const auto& line = layout.getLine(chosenLine);
+            int result = line.stringRange.getEnd();
+            bool found = false;
+            for (const auto* run : line.runs)
+            {
+                for (int i = 0; i < run->glyphs.size() && ! found; ++i)
+                {
+                    const auto& glyph = run->glyphs.getReference(i);
+                    const auto left = textArea.getX() + line.lineOrigin.x + glyph.anchor.x;
+                    if (point.x < left + glyph.width * 0.5f)
+                    {
+                        result = run->stringRange.getStart() + i;
+                        found = true;
+                    }
+                }
+                if (found)
+                    break;
+            }
+            return juce::jlimit(0, total, result);
+        }
+
+        void copySelection() const
+        {
+            const auto text = shownText();
+            const auto range = selection.isEmpty() ? juce::Range<int>(0, text.length()) : selection;
+            juce::SystemClipboard::copyTextToClipboard(text.substring(range.getStart(), range.getEnd()));
+        }
+
+        void showContextMenu()
+        {
+            juce::PopupMenu menu;
+            menu.addItem(1, "Copy", ! selection.isEmpty());
+            menu.addItem(2, "Copy message");
+            menu.addItem(3, "Select all");
+            juce::Component::SafePointer<ChatBubbleComponent> safe(this);
+            menu.showMenuAsync({}, [safe](int result)
+            {
+                if (safe == nullptr)
+                    return;
+                if (result == 1)
+                    safe->copySelection();
+                else if (result == 2)
+                    juce::SystemClipboard::copyTextToClipboard(safe->bodyText);
+                else if (result == 3)
+                {
+                    safe->selection = { 0, safe->shownText().length() };
+                    safe->repaint();
+                }
+            });
+        }
     };
 
 } // namespace
@@ -230,6 +431,12 @@ public:
     int addMessage(bool user, const juce::String& badge, const juce::String& content)
     {
         auto* bubble = new ChatBubbleComponent();
+        bubble->onSelectionStarted = [this](ChatBubbleComponent* active)
+        {
+            for (auto* other : bubbles)
+                if (other != active)
+                    other->clearSelection();
+        };
         bubble->setMessage(user, badge, content);
         addAndMakeVisible(bubble);
         bubbles.add(bubble);
@@ -400,6 +607,7 @@ AiPanel::AiPanel()
             return;
 
         auto submittedPrompt = buildSubmissionPrompt();
+        lastQuestion = prompt;
 
         appendUserMessage(prompt);
         pendingAssistantBubbleIndex = transcriptContent->addMessage(false, "Virtual Engineer", "Thinking...");

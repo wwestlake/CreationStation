@@ -478,6 +478,12 @@
       "results": [
         "the project service is out of date or not running"
       ]
+    },
+    "djehuti.station.help.contents": {
+      "results": [
+        "a Help window with a searchable list of topics, the selected topic and links to related topics",
+        "F1 opens the help for the panel you are working in"
+      ]
     }
   }
 }
