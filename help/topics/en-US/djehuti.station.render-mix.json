@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.render-mix",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Render the master mix",
+  "summary": "File > Render Full Mix... renders every unmuted track exactly as you hear it, to the project or to a file; Export Full Mix as WAV... goes straight to a file.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.file.render-full-mix",
+      "anchorBlockId": "render",
+      "verifiedBehaviorSignature": "sha256:1c8d2e11aafdde4ac4f9d6e3f4df3a5147b46cb0ffd78ef2fe54cf4806518522"
+    },
+    {
+      "helpId": "djehuti.station.file.export-wav",
+      "anchorBlockId": "render",
+      "verifiedBehaviorSignature": "sha256:fe6a45c8a13860f42b8d4fc63266559d3157d4dc7c0e5f3d98c2464e22d0903a"
+    }
+  ],
+  "keywords": [
+    "render",
+    "export",
+    "bounce",
+    "mixdown",
+    "WAV",
+    "master mix",
+    "tail",
+    "bit depth",
+    "normalize"
+  ],
+  "alternateQueries": [
+    "How do I export my song?",
+    "How do I bounce to WAV?",
+    "Why is my MIDI track silent in the render?",
+    "How long should the tail be?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-overview"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "render",
+      "kind": "steps",
+      "title": "Render",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Click into the Tracker and choose File > Render Full Mix...",
+          "expectedResult": "The Render dialog opens.",
+          "uiTarget": "djehuti.station.file.render-full-mix"
+        },
+        {
+          "id": "what",
+          "instruction": "Choose what to render: the entire project, or a custom start and end."
+        },
+        {
+          "id": "tail",
+          "instruction": "Set the tail (0 to 120 seconds) so reverbs and delays can finish ringing out."
+        },
+        {
+          "id": "format",
+          "instruction": "Choose the sample rate (the audio device's by default) and bit depth, and an optional peak normalise (to -0.3 dB or -1 dB)."
+        },
+        {
+          "id": "save-to",
+          "instruction": "Choose Save to: the project (as a render asset) or a file on disk; optionally place the result on a new track."
+        },
+        {
+          "id": "name",
+          "instruction": "Enter a name; $project and $date are filled in."
+        },
+        {
+          "id": "go",
+          "instruction": "Start the render.",
+          "expectedResult": "A progress window shows the time rendered, the time elapsed and an estimate, with Cancel."
+        }
+      ]
+    },
+    {
+      "id": "midi",
+      "kind": "note",
+      "text": "MIDI instrument tracks are not included in a render yet. The dialog tells you when the project has MIDI clips."
+    },
+    {
+      "id": "export",
+      "kind": "paragraph",
+      "text": "Export Full Mix as WAV... opens the same dialog set to save a file."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/RenderDialog.cpp"
+      }
+    ]
+  }
+}

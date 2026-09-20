@@ -1,0 +1,128 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.troubleshoot-no-sound",
+  "locale": "en-US",
+  "type": "troubleshooting",
+  "title": "No sound, or the wrong sound",
+  "summary": "Check focus, the audio device, muted tracks and the Signal Lab's status line when nothing plays.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.error.no-sound",
+      "anchorBlockId": "nothing-plays",
+      "verifiedBehaviorSignature": "sha256:d045e5f0b77c28faf51e07d284720e80728a224480727734e132691a45e48f76"
+    },
+    {
+      "helpId": "djehuti.station.view.audio-devices",
+      "anchorBlockId": "nothing-plays",
+      "verifiedBehaviorSignature": "sha256:20431a2b3022817245930884bf366eb843c4330bbf503df9b5012047f96e9b05"
+    },
+    {
+      "helpId": "djehuti.station.transport.play",
+      "anchorBlockId": "nothing-plays",
+      "verifiedBehaviorSignature": "sha256:b796b64cc993c3914aaaff4fb862dd6a6c3af1b4b52b44acc8e2bb22e338cbd6"
+    }
+  ],
+  "keywords": [
+    "no sound",
+    "silent",
+    "cannot hear",
+    "noise",
+    "static",
+    "Play does nothing",
+    "audio device"
+  ],
+  "alternateQueries": [
+    "Why can I not hear anything?",
+    "Why is Play silent?",
+    "Why is the Signal Lab making noise?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.audio-devices"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.signal-lab-first-sound"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "nothing-plays",
+      "kind": "troubleshooting",
+      "title": "Pressing Play makes no sound",
+      "symptoms": [
+        "Play highlights but nothing is heard",
+        "the Tracker plays nothing while the Signal Lab is showing"
+      ],
+      "resolution": "Play goes to the panel that has focus. Click into the panel you want to hear (the Tracker for the arrangement, the Signal Lab for the sound you are designing) and press Play again.",
+      "cause": "The transport plays whichever of the Tracker or the Signal Lab has focus."
+    },
+    {
+      "id": "device",
+      "kind": "troubleshooting",
+      "title": "Nothing is heard from anything",
+      "symptoms": [
+        "no sound from any panel",
+        "level meters do not move"
+      ],
+      "resolution": "Click Audio in the header and choose your output device. Check the master volume and that the track is not muted or another track soloed."
+    },
+    {
+      "id": "signal-status",
+      "kind": "troubleshooting",
+      "title": "Signal Lab: read the status line",
+      "symptoms": [
+        "the Signal Lab is silent"
+      ],
+      "resolution": "After you press Play, the line under the panel title says either \"Playing live: N source(s), M wire(s)\" or \"Play did not start the live engine (...)\". If it says 0 sources, place an oscillator and wire it to the Sink. If it says playing, check the device and levels as above."
+    },
+    {
+      "id": "old-beta",
+      "kind": "troubleshooting",
+      "title": "Signal Lab was silent or noisy until a track existed",
+      "symptoms": [
+        "Signal Lab noise or silence with no tracks in the Tracker",
+        "sound appears after adding a track"
+      ],
+      "resolution": "Update to Djehuti Station 0.9.1 Beta 6 or later. In earlier betas the Signal Lab needed a track on the Tracker to play cleanly.",
+      "cause": "Fixed in Beta 6: the live signal now clears its own output space and no longer depends on a track."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (syncActiveModeToFocus)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SignalLabPanel.cpp (triggerTransportPlay)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/tests/SignalClipRenderSmoke.cpp"
+      }
+    ]
+  }
+}

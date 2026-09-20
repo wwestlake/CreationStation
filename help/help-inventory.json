@@ -1,0 +1,1144 @@
+{
+  "$schema": "https://djehuti.example/schemas/help-inventory.schema.json",
+  "schemaVersion": "1.0",
+  "product": "Djehuti Station",
+  "buildVersion": "0.9.1-beta6-work",
+  "sourceRevision": "station-master-2faab9f+beta6-work",
+  "generatedAt": "2026-09-20T12:00:00Z",
+  "items": [
+    {
+      "helpId": "djehuti.station.app",
+      "kind": "application",
+      "label": "Djehuti Station",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:31baeb3f59c0a2fdb9ac3240cf0161111c96ffdcb8b6841a2206548422d6e692",
+      "sourceRef": "apps/CreationStation/Source/Main.cpp"
+    },
+    {
+      "helpId": "djehuti.station.view.tracker",
+      "kind": "view",
+      "label": "Tracker",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:8f6fb076807e775ae5f1bfff8b3d695b53784e6942088c21f4e2c6cb24fdf3c2",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp; Views/TrackerPanel.cpp",
+      "uiPath": [
+        "View",
+        "Tracker"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.sampler",
+      "kind": "view",
+      "label": "Sampler",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:ea400554d55cd40322ee60ab31686372fbc4d16fed3cfeb0060de98422fa79c4",
+      "sourceRef": "apps/CreationStation/Source/Views/SamplePackBuilderPanel.cpp",
+      "uiPath": [
+        "View",
+        "Sampler"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.signal-lab",
+      "kind": "view",
+      "label": "Signal",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:c08cb233bc46b4ec41c119b87ca0353cbbd060bf3e59f66ce22591d4a95a25c4",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "View",
+        "Signal"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.layers",
+      "kind": "view",
+      "label": "Layers",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:4d89cf6c3a84cb22209c7f6e1a6dc6c3518ea080726486ab23a95adc1e2d5633",
+      "sourceRef": "apps/CreationStation/Source/Views/MixerPanel.cpp",
+      "uiPath": [
+        "View",
+        "Layers"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.plugins",
+      "kind": "view",
+      "label": "Plugins",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:783e45059c5959220b66faa3f06209f3354ee9ddc74e779f899e4088fae99ecf",
+      "sourceRef": "apps/CreationStation/Source/Views/PluginsPanel.cpp",
+      "uiPath": [
+        "View",
+        "Plugins"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.script",
+      "kind": "view",
+      "label": "Script",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:3553d2da825d81fb35ce47c5a04ad0e2006f82bd1de9a39de0311855b2cb97b5",
+      "sourceRef": "apps/CreationStation/Source/Views/DslPanel.cpp",
+      "uiPath": [
+        "View",
+        "Script"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.capture",
+      "kind": "view",
+      "label": "Capture",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:e421279104788ebcf37fa67e782e92633b4e557a26c8a14740047864cffeb8f2",
+      "sourceRef": "apps/CreationStation/Source/Views/RecordView.cpp",
+      "uiPath": [
+        "View",
+        "Capture"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.score",
+      "kind": "view",
+      "label": "Score",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:e7c7a0022bf470ec6b3cc75ebcd3903b81e3e7dd9aa15919cb860eec20cc3c4d",
+      "sourceRef": "apps/CreationStation/Source/Views/ScorePanel.cpp",
+      "uiPath": [
+        "View",
+        "Score"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.settings",
+      "kind": "view",
+      "label": "Settings",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:333f9020d91ba912013738fa7b04617c773996a28b6bd871d06569a959acabb3",
+      "sourceRef": "apps/CreationStation/Source/Views/SettingsPanel.cpp",
+      "uiPath": [
+        "View",
+        "Settings"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.foley",
+      "kind": "view",
+      "label": "Foley",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:d159bd5d1ddab9f2f8b8ac2912a7e655e75374bf1071ab6f5ebdb5f804c3c4f8",
+      "sourceRef": "apps/CreationStation/Source/Views/FoleyPanel.cpp",
+      "uiPath": [
+        "View",
+        "Foley"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.video",
+      "kind": "view",
+      "label": "Video",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:18befeef28411a98660db77593d34c56c7b48f766855ad92be2deb01ef351850",
+      "sourceRef": "apps/CreationStation/Source/Video/Gl/VideoPanelHost.h",
+      "uiPath": [
+        "View",
+        "Video"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.track-insert",
+      "kind": "view",
+      "label": "Track Insert",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:9cbfd6574bd0d5e82157de6d39842c56d26de4b6b58fbca3790eb7a838e0fe89",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "View",
+        "Track Insert"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.virtual-engineer",
+      "kind": "view",
+      "label": "Virtual Engineer",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:9b17a2d8bcc6ab62e7230cf24a3bae617c6f90045de99d64c4d2e29e30d1b558",
+      "sourceRef": "apps/CreationStation/Source/Views/AiPanel.cpp",
+      "uiPath": [
+        "View",
+        "Virtual Engineer"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.reset-layout",
+      "kind": "command",
+      "label": "Reset Dock Layout",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:aee2109762e2c527c9ff855d8663305e781ed797d2d74b89eb47ea27c69a0aa2",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "View",
+        "Reset Dock Layout"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.project-manager",
+      "kind": "view",
+      "label": "Project",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:4315e6adab9cb50b56126be59f48b84f8710f2b61f0a60a370d33569decd02f5",
+      "sourceRef": "apps/CreationStation/Source/shared/UI/src/SuiteShellController.cpp",
+      "uiPath": [
+        "Header",
+        "Project"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.suite-settings",
+      "kind": "view",
+      "label": "Suite settings",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:870c4e9aaf3851df239ba0712b8cb37092fff15a5323e4980b24d486327ebf5a",
+      "sourceRef": "apps/CreationStation/Source/shared/UI/src/SuiteSettingsPanel.cpp",
+      "uiPath": [
+        "Header",
+        "gear button"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.audio-devices",
+      "kind": "view",
+      "label": "Audio",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:20431a2b3022817245930884bf366eb843c4330bbf503df9b5012047f96e9b05",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp (showAudioSettings)",
+      "uiPath": [
+        "Header",
+        "Audio"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.assets-window",
+      "kind": "view",
+      "label": "Assets",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:00804fae5cc93f564949b51ebf645af783bb2aeb53edbfd4ffea26fa164b8da8",
+      "sourceRef": "apps/CreationStation/Source/shared/UI/src/SuiteAssetManagerPanel.cpp",
+      "uiPath": [
+        "Header",
+        "Assets"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.view.pods",
+      "kind": "view",
+      "label": "Pods",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:76649a2accf3b69b9d6284a41b4c1e4206cd66047f3a84ad3179fa663d639192",
+      "sourceRef": "apps/CreationStation/Source/shared/UI (FratePodsBrowserPanel)",
+      "uiPath": [
+        "Header",
+        "Pods"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.play",
+      "kind": "command",
+      "label": "Play",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:b796b64cc993c3914aaaff4fb862dd6a6c3af1b4b52b44acc8e2bb22e338cbd6",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Play"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.pause",
+      "kind": "command",
+      "label": "Pause",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:f3e3989acdd36000f25bad17ccaa064e2052794a75c46fdd8447114537169d52",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Pause"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.stop",
+      "kind": "command",
+      "label": "Stop",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:ba6ae2a47d46489e4eaf913a3eed13dd097de772c1a3027f653208d539afbefd",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Stop"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.record",
+      "kind": "command",
+      "label": "Record",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:84a9b028c2cf775300b8bbf9b04ca426083f1da6dc83781d99cd451b512217eb",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Record"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.rewind",
+      "kind": "command",
+      "label": "Rewind",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:42106a7b246af7754356b4f732213c31818ef3c4e4319b8f2df76dd647764654",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Rew"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.fast-forward",
+      "kind": "command",
+      "label": "Fast forward",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:8146544f7deedcd09afc6396cdb3f95361581557d15a01b9fd6f41cf3e7619bc",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Fwd"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.loop",
+      "kind": "command",
+      "label": "Loop",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:e41e8a5c29e87bcbadee776b97613d17d55711b9ab9788b7bb55a53d7ef4e216",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp; Timeline/TimelineModel.cpp",
+      "uiPath": [
+        "Header",
+        "Loop"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.transport.click",
+      "kind": "command",
+      "label": "Click (metronome)",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:8fb49680f0d6ca9a5d938b9ec1c3cc130ad51672809b71b38e2c78e674f74827",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Click"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.import",
+      "kind": "command",
+      "label": "Import...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:5fb63783b6c207afe54087d97e588ca4e3bb462724f4332b03a0975d5553f340",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp (showImportWindow); Views/ImportPanel.h",
+      "uiPath": [
+        "File",
+        "Import..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.save-project",
+      "kind": "command",
+      "label": "Save / Save Project",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:0e3ebab1f4ae6b47adfe7c66c9a1b9e3781983f15173edc35cd54b51a0e4e786",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "File",
+        "Save"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.new-arrangement",
+      "kind": "command",
+      "label": "New Arrangement",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:9848877e2a09f73ec15520806e3ea972c1955d0c9c677e0f6a28339fbb5f9ece",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "File",
+        "New Arrangement"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.save-arrangement",
+      "kind": "command",
+      "label": "Save Arrangement...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:c17c0faef63c830b0e0db4e5d9c6fe99fbe6336b282a49fa3f5ba0549287232c",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "File",
+        "Save Arrangement..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.load-arrangement",
+      "kind": "command",
+      "label": "Load Arrangement...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:1aab86141a2e8843ea75942e2fbb8aa1bcabf17685687d8658d1882417bfee38",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "File",
+        "Load Arrangement..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.render-full-mix",
+      "kind": "command",
+      "label": "Render Full Mix...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:1c8d2e11aafdde4ac4f9d6e3f4df3a5147b46cb0ffd78ef2fe54cf4806518522",
+      "sourceRef": "apps/CreationStation/Source/Views/RenderDialog.cpp",
+      "uiPath": [
+        "File",
+        "Render Full Mix..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.export-wav",
+      "kind": "command",
+      "label": "Export Full Mix as WAV...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:fe6a45c8a13860f42b8d4fc63266559d3157d4dc7c0e5f3d98c2464e22d0903a",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "File",
+        "Export Full Mix as WAV..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.new-signal",
+      "kind": "command",
+      "label": "New Signal",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:adaec97787d308acfe0aaa9d5d0aecb6949f4e71770d378d5e1f1faba34478f0",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "File",
+        "New Signal"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.open-signal",
+      "kind": "command",
+      "label": "Open Signal...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:22d03d079cad345a869f8a9b7757e8a3c3db7770463e03ad9702de60d974b3b6",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "File",
+        "Open Signal..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.save-signal",
+      "kind": "command",
+      "label": "Save Signal...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:b29f75b4608c030f50346e4c06c9b9abae15ace315a184485c37f2f4fc611c51",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "File",
+        "Save Signal..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.file.render-signal",
+      "kind": "command",
+      "label": "Render Signal to Project",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:cedc437e6360330889919490a0705bbf100ae914813c34b8b23e7d9ff1aa3df4",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "File",
+        "Render Signal to Project"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.edit.undo",
+      "kind": "command",
+      "label": "Undo",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:4c854c330a1983d6ad9afa0c39ff8aacc9fac5d9372336cee624d83897ef82ce",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Edit",
+        "Undo"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.edit.redo",
+      "kind": "command",
+      "label": "Redo",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:67d1be164457944ef9b3286579cca244183027826ac250c28eb5e606cbabc38a",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Edit",
+        "Redo"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.edit.duplicate-clip",
+      "kind": "command",
+      "label": "Duplicate Clip",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:a698ba090eaba5c2fbb2de02eae4662b4e2bec5ba0bfba9823ee3ca1179257ed",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Edit",
+        "Duplicate Clip"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.edit.split-clip",
+      "kind": "command",
+      "label": "Split at Playhead",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:210c133006309edd8404113a92f5893796ea39867ba443b2fb28da6db367f4de",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Edit",
+        "Split at Playhead"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.edit.rename-clip",
+      "kind": "command",
+      "label": "Rename Clip",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:bd278f5d98f3c2c707c5f5b9609b8329bee707ca1774c2cdabd20872cad25408",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Edit",
+        "Rename Clip"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.edit.delete-clip",
+      "kind": "command",
+      "label": "Delete Clip",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:8a6ff660ea7123844ae2e47684a0cab3397cdb9d88785a66087fb0c89693e871",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Edit",
+        "Delete Clip"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.help.guided-tour",
+      "kind": "command",
+      "label": "Guided Tour",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:a544bc093bf7bc6d9d865b2aaca0a9302489c07a1d0f9ce3f94b5728cdff2b43",
+      "sourceRef": "apps/CreationStation/Source/Views/TourGuideOverlay.cpp",
+      "uiPath": [
+        "Help",
+        "Guided Tour"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.help.feedback",
+      "kind": "command",
+      "label": "Send Feedback...",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:3cd5f4f77308c48ce299a8fabea7b9e959ebd03712cdad70e3b4a7f73dd426e5",
+      "sourceRef": "apps/CreationStation/Source/Views/FeedbackDialog.cpp",
+      "uiPath": [
+        "Help",
+        "Send Feedback..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.add-track",
+      "kind": "workflow",
+      "label": "Add a track",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:8e271f5fafed3d3bc228ea424b03e102da33a7c45768a0b0d9e12e47278a24f2",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "right-click the timeline"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.track-kind",
+      "kind": "control",
+      "label": "Track kind",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:37399b70999784c606b542fd09dc4c405f87528db069b9cd4f5f82006abc71e9",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "track header",
+        "kind"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.arm",
+      "kind": "control",
+      "label": "Arm",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:ca6f7d49bbde8d7e530821b4f335bf3d2ab50f5c34a97ae6be3d322f5b293589",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "track header",
+        "Arm"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.monitor",
+      "kind": "control",
+      "label": "Monitor (Mon)",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:d14df052b74a5c6c419798cbe16baac1a28a042737dc31bad583a30321784a57",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "track header",
+        "Mon"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.mute-solo",
+      "kind": "control",
+      "label": "Mute and Solo",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:19e47de24b28b67fb4bbcf412dca4e3b4d57001276daf114ad2a365d319ba1c1",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "track header",
+        "M / S"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.channel-mode",
+      "kind": "control",
+      "label": "Mono / stereo",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:4e836ba69428a54e7311003ffa208734522a406861fc760ed90dd8c37ffebcaf",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "track header",
+        "Mono/ST"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.input-source",
+      "kind": "control",
+      "label": "Audio input source",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:9f6a311601da8dfd02f2c12f14c0709dc2a4f0f85b32a303f523d45872b2f40c",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "track header",
+        "input"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.timing",
+      "kind": "control",
+      "label": "Project timing",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:06b3b17ac6796310eaa14d87715b959c69771d961bf9efe8718ef2c67314e865",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "timing bar"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.snap-grid",
+      "kind": "control",
+      "label": "Snap and grid",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:ee2dfef54024db707a83d25aa726ca5c21d7ed661717f0bba9ec46136721aac4",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "Snap"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.markers",
+      "kind": "workflow",
+      "label": "Markers",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:e663d2eebb6cfa3e877d8ce7f15b458d5583aa9c9d094f718454781666f51dd0",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "right-click the timeline",
+        "Add Marker Here"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.pitch-pipe",
+      "kind": "control",
+      "label": "Pitch Pipe",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:e621749647c2150392f348a3046406ca097de4903cee580e6fed6e79662a10ef",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "Pitch Pipe"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.clip-menu",
+      "kind": "control",
+      "label": "Clip menu",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:c7e8bac995278fd5f7162b6cf6d567d5bdb421de68a023bbef2b396ec22cebd6",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "right-click a clip"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.add-clip",
+      "kind": "workflow",
+      "label": "Add a clip to a track",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:1991ade7a84656b7d0cfb0a89cbf1298636221db8cd68cf8af90ff6b5599db09",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp (showAddClipPicker)",
+      "uiPath": [
+        "Tracker",
+        "right-click an empty spot on a track",
+        "Add Clip..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.drop-files",
+      "kind": "workflow",
+      "label": "Drop files on the Tracker",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:8e89cea93493b861d76036ae5c32cc8ed2a23921ff42e0f332840d1bdfed65f7",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "drag and drop"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.automation",
+      "kind": "workflow",
+      "label": "Automation",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:46ffefc8a25398c05a9a23c5fef70692a462c61f4c37ea5aabc87180b2651997",
+      "sourceRef": "apps/CreationStation/Source/Views/TrackerPanel.cpp",
+      "uiPath": [
+        "Tracker",
+        "automation track"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.split-sound",
+      "kind": "command",
+      "label": "Split sound onto its own track",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:2b116f069569d7480de2e6993092a4a2e760a5b58e86966858139021b23e7c9f",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Tracker",
+        "right-click a video clip"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.tracker.video-effects",
+      "kind": "command",
+      "label": "Video effects and layout...",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:9d73ffd0a7840f70e3b1d8e0624a4b1ad2b6f159796e34d4514e6f2b19c019d5",
+      "sourceRef": "apps/CreationStation/Source/Views/VideoClipSettingsPanel.h",
+      "uiPath": [
+        "Tracker",
+        "right-click a video clip"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.signal-lab.play",
+      "kind": "workflow",
+      "label": "Play a signal",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:ab3edcd8c9cff0cb1049be4a7eac45e9cedb93ea75c8c7f6260bf84659ef313e",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "Signal",
+        "Play"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.signal-lab.nodes",
+      "kind": "control",
+      "label": "Node palette",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:253c43dafef77342f7aa82ea51fa104451a958310c4254b3181f90616fb82622",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "Signal",
+        "right-click the canvas"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.signal-lab.variables",
+      "kind": "control",
+      "label": "Variables",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:0b8b4b4ad6911b0bb1e9ac068543240c51c47b0a7a3c79b46cb9b47c099b4634",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "Signal",
+        "Variables",
+        "+ Variable"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.signal-lab.compile",
+      "kind": "command",
+      "label": "Compile",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:753136894f1e17bb5a3bcd43fa61c709bad6cb1f46e1934ce8e71d75aec356e6",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp",
+      "uiPath": [
+        "Signal",
+        "Compile"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.recording.take",
+      "kind": "workflow",
+      "label": "Record a take",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:1f64cfe3393c2364935d26be06f74193011da1be52c5e0345e513210b02eaafa",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "Header",
+        "Record"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.mixer.channel",
+      "kind": "control",
+      "label": "Mixer channel",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:9d170696c742ea1ef87b62b3154b8c61b6a2931f1479c62b687bbb4db4c57096",
+      "sourceRef": "apps/CreationStation/Source/Views/MixerPanel.cpp",
+      "uiPath": [
+        "Layers",
+        "channel strip"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.plugins.vst-folders",
+      "kind": "workflow",
+      "label": "VST folders and rescan",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:486c9cd6fcbcd8d5800fa0464fc34e22bdfaf7bf83606e247b0fc7d3c118f237",
+      "sourceRef": "apps/CreationStation/Source/Views/PluginsPanel.cpp",
+      "uiPath": [
+        "Plugins",
+        "VST Folders"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.plugins.load-insert",
+      "kind": "workflow",
+      "label": "Load a plugin to an insert",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:92310f4ba57d7c6c326f82a4e0ad0e68bcb3baf9ac975326e8eb51adf4d5d35b",
+      "sourceRef": "apps/CreationStation/Source/Views/PluginsPanel.cpp",
+      "uiPath": [
+        "Plugins",
+        "Load To Insert"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.sampler.build-pack",
+      "kind": "workflow",
+      "label": "Build a sample pack",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:3b3c1795e0cb6e138505f85a5f4cab280c252ab98dc285991d7959d70205d645",
+      "sourceRef": "apps/CreationStation/Source/Views/SamplePackBuilderPanel.cpp",
+      "uiPath": [
+        "Sampler",
+        "Build Sample Pack"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.foley.build-pod",
+      "kind": "workflow",
+      "label": "Generate FRust and build a pod",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:3a364ca059822670ff72fe2c03a766afc24cca0c9f83d86b10a5248eb577a7b9",
+      "sourceRef": "apps/CreationStation/Source/Views/FoleyPanel.cpp",
+      "uiPath": [
+        "Foley",
+        "Generate FRust / Build Pod"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.script.compile",
+      "kind": "workflow",
+      "label": "Compile FRust source",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:35b4c7a9d9b3be42a8d37bc188297b81daecab6a6991879f9fb088145cf7126b",
+      "sourceRef": "apps/CreationStation/Source/Views/DslPanel.cpp",
+      "uiPath": [
+        "Script",
+        "Compile"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.score.notation",
+      "kind": "workflow",
+      "label": "Score notation",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:1ee5189920fd78cf23151b13cb50a3b727658664cb607f0a8a71ee247c757f83",
+      "sourceRef": "apps/CreationStation/Source/Views/ScorePanel.cpp",
+      "uiPath": [
+        "Score"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.virtual-engineer.chat",
+      "kind": "workflow",
+      "label": "Ask the Virtual Engineer",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:1b98d48747079da456c0c7a6489e7dab5a8991139efa2134eb9486139eb2137c",
+      "sourceRef": "apps/CreationStation/Source/Views/AiPanel.cpp",
+      "uiPath": [
+        "Virtual Engineer"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.control-surface.midi",
+      "kind": "workflow",
+      "label": "Control surfaces",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:70bfac5b829df8a7fb9cbca9b9ce01c04beaa120d450a6167cbf34758086dde1",
+      "sourceRef": "apps/CreationStation/Source/ControlSurface/XTouchControlSurface.cpp",
+      "uiPath": [
+        "Settings",
+        "MIDI"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.storage.first-run",
+      "kind": "workflow",
+      "label": "Choose the storage folder",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:4d9348ff6da048a924a991be59376acfd6f31178a8eed6bf825aac1604f7732c",
+      "sourceRef": "apps/CreationStation/Source/shared/UI/src/SuiteJUCEApplication.cpp",
+      "uiPath": [
+        "first start"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.storage.folder",
+      "kind": "setting",
+      "label": "Storage folder",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:9a96679003406aa5df811ee77eb127a8a3906059bb617482ecdc70bf756a2004",
+      "sourceRef": "apps/CreationStation/Source/shared/AssetSystem/src/SuiteSettings.cpp",
+      "uiPath": [
+        "Suite settings",
+        "Storage"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.project.manage",
+      "kind": "workflow",
+      "label": "Create, open, rename, clone, delete a project",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:4b3c7b42443d0d856d05bc167d06700babb029863545a5bb04700335be7a389c",
+      "sourceRef": "apps/CreationStation/Source/shared/UI/src/SuiteShellController.cpp",
+      "uiPath": [
+        "Header",
+        "Project"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.assets.import-media",
+      "kind": "workflow",
+      "label": "Bring media into a project",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:9884229e5d171fc0d46209353473904c615a4e1d3d412c2287644079d88174b4",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp",
+      "uiPath": [
+        "File",
+        "Import..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.assets.browse",
+      "kind": "workflow",
+      "label": "Browse project assets",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:d850cf026e374d5cb49f689164f4cee09577d4f6a2c9b20c8380cdb1ca429e6c",
+      "sourceRef": "apps/CreationStation/Source/shared/UI/src/SuiteAssetManagerPanel.cpp",
+      "uiPath": [
+        "Header",
+        "Assets"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.video.import-play",
+      "kind": "workflow",
+      "label": "Import and play a video",
+      "owner": "Djehuti Station",
+      "documentation": "required",
+      "behaviorSignature": "sha256:cf64081f672104914e84b0b78635077dfcf23ec3cf97e7d20cc4b46eb3fe0bce",
+      "sourceRef": "apps/CreationStation/Source/MainComponent.cpp; Video/",
+      "uiPath": [
+        "File",
+        "Import..."
+      ]
+    },
+    {
+      "helpId": "djehuti.station.video.layers",
+      "kind": "workflow",
+      "label": "Layer videos",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:0c3468e8fcbb01ea3bc9dd61c9cef23db52e012d7189a93979b9828f59ec184e",
+      "sourceRef": "apps/CreationStation/Source/Video/Gl/VideoGlView.cpp",
+      "uiPath": [
+        "Tracker",
+        "video tracks"
+      ]
+    },
+    {
+      "helpId": "djehuti.station.error.no-sound",
+      "kind": "error",
+      "label": "No sound",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:d045e5f0b77c28faf51e07d284720e80728a224480727734e132691a45e48f76",
+      "sourceRef": "apps/CreationStation/Source/Views/SignalLabPanel.cpp"
+    },
+    {
+      "helpId": "djehuti.station.error.video-decode",
+      "kind": "error",
+      "label": "Video will not show",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:86111b08fa84c9b777536fe4a1f098b55448f3a607e4029d5bec5392dfa58686",
+      "sourceRef": "apps/CreationStation/Source/Video/VideoDecodeService.cpp"
+    },
+    {
+      "helpId": "djehuti.station.error.service",
+      "kind": "error",
+      "label": "Project service problem",
+      "owner": "Djehuti Station",
+      "documentation": "recommended",
+      "behaviorSignature": "sha256:6881c9973107da0a0701dfbe0370146343ab8e60d16eaea55a41efda88064e5e",
+      "sourceRef": "apps/CreationStation/Source/shared/AssetSystem/src/SuiteVfsServiceClient.cpp"
+    }
+  ]
+}

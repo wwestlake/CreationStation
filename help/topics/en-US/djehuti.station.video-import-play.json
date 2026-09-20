@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.video-import-play",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Import and play a video",
+  "summary": "Import a video, place it on a video track, and press Play: the Video panel shows the picture and the video's sound plays through its own track.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.video.import-play",
+      "anchorBlockId": "import",
+      "verifiedBehaviorSignature": "sha256:cf64081f672104914e84b0b78635077dfcf23ec3cf97e7d20cc4b46eb3fe0bce"
+    },
+    {
+      "helpId": "djehuti.station.view.video",
+      "anchorBlockId": "import",
+      "verifiedBehaviorSignature": "sha256:18befeef28411a98660db77593d34c56c7b48f766855ad92be2deb01ef351850"
+    }
+  ],
+  "keywords": [
+    "video",
+    "import video",
+    "play video",
+    "mp4",
+    "Video panel",
+    "picture",
+    "decode"
+  ],
+  "alternateQueries": [
+    "How do I import a video?",
+    "Why is there no video window?",
+    "How do I play a video?",
+    "Can I export the video?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.assets-import"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.video-layers-green-screen"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.video-sound-split"
+    },
+    {
+      "type": "troubleshoots",
+      "topicId": "djehuti.station.troubleshoot-video"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "import",
+      "kind": "steps",
+      "title": "Bring a video in",
+      "steps": [
+        {
+          "id": "import",
+          "instruction": "Choose File > Import... and add the video (mp4, mov, mkv, avi, webm or m4v), or drop it on the Tracker.",
+          "expectedResult": "A progress window copies it into the project. Its original is kept and its sound is extracted as a WAV.",
+          "uiTarget": "djehuti.station.file.import"
+        },
+        {
+          "id": "place",
+          "instruction": "If you imported without dropping, right-click a video track and choose Add Clip..., then pick the video.",
+          "expectedResult": "A video clip appears on a video track."
+        }
+      ]
+    },
+    {
+      "id": "play",
+      "kind": "steps",
+      "title": "Play it",
+      "steps": [
+        {
+          "id": "play",
+          "instruction": "Press Play in the header.",
+          "expectedResult": "The Video panel opens and shows the picture at the playhead; the sound plays through the video's track.",
+          "uiTarget": "djehuti.station.transport.play"
+        }
+      ]
+    },
+    {
+      "id": "panel",
+      "kind": "paragraph",
+      "text": "The Video panel can be docked or floated like any panel. The picture is drawn on the graphics card, and its resolution follows the size of the panel: a bigger window gives a sharper picture. A status strip under the picture reports what the video side is doing."
+    },
+    {
+      "id": "storage",
+      "kind": "paragraph",
+      "text": "The video is stored inside the project and read from it in pieces while it plays; it is not copied out to a file."
+    },
+    {
+      "id": "limits",
+      "kind": "note",
+      "text": "Video can be layered and lightly effected but cannot yet be rendered out as a finished video file. Some containers and codecs (MKV, WebM, HEVC) depend on codecs installed in Windows."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (runVideoImport, openVideoViewForPlayback)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Video/"
+      }
+    ]
+  }
+}

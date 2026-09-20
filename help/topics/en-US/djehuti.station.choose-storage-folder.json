@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.choose-storage-folder",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Choose the storage folder",
+  "summary": "Pick the folder where Station keeps its data on first start, or see where it currently is.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.storage.first-run",
+      "anchorBlockId": "first-start",
+      "verifiedBehaviorSignature": "sha256:4d9348ff6da048a924a991be59376acfd6f31178a8eed6bf825aac1604f7732c"
+    },
+    {
+      "helpId": "djehuti.station.storage.folder",
+      "anchorBlockId": "first-start",
+      "verifiedBehaviorSignature": "sha256:9a96679003406aa5df811ee77eb127a8a3906059bb617482ecdc70bf756a2004"
+    }
+  ],
+  "keywords": [
+    "choose folder",
+    "first run",
+    "storage folder",
+    "setup",
+    "install"
+  ],
+  "alternateQueries": [
+    "How do I set up Station the first time?",
+    "How do I change the storage folder?",
+    "What folder should I choose?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.storage-vfs"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "first-start",
+      "kind": "steps",
+      "title": "First start",
+      "steps": [
+        {
+          "id": "start",
+          "instruction": "Start Djehuti Station for the first time.",
+          "expectedResult": "A message asks where the suite should keep its data."
+        },
+        {
+          "id": "choose",
+          "instruction": "Choose Choose folder... and pick or create a folder on a drive with plenty of space.",
+          "expectedResult": "The application opens."
+        }
+      ]
+    },
+    {
+      "id": "existing",
+      "kind": "paragraph",
+      "text": "If the folder you pick already contains a Djehuti storage container (a vfs.bin file), Station uses the projects and settings already in it."
+    },
+    {
+      "id": "where-now",
+      "kind": "paragraph",
+      "text": "The suite settings (the gear button in the header) show the current storage folder on the Storage tab."
+    },
+    {
+      "id": "cancel",
+      "kind": "warning",
+      "text": "Cancelling the folder chooser closes the application. There is no default folder."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/SuiteJUCEApplication.cpp (requireStorageRoot)"
+      }
+    ]
+  }
+}

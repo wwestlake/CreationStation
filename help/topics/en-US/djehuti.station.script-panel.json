@@ -1,0 +1,82 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.script-panel",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Script (FRust) panel",
+  "summary": "The Script panel edits FRust source, the Djehuti Suite language, and checks it with Compile.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.script",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:3553d2da825d81fb35ce47c5a04ad0e2006f82bd1de9a39de0311855b2cb97b5"
+    },
+    {
+      "helpId": "djehuti.station.script.compile",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:35b4c7a9d9b3be42a8d37bc188297b81daecab6a6991879f9fb088145cf7126b"
+    }
+  ],
+  "keywords": [
+    "FRust",
+    "script",
+    "compile",
+    "language",
+    "Djehuti Suite Language"
+  ],
+  "alternateQueries": [
+    "How do I compile FRust?",
+    "What is the Script panel?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.foley"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "what",
+      "kind": "paragraph",
+      "text": "The Script panel is titled Djehuti Suite Language (FRust). It has a source editor and an output area. Press Compile to check the source: the output says \"Compiled cleanly.\" or shows the compiler's messages."
+    },
+    {
+      "id": "save-load",
+      "kind": "paragraph",
+      "text": "Save to your library keeps the source; Load a saved .frust file brings one back; Export becomes available after a clean compile."
+    },
+    {
+      "id": "temp-files",
+      "kind": "warning",
+      "text": "Compile runs the FRust compiler, which works on files, so pressing it writes two temporary files. Compiling only happens when you press Compile."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/DslPanel.cpp"
+      }
+    ]
+  }
+}

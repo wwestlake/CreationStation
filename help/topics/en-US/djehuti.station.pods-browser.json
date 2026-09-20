@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.pods-browser",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Browse Frate pods",
+  "summary": "The Pods button opens a browser of the Frust package registry, where you can find and install pods.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.pods",
+      "anchorBlockId": "browse",
+      "verifiedBehaviorSignature": "sha256:76649a2accf3b69b9d6284a41b4c1e4206cd66047f3a84ad3179fa663d639192"
+    }
+  ],
+  "keywords": [
+    "pods",
+    "Frate",
+    "package registry",
+    "FRust package",
+    "install pod"
+  ],
+  "alternateQueries": [
+    "What are pods?",
+    "How do I install a pod?",
+    "What is Frate?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.foley"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "browse",
+      "kind": "steps",
+      "title": "Browse pods",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Click Pods in the header.",
+          "expectedResult": "The Frate Pods browser opens.",
+          "uiTarget": "djehuti.station.view.pods"
+        }
+      ]
+    },
+    {
+      "id": "registry",
+      "kind": "paragraph",
+      "text": "It browses the Frust package registry. No sign-in is needed to browse or install. If the registry cannot be reached the browser says \"Could not reach the pod registry.\""
+    },
+    {
+      "id": "what-is-a-pod",
+      "kind": "paragraph",
+      "text": "A pod is a reusable package of FRust code. The Foley panel can build a graph into a pod and add pods to its node palette."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/SuiteShellController.cpp (Frate pods browser)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/FoleyPanel.cpp"
+      }
+    ]
+  }
+}

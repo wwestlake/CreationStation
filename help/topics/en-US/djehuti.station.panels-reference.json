@@ -1,0 +1,220 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.panels-reference",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Panels in Djehuti Station",
+  "summary": "What each panel is for: Tracker, Sampler, Signal, Layers, Plugins, Script, Capture, Score, Settings, Foley, Video, Track Insert and Virtual Engineer.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.tracker",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:8f6fb076807e775ae5f1bfff8b3d695b53784e6942088c21f4e2c6cb24fdf3c2"
+    },
+    {
+      "helpId": "djehuti.station.view.sampler",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:ea400554d55cd40322ee60ab31686372fbc4d16fed3cfeb0060de98422fa79c4"
+    },
+    {
+      "helpId": "djehuti.station.view.signal-lab",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:c08cb233bc46b4ec41c119b87ca0353cbbd060bf3e59f66ce22591d4a95a25c4"
+    },
+    {
+      "helpId": "djehuti.station.view.layers",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:4d89cf6c3a84cb22209c7f6e1a6dc6c3518ea080726486ab23a95adc1e2d5633"
+    },
+    {
+      "helpId": "djehuti.station.view.plugins",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:783e45059c5959220b66faa3f06209f3354ee9ddc74e779f899e4088fae99ecf"
+    },
+    {
+      "helpId": "djehuti.station.view.script",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:3553d2da825d81fb35ce47c5a04ad0e2006f82bd1de9a39de0311855b2cb97b5"
+    },
+    {
+      "helpId": "djehuti.station.view.capture",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:e421279104788ebcf37fa67e782e92633b4e557a26c8a14740047864cffeb8f2"
+    },
+    {
+      "helpId": "djehuti.station.view.score",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:e7c7a0022bf470ec6b3cc75ebcd3903b81e3e7dd9aa15919cb860eec20cc3c4d"
+    },
+    {
+      "helpId": "djehuti.station.view.settings",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:333f9020d91ba912013738fa7b04617c773996a28b6bd871d06569a959acabb3"
+    },
+    {
+      "helpId": "djehuti.station.view.foley",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:d159bd5d1ddab9f2f8b8ac2912a7e655e75374bf1071ab6f5ebdb5f804c3c4f8"
+    },
+    {
+      "helpId": "djehuti.station.view.video",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:18befeef28411a98660db77593d34c56c7b48f766855ad92be2deb01ef351850"
+    },
+    {
+      "helpId": "djehuti.station.view.track-insert",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:9cbfd6574bd0d5e82157de6d39842c56d26de4b6b58fbca3790eb7a838e0fe89"
+    },
+    {
+      "helpId": "djehuti.station.view.virtual-engineer",
+      "anchorBlockId": "how-to-open",
+      "verifiedBehaviorSignature": "sha256:9b17a2d8bcc6ab62e7230cf24a3bae617c6f90045de99d64c4d2e29e30d1b558"
+    }
+  ],
+  "keywords": [
+    "panels",
+    "View menu",
+    "Tracker",
+    "Layers",
+    "Signal Lab",
+    "Plugins",
+    "Capture",
+    "Score",
+    "Foley",
+    "Script",
+    "Video",
+    "Track Insert",
+    "Sampler"
+  ],
+  "alternateQueries": [
+    "What does the Layers panel do?",
+    "Where is the mixer?",
+    "What is the Signal panel?",
+    "What is Foley?",
+    "How do I open a panel?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.workspace-layout"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "how-to-open",
+      "kind": "paragraph",
+      "text": "Open or close a panel from the View menu. A checked entry means the panel is open."
+    },
+    {
+      "id": "tracker",
+      "kind": "definition",
+      "term": "Tracker",
+      "definition": "The timeline. Tracks run across, clips sit on tracks, and the playhead moves along the top. This is where you arrange audio, MIDI, automation, Signal, Foley and video material."
+    },
+    {
+      "id": "layers",
+      "kind": "definition",
+      "term": "Layers",
+      "definition": "The mixing console: channel strips in banks, with Mute, Solo and FX per channel and Bank - / Bank + to page through channels."
+    },
+    {
+      "id": "signal",
+      "kind": "definition",
+      "term": "Signal (Signal Lab)",
+      "definition": "A node-graph sound designer. You wire sources such as oscillators through processing nodes to a Sink and play the result live. Signals can be saved, rendered to the project and placed on the timeline."
+    },
+    {
+      "id": "plugins",
+      "kind": "definition",
+      "term": "Plugins (Plugin Studio)",
+      "definition": "Manage the folders searched for VST plugins, browse the plugins found, and load one into a track's insert chain. Build Sample Pack opens the sample pack builder."
+    },
+    {
+      "id": "sampler",
+      "kind": "definition",
+      "term": "Sampler (Sample Pack Builder)",
+      "definition": "Turns a folder of scattered single-note recordings into a chromatic sample pack."
+    },
+    {
+      "id": "capture",
+      "kind": "definition",
+      "term": "Capture (Capture Booth)",
+      "definition": "Arm source lanes, monitor inputs and grab fresh material for Foley and sound design; recent captures are listed here."
+    },
+    {
+      "id": "score",
+      "kind": "definition",
+      "term": "Score (Score Studio)",
+      "definition": "Compose with notation: a grand staff or piano roll, notes, lyrics, teaching cues and an AI composition coach."
+    },
+    {
+      "id": "foley",
+      "kind": "definition",
+      "term": "Foley",
+      "definition": "A node-graph editor for sequencing and choice logic. It generates FRust source and can build a reusable pod."
+    },
+    {
+      "id": "script",
+      "kind": "definition",
+      "term": "Script",
+      "definition": "The Djehuti Suite Language (FRust) editor with a Compile button."
+    },
+    {
+      "id": "video",
+      "kind": "definition",
+      "term": "Video",
+      "definition": "The picture window for video clips. It opens when you press Play with video on the timeline. A status strip under the picture reports what the video side is doing."
+    },
+    {
+      "id": "track-insert",
+      "kind": "definition",
+      "term": "Track Insert",
+      "definition": "The insert (effects) chain of the selected track, or of the master when no track is selected."
+    },
+    {
+      "id": "settings",
+      "kind": "definition",
+      "term": "Settings",
+      "definition": "Audio system, input and output devices, MIDI, startup, storage and tool settings, with a search box."
+    },
+    {
+      "id": "virtual-engineer",
+      "kind": "definition",
+      "term": "Virtual Engineer",
+      "definition": "An AI assistant panel. It answers questions and helps with building and debugging, using one of your suite AI accounts."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/"
+      }
+    ]
+  }
+}

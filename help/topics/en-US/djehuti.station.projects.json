@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.projects",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Create, open, rename, clone and delete projects",
+  "summary": "Use the Project button in the header to manage projects.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.project-manager",
+      "anchorBlockId": "open-manager",
+      "verifiedBehaviorSignature": "sha256:4315e6adab9cb50b56126be59f48b84f8710f2b61f0a60a370d33569decd02f5"
+    },
+    {
+      "helpId": "djehuti.station.project.manage",
+      "anchorBlockId": "open-manager",
+      "verifiedBehaviorSignature": "sha256:4b3c7b42443d0d856d05bc167d06700babb029863545a5bb04700335be7a389c"
+    }
+  ],
+  "keywords": [
+    "project",
+    "new project",
+    "open project",
+    "rename",
+    "clone",
+    "delete",
+    "project manager"
+  ],
+  "alternateQueries": [
+    "How do I create a new project?",
+    "How do I open another project?",
+    "How do I delete a project?",
+    "How do I copy a project?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.storage-vfs"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "open-manager",
+      "kind": "steps",
+      "title": "Open the project manager",
+      "steps": [
+        {
+          "id": "click-project",
+          "instruction": "Click the Project button in the header.",
+          "expectedResult": "The Djehuti Suite Project Manager opens with the list of projects.",
+          "uiTarget": "djehuti.station.view.project-manager"
+        }
+      ]
+    },
+    {
+      "id": "new",
+      "kind": "definition",
+      "term": "New Project...",
+      "definition": "Asks for a name and creates a project. The Tracker starts empty."
+    },
+    {
+      "id": "open",
+      "kind": "definition",
+      "term": "Open Project",
+      "definition": "Opens the selected project in Station."
+    },
+    {
+      "id": "rename",
+      "kind": "definition",
+      "term": "Rename",
+      "definition": "Changes the project's display name."
+    },
+    {
+      "id": "clone",
+      "kind": "definition",
+      "term": "Clone...",
+      "definition": "Asks for a name and makes a copy of the selected project."
+    },
+    {
+      "id": "delete",
+      "kind": "definition",
+      "term": "Delete Project",
+      "definition": "Permanently deletes the selected project after you type DELETE exactly to confirm. It cannot be undone."
+    },
+    {
+      "id": "scope",
+      "kind": "note",
+      "text": "A project shows only its own assets. Projects are not owned by one application; any suite application can open them."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/SuiteShellController.cpp"
+      }
+    ]
+  }
+}

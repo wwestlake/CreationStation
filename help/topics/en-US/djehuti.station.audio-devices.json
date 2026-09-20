@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.audio-devices",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Choose your audio devices",
+  "summary": "Use the Audio button to pick the input and output devices, sample rate and buffer size.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.audio-devices",
+      "anchorBlockId": "choose",
+      "verifiedBehaviorSignature": "sha256:20431a2b3022817245930884bf366eb843c4330bbf503df9b5012047f96e9b05"
+    },
+    {
+      "helpId": "djehuti.station.view.settings",
+      "anchorBlockId": "choose",
+      "verifiedBehaviorSignature": "sha256:333f9020d91ba912013738fa7b04617c773996a28b6bd871d06569a959acabb3"
+    }
+  ],
+  "keywords": [
+    "audio",
+    "audio device",
+    "input device",
+    "output device",
+    "sample rate",
+    "buffer size",
+    "ASIO",
+    "headphones",
+    "microphone"
+  ],
+  "alternateQueries": [
+    "How do I choose my headphones?",
+    "Why can I not hear anything?",
+    "How do I choose a microphone?"
+  ],
+  "relations": [
+    {
+      "type": "troubleshoots",
+      "topicId": "djehuti.station.troubleshoot-no-sound"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.recording"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "choose",
+      "kind": "steps",
+      "title": "Choose devices",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Click Audio in the header.",
+          "expectedResult": "The Audio Devices window opens.",
+          "uiTarget": "djehuti.station.view.audio-devices"
+        },
+        {
+          "id": "pick",
+          "instruction": "Choose your output device (and input device if you record).",
+          "expectedResult": "Sound plays through the chosen device."
+        }
+      ]
+    },
+    {
+      "id": "settings-panel",
+      "kind": "paragraph",
+      "text": "The Settings panel also lists the audio system, the input and output device and the detected input sources, and shows audio diagnostics once a device is active. Your device choices are remembered."
+    },
+    {
+      "id": "midi",
+      "kind": "paragraph",
+      "text": "In Settings under MIDI, devices feed every enabled track by default (Omni). You can route a device to one track."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (showAudioSettings)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SettingsPanel.cpp"
+      }
+    ]
+  }
+}

@@ -1,0 +1,483 @@
+{
+  "note": "Interim, hand-authored behavior descriptors. The canonical JSON of each descriptor (sorted keys, no whitespace) is hashed into that item's behaviorSignature in help-inventory.json. Phase 2 replaces this file by generating the inventory from Station's own command and view registries.",
+  "descriptors": {
+    "djehuti.station.app": {
+      "results": [
+        "a music, audio and video workstation window with dockable panels"
+      ],
+      "sideEffects": [
+        "asks for the storage folder on first start",
+        "starts the VFS service when needed"
+      ]
+    },
+    "djehuti.station.view.tracker": {
+      "results": [
+        "timeline of tracks and clips",
+        "per-track arm, monitor, mute, solo, FX controls"
+      ]
+    },
+    "djehuti.station.view.sampler": {
+      "results": [
+        "Sample Pack Builder"
+      ]
+    },
+    "djehuti.station.view.signal-lab": {
+      "results": [
+        "node-graph sound designer",
+        "live play through the audio engine"
+      ]
+    },
+    "djehuti.station.view.layers": {
+      "results": [
+        "mixing console with banks of channels"
+      ]
+    },
+    "djehuti.station.view.plugins": {
+      "results": [
+        "VST folders, plugin browser, load to insert"
+      ]
+    },
+    "djehuti.station.view.script": {
+      "results": [
+        "FRust source editor with Compile"
+      ]
+    },
+    "djehuti.station.view.capture": {
+      "results": [
+        "capture booth: arm and monitor tracks, recent captures"
+      ]
+    },
+    "djehuti.station.view.score": {
+      "results": [
+        "Score Studio: staff and piano roll notation, lyrics, play score"
+      ]
+    },
+    "djehuti.station.view.settings": {
+      "results": [
+        "audio, MIDI, startup, storage, tools settings with search"
+      ]
+    },
+    "djehuti.station.view.foley": {
+      "results": [
+        "node graph for sequencing and choice logic, generated as FRust"
+      ]
+    },
+    "djehuti.station.view.video": {
+      "results": [
+        "GPU-drawn picture of the video clips under the playhead",
+        "status strip"
+      ]
+    },
+    "djehuti.station.view.track-insert": {
+      "results": [
+        "insert (effects) chain of the selected track or master"
+      ]
+    },
+    "djehuti.station.view.virtual-engineer": {
+      "results": [
+        "chat assistant with modes and permission policies"
+      ]
+    },
+    "djehuti.station.view.reset-layout": {
+      "results": [
+        "panels return to the default arrangement"
+      ]
+    },
+    "djehuti.station.view.project-manager": {
+      "results": [
+        "project list with New, Open, Rename, Clone, Delete"
+      ],
+      "sideEffects": [
+        "delete requires typing DELETE"
+      ]
+    },
+    "djehuti.station.view.suite-settings": {
+      "results": [
+        "suite-wide settings including the storage folder"
+      ]
+    },
+    "djehuti.station.view.audio-devices": {
+      "results": [
+        "audio device selector for input and output devices"
+      ]
+    },
+    "djehuti.station.view.assets-window": {
+      "results": [
+        "project assets list with details, Open/Preview, Stop, Place on Track, Export"
+      ]
+    },
+    "djehuti.station.view.pods": {
+      "results": [
+        "browser of Frate pods"
+      ]
+    },
+    "djehuti.station.transport.play": {
+      "results": [
+        "plays the focused panel: the Tracker arrangement or the Signal Lab sound"
+      ]
+    },
+    "djehuti.station.transport.pause": {
+      "results": [
+        "playback pauses"
+      ]
+    },
+    "djehuti.station.transport.stop": {
+      "results": [
+        "playback and recording stop"
+      ]
+    },
+    "djehuti.station.transport.record": {
+      "results": [
+        "armed audio tracks record; the take is saved into the project when recording stops"
+      ]
+    },
+    "djehuti.station.transport.rewind": {
+      "results": [
+        "playhead moves back"
+      ]
+    },
+    "djehuti.station.transport.fast-forward": {
+      "results": [
+        "playhead moves forward"
+      ]
+    },
+    "djehuti.station.transport.loop": {
+      "results": [
+        "playback repeats the loop region",
+        "delay between loops can be set"
+      ]
+    },
+    "djehuti.station.transport.click": {
+      "results": [
+        "cycles metronome: off, on while playing or recording, always on"
+      ]
+    },
+    "djehuti.station.file.import": {
+      "inputs": [
+        "files or a folder"
+      ],
+      "results": [
+        "audio and video added to the project's assets, not placed on tracks"
+      ],
+      "errors": [
+        "unsupported file type is listed as not imported"
+      ]
+    },
+    "djehuti.station.file.save-project": {
+      "results": [
+        "the project is saved"
+      ]
+    },
+    "djehuti.station.file.new-arrangement": {
+      "results": [
+        "Tracker emptied; asks to save first only when there are unsaved changes; undoable"
+      ]
+    },
+    "djehuti.station.file.save-arrangement": {
+      "inputs": [
+        "a name"
+      ],
+      "results": [
+        "arrangement saved as a project asset"
+      ]
+    },
+    "djehuti.station.file.load-arrangement": {
+      "results": [
+        "a saved arrangement replaces the Tracker contents"
+      ]
+    },
+    "djehuti.station.file.render-full-mix": {
+      "results": [
+        "master mix rendered to the project or to a file"
+      ]
+    },
+    "djehuti.station.file.export-wav": {
+      "results": [
+        "master mix rendered to a WAV file on disk"
+      ]
+    },
+    "djehuti.station.file.new-signal": {
+      "results": [
+        "blank Signal Lab graph"
+      ]
+    },
+    "djehuti.station.file.open-signal": {
+      "results": [
+        "a saved signal loads"
+      ]
+    },
+    "djehuti.station.file.save-signal": {
+      "results": [
+        "signal saved to the library"
+      ]
+    },
+    "djehuti.station.file.render-signal": {
+      "results": [
+        "a WAV render asset added to the project"
+      ]
+    },
+    "djehuti.station.edit.undo": {
+      "results": [
+        "undo goes to the focused panel: Tracker or Signal Lab"
+      ]
+    },
+    "djehuti.station.edit.redo": {
+      "results": [
+        "redo goes to the focused panel"
+      ]
+    },
+    "djehuti.station.edit.duplicate-clip": {
+      "results": [
+        "copy of the selected clip"
+      ]
+    },
+    "djehuti.station.edit.split-clip": {
+      "results": [
+        "selected clip is cut at the playhead"
+      ]
+    },
+    "djehuti.station.edit.rename-clip": {
+      "results": [
+        "clip renamed"
+      ]
+    },
+    "djehuti.station.edit.delete-clip": {
+      "results": [
+        "selected clip removed; undoable"
+      ]
+    },
+    "djehuti.station.help.guided-tour": {
+      "results": [
+        "step-by-step overlay pointing at parts of the window"
+      ]
+    },
+    "djehuti.station.help.feedback": {
+      "results": [
+        "bug report or suggestion sent when Send is pressed"
+      ],
+      "sideEffects": [
+        "usage metrics only if opted in"
+      ]
+    },
+    "djehuti.station.tracker.add-track": {
+      "results": [
+        "new track of a chosen kind"
+      ]
+    },
+    "djehuti.station.tracker.track-kind": {
+      "results": [
+        "audio, MIDI, automation, signal, foley, folder, marker or video"
+      ]
+    },
+    "djehuti.station.tracker.arm": {
+      "results": [
+        "track will record"
+      ]
+    },
+    "djehuti.station.tracker.monitor": {
+      "results": [
+        "track input is heard live"
+      ]
+    },
+    "djehuti.station.tracker.mute-solo": {
+      "results": [
+        "track muted or soloed"
+      ]
+    },
+    "djehuti.station.tracker.channel-mode": {
+      "results": [
+        "Mono records one input; ST records this input and the next as stereo"
+      ]
+    },
+    "djehuti.station.tracker.input-source": {
+      "results": [
+        "choose the track's input"
+      ]
+    },
+    "djehuti.station.tracker.timing": {
+      "results": [
+        "tempo (default 120), time signature (default 4/4), key"
+      ]
+    },
+    "djehuti.station.tracker.snap-grid": {
+      "results": [
+        "snapping to 1 bar, 1/2, 1/4, 1/8, 1/16 or 1/32"
+      ]
+    },
+    "djehuti.station.tracker.markers": {
+      "results": [
+        "named position on the timeline; clicking moves the playhead"
+      ]
+    },
+    "djehuti.station.tracker.pitch-pipe": {
+      "results": [
+        "plays a reference note for 2 seconds"
+      ]
+    },
+    "djehuti.station.tracker.clip-menu": {
+      "results": [
+        "split, rename, duplicate, delete, and for video clips split sound / link / video effects"
+      ]
+    },
+    "djehuti.station.tracker.add-clip": {
+      "results": [
+        "picker offers the assets that fit the track's kind"
+      ]
+    },
+    "djehuti.station.tracker.drop-files": {
+      "results": [
+        "audio and video files are imported and placed where dropped"
+      ]
+    },
+    "djehuti.station.tracker.automation": {
+      "results": [
+        "automation lanes with Touch, Latch or Write recording and curve shapes"
+      ]
+    },
+    "djehuti.station.tracker.split-sound": {
+      "results": [
+        "new audio track linked to the picture"
+      ]
+    },
+    "djehuti.station.tracker.video-effects": {
+      "results": [
+        "green screen and picture-in-picture settings for that clip"
+      ]
+    },
+    "djehuti.station.signal-lab.play": {
+      "results": [
+        "sound plays live; status line says how many sources and wires"
+      ]
+    },
+    "djehuti.station.signal-lab.nodes": {
+      "results": [
+        "Sources, Processing, Routing and Dynamics, I/O and Analysis, Control Surface, Variables"
+      ]
+    },
+    "djehuti.station.signal-lab.variables": {
+      "results": [
+        "named values; drag onto the graph for Get, Alt-drag for Set"
+      ]
+    },
+    "djehuti.station.signal-lab.compile": {
+      "results": [
+        "graph is checked and compiled"
+      ]
+    },
+    "djehuti.station.recording.take": {
+      "results": [
+        "armed tracks record; each take becomes an audio asset and a clip"
+      ]
+    },
+    "djehuti.station.mixer.channel": {
+      "results": [
+        "Mute, Solo and FX per channel; Bank -/+ pages through channels"
+      ]
+    },
+    "djehuti.station.plugins.vst-folders": {
+      "results": [
+        "folders searched for VST plugins; Rescan; Import Path List"
+      ]
+    },
+    "djehuti.station.plugins.load-insert": {
+      "results": [
+        "plugin added to the selected track's insert chain"
+      ]
+    },
+    "djehuti.station.sampler.build-pack": {
+      "inputs": [
+        "a folder of single-note recordings",
+        "an export folder"
+      ],
+      "results": [
+        "a chromatic sample pack"
+      ]
+    },
+    "djehuti.station.foley.build-pod": {
+      "results": [
+        "FRust source; a reusable pod in the project"
+      ]
+    },
+    "djehuti.station.script.compile": {
+      "results": [
+        "Compiled cleanly, or the compiler's messages"
+      ],
+      "sideEffects": [
+        "writes two temporary files"
+      ]
+    },
+    "djehuti.station.score.notation": {
+      "results": [
+        "add, move and remove notes; lyrics; play the score"
+      ]
+    },
+    "djehuti.station.virtual-engineer.chat": {
+      "results": [
+        "chat answers using a suite AI account",
+        "modes Normal, Learn, Research",
+        "permission policies"
+      ]
+    },
+    "djehuti.station.control-surface.midi": {
+      "results": [
+        "X-Touch and BCR2000 presets",
+        "MIDI learn"
+      ]
+    },
+    "djehuti.station.storage.first-run": {
+      "results": [
+        "one folder chosen; the app closes if none is chosen"
+      ],
+      "sideEffects": [
+        "writes the pointer file",
+        "creates vfs.bin"
+      ]
+    },
+    "djehuti.station.storage.folder": {
+      "results": [
+        "where the VFS lives"
+      ]
+    },
+    "djehuti.station.project.manage": {
+      "results": [
+        "project actions through the project manager"
+      ]
+    },
+    "djehuti.station.assets.import-media": {
+      "results": [
+        "files become project assets"
+      ]
+    },
+    "djehuti.station.assets.browse": {
+      "results": [
+        "asset details from the manifest",
+        "Open/Preview, Place on Track, Export"
+      ]
+    },
+    "djehuti.station.video.import-play": {
+      "results": [
+        "video stored in the project; plays in the Video panel; its sound is extracted"
+      ]
+    },
+    "djehuti.station.video.layers": {
+      "results": [
+        "a video on a higher track is drawn in front"
+      ]
+    },
+    "djehuti.station.error.no-sound": {
+      "results": [
+        "playing produces silence"
+      ]
+    },
+    "djehuti.station.error.video-decode": {
+      "results": [
+        "video panel status strip names the decode problem"
+      ]
+    },
+    "djehuti.station.error.service": {
+      "results": [
+        "the project service is out of date or not running"
+      ]
+    }
+  }
+}

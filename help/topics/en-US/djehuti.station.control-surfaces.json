@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.control-surfaces",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Control surfaces: X-Touch and BCR2000",
+  "summary": "Station works with the Behringer X-Touch and BCR2000 control surfaces, with ready-made presets and MIDI learn.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.control-surface.midi",
+      "anchorBlockId": "status",
+      "verifiedBehaviorSignature": "sha256:70bfac5b829df8a7fb9cbca9b9ce01c04beaa120d450a6167cbf34758086dde1"
+    }
+  ],
+  "keywords": [
+    "X-Touch",
+    "BCR2000",
+    "control surface",
+    "MIDI learn",
+    "fader",
+    "knob",
+    "scrub",
+    "jog wheel",
+    "MIDI controller"
+  ],
+  "alternateQueries": [
+    "How do I use my X-Touch?",
+    "Why is my X-Touch not connecting?",
+    "How do I MIDI learn a knob?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.mixer-layers"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.audio-devices"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "status",
+      "kind": "paragraph",
+      "text": "The status line reports the connection: \"MIDI: connected to <device>\" or \"MIDI: no X-Touch or BCR2000 detected yet\"."
+    },
+    {
+      "id": "presets",
+      "kind": "paragraph",
+      "text": "Presets include Behringer Studio (a studio-wide preset for the X-Touch, BCR2000, voice toggles and transport), BCR2000 Mix, BCR2000 Signal (Signal Lab and sound design knobs) and BCR2000 Voice (hands-free voice toggle and talkback controls). The X-Touch is set up for hands-on track mixing and transport control. The active preset is named in the status line."
+    },
+    {
+      "id": "bank",
+      "kind": "paragraph",
+      "text": "Surface faders follow the mixer's bank: paging channels in the Layers panel pages the surface too."
+    },
+    {
+      "id": "scrub",
+      "kind": "paragraph",
+      "text": "A surface button toggles scrub mode; the header then shows a SCRUB indicator. Jog-wheel scrubbing is not fully wired up yet."
+    },
+    {
+      "id": "learn",
+      "kind": "paragraph",
+      "text": "MIDI learn binds a control to a Signal Lab Fader or Button Control node. Mappings are stored in the project storage, not in a file on your computer."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/ControlSurface/"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      }
+    ]
+  }
+}

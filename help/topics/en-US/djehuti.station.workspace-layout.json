@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.workspace-layout",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "The Station window: header, menus, tabs and panels",
+  "summary": "The window has a header with the project, transport and shortcut buttons, a menu bar (File, Edit, View, Help), and a dock area where panels appear as tabs, side-by-side or floating.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.reset-layout",
+      "anchorBlockId": "header",
+      "verifiedBehaviorSignature": "sha256:aee2109762e2c527c9ff855d8663305e781ed797d2d74b89eb47ea27c69a0aa2"
+    },
+    {
+      "helpId": "djehuti.station.app",
+      "anchorBlockId": "header",
+      "verifiedBehaviorSignature": "sha256:31baeb3f59c0a2fdb9ac3240cf0161111c96ffdcb8b6841a2206548422d6e692"
+    }
+  ],
+  "keywords": [
+    "header",
+    "menu bar",
+    "dock",
+    "layout",
+    "tabs",
+    "floating panel",
+    "reset layout"
+  ],
+  "alternateQueries": [
+    "How do I reset the layout?",
+    "How do I move a panel?",
+    "Where are the buttons at the top?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.menus-reference"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.transport-reference"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "header",
+      "kind": "paragraph",
+      "text": "At the top is the header. It shows the application name, the suite application icons, a Project button (the current project's name), a gear button for suite settings, and the buttons Audio, Assets, Pods, Tour, a ? button (about this application) and Sign In. Below them are the transport controls."
+    },
+    {
+      "id": "menu-bar",
+      "kind": "paragraph",
+      "text": "Under the header is the menu bar: File, Edit, View and Help. The File menu changes with the panel that has focus (see the menus reference)."
+    },
+    {
+      "id": "dock",
+      "kind": "paragraph",
+      "text": "Panels live in the dock area. Each panel has a tab. You can drag a tab to dock it beside another panel, drop it onto another panel's tab strip to make a tabbed group, or float it into its own window. The layout is remembered between sessions, including which panel was showing."
+    },
+    {
+      "id": "reset",
+      "kind": "paragraph",
+      "text": "View > Reset Dock Layout puts every panel back in its default arrangement."
+    },
+    {
+      "id": "status",
+      "kind": "paragraph",
+      "text": "The header's status line (\"Ready.\" when idle) reports what the application is doing and short results such as \"New arrangement.\" or \"Saved arrangement: <name>\"."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/CreationSuiteHeaderBar.cpp"
+      }
+    ]
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.troubleshoot-video",
+  "locale": "en-US",
+  "type": "troubleshooting",
+  "title": "The video does not show or will not play",
+  "summary": "The Video panel's status strip says what is wrong; the common causes are a hidden panel, a missing codec and no usable graphics decoder.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.error.video-decode",
+      "anchorBlockId": "no-window",
+      "verifiedBehaviorSignature": "sha256:86111b08fa84c9b777536fe4a1f098b55448f3a607e4029d5bec5392dfa58686"
+    },
+    {
+      "helpId": "djehuti.station.view.video",
+      "anchorBlockId": "no-window",
+      "verifiedBehaviorSignature": "sha256:18befeef28411a98660db77593d34c56c7b48f766855ad92be2deb01ef351850"
+    }
+  ],
+  "keywords": [
+    "video not showing",
+    "black video",
+    "codec",
+    "MKV",
+    "WebM",
+    "HEVC",
+    "decode problem",
+    "video panel"
+  ],
+  "alternateQueries": [
+    "Why is my video black?",
+    "Why does my video not play?",
+    "What does DECODE PROBLEM mean?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.video-import-play"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "no-window",
+      "kind": "troubleshooting",
+      "title": "There is no video window",
+      "symptoms": [
+        "no Video panel after pressing Play"
+      ],
+      "resolution": "The Video panel opens when Play is pressed with a video clip on the timeline. If it is open but behind another tab, Play brings it forward. Open it from View > Video."
+    },
+    {
+      "id": "strip",
+      "kind": "troubleshooting",
+      "title": "Read the status strip",
+      "symptoms": [
+        "black picture",
+        "the strip shows DECODE PROBLEM"
+      ],
+      "resolution": "The strip under the picture reports the graphics state, the number of layers, pictures decoded and video clips under the playhead. \"view not on screen: not decoding\" means the panel is hidden. \"DECODE PROBLEM: ...\" gives the reason the picture could not be produced."
+    },
+    {
+      "id": "codec",
+      "kind": "troubleshooting",
+      "title": "Windows could not open the file",
+      "symptoms": [
+        "\"Windows could not open the file\"",
+        "this container or codec may not be installed"
+      ],
+      "resolution": "Some containers and codecs (MKV, WebM, HEVC) need extra codecs in Windows. Convert the video to MP4 (H.264) and import it again.",
+      "cause": "Video is decoded by Windows Media Foundation, which only opens formats Windows has decoders for."
+    },
+    {
+      "id": "gpu",
+      "kind": "troubleshooting",
+      "title": "No GPU decoder",
+      "symptoms": [
+        "\"could not start a Direct3D 11 GPU device\"",
+        "\"NV12 was refused\""
+      ],
+      "resolution": "Video decoding uses the graphics card. Update the graphics driver, and check that the video's codec is supported by your GPU."
+    },
+    {
+      "id": "no-sound",
+      "kind": "troubleshooting",
+      "title": "The picture plays but there is no sound",
+      "symptoms": [
+        "video plays silently"
+      ],
+      "resolution": "The video's sound is extracted once after import and plays through its track. Check the track is not muted; if the sound was split onto its own track, check that track. A video with no sound track has nothing to play."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Video/VideoDecodeService.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Video/Gl/VideoPanelHost.h"
+      }
+    ]
+  }
+}

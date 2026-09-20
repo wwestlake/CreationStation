@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.video-layers-green-screen",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Layer videos, picture-in-picture and green screen",
+  "summary": "Put several video clips on video tracks: a clip on a higher track is drawn in front. Right-click a video clip and choose Video effects and layout... for green screen and layout.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.video.layers",
+      "anchorBlockId": "order",
+      "verifiedBehaviorSignature": "sha256:0c3468e8fcbb01ea3bc9dd61c9cef23db52e012d7189a93979b9828f59ec184e"
+    },
+    {
+      "helpId": "djehuti.station.tracker.video-effects",
+      "anchorBlockId": "order",
+      "verifiedBehaviorSignature": "sha256:9d73ffd0a7840f70e3b1d8e0624a4b1ad2b6f159796e34d4514e6f2b19c019d5"
+    }
+  ],
+  "keywords": [
+    "green screen",
+    "chroma key",
+    "picture in picture",
+    "overlay",
+    "layers",
+    "opacity",
+    "video effects"
+  ],
+  "alternateQueries": [
+    "How do I do a green screen?",
+    "How do I put a small video over another?",
+    "Which video is in front?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.video-import-play"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "order",
+      "kind": "paragraph",
+      "text": "Video clips that overlap in time are layered. A clip on a track higher in the list is drawn in front of one lower down."
+    },
+    {
+      "id": "effects",
+      "kind": "steps",
+      "title": "Open a clip's effects and layout",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Right-click the video clip and choose Video effects and layout...",
+          "expectedResult": "The clip's settings open.",
+          "uiTarget": "djehuti.station.tracker.video-effects"
+        }
+      ]
+    },
+    {
+      "id": "green-screen",
+      "kind": "definition",
+      "term": "Green screen",
+      "definition": "Turn on Remove the key colour to make that colour see-through, so the layer underneath shows. Key colour picks the colour to remove; Soft edge feathers the edge; Spill cleanup reduces the coloured fringe."
+    },
+    {
+      "id": "layout",
+      "kind": "definition",
+      "term": "Layout (picture-in-picture, overlays)",
+      "definition": "Sets where the clip sits and how big and opaque it is, so a small video can float over a larger one."
+    },
+    {
+      "id": "reset",
+      "kind": "paragraph",
+      "text": "Reset everything returns the clip's settings to their defaults. The settings are saved with the clip."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/VideoClipSettingsPanel.h"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Video/Gl/VideoGlView.cpp"
+      }
+    ]
+  }
+}

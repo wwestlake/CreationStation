@@ -1,0 +1,143 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.tracker-arrangements",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Start, save and load arrangements",
+  "summary": "An arrangement is the Tracker's tracks and clips. Use File > New Arrangement, Save Arrangement... and Load Arrangement... while the Tracker has focus.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.file.new-arrangement",
+      "anchorBlockId": "concept",
+      "verifiedBehaviorSignature": "sha256:9848877e2a09f73ec15520806e3ea972c1955d0c9c677e0f6a28339fbb5f9ece"
+    },
+    {
+      "helpId": "djehuti.station.file.save-arrangement",
+      "anchorBlockId": "concept",
+      "verifiedBehaviorSignature": "sha256:c17c0faef63c830b0e0db4e5d9c6fe99fbe6336b282a49fa3f5ba0549287232c"
+    },
+    {
+      "helpId": "djehuti.station.file.load-arrangement",
+      "anchorBlockId": "concept",
+      "verifiedBehaviorSignature": "sha256:1aab86141a2e8843ea75942e2fbb8aa1bcabf17685687d8658d1882417bfee38"
+    }
+  ],
+  "keywords": [
+    "arrangement",
+    "new arrangement",
+    "save arrangement",
+    "load arrangement",
+    "unsaved",
+    "tab name"
+  ],
+  "alternateQueries": [
+    "How do I start a new arrangement?",
+    "How do I save my tracks?",
+    "How do I open a saved arrangement?",
+    "What does the asterisk on the Tracker tab mean?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.menus-reference"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-overview"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "concept",
+      "kind": "paragraph",
+      "text": "A project can hold many arrangements, but the Tracker shows one at a time. Saved arrangements are project assets. The Tracker tab shows the open arrangement: \"Tracker - <name>\", or \"Tracker - Untitled\" for one that has not been saved, with a * added while there are unsaved changes."
+    },
+    {
+      "id": "new",
+      "kind": "steps",
+      "title": "Start a new arrangement",
+      "steps": [
+        {
+          "id": "menu",
+          "instruction": "Click into the Tracker, then choose File > New Arrangement.",
+          "expectedResult": "If the arrangement has unsaved changes you are asked: Save, Don't Save, or Cancel.",
+          "uiTarget": "djehuti.station.file.new-arrangement"
+        },
+        {
+          "id": "result",
+          "instruction": "Choose one.",
+          "expectedResult": "The Tracker is empty and the status line says \"New arrangement.\""
+        }
+      ]
+    },
+    {
+      "id": "undo",
+      "kind": "note",
+      "text": "New Arrangement can be undone with Ctrl+Z, which brings the old arrangement back. Saved arrangements are never touched."
+    },
+    {
+      "id": "save",
+      "kind": "steps",
+      "title": "Save the arrangement",
+      "steps": [
+        {
+          "id": "save-item",
+          "instruction": "Choose File > Save Arrangement...",
+          "expectedResult": "You are asked for a name.",
+          "uiTarget": "djehuti.station.file.save-arrangement"
+        },
+        {
+          "id": "name",
+          "instruction": "Type a name and confirm.",
+          "expectedResult": "The tab shows the name without a *."
+        }
+      ]
+    },
+    {
+      "id": "load",
+      "kind": "steps",
+      "title": "Load an arrangement",
+      "steps": [
+        {
+          "id": "load-item",
+          "instruction": "Choose File > Load Arrangement...",
+          "expectedResult": "A list of the project's saved arrangements appears, newest first.",
+          "uiTarget": "djehuti.station.file.load-arrangement"
+        },
+        {
+          "id": "pick",
+          "instruction": "Pick one.",
+          "expectedResult": "It replaces the Tracker's contents."
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (newArrangement, arrangementIsDirty)"
+      }
+    ]
+  }
+}

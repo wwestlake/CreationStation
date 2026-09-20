@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.troubleshoot-import",
+  "locale": "en-US",
+  "type": "troubleshooting",
+  "title": "Import problems",
+  "summary": "Why an import did not finish, was skipped, or did not place a clip.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.file.import",
+      "anchorBlockId": "not-placed",
+      "verifiedBehaviorSignature": "sha256:5fb63783b6c207afe54087d97e588ca4e3bb462724f4332b03a0975d5553f340"
+    },
+    {
+      "helpId": "djehuti.station.assets.import-media",
+      "anchorBlockId": "not-placed",
+      "verifiedBehaviorSignature": "sha256:9884229e5d171fc0d46209353473904c615a4e1d3d412c2287644079d88174b4"
+    }
+  ],
+  "keywords": [
+    "import failed",
+    "cannot import",
+    "not imported",
+    "large file",
+    "upload"
+  ],
+  "alternateQueries": [
+    "Why did my import fail?",
+    "Why is my file not on the timeline?",
+    "Why can I not import a big video?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.assets-import"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.troubleshoot-service"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "not-placed",
+      "kind": "troubleshooting",
+      "title": "My imported file is not on a track",
+      "symptoms": [
+        "imported with File > Import but nothing on the timeline"
+      ],
+      "resolution": "File > Import only adds files to the project's assets. Place one with Add Clip... on a track, or Place on Track in the Assets window. Dropping a file on the Tracker imports and places it."
+    },
+    {
+      "id": "skipped",
+      "kind": "troubleshooting",
+      "title": "A file was listed as not imported",
+      "symptoms": [
+        "\"Not imported (not audio or video this app can import)\""
+      ],
+      "resolution": "Only audio (wav, aif, aiff, flac, mp3, ogg) and video (mp4, mov, mkv, avi, webm, m4v) files are imported."
+    },
+    {
+      "id": "busy",
+      "kind": "troubleshooting",
+      "title": "\"another long action is still running\"",
+      "symptoms": [
+        "cannot start an import while another progress window is open"
+      ],
+      "resolution": "Wait for the current progress window to finish, or press its Cancel, then start the import again."
+    },
+    {
+      "id": "service",
+      "kind": "troubleshooting",
+      "title": "Large files fail to upload",
+      "symptoms": [
+        "the project service is out of date and cannot take large files"
+      ],
+      "resolution": "Close Djehuti Station and the project service, then start Station again so it starts the current service.",
+      "cause": "An older project service does not support uploading large files in pieces."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (runLibraryImport)"
+      },
+      {
+        "kind": "source",
+        "ref": "shared/AssetSystem/src/SuiteVfsServiceClient.cpp"
+      }
+    ]
+  }
+}

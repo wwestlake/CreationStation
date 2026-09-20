@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.plugins-vst",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Find and manage VST plugins",
+  "summary": "In the Plugins panel add the folders where your VST plugins are, rescan, and browse what was found.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.plugins",
+      "anchorBlockId": "folders",
+      "verifiedBehaviorSignature": "sha256:783e45059c5959220b66faa3f06209f3354ee9ddc74e779f899e4088fae99ecf"
+    },
+    {
+      "helpId": "djehuti.station.plugins.vst-folders",
+      "anchorBlockId": "folders",
+      "verifiedBehaviorSignature": "sha256:486c9cd6fcbcd8d5800fa0464fc34e22bdfaf7bf83606e247b0fc7d3c118f237"
+    },
+    {
+      "helpId": "djehuti.station.plugins.load-insert",
+      "anchorBlockId": "folders",
+      "verifiedBehaviorSignature": "sha256:92310f4ba57d7c6c326f82a4e0ad0e68bcb3baf9ac975326e8eb51adf4d5d35b"
+    }
+  ],
+  "keywords": [
+    "VST",
+    "plugin",
+    "plugin folder",
+    "rescan",
+    "instrument",
+    "effect",
+    "Plugin Studio"
+  ],
+  "alternateQueries": [
+    "How do I add my VST plugins?",
+    "Why are my plugins not showing?",
+    "How do I rescan plugins?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.track-insert-effects"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.sampler-builder"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "folders",
+      "kind": "steps",
+      "title": "Tell Station where your plugins are",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Open View > Plugins.",
+          "expectedResult": "The Plugin Studio opens with VST Folders and a Plugin Browser.",
+          "uiTarget": "djehuti.station.view.plugins"
+        },
+        {
+          "id": "add",
+          "instruction": "Press Add Folder and choose a folder that contains VST plugins.",
+          "expectedResult": "The folder is listed.",
+          "uiTarget": "djehuti.station.plugins.vst-folders"
+        },
+        {
+          "id": "rescan",
+          "instruction": "Press Rescan to search all VST folders.",
+          "expectedResult": "Discovered plugins appear in the browser."
+        }
+      ]
+    },
+    {
+      "id": "import-list",
+      "kind": "paragraph",
+      "text": "Import Path List adds several folders at once from a list. Remove a folder from the list to stop searching it."
+    },
+    {
+      "id": "browse",
+      "kind": "paragraph",
+      "text": "The Plugin Browser has a search box and a format filter (All Formats). Select a plugin and press Load To Insert to add it to the selected track."
+    },
+    {
+      "id": "sample-pack",
+      "kind": "paragraph",
+      "text": "Build Sample Pack... opens the Sample Pack Builder for turning single-note recordings into a sample pack."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/PluginsPanel.cpp"
+      }
+    ]
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.overview",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "What Djehuti Station is",
+  "summary": "Djehuti Station is a music, audio and video workstation for Windows, part of the Djehuti Suite, with a Tracker timeline, a mixer, a node-based sound designer and a video compositor.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.app",
+      "anchorBlockId": "what-it-is",
+      "verifiedBehaviorSignature": "sha256:31baeb3f59c0a2fdb9ac3240cf0161111c96ffdcb8b6841a2206548422d6e692"
+    }
+  ],
+  "keywords": [
+    "Djehuti Station",
+    "DAW",
+    "workstation",
+    "Tracker",
+    "Djehuti Suite",
+    "beta"
+  ],
+  "alternateQueries": [
+    "What is Djehuti Station?",
+    "What can Djehuti Station do?",
+    "What are the parts of the application?"
+  ],
+  "relations": [
+    {
+      "type": "explains",
+      "topicId": "djehuti.station.panels-reference"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.storage-vfs"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "what-it-is",
+      "kind": "paragraph",
+      "text": "Djehuti Station is a workstation for making music, sound design and video. You arrange sounds, recordings, generated signals and video clips on a timeline called the Tracker, mix them, and render the result. It is one application in the Djehuti Suite; the other suite apps are separate programs that share the same project storage."
+    },
+    {
+      "id": "main-parts",
+      "kind": "paragraph",
+      "text": "The main parts are: the Tracker (the timeline of tracks and clips), Layers (the mixing console), Signal (a node-graph sound designer called the Signal Lab), Plugins (VST plugins and sample packs), Video (a picture window for video clips), Capture, Score, Foley, Script, and the Virtual Engineer (an AI assistant). Each one is a panel you can dock, tab or float."
+    },
+    {
+      "id": "projects-and-storage",
+      "kind": "paragraph",
+      "text": "Everything you make lives in a project, and every project lives inside one storage folder you choose the first time you start the application. Station does not scatter files around the computer: the storage folder holds one container file (vfs.bin) and nothing else you need to manage."
+    },
+    {
+      "id": "status",
+      "kind": "note",
+      "text": "Djehuti Station is in public beta. Some panels are early: for example video can be edited and layered but not yet rendered out as a finished video file."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/README.md"
+      }
+    ]
+  }
+}

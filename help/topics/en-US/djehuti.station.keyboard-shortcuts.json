@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.keyboard-shortcuts",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Keyboard shortcuts",
+  "summary": "The keyboard shortcuts Station defines: undo, redo, duplicate, split, rename and delete a clip.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.edit.undo",
+      "anchorBlockId": "table",
+      "verifiedBehaviorSignature": "sha256:4c854c330a1983d6ad9afa0c39ff8aacc9fac5d9372336cee624d83897ef82ce"
+    },
+    {
+      "helpId": "djehuti.station.edit.redo",
+      "anchorBlockId": "table",
+      "verifiedBehaviorSignature": "sha256:67d1be164457944ef9b3286579cca244183027826ac250c28eb5e606cbabc38a"
+    },
+    {
+      "helpId": "djehuti.station.edit.duplicate-clip",
+      "anchorBlockId": "table",
+      "verifiedBehaviorSignature": "sha256:a698ba090eaba5c2fbb2de02eae4662b4e2bec5ba0bfba9823ee3ca1179257ed"
+    },
+    {
+      "helpId": "djehuti.station.edit.split-clip",
+      "anchorBlockId": "table",
+      "verifiedBehaviorSignature": "sha256:210c133006309edd8404113a92f5893796ea39867ba443b2fb28da6db367f4de"
+    },
+    {
+      "helpId": "djehuti.station.edit.rename-clip",
+      "anchorBlockId": "table",
+      "verifiedBehaviorSignature": "sha256:bd278f5d98f3c2c707c5f5b9609b8329bee707ca1774c2cdabd20872cad25408"
+    },
+    {
+      "helpId": "djehuti.station.edit.delete-clip",
+      "anchorBlockId": "table",
+      "verifiedBehaviorSignature": "sha256:8a6ff660ea7123844ae2e47684a0cab3397cdb9d88785a66087fb0c89693e871"
+    }
+  ],
+  "keywords": [
+    "shortcuts",
+    "keyboard",
+    "Ctrl+Z",
+    "Ctrl+D",
+    "F2",
+    "Delete",
+    "split"
+  ],
+  "alternateQueries": [
+    "What is the shortcut to split a clip?",
+    "How do I undo?",
+    "How do I rename a clip?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.menus-reference"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "table",
+      "kind": "paragraph",
+      "text": "Ctrl+Z undo. Ctrl+Y or Ctrl+Shift+Z redo. Ctrl+D duplicate the selected clip. Ctrl+Shift+S split the selected clip at the playhead. F2 rename the selected clip. Delete or Backspace delete the selected clip."
+    },
+    {
+      "id": "focus",
+      "kind": "note",
+      "text": "Undo and Redo act on the panel that has focus: in the Signal Lab they undo the graph edit, elsewhere they undo the Tracker edit. Clip shortcuts need a selected clip."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (handleGlobalKeyPress, getMenuForIndex)"
+      }
+    ]
+  }
+}
