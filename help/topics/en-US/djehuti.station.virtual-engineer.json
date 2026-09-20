@@ -1,0 +1,126 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.virtual-engineer",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Use the Virtual Engineer",
+  "summary": "The Virtual Engineer is a chat assistant panel. Pick a model from your suite AI accounts, choose a mode and an access level, and ask.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.virtual-engineer",
+      "anchorBlockId": "ask",
+      "verifiedBehaviorSignature": "sha256:9b17a2d8bcc6ab62e7230cf24a3bae617c6f90045de99d64c4d2e29e30d1b558"
+    },
+    {
+      "helpId": "djehuti.station.virtual-engineer.chat",
+      "anchorBlockId": "ask",
+      "verifiedBehaviorSignature": "sha256:1b98d48747079da456c0c7a6489e7dab5a8991139efa2134eb9486139eb2137c"
+    }
+  ],
+  "keywords": [
+    "Virtual Engineer",
+    "AI assistant",
+    "chat",
+    "model",
+    "Learn mode",
+    "Research mode",
+    "access",
+    "permissions",
+    "AI account"
+  ],
+  "alternateQueries": [
+    "How do I use the AI assistant?",
+    "How do I add an AI account?",
+    "What do Learn and Research mode do?",
+    "What does Ask first mean?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.settings-panel"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.using-help"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "ask",
+      "kind": "steps",
+      "title": "Ask a question",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Open View > Virtual Engineer.",
+          "expectedResult": "The assistant panel opens.",
+          "uiTarget": "djehuti.station.view.virtual-engineer"
+        },
+        {
+          "id": "model",
+          "instruction": "Pick a model. Models come from your suite AI accounts.",
+          "expectedResult": "The model box shows the chosen model. With no accounts it says \"No suite AI accounts configured\"."
+        },
+        {
+          "id": "type",
+          "instruction": "Type what you want, then send it.",
+          "expectedResult": "The assistant answers in the transcript."
+        }
+      ]
+    },
+    {
+      "id": "modes",
+      "kind": "definition",
+      "term": "Modes",
+      "definition": "Normal gives direct answers. Learn acts like a patient coach with step-by-step guidance. Research gives deeper, more thorough answers and notes uncertainty."
+    },
+    {
+      "id": "access",
+      "kind": "definition",
+      "term": "Access",
+      "definition": "Ask first asks before anything that touches files, settings or external services. App only allows internal application actions but asks before file or network changes. Files allows file and project changes with guardrails. Full access allows changes for the session, with care about side effects."
+    },
+    {
+      "id": "accounts",
+      "kind": "note",
+      "text": "AI accounts are set up in the suite settings (gear button) on the Suite AI Accounts tab. The assistant chooses among the accounts by name; it does not configure a provider itself."
+    },
+    {
+      "id": "help-grounded",
+      "kind": "note",
+      "text": "When you ask how Station works, the assistant is given the most relevant help topics and names the topic it used. If the help does not cover your question it should say so. You can read the same help yourself with F1 or Help > Help Topics."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/AiPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/SuiteSettingsPanel.cpp"
+      }
+    ]
+  }
+}

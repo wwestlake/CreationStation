@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.recording",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Record audio",
+  "summary": "Arm an audio track, choose its input, press Record, and stop: the take is saved into the project as an asset and shown as a clip.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.recording.take",
+      "anchorBlockId": "record",
+      "verifiedBehaviorSignature": "sha256:1f64cfe3393c2364935d26be06f74193011da1be52c5e0345e513210b02eaafa"
+    },
+    {
+      "helpId": "djehuti.station.transport.record",
+      "anchorBlockId": "record",
+      "verifiedBehaviorSignature": "sha256:84a9b028c2cf775300b8bbf9b04ca426083f1da6dc83781d99cd451b512217eb"
+    },
+    {
+      "helpId": "djehuti.station.tracker.arm",
+      "anchorBlockId": "record",
+      "verifiedBehaviorSignature": "sha256:ca6f7d49bbde8d7e530821b4f335bf3d2ab50f5c34a97ae6be3d322f5b293589"
+    },
+    {
+      "helpId": "djehuti.station.tracker.monitor",
+      "anchorBlockId": "record",
+      "verifiedBehaviorSignature": "sha256:d14df052b74a5c6c419798cbe16baac1a28a042737dc31bad583a30321784a57"
+    },
+    {
+      "helpId": "djehuti.station.tracker.channel-mode",
+      "anchorBlockId": "record",
+      "verifiedBehaviorSignature": "sha256:4e836ba69428a54e7311003ffa208734522a406861fc760ed90dd8c37ffebcaf"
+    },
+    {
+      "helpId": "djehuti.station.tracker.input-source",
+      "anchorBlockId": "record",
+      "verifiedBehaviorSignature": "sha256:9f6a311601da8dfd02f2c12f14c0709dc2a4f0f85b32a303f523d45872b2f40c"
+    }
+  ],
+  "keywords": [
+    "record",
+    "recording",
+    "arm",
+    "monitor",
+    "take",
+    "microphone",
+    "input",
+    "stereo"
+  ],
+  "alternateQueries": [
+    "How do I record?",
+    "How do I record a guitar?",
+    "Why does Record do nothing?",
+    "Where does my recording go?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.audio-devices"
+    },
+    {
+      "type": "troubleshoots",
+      "topicId": "djehuti.station.troubleshoot-no-sound"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.transport-reference"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "record",
+      "kind": "steps",
+      "title": "Record a take",
+      "steps": [
+        {
+          "id": "device",
+          "instruction": "Choose your input device with the Audio button.",
+          "expectedResult": "The input appears in the track's input list.",
+          "uiTarget": "djehuti.station.view.audio-devices"
+        },
+        {
+          "id": "arm",
+          "instruction": "On an audio track, choose the input source and press Arm.",
+          "expectedResult": "The Arm button lights.",
+          "uiTarget": "djehuti.station.tracker.arm"
+        },
+        {
+          "id": "mono-st",
+          "instruction": "Set Mono to record one input, or ST to record this input plus the next as stereo.",
+          "uiTarget": "djehuti.station.tracker.channel-mode"
+        },
+        {
+          "id": "monitor",
+          "instruction": "Press Mon to hear the input while recording (optional).",
+          "expectedResult": "You hear the input live.",
+          "uiTarget": "djehuti.station.tracker.monitor"
+        },
+        {
+          "id": "go",
+          "instruction": "Press Record in the header.",
+          "expectedResult": "The status line says \"Recording N track(s).\" and the clip grows as you record.",
+          "uiTarget": "djehuti.station.transport.record"
+        },
+        {
+          "id": "stop",
+          "instruction": "Press Stop.",
+          "expectedResult": "The take is saved into the project as an audio asset named like Take-<time>-T01-<track> and the clip plays from it."
+        }
+      ]
+    },
+    {
+      "id": "multi",
+      "kind": "paragraph",
+      "text": "Every armed audio track records at once, each into its own take."
+    },
+    {
+      "id": "track-type",
+      "kind": "note",
+      "text": "Only audio tracks record audio. Arming a track of another type is skipped, and the status line says which tracks were skipped."
+    },
+    {
+      "id": "memory",
+      "kind": "note",
+      "text": "A recording is held in memory while it runs and written into the project when you stop; nothing is written to a temporary file."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (startRecordingSession, stopRecordingSession)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Audio/WorkstationAudioEngine.cpp"
+      }
+    ]
+  }
+}

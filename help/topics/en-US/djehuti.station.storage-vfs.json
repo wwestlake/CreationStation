@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.storage-vfs",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "Where your data lives: the storage folder and vfs.bin",
+  "summary": "Station keeps everything in one storage folder you choose: a single container file (vfs.bin) holds every project and setting, with one small service file beside it.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.storage.first-run",
+      "anchorBlockId": "one-folder",
+      "verifiedBehaviorSignature": "sha256:4d9348ff6da048a924a991be59376acfd6f31178a8eed6bf825aac1604f7732c"
+    },
+    {
+      "helpId": "djehuti.station.storage.folder",
+      "anchorBlockId": "one-folder",
+      "verifiedBehaviorSignature": "sha256:9a96679003406aa5df811ee77eb127a8a3906059bb617482ecdc70bf756a2004"
+    }
+  ],
+  "keywords": [
+    "storage",
+    "VFS",
+    "vfs.bin",
+    "container",
+    "project service",
+    "storage folder",
+    "data location",
+    "pointer file",
+    "VfsHeartbeat"
+  ],
+  "alternateQueries": [
+    "Where does Station keep my projects?",
+    "What is vfs.bin?",
+    "What is VfsHeartbeat.json?",
+    "Where are my files stored?",
+    "Why does it ask for a folder?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.choose-storage-folder"
+    },
+    {
+      "type": "troubleshoots",
+      "topicId": "djehuti.station.troubleshoot-service"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "one-folder",
+      "kind": "paragraph",
+      "text": "The first time you start any Djehuti Suite application it asks where to keep its data. You choose one folder, ideally on a drive with plenty of space. That is the storage folder, also called the VFS root."
+    },
+    {
+      "id": "what-is-inside",
+      "kind": "paragraph",
+      "text": "The storage folder contains vfs.bin, one container file that holds everything: every project, its assets, settings, layouts, control-surface mappings and logs. It also contains VfsHeartbeat.json, a tiny file the project service writes so the applications can find it. You do not edit either file."
+    },
+    {
+      "id": "service",
+      "kind": "paragraph",
+      "text": "A background program, the Djehuti project service, is the only thing that opens vfs.bin. The applications start it automatically when they need it, and it closes itself after an hour of inactivity. Starting an application again starts it again."
+    },
+    {
+      "id": "pointer",
+      "kind": "paragraph",
+      "text": "The only other thing Station keeps on the computer is one small file, suite-settings.json, in your Roaming application-data folder (Djehuti-Suite). It records where the storage folder is. Nothing else is written to the computer's disks; assets are not copied out of the container to be played or edited."
+    },
+    {
+      "id": "changing",
+      "kind": "paragraph",
+      "text": "If you pick a folder that already holds a Djehuti storage container, Station uses it; it does not create a new one."
+    },
+    {
+      "id": "cancel",
+      "kind": "warning",
+      "text": "The storage folder is required. If you cancel the folder prompt at start-up, the application closes: it has nowhere to keep your data."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "docs/architecture/Suite-VFS-Single-Container-Plan.md"
+      },
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/SuiteJUCEApplication.cpp"
+      }
+    ]
+  }
+}

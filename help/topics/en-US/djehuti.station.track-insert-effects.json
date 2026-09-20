@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.track-insert-effects",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Add effects to a track (insert chain)",
+  "summary": "Press FX on a track or channel to open its insert chain, and load VST plugins into it from the Plugins panel.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.track-insert",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:9cbfd6574bd0d5e82157de6d39842c56d26de4b6b58fbca3790eb7a838e0fe89"
+    },
+    {
+      "helpId": "djehuti.station.plugins.load-insert",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:92310f4ba57d7c6c326f82a4e0ad0e68bcb3baf9ac975326e8eb51adf4d5d35b"
+    }
+  ],
+  "keywords": [
+    "effects",
+    "insert",
+    "FX",
+    "plugin",
+    "reverb",
+    "compressor",
+    "insert chain"
+  ],
+  "alternateQueries": [
+    "How do I add a reverb?",
+    "How do I add a plugin to a track?",
+    "What is an insert?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.plugins-vst"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "open",
+      "kind": "steps",
+      "title": "Open a track's effects",
+      "steps": [
+        {
+          "id": "fx",
+          "instruction": "Press FX on the track (or the channel in Layers).",
+          "expectedResult": "The track's effects chain opens; with nothing loaded it reads that no plugins are loaded.",
+          "uiTarget": "djehuti.station.view.track-insert"
+        },
+        {
+          "id": "select",
+          "instruction": "Select the track, then open the Plugins panel and choose a plugin."
+        },
+        {
+          "id": "load",
+          "instruction": "Press Load To Insert.",
+          "expectedResult": "The plugin is added to the selected track's insert chain.",
+          "uiTarget": "djehuti.station.plugins.load-insert"
+        }
+      ]
+    },
+    {
+      "id": "master",
+      "kind": "paragraph",
+      "text": "With no track selected the Track Insert panel works on the master output."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (showFxStackWindow)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/PluginsPanel.cpp"
+      }
+    ]
+  }
+}

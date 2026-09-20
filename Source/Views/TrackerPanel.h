@@ -91,6 +91,7 @@ public:
     // The display name of whichever arrangement is currently active in this project (last
     // saved or loaded), so re-saving defaults to that name instead of always prompting fresh.
     void setCurrentArrangementName(const juce::String& name);
+    juce::String getCurrentArrangementName() const { return currentArrangementName; }
 
     void setTrackCount(int newTrackCount);
     void setTrackName(int trackIndex, const juce::String& name);

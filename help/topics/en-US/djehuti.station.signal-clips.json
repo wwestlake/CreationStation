@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.signal-clips",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Use a signal on the timeline",
+  "summary": "Put a saved signal on a Signal track and it plays live with the arrangement; its public variables can be automated.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.tracker.add-clip",
+      "anchorBlockId": "place",
+      "verifiedBehaviorSignature": "sha256:1991ade7a84656b7d0cfb0a89cbf1298636221db8cd68cf8af90ff6b5599db09"
+    },
+    {
+      "helpId": "djehuti.station.view.signal-lab",
+      "anchorBlockId": "place",
+      "verifiedBehaviorSignature": "sha256:c08cb233bc46b4ec41c119b87ca0353cbbd060bf3e59f66ce22591d4a95a25c4"
+    }
+  ],
+  "keywords": [
+    "signal clip",
+    "signal track",
+    "automate variable",
+    "patch on timeline"
+  ],
+  "alternateQueries": [
+    "How do I put my Signal Lab sound on the timeline?",
+    "Can I automate a Signal Lab value?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.signal-lab-save-render"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-clips"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "place",
+      "kind": "steps",
+      "title": "Place a signal",
+      "steps": [
+        {
+          "id": "track",
+          "instruction": "Press a track's kind button and choose Signal, or add a clip to a Signal track."
+        },
+        {
+          "id": "add",
+          "instruction": "Right-click the track and choose Add Clip... then choose the saved signal.",
+          "expectedResult": "A Signal clip appears; its length comes from the signal."
+        }
+      ]
+    },
+    {
+      "id": "live",
+      "kind": "paragraph",
+      "text": "Signal clips are played live by the timeline, one voice per clip, not from a fixed recording. Changing a public variable while it plays changes the sound."
+    },
+    {
+      "id": "render",
+      "kind": "note",
+      "text": "Rendering the master mix includes Signal clips."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (buildSignalClipTargets)"
+      }
+    ]
+  }
+}

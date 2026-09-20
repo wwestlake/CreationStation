@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.score-studio",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Score Studio",
+  "summary": "The Score panel is for composing with notation: a grand staff or piano roll, notes, lyrics, key selection, playback and an AI coach.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.score",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:e7c7a0022bf470ec6b3cc75ebcd3903b81e3e7dd9aa15919cb860eec20cc3c4d"
+    },
+    {
+      "helpId": "djehuti.station.score.notation",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:1ee5189920fd78cf23151b13cb50a3b727658664cb607f0a8a71ee247c757f83"
+    }
+  ],
+  "keywords": [
+    "score",
+    "notation",
+    "staff",
+    "piano roll",
+    "lyrics",
+    "composition",
+    "notes"
+  ],
+  "alternateQueries": [
+    "How do I write notation?",
+    "How do I add lyrics?",
+    "How do I move a note?"
+  ],
+  "relations": [],
+  "blocks": [
+    {
+      "id": "what",
+      "kind": "paragraph",
+      "text": "Score Studio lets you compose with notation, lyrics, teaching cues and AI-assisted revision. Show the grand staff or the piano roll."
+    },
+    {
+      "id": "notes",
+      "kind": "definition",
+      "term": "Editing notes",
+      "definition": "Add Note adds a note; Remove Note removes the selected one. Note Up and Note Down move the selected note by a semitone; Beat Left and Beat Right move it earlier or later. A lyric syllable can be typed for the selected note."
+    },
+    {
+      "id": "play",
+      "kind": "definition",
+      "term": "Play Score",
+      "definition": "Plays the score."
+    },
+    {
+      "id": "key",
+      "kind": "definition",
+      "term": "Key",
+      "definition": "Choose the key (for example C Major, A Minor, G Major)."
+    },
+    {
+      "id": "coach",
+      "kind": "definition",
+      "term": "AI Teaching / Composition Coach",
+      "definition": "An assistant section for teaching and revising the composition."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/ScorePanel.cpp"
+      }
+    ]
+  }
+}

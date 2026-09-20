@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.assets-window",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "The Assets window",
+  "summary": "The Assets button opens a window listing the project's assets with their details, and lets you preview, place or export them.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.assets-window",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:00804fae5cc93f564949b51ebf645af783bb2aeb53edbfd4ffea26fa164b8da8"
+    },
+    {
+      "helpId": "djehuti.station.assets.browse",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:d850cf026e374d5cb49f689164f4cee09577d4f6a2c9b20c8380cdb1ca429e6c"
+    }
+  ],
+  "keywords": [
+    "assets",
+    "asset manager",
+    "preview",
+    "place on track",
+    "export",
+    "project assets"
+  ],
+  "alternateQueries": [
+    "Where are my imported files?",
+    "How do I preview an asset?",
+    "How do I export an asset?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.assets-import"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "open",
+      "kind": "paragraph",
+      "text": "Click Assets in the header. The window has three tabs: Project Assets, Asset Store and Shared Assets. The last two are placeholders (coming soon)."
+    },
+    {
+      "id": "list",
+      "kind": "paragraph",
+      "text": "Project Assets lists the current project's assets with a Refresh button. Select one to see its details on the right: kind, path, size, modified time and, when recorded, length, picture size, frame rate, sample rate and channels. Details come from the project's records, so selecting an asset does not open the file."
+    },
+    {
+      "id": "open-preview",
+      "kind": "definition",
+      "term": "Open / Preview",
+      "definition": "Opens the asset in the panel that suits it (for example a patch in the Signal Lab) or plays an audio asset."
+    },
+    {
+      "id": "stop",
+      "kind": "definition",
+      "term": "Stop",
+      "definition": "Stops an audio preview."
+    },
+    {
+      "id": "place",
+      "kind": "definition",
+      "term": "Place on Track",
+      "definition": "Puts the asset on the selected track at the playhead."
+    },
+    {
+      "id": "export",
+      "kind": "definition",
+      "term": "Export",
+      "definition": "Saves an audio asset to a file you choose."
+    },
+    {
+      "id": "names",
+      "kind": "note",
+      "text": "Editing an asset's display name and description is not available yet."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/SuiteAssetManagerPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      }
+    ]
+  }
+}

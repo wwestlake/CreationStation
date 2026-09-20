@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.feedback-and-privacy",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Send feedback and privacy",
+  "summary": "Help > Send Feedback sends a bug report or suggestion when you press Send; usage metrics are opt-in and off by default.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.help.feedback",
+      "anchorBlockId": "send",
+      "verifiedBehaviorSignature": "sha256:3cd5f4f77308c48ce299a8fabea7b9e959ebd03712cdad70e3b4a7f73dd426e5"
+    }
+  ],
+  "keywords": [
+    "feedback",
+    "bug report",
+    "suggestion",
+    "privacy",
+    "telemetry",
+    "metrics"
+  ],
+  "alternateQueries": [
+    "How do I report a bug?",
+    "Does Station collect usage data?",
+    "How do I turn off metrics?"
+  ],
+  "relations": [],
+  "blocks": [
+    {
+      "id": "send",
+      "kind": "steps",
+      "title": "Send feedback",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Choose Help > Send Feedback...",
+          "expectedResult": "The Feedback & Privacy dialog opens.",
+          "uiTarget": "djehuti.station.help.feedback"
+        },
+        {
+          "id": "write",
+          "instruction": "Choose Bug report or Suggestion and write your message."
+        },
+        {
+          "id": "send",
+          "instruction": "Press Send.",
+          "expectedResult": "The message is sent (the button shows Sending... meanwhile)."
+        }
+      ]
+    },
+    {
+      "id": "privacy",
+      "kind": "paragraph",
+      "text": "Feedback is anonymous by default: an install identifier, the app version and the operating system, never your files or content. Both sending written feedback and sharing anonymous usage metrics are opt-in and off by default."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/FeedbackDialog.cpp"
+      }
+    ]
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.assets-import",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Bring audio and video into a project",
+  "summary": "Use File > Import to add files or a whole folder to the project's assets, or drop files onto the Tracker to import and place them.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.file.import",
+      "anchorBlockId": "import-window",
+      "verifiedBehaviorSignature": "sha256:5fb63783b6c207afe54087d97e588ca4e3bb462724f4332b03a0975d5553f340"
+    },
+    {
+      "helpId": "djehuti.station.assets.import-media",
+      "anchorBlockId": "import-window",
+      "verifiedBehaviorSignature": "sha256:9884229e5d171fc0d46209353473904c615a4e1d3d412c2287644079d88174b4"
+    },
+    {
+      "helpId": "djehuti.station.tracker.drop-files",
+      "anchorBlockId": "import-window",
+      "verifiedBehaviorSignature": "sha256:8e89cea93493b861d76036ae5c32cc8ed2a23921ff42e0f332840d1bdfed65f7"
+    }
+  ],
+  "keywords": [
+    "import",
+    "drag and drop",
+    "audio",
+    "video",
+    "wav",
+    "mp3",
+    "mp4",
+    "add files",
+    "add folder",
+    "batch import",
+    "asset"
+  ],
+  "alternateQueries": [
+    "How do I import a video?",
+    "How do I import a folder of samples?",
+    "Can I import MP3?",
+    "Why did my import not place on a track?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.assets-window"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.video-import-play"
+    },
+    {
+      "type": "troubleshoots",
+      "topicId": "djehuti.station.troubleshoot-import"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "import-window",
+      "kind": "steps",
+      "title": "Import with File > Import",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Choose File > Import...",
+          "expectedResult": "The Import window opens.",
+          "uiTarget": "djehuti.station.file.import"
+        },
+        {
+          "id": "add",
+          "instruction": "Choose Add Files... to pick files, or Add Folder... to add everything inside a folder, including its subfolders.",
+          "expectedResult": "The files appear in the list with their kind and size."
+        },
+        {
+          "id": "review",
+          "instruction": "Remove any you do not want with Remove Selected, or Clear the list."
+        },
+        {
+          "id": "go",
+          "instruction": "Choose Import.",
+          "expectedResult": "A progress window shows the batch, with Cancel."
+        }
+      ]
+    },
+    {
+      "id": "what-happens",
+      "kind": "paragraph",
+      "text": "Files go into the project's assets; they are not placed on any track. Audio (wav, aif, aiff, flac, mp3, ogg) goes in as it is. Video (mp4, mov, mkv, avi, webm, m4v) goes in with its original kept, and its sound is extracted as a WAV so it can be played and mixed. Two files with the same name do not replace each other: the later one is named \"name (2)\"."
+    },
+    {
+      "id": "unsupported",
+      "kind": "paragraph",
+      "text": "Files of other types are listed at the end as not imported."
+    },
+    {
+      "id": "drop",
+      "kind": "steps",
+      "title": "Or drop files on the Tracker",
+      "steps": [
+        {
+          "id": "drag",
+          "instruction": "Drag audio or video files from Windows onto the Tracker.",
+          "expectedResult": "The files are imported and placed on a track at the drop position. A video creates a video track."
+        }
+      ]
+    },
+    {
+      "id": "large",
+      "kind": "note",
+      "text": "A large video (several gigabytes) can take a while to copy in; the progress window shows the file and Cancel."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/ImportPanel.h"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (runLibraryImport, runVideoImport)"
+      }
+    ]
+  }
+}

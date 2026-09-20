@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.using-help",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Find help in Station",
+  "summary": "Open the Help window with F1 or Help > Help Topics, search it, and ask the Virtual Engineer, which answers from the same help.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.help.contents",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:29c9d583c271f512a340515dc8513c55cf0f41e7e0a378dd3d316034f1d73817"
+    }
+  ],
+  "keywords": [
+    "help",
+    "F1",
+    "search help",
+    "help window",
+    "manual",
+    "documentation",
+    "context help",
+    "where is the help"
+  ],
+  "alternateQueries": [
+    "How do I get help?",
+    "Where is the manual?",
+    "What does F1 do?",
+    "How do I search the help?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.virtual-engineer"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.guided-tour"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.overview"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "open",
+      "kind": "steps",
+      "title": "Open the help",
+      "steps": [
+        {
+          "id": "f1",
+          "instruction": "Click into the panel you need help with and press F1.",
+          "expectedResult": "The Help window opens on the topic for that panel.",
+          "uiTarget": "djehuti.station.help.contents"
+        },
+        {
+          "id": "menu",
+          "instruction": "Or choose Help > Help Topics.",
+          "expectedResult": "The Help window opens; it shows the help for the panel you were working in, or the overview."
+        }
+      ]
+    },
+    {
+      "id": "search",
+      "kind": "paragraph",
+      "text": "Type in the search box at the top of the list to search every topic by title, keyword, common question and text. Pick a result to read it. Related topics are listed as buttons under the topic."
+    },
+    {
+      "id": "ask",
+      "kind": "paragraph",
+      "text": "The Virtual Engineer answers from this same help. When you ask it how to do something, Station gives it the topics that best match your question and the panel you are in, and it says which topic its answer comes from. It needs an AI account; the Help window does not."
+    },
+    {
+      "id": "draft",
+      "kind": "note",
+      "text": "Topics marked draft were written from Station's source and have not yet been checked by a person. If the help and what you see disagree, the application is right; please send feedback from the Help menu."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Help/HelpPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (showHelpWindow, launchAiCompletion)"
+      }
+    ]
+  }
+}

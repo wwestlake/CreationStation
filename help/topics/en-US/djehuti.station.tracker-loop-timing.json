@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.tracker-loop-timing",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Loop, tempo, grid, markers and the pitch pipe",
+  "summary": "Set the project tempo, time signature and key; snap edits to a grid; loop a region; add markers; and play a reference note with the pitch pipe.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.tracker.timing",
+      "anchorBlockId": "timing",
+      "verifiedBehaviorSignature": "sha256:06b3b17ac6796310eaa14d87715b959c69771d961bf9efe8718ef2c67314e865"
+    },
+    {
+      "helpId": "djehuti.station.tracker.snap-grid",
+      "anchorBlockId": "timing",
+      "verifiedBehaviorSignature": "sha256:ee2dfef54024db707a83d25aa726ca5c21d7ed661717f0bba9ec46136721aac4"
+    },
+    {
+      "helpId": "djehuti.station.tracker.markers",
+      "anchorBlockId": "timing",
+      "verifiedBehaviorSignature": "sha256:e663d2eebb6cfa3e877d8ce7f15b458d5583aa9c9d094f718454781666f51dd0"
+    },
+    {
+      "helpId": "djehuti.station.tracker.pitch-pipe",
+      "anchorBlockId": "timing",
+      "verifiedBehaviorSignature": "sha256:e621749647c2150392f348a3046406ca097de4903cee580e6fed6e79662a10ef"
+    },
+    {
+      "helpId": "djehuti.station.transport.loop",
+      "anchorBlockId": "timing",
+      "verifiedBehaviorSignature": "sha256:e41e8a5c29e87bcbadee776b97613d17d55711b9ab9788b7bb55a53d7ef4e216"
+    }
+  ],
+  "keywords": [
+    "tempo",
+    "BPM",
+    "time signature",
+    "key",
+    "grid",
+    "snap",
+    "loop",
+    "marker",
+    "pitch pipe",
+    "metronome"
+  ],
+  "alternateQueries": [
+    "How do I change the tempo?",
+    "How do I snap to the grid?",
+    "How do I add a marker?",
+    "How do I loop part of the song?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.transport-reference"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "timing",
+      "kind": "definition",
+      "term": "Project timing",
+      "definition": "The timing bar shows the tempo in BPM (a new project starts at 120.0), the time signature (4/4) and the musical key. Change them by editing the fields."
+    },
+    {
+      "id": "snap",
+      "kind": "definition",
+      "term": "Snap and grid",
+      "definition": "The Snap switch makes the loop region and other drags snap to the grid. The grid resolution can be 1 Bar, 1/2, 1/4, 1/8, 1/16 or 1/32."
+    },
+    {
+      "id": "loop",
+      "kind": "definition",
+      "term": "Loop",
+      "definition": "The Loop button in the header repeats the loop region during playback. The loop delay field sets a pause between repeats."
+    },
+    {
+      "id": "markers",
+      "kind": "definition",
+      "term": "Markers",
+      "definition": "Right-click the timeline and choose Add Marker Here to place a named marker; click a marker to move the playhead to it; Delete Marker removes it."
+    },
+    {
+      "id": "pitch-pipe",
+      "kind": "definition",
+      "term": "Pitch pipe",
+      "definition": "Pick a note and octave and press Play to hear a reference tone for 2 seconds."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/TrackerPanel.cpp"
+      }
+    ]
+  }
+}

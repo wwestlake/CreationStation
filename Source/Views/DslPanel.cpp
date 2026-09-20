@@ -60,7 +60,11 @@ pub fn gain(input: f64, amount: f64) -> f64 = {
     loadButton.setTooltip("Load a saved .frust file");
     addAndMakeVisible(loadButton);
 
-    compileSource();
+    // Compiling writes two temporary files (the compiler works on files), so it only happens when the user presses
+    // Compile - never on its own at startup.
+    outputEditor.setText("Press Compile to check this source.", juce::dontSendNotification);
+    exportButton.setEnabled(false);
+    saveButton.setEnabled(false);
 }
 
 void DslPanel::setSourceText(const juce::String& text)

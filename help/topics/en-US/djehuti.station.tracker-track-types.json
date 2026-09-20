@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.tracker-track-types",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Track types",
+  "summary": "A track can hold one kind of material: Audio, MIDI, Automation, Signal, Foley, Folder, Marker or Video.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.tracker.track-kind",
+      "anchorBlockId": "choose",
+      "verifiedBehaviorSignature": "sha256:37399b70999784c606b542fd09dc4c405f87528db069b9cd4f5f82006abc71e9"
+    }
+  ],
+  "keywords": [
+    "track type",
+    "audio track",
+    "MIDI track",
+    "automation track",
+    "signal track",
+    "foley track",
+    "folder track",
+    "marker track",
+    "video track"
+  ],
+  "alternateQueries": [
+    "What kinds of tracks are there?",
+    "How do I change a track's type?",
+    "Why can I not put this clip on this track?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-add-track"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "choose",
+      "kind": "paragraph",
+      "text": "Choose a track's kind with the kind button in its header (\"Choose what kind of material this track contains\"). A clip can only live on a track that can hold it."
+    },
+    {
+      "id": "audio",
+      "kind": "definition",
+      "term": "Audio",
+      "definition": "Recorded or imported sound. Audio tracks can be armed and recorded."
+    },
+    {
+      "id": "midi",
+      "kind": "definition",
+      "term": "MIDI",
+      "definition": "Note patterns played by an instrument plugin."
+    },
+    {
+      "id": "automation",
+      "kind": "definition",
+      "term": "Automation",
+      "definition": "Lanes that move a control over time. See the automation topic."
+    },
+    {
+      "id": "signal",
+      "kind": "definition",
+      "term": "Signal",
+      "definition": "Clips made from Signal Lab patches, played live by the timeline."
+    },
+    {
+      "id": "foley",
+      "kind": "definition",
+      "term": "Foley",
+      "definition": "Foley setups and sound-design material."
+    },
+    {
+      "id": "folder",
+      "kind": "definition",
+      "term": "Folder",
+      "definition": "Groups other tracks. Move a track into a folder with Move to Folder..."
+    },
+    {
+      "id": "marker",
+      "kind": "definition",
+      "term": "Marker",
+      "definition": "A row for timeline markers."
+    },
+    {
+      "id": "video",
+      "kind": "definition",
+      "term": "Video",
+      "definition": "Video clips. A video track is created automatically when you drop or place a video."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/TrackerPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Timeline/TimelineModel.h"
+      }
+    ]
+  }
+}

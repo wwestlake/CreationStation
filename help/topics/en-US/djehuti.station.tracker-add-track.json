@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.tracker-add-track",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Add, remove and organise tracks",
+  "summary": "Right-click an empty part of the timeline and choose Add Track; use a track's menu to remove it or move it into a folder.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.tracker.add-track",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:8e271f5fafed3d3bc228ea424b03e102da33a7c45768a0b0d9e12e47278a24f2"
+    },
+    {
+      "helpId": "djehuti.station.tracker.track-kind",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:37399b70999784c606b542fd09dc4c405f87528db069b9cd4f5f82006abc71e9"
+    }
+  ],
+  "keywords": [
+    "add track",
+    "remove track",
+    "new track",
+    "track actions",
+    "move to folder"
+  ],
+  "alternateQueries": [
+    "How do I add a track?",
+    "How do I delete a track?",
+    "Where is the add track button?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-track-types"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.tracker-clips"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "add",
+      "kind": "steps",
+      "title": "Add a track",
+      "steps": [
+        {
+          "id": "right-click",
+          "instruction": "Right-click an empty spot on the timeline.",
+          "expectedResult": "A menu appears with Add Track and Add Clip...",
+          "uiTarget": "djehuti.station.tracker.add-track"
+        },
+        {
+          "id": "choose",
+          "instruction": "Choose Add Track.",
+          "expectedResult": "A new track appears at the bottom."
+        },
+        {
+          "id": "kind",
+          "instruction": "Press the kind button in the new track's header and pick the kind of track you want.",
+          "expectedResult": "The track shows the chosen kind."
+        }
+      ]
+    },
+    {
+      "id": "remove",
+      "kind": "steps",
+      "title": "Remove a track",
+      "steps": [
+        {
+          "id": "actions",
+          "instruction": "Open the track's actions (\"...\") menu."
+        },
+        {
+          "id": "remove",
+          "instruction": "Choose Remove Track...",
+          "expectedResult": "You are asked to confirm."
+        }
+      ]
+    },
+    {
+      "id": "undo",
+      "kind": "note",
+      "text": "Adding and removing tracks can be undone with Ctrl+Z."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/TrackerPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      }
+    ]
+  }
+}

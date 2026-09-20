@@ -9,7 +9,10 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mferror.h>
+#include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <mutex>
 #include <vector>
 
 #pragma comment(lib, "d3d11.lib")
@@ -64,6 +67,87 @@ public:
 
 private:
     T* ptr = nullptr;
+};
+
+
+// Lets Media Foundation read a video from a juce::InputStream (a VFS entry read in pieces) instead of a file path.
+// Media Foundation reads from its own worker threads, so every call is serialised.
+class JuceInputStreamIStream final : public IStream
+{
+public:
+    explicit JuceInputStreamIStream(std::unique_ptr<juce::InputStream> streamToUse) : stream(std::move(streamToUse)) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override
+    {
+        if (riid == IID_IUnknown || riid == IID_ISequentialStream || riid == IID_IStream)
+        {
+            *object = static_cast<IStream*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return (ULONG) ++references; }
+    ULONG STDMETHODCALLTYPE Release() override
+    {
+        const auto remaining = (ULONG) --references;
+        if (remaining == 0)
+            delete this;
+        return remaining;
+    }
+
+    HRESULT STDMETHODCALLTYPE Read(void* buffer, ULONG count, ULONG* bytesRead) override
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        const auto wanted = count > 0x7fffffffu ? 0x7fffffff : (int) count;
+        const auto got = stream->read(buffer, wanted);
+        if (bytesRead != nullptr)
+            *bytesRead = (ULONG) got;
+        return got == wanted ? S_OK : S_FALSE;
+    }
+    HRESULT STDMETHODCALLTYPE Write(const void*, ULONG, ULONG*) override { return STG_E_ACCESSDENIED; }
+
+    HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER* newPosition) override
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        juce::int64 target = move.QuadPart;
+        if (origin == STREAM_SEEK_CUR)
+            target += stream->getPosition();
+        else if (origin == STREAM_SEEK_END)
+            target += stream->getTotalLength();
+
+        if (target < 0 || ! stream->setPosition(target))
+            return STG_E_INVALIDFUNCTION;
+
+        if (newPosition != nullptr)
+            newPosition->QuadPart = (ULONGLONG) stream->getPosition();
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CopyTo(IStream*, ULARGE_INTEGER, ULARGE_INTEGER*, ULARGE_INTEGER*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE Commit(DWORD) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE Revert() override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE Stat(STATSTG* stat, DWORD) override
+    {
+        if (stat == nullptr)
+            return STG_E_INVALIDPOINTER;
+        const std::lock_guard<std::mutex> lock(mutex);
+        std::memset(stat, 0, sizeof(*stat));
+        stat->type = STGTY_STREAM;
+        stat->cbSize.QuadPart = (ULONGLONG) juce::jmax<juce::int64>(0, stream->getTotalLength());
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Clone(IStream**) override { return E_NOTIMPL; }
+
+private:
+    ~JuceInputStreamIStream() = default;
+
+    std::mutex mutex;
+    std::unique_ptr<juce::InputStream> stream;
+    std::atomic<long> references { 1 };
 };
 
 // COM apartment state is per-thread, not per-object - open()/decodeFrameAt()/
@@ -214,6 +298,16 @@ bool VideoDecodeService::isOpen() const noexcept
 
 VideoStreamInfo VideoDecodeService::open(const juce::File& file)
 {
+    return openImpl(&file, nullptr, {});
+}
+
+VideoStreamInfo VideoDecodeService::open(std::unique_ptr<juce::InputStream> stream, const juce::String& nameHint)
+{
+    return openImpl(nullptr, std::move(stream), nameHint);
+}
+
+VideoStreamInfo VideoDecodeService::openImpl(const juce::File* file, std::unique_ptr<juce::InputStream> stream, const juce::String& nameHint)
+{
     close();
     lastError = {};
 
@@ -239,7 +333,31 @@ VideoStreamInfo VideoDecodeService::open(const juce::File& file)
     attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
 
     ComPtr<IMFSourceReader> reader;
-    auto hr = MFCreateSourceReaderFromURL(file.getFullPathName().toWideCharPointer(), attributes.get(), reader.address());
+    HRESULT hr = E_FAIL;
+    if (file != nullptr)
+    {
+        hr = MFCreateSourceReaderFromURL(file->getFullPathName().toWideCharPointer(), attributes.get(), reader.address());
+    }
+    else if (stream != nullptr)
+    {
+        // The video is read from the stream (a VFS entry, in pieces), never from a file on the disk.
+        auto* istream = new JuceInputStreamIStream(std::move(stream)); // starts with one reference
+        IMFByteStream* byteStream = nullptr;
+        hr = MFCreateMFByteStreamOnStream(istream, &byteStream);
+        istream->Release(); // the byte stream holds its own reference now
+        if (SUCCEEDED(hr))
+        {
+            IMFAttributes* byteStreamAttributes = nullptr;
+            if (nameHint.isNotEmpty() && SUCCEEDED(byteStream->QueryInterface(__uuidof(IMFAttributes), (void**) &byteStreamAttributes)))
+            {
+                byteStreamAttributes->SetString(MF_BYTESTREAM_ORIGIN_NAME, nameHint.toWideCharPointer());
+                byteStreamAttributes->Release();
+            }
+
+            hr = MFCreateSourceReaderFromByteStream(byteStream, attributes.get(), reader.address());
+            byteStream->Release();
+        }
+    }
     if (FAILED(hr))
     {
         lastError = "Windows could not open the file (error 0x" + juce::String::toHexString((juce::uint32) hr).paddedLeft('0', 8)

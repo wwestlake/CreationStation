@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.signal-lab-first-sound",
+  "locale": "en-US",
+  "type": "tutorial",
+  "title": "Make your first sound in the Signal Lab",
+  "summary": "Place a Sine Oscillator and a Sink, connect them and press Play to hear a tone.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.signal-lab.play",
+      "anchorBlockId": "build",
+      "verifiedBehaviorSignature": "sha256:ab3edcd8c9cff0cb1049be4a7eac45e9cedb93ea75c8c7f6260bf84659ef313e"
+    },
+    {
+      "helpId": "djehuti.station.signal-lab.nodes",
+      "anchorBlockId": "build",
+      "verifiedBehaviorSignature": "sha256:253c43dafef77342f7aa82ea51fa104451a958310c4254b3181f90616fb82622"
+    },
+    {
+      "helpId": "djehuti.station.view.signal-lab",
+      "anchorBlockId": "build",
+      "verifiedBehaviorSignature": "sha256:c08cb233bc46b4ec41c119b87ca0353cbbd060bf3e59f66ce22591d4a95a25c4"
+    }
+  ],
+  "keywords": [
+    "first sound",
+    "sine wave",
+    "oscillator",
+    "Sink",
+    "play",
+    "tone",
+    "tutorial",
+    "getting started"
+  ],
+  "alternateQueries": [
+    "How do I make a sound?",
+    "How do I play a sine wave?",
+    "Why do I hear nothing in the Signal Lab?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.signal-lab-overview"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.signal-lab-save-render"
+    },
+    {
+      "type": "troubleshoots",
+      "topicId": "djehuti.station.troubleshoot-no-sound"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "build",
+      "kind": "steps",
+      "title": "Build and play a sine tone",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Open View > Signal and click into the panel so it has focus.",
+          "expectedResult": "The Signal Lab shows a blank graph (\"Blank signal graph\").",
+          "uiTarget": "djehuti.station.view.signal-lab"
+        },
+        {
+          "id": "add-sine",
+          "instruction": "Right-click an empty spot on the canvas and choose Sine Oscillator from Sources.",
+          "expectedResult": "A Sine Osc node appears with a Level and a Freq."
+        },
+        {
+          "id": "add-sink",
+          "instruction": "Right-click again and add a Sink from I/O & Analysis.",
+          "expectedResult": "A Sink node appears."
+        },
+        {
+          "id": "wire",
+          "instruction": "Drag from the Sine Osc's output port to the Sink's input port.",
+          "expectedResult": "A wire joins them."
+        },
+        {
+          "id": "play",
+          "instruction": "Press Play in the header.",
+          "expectedResult": "You hear a tone, and the status line says \"Playing live: 1 source(s), 1 wire(s)\".",
+          "uiTarget": "djehuti.station.signal-lab.play"
+        },
+        {
+          "id": "change",
+          "instruction": "Select the Sine Osc and change its frequency or level.",
+          "expectedResult": "The sound changes."
+        },
+        {
+          "id": "stop",
+          "instruction": "Press Stop.",
+          "expectedResult": "The sound stops."
+        }
+      ]
+    },
+    {
+      "id": "defaults",
+      "kind": "note",
+      "text": "A new oscillator has Level 0.65. The Sink plays for 5 seconds by default; the length shows on the Sink node."
+    },
+    {
+      "id": "focus",
+      "kind": "note",
+      "text": "Play acts on the panel that has focus. If nothing plays, click into the Signal Lab first."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SignalLabPanel.cpp (triggerTransportPlay)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/tests/SignalClipLiveSmoke.cpp"
+      }
+    ]
+  }
+}

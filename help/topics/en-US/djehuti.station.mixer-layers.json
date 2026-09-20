@@ -1,0 +1,104 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.mixer-layers",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "The Layers panel (mixing console)",
+  "summary": "Layers is the mixing console: channel strips in banks with Mute, Solo and FX per channel.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.layers",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:4d89cf6c3a84cb22209c7f6e1a6dc6c3518ea080726486ab23a95adc1e2d5633"
+    },
+    {
+      "helpId": "djehuti.station.mixer.channel",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:9d170696c742ea1ef87b62b3154b8c61b6a2931f1479c62b687bbb4db4c57096"
+    }
+  ],
+  "keywords": [
+    "mixer",
+    "Layers",
+    "mixing console",
+    "channel strip",
+    "mute",
+    "solo",
+    "bank",
+    "gain",
+    "pan"
+  ],
+  "alternateQueries": [
+    "Where is the mixer?",
+    "How do I mute a track?",
+    "How do I solo a track?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.track-insert-effects"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.control-surfaces"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "what",
+      "kind": "paragraph",
+      "text": "Layers shows the tracks as channel strips under the title Mixing Console, a bank at a time. Bank - and Bank + page to the previous or next set of channels; the bank label shows which channels are visible."
+    },
+    {
+      "id": "mute",
+      "kind": "definition",
+      "term": "Mute",
+      "definition": "Silences the channel."
+    },
+    {
+      "id": "solo",
+      "kind": "definition",
+      "term": "Solo",
+      "definition": "Plays only soloed channels."
+    },
+    {
+      "id": "fx",
+      "kind": "definition",
+      "term": "FX",
+      "definition": "Opens the channel's effects chain (the insert chain)."
+    },
+    {
+      "id": "hardware",
+      "kind": "note",
+      "text": "A control surface such as the X-Touch follows the same bank."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/MixerPanel.cpp"
+      }
+    ]
+  }
+}

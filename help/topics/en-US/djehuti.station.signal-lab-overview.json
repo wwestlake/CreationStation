@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.signal-lab-overview",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "The Signal Lab",
+  "summary": "The Signal Lab (the Signal panel) is a node-graph sound designer: wire sources through processing to a Sink, play the result live, then save it, render it or put it on the timeline.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.signal-lab",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:c08cb233bc46b4ec41c119b87ca0353cbbd060bf3e59f66ce22591d4a95a25c4"
+    }
+  ],
+  "keywords": [
+    "Signal Lab",
+    "signal",
+    "node graph",
+    "oscillator",
+    "synth",
+    "sound design",
+    "patch"
+  ],
+  "alternateQueries": [
+    "What is the Signal Lab?",
+    "How do I make a sound from scratch?",
+    "What is a Sink?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.signal-lab-first-sound"
+    },
+    {
+      "type": "reference",
+      "topicId": "djehuti.station.signal-lab-node-reference"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "what",
+      "kind": "paragraph",
+      "text": "The Signal Lab forges sounds from oscillators, filters, motion and envelope shaping. You place nodes on a canvas and connect them with wires. Audio flows along the wires from sources to the Sink, which is the output."
+    },
+    {
+      "id": "parts",
+      "kind": "paragraph",
+      "text": "The panel has a title and status line, a Compile button, a Properties column on the left (the signal's name and description, and a Variables list), and the node canvas. Scopes and analyzers open as separate views."
+    },
+    {
+      "id": "live",
+      "kind": "paragraph",
+      "text": "The Signal Lab plays live through the audio engine: press Play with the Signal Lab focused and you hear the graph as you edit it. It needs no track on the Tracker."
+    },
+    {
+      "id": "one-graph",
+      "kind": "paragraph",
+      "text": "The Signal Lab is Station's one DSP graph; there is no separate patch editor. Signals can be saved to the library, rendered into the project as a WAV, or placed on the timeline as Signal clips."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SignalLabPanel.cpp"
+      }
+    ]
+  }
+}
