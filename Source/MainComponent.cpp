@@ -13,6 +13,7 @@
 #include <creation/assets/ProjectWorkspaceService.h>
 #include <creation/suite/SuiteStoragePaths.h>
 #include <creation/ui/CreationSuiteLogos.h>
+#include "BuiltInFrustData.h"
 #include <creation/services/SuiteAiProviderRuntime.h>
 #include "Tutorial/TutorialScriptCompiler.h"
 #include <creation/services/SuiteAiSettings.h>
@@ -6944,6 +6945,14 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
 
     userPrompt = helpBlock + contextBlock + userPrompt;
 
+    // Providers that speak the OpenAI chat protocol go through the assistant: it can write and run FRust against
+    // Station, see the result, and keep going. Other providers keep the single answer for now.
+    if (StationAssistant::supportsProvider(aiProviderSettings.providerId))
+    {
+        launchAssistantRun(systemPrompt, userPrompt, suppliedHelp);
+        return;
+    }
+
     std::thread([safeThis = juce::Component::SafePointer<MainComponent>(this),
                  systemPrompt = std::move(systemPrompt),
                  userPrompt = std::move(userPrompt),
@@ -6982,6 +6991,59 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
             }
         });
     }).detach();
+}
+
+void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& suppliedHelp)
+{
+    if (assistant == nullptr)
+    {
+        int size = 0;
+        const char* data = BuiltInFrustData::getNamedResource("StationAgentApi_frust", size);
+        assistant = std::make_unique<StationAssistant>(getAgentHost(), data != nullptr ? std::string(data, (size_t) size) : std::string());
+    }
+
+    creation::services::SuiteAiResolvedRuntimeSettings account;
+    account.providerId = aiProviderSettings.providerId;
+    account.providerDisplayName = aiProviderSettings.providerDisplayName;
+    account.baseUrl = aiProviderSettings.baseUrl;
+    account.modelName = aiProviderSettings.modelName;
+    account.apiKey = aiProviderSettings.apiKey;
+
+    aiPanel.onStopRequested = [this]
+    {
+        if (assistant != nullptr)
+            assistant->stop();
+        transportBar.setStatusText("Stopping the assistant...");
+    };
+
+    aiPanel.setRunning(true);
+    transportBar.setStatusText("The assistant is working...");
+
+    const bool started = assistant->start(
+        account, systemPrompt, userPrompt, pendingAiQuestion,
+        [this](const juce::String& status)
+        {
+            aiPanel.setAssistantResponse("_" + status + "_");
+        },
+        [this, suppliedHelp](const StationAssistant::Outcome& outcome)
+        {
+            aiCompletionInFlight = false;
+            aiPanel.setRunning(false);
+
+            auto text = outcome.text;
+            if (suppliedHelp.isNotEmpty() && outcome.finished)
+                text << "\n\n_Help topics supplied: " << suppliedHelp << "_";
+            aiPanel.setAssistantResponse(text);
+            transportBar.setStatusText(outcome.error.isNotEmpty() ? outcome.error
+                                       : outcome.finished ? juce::String("AI response ready.") : juce::String("The assistant stopped."));
+        });
+
+    if (! started)
+    {
+        aiCompletionInFlight = false;
+        aiPanel.setRunning(false);
+        aiPanel.setAssistantResponse("The assistant is still working on the previous request.");
+    }
 }
 
 void MainComponent::refreshAiPanelAccountsAndModels()

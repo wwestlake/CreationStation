@@ -71,6 +71,11 @@ public:
     // What the round button at the right of the message box shows, and its tooltip. The host changes it as
     // the assistant's state changes (send while idle, stop while a request runs).
     void setSendButtonIcon(station_ui::SendArrowButton::Icon icon, const juce::String& tooltip);
+
+    // While the assistant is working the arrow becomes Stop, and pressing it (not Enter) calls onStopRequested.
+    void setRunning(bool isRunning);
+    bool isRunning() const noexcept { return running; }
+    std::function<void()> onStopRequested;
     bool isCollapsed() const noexcept { return collapsed; }
 
     std::function<void(GuidanceMode mode)> onModeChanged;
@@ -127,6 +132,7 @@ private:
     AccessLevel accessLevel = AccessLevel::askFirst;
     bool collapsed = false;
     int promptEditorHeight = 0;
+    bool running = false;
     bool updatingComboBoxes = false;
     juce::Array<AccountEntry> availableAccounts;
     juce::StringArray availableModels;

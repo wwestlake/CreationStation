@@ -175,6 +175,9 @@ endif()
 if(NOT TARGET creation_suite_ai_core)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiCore" CreationSuiteSharedAiCore)
 endif()
+if(NOT TARGET creation_suite_ai_providers)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiProviders" CreationSuiteSharedAiProviders)
+endif()
 if(NOT TARGET creation_suite_ai_frust_tools)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiFrustTools" CreationSuiteSharedAiFrustTools)
 endif()
@@ -341,6 +344,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/AudioGraphCodegen.h
     Source/Agent/StationAgentHost.h
     Source/Agent/StationAgentHostImpl.cpp
+    Source/Agent/StationAssistant.cpp
+    Source/Agent/StationAssistant.h
     Source/Agent/StationScriptApi.cpp
     Source/Agent/StationScriptApi.h
     Source/Language/StationFrustPodService.cpp
@@ -445,6 +450,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     StationHelpData
     StationBuiltInFrust
     creation_suite_ai_frust_tools
+    creation_suite_ai_providers
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_RENDER_TARGET}
     juce::juce_opengl

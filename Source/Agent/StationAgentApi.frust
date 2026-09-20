@@ -35,4 +35,6 @@ extern fn station_transport_stop() -> i64;
 
 // ---- Reporting ----
 extern fn station_log(text: String) -> i64;          // adds a line to what the script reports
+extern fn station_log_i64(label: String, value: i64) -> i64;   // adds the line "label: value"
+extern fn station_log_f64(label: String, value: f64) -> i64;   // adds the line "label: value"
 extern fn station_last_error() -> String;            // why the last call that returned 0 failed

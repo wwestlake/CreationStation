@@ -603,12 +603,19 @@ AiPanel::AiPanel()
     // Room at the right for the send arrow, which sits inside the box. The box starts one line high
     // (the mode's hint shows while it is empty) and grows as you type.
     promptEditor.setBorder(juce::BorderSize<int>(4, 6, 4, 38));
-    promptEditor.onSend = [this] { sendButton.triggerClick(); };
+    promptEditor.onSend = [this] { if (! running) sendButton.triggerClick(); };
     promptEditor.addListener(this);
     addAndMakeVisible(promptEditor);
 
     sendButton.onClick = [this]
     {
+        if (running)
+        {
+            if (onStopRequested)
+                onStopRequested();
+            return;
+        }
+
         auto prompt = getPromptText().trim();
         if (prompt.isEmpty())
             return;
@@ -943,6 +950,15 @@ void AiPanel::setSendButtonIcon(station_ui::SendArrowButton::Icon icon, const ju
 {
     sendButton.setIcon(icon);
     sendButton.setTooltip(tooltip);
+}
+
+void AiPanel::setRunning(bool isRunning)
+{
+    running = isRunning;
+    if (running)
+        setSendButtonIcon(station_ui::SendArrowButton::Icon::stop, "Stop the assistant");
+    else
+        setSendButtonIcon(station_ui::SendArrowButton::Icon::send, "Send your message to the assistant");
 }
 
 void AiPanel::setEnterSendsMessage(bool shouldSend)

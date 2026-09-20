@@ -135,6 +135,17 @@ int main()
         "}\n");
     check(readBack.ok && contains(readBack.output, "Drums"), "a script can read the project back: " + readBack.output + readBack.error);
 
+    // Numbers can be reported without formatting them in FRust.
+    auto logged = runner.runBlocking(
+        "pub fn run() -> String = {\n"
+        "    station_log_i64(\"tracks\", station_track_count());\n"
+        "    station_log_f64(\"volume\", station_track_volume_db(1));\n"
+        "    station_log_f64(\"pan\", station_track_pan(1));\n"
+        "    \"done\"\n"
+        "}\n");
+    check(logged.ok && contains(logged.output, "tracks: 2") && contains(logged.output, "volume: -6") && contains(logged.output, "pan: -0.5"),
+          "numbers are reported as label: value lines: " + logged.output + logged.error);
+
     // Failures carry their reason.
     auto failure = runner.runBlocking(
         "pub fn run() -> String = {\n"

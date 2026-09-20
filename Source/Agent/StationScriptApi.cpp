@@ -132,6 +132,23 @@ std::int64_t station_log(const char* text)
     return 1;
 }
 
+std::int64_t station_log_i64(const char* label, std::int64_t value)
+{
+    Call::log(std::string(label != nullptr ? label : "") + ": " + std::to_string(value));
+    return 1;
+}
+
+std::int64_t station_log_f64(const char* label, double value)
+{
+    // Trim trailing zeros so 0.5 reads "0.5" and -6 reads "-6".
+    std::string text = std::to_string(value);
+    text.erase(text.find_last_not_of('0') + 1);
+    if (! text.empty() && text.back() == '.')
+        text.pop_back();
+    Call::log(std::string(label != nullptr ? label : "") + ": " + text);
+    return 1;
+}
+
 const char* station_last_error()
 {
     return Call::handBack(Call::lastError());
@@ -165,6 +182,8 @@ creation::frust::ScriptApi makeApi(StationAgentHost& host, std::string declarati
         { "station_transport_play", reinterpret_cast<void*>(&station_transport_play) },
         { "station_transport_stop", reinterpret_cast<void*>(&station_transport_stop) },
         { "station_log", reinterpret_cast<void*>(&station_log) },
+        { "station_log_i64", reinterpret_cast<void*>(&station_log_i64) },
+        { "station_log_f64", reinterpret_cast<void*>(&station_log_f64) },
         { "station_last_error", reinterpret_cast<void*>(&station_last_error) },
     };
     return api;
