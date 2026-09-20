@@ -331,6 +331,9 @@ private:
     // Which saved arrangement/patch/foley-setup (project asset id) is currently active in each
     // tool tab -- used to auto-restore the right one when the project reopens.
     juce::String currentArrangementAssetId;
+    juce::String arrangementBaseline;
+    juce::String shownArrangementTitle;
+    double arrangementTitleCheckedAtSeconds = 0.0;
     juce::String currentSignalLabAssetId;
     juce::String currentFoleyAssetId;
     VstPluginCatalog vstPluginCatalog;
@@ -604,6 +607,15 @@ private:
     // asset in each tool tab, used both by the auto-restore-on-project-open path and by each
     // tool's own interactive Load menu.
     bool restoreArrangementAsset(const creation::assets::AssetDescriptor& asset);
+
+    // One arrangement is open at a time; File > New Arrangement empties the Tracker (asking to save first if it has
+    // unsaved changes). "Unsaved" means the tracks and clips differ from how they were when last saved or loaded.
+    void newArrangement();
+    void performNewArrangement();
+    juce::String arrangementFingerprint() const;
+    bool arrangementIsDirty() const;
+    void markArrangementClean();
+    void refreshArrangementTitle();
     bool restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset);
     bool restoreFoleyAsset(const creation::assets::AssetDescriptor& asset);
     void restoreLastActiveAssets(const juce::ValueTree& lastActiveAssetsState);
@@ -622,6 +634,11 @@ private:
                                   juce::String& errorMessage);
     void importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
     void runVideoImport(juce::StringArray filePaths, int trackIndex, double startSeconds);
+
+    // File > Import: pick files or a folder, then bring them all into the project's asset library (no track placement).
+    void showImportWindow();
+    void runLibraryImport(juce::StringArray filePaths);
+    juce::Component::SafePointer<juce::DialogWindow> importWindow;
     // The window for whatever long action is running (import, ...): progress bar, status line, Cancel.
     std::unique_ptr<ProgressTask> progressTask;
     std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
