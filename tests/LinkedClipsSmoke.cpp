@@ -122,6 +122,32 @@ int main()
     }
     check(restoredLinked == 2 && detached, "link and detached-sound survive save and restore");
 
+    // A video clip's effect and layout settings survive save and restore (and copy along with a duplicated clip).
+    fresh(model, a, b, loner);
+    juce::NamedValueSet params;
+    params.set("key.enabled", true);
+    params.set("key.tolerance", 0.42);
+    params.set("xf.scale", 0.5);
+    params.set("xf.x", 0.25);
+    model.setClipVideoParams(loner, params);
+    cs::TimelineModel withParams;
+    withParams.restoreState(model.createState());
+    bool paramsBack = false;
+    for (const auto& clip : withParams.getClips())
+        if (clip.displayName == "loner")
+            paramsBack = (bool) clip.videoParams.getWithDefault("key.enabled", false)
+                      && near((double) clip.videoParams.getWithDefault("key.tolerance", 0.0), 0.42)
+                      && near((double) clip.videoParams.getWithDefault("xf.scale", 0.0), 0.5)
+                      && near((double) clip.videoParams.getWithDefault("xf.x", 0.0), 0.25);
+    check(paramsBack, "a video clip's effect and layout settings survive save and restore");
+
+    model.duplicateClip(loner);
+    bool copyHasParams = false;
+    for (const auto& clip : model.getClips())
+        if (clip.displayName.endsWith("copy"))
+            copyHasParams = near((double) clip.videoParams.getWithDefault("xf.scale", 0.0), 0.5);
+    check(copyHasParams, "a duplicated clip keeps its settings");
+
     std::printf("%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }

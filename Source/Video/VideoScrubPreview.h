@@ -40,7 +40,20 @@ public:
             launchNextJob();
     }
 
+    // Why the last decode produced no picture ("" when it did). Safe from any thread.
+    juce::String getLastError() const
+    {
+        const juce::ScopedLock sl(lock);
+        return lastDecodeError;
+    }
+
 private:
+    void setLastError(const juce::String& text)
+    {
+        const juce::ScopedLock sl(lock);
+        lastDecodeError = text;
+    }
+
     // Caller must hold lock.
     void launchNextJob()
     {
@@ -68,6 +81,8 @@ private:
                 openInfo = openService.open(file);
                 openValid = openInfo.valid;
                 openFile = file;
+                if (! openValid)
+                    setLastError("could not open the video: " + openService.getLastError());
             }
 
             juce::Image decoded;
@@ -75,6 +90,9 @@ private:
                 decoded = openService.decodeFrameAt(sourceSeconds,
                                                     juce::jlimit(16, juce::jmax(16, openInfo.width), wantWidth),
                                                     juce::jlimit(16, juce::jmax(16, openInfo.height), wantHeight));
+
+            if (openValid)
+                setLastError(decoded.isValid() ? juce::String() : openService.getLastError());
 
             if (callback)
                 juce::MessageManager::callAsync([callback, decoded] { callback(decoded); });
@@ -85,7 +103,8 @@ private:
         });
     }
 
-    juce::CriticalSection lock;
+    mutable juce::CriticalSection lock;
+    juce::String lastDecodeError;
     bool jobRunning = false;
     bool hasPendingRequest = false;
     juce::File pendingFile;

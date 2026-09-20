@@ -41,6 +41,9 @@
 #include "Views/ContentPanel.h"
 #include "Views/ProgressTask.h"
 #include "Video/VideoPreviewComponent.h"
+#include "Video/Gl/VideoGlView.h"
+#include "Video/Gl/VideoLayerParams.h"
+#include "Video/Gl/VideoPanelHost.h"
 #include "Video/VideoScrubPreview.h"
 #include "Views/RenderDialog.h"
 #include "Views/ToastMessage.h"
@@ -289,14 +292,26 @@ private:
 
     // Video. The picture is a dock panel (dock it, float it, resize it); the sound is the video's own audio
     // track, decoded once to a WAV so it plays through the clip's mixer track like any other audio clip.
-    cs::VideoPreviewComponent videoView;
-    cs::VideoScrubPreview videoScrub;
-    juce::String lastVideoRequestKey;
+    cs::VideoGlView videoView; // the video picture: drawn by OpenGL, effects run on the GPU
+    cs::VideoPanelHost videoPanelHost { videoView }; // what the video panel shows: the picture plus a status strip
+    // One decoder per video clip that is on screen at the playhead (each layer of the picture has its own).
+    struct VideoLayerFeed
+    {
+        cs::VideoScrubPreview scrub;
+        juce::Image frame;
+        juce::String requestKey;
+    };
+    std::map<juce::String, std::unique_ptr<VideoLayerFeed>> videoFeeds; // clip id -> its decoder and latest frame
+    std::vector<juce::String> videoActiveOrder;                          // clip ids at the playhead, bottom layer first
+    void refreshVideoLayers();                                           // republish the layers from the feeds and the clips' settings
+    void showVideoClipSettings(int clipIndex);
+    std::unique_ptr<juce::DocumentWindow> videoSettingsWindow;
     std::map<juce::String, juce::File> videoAudioFiles; // asset id -> local WAV of that video's sound
     std::set<juce::String> videosWithoutAudio;          // asset ids whose video has no sound track
     void updateVideoView(double timelineSeconds);
     void openVideoViewForPlayback();
-    // The clip menu's video/sound actions (1 split the sound onto its own track, 2 unlink, 3 link, 4 put back).
+    // The clip menu's video/sound actions (1 split the sound onto its own track, 2 unlink, 3 link, 4 put back,
+    // 5 video effects and layout).
     void handleClipSoundAction(int clipIndex, int action);
     // Right-click > Add Clip...: a picker that offers what fits the track, with a picture and facts for each item.
     void showAddClipPicker(int trackIndex, double startSeconds);

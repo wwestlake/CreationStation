@@ -456,6 +456,12 @@ void TimelineModel::setClipSoundDetached(int clipIndex, bool detached)
         clips[(size_t) clipIndex].soundDetached = detached;
 }
 
+void TimelineModel::setClipVideoParams(int clipIndex, const juce::NamedValueSet& params)
+{
+    if (juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        clips[(size_t) clipIndex].videoParams = params;
+}
+
 void TimelineModel::setClipSourceRange(int clipIndex, double sourceStartSeconds, double sourceDurationSeconds)
 {
     if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
@@ -1620,6 +1626,13 @@ juce::ValueTree TimelineModel::createState() const
             clipState.setProperty("linkGroupId", clip.linkGroupId, nullptr);
         if (clip.soundDetached)
             clipState.setProperty("soundDetached", true, nullptr);
+        if (clip.videoParams.size() > 0)
+        {
+            juce::ValueTree videoState("VideoParams");
+            for (int i = 0; i < clip.videoParams.size(); ++i)
+                videoState.setProperty(clip.videoParams.getName(i), clip.videoParams.getValueAt(i), nullptr);
+            clipState.addChild(videoState, -1, nullptr);
+        }
 
         if (! clip.midiNotes.empty())
         {
@@ -1780,6 +1793,12 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
         clip.recording = false;
         clip.linkGroupId = child.getProperty("linkGroupId").toString();
         clip.soundDetached = (bool) child.getProperty("soundDetached", false);
+        if (const auto videoState = child.getChildWithName("VideoParams"); videoState.isValid())
+            for (int i = 0; i < videoState.getNumProperties(); ++i)
+            {
+                const auto name = videoState.getPropertyName(i);
+                clip.videoParams.set(name, videoState.getProperty(name));
+            }
         if (clip.displayName.trim().isEmpty())
             clip.displayName = clip.file.existsAsFile() ? clip.file.getFileNameWithoutExtension()
                                                         : toDisplayName(clip.kind) + " Clip";
