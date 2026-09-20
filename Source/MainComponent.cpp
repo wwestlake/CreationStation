@@ -93,6 +93,10 @@ constexpr int menuIdFileSaveArrangement = 2;
 constexpr int menuIdFileLoadArrangement = 3;
 constexpr int menuIdFileRender = 4;
 constexpr int menuIdFileExportWav = 5;
+constexpr int menuIdFileNewSignal = 6;
+constexpr int menuIdFileOpenSignal = 7;
+constexpr int menuIdFileSaveSignal = 8;
+constexpr int menuIdFileRenderSignal = 9;
 constexpr int menuIdEditUndo = 101;
 constexpr int menuIdEditRedo = 102;
 constexpr int menuIdEditDuplicate = 103;
@@ -1825,6 +1829,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     transportBar.onPlay = [this]
     {
+        syncActiveModeToFocus();
         engine.stopAssetPreview();
 
         if (activeMode == WorkspaceMode::signal)
@@ -1849,6 +1854,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     };
     transportBar.onPause = [this]
     {
+        syncActiveModeToFocus();
         engine.stopAssetPreview();
 
         if (activeMode == WorkspaceMode::signal)
@@ -1865,6 +1871,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     };
     transportBar.onStop = [this]
     {
+        syncActiveModeToFocus();
         stopRecordingSession();
         engine.stopAssetPreview();
 
@@ -4410,8 +4417,51 @@ void MainComponent::confirmCloseApplication(const std::function<void(bool should
                                  });
 }
 
+void MainComponent::syncActiveModeToFocus()
+{
+    const auto modeBefore = activeMode;
+    struct RefreshMenuIfTargetChanged
+    {
+        MainComponent& owner;
+        WorkspaceMode before;
+        ~RefreshMenuIfTargetChanged()
+        {
+            if ((before == WorkspaceMode::signal) != (owner.activeMode == WorkspaceMode::signal))
+                owner.menuItemsChanged();
+        }
+    } refreshMenu { *this, modeBefore };
+
+    const auto isInside = [](juce::Component& panel, const juce::Component* focused)
+    {
+        return focused != nullptr && (focused == &panel || panel.isParentOf(focused));
+    };
+
+    const auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    if (isInside(signalLabPanel, focused))
+    {
+        activeMode = WorkspaceMode::signal;
+        return;
+    }
+    if (isInside(trackerPanel, focused))
+    {
+        activeMode = WorkspaceMode::tracker;
+        return;
+    }
+
+    // Focus is somewhere else (a transport button, a menu): keep the last choice while its panel is on screen, and
+    // when it is not, use the one of the two that is.
+    const auto signalShowing = signalLabPanel.isShowing();
+    const auto trackerShowing = trackerPanel.isShowing();
+    if (activeMode == WorkspaceMode::signal && ! signalShowing && trackerShowing)
+        activeMode = WorkspaceMode::tracker;
+    else if (activeMode != WorkspaceMode::signal && signalShowing && ! trackerShowing)
+        activeMode = WorkspaceMode::signal;
+}
+
 void MainComponent::timerCallback()
 {
+    syncActiveModeToFocus();
+
     // A preview started from the asset list ends by itself; flip its card back from Stop to Play.
     if (previewingProjectAssetId.isNotEmpty() && ! engine.isPreviewingAsset())
     {
@@ -4676,6 +4726,19 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
     // this app does with the project it is a tenant in.
     if (topLevelMenuIndex == 0)
     {
+        // File follows whichever of the Tracker or the Signal Lab has focus.
+        if (activeMode == WorkspaceMode::signal)
+        {
+            menu.addItem(menuIdFileNewSignal, "New Signal");
+            menu.addItem(menuIdFileOpenSignal, "Open Signal...");
+            menu.addItem(menuIdFileSaveSignal, "Save Signal...");
+            menu.addSeparator();
+            menu.addItem(menuIdFileRenderSignal, "Render Signal to Project");
+            menu.addSeparator();
+            menu.addItem(menuIdFileSave, "Save Project", projectSession.isValid());
+            return menu;
+        }
+
         menu.addItem(menuIdFileSave, "Save", projectSession.isValid());
         menu.addSeparator();
         menu.addItem(menuIdFileSaveArrangement, "Save Arrangement...", projectSession.isValid());
@@ -4754,6 +4817,10 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
             case menuIdFileLoadArrangement: trackerPanel.requestLoadArrangement(); break;
             case menuIdFileRender: showRenderDialog(RenderRequest::Destination::project); break;
             case menuIdFileExportWav: showRenderDialog(RenderRequest::Destination::file); break;
+            case menuIdFileNewSignal: signalLabPanel.newSignal(); break;
+            case menuIdFileOpenSignal: signalLabPanel.openSignal(); break;
+            case menuIdFileSaveSignal: signalLabPanel.saveSignal(); break;
+            case menuIdFileRenderSignal: signalLabPanel.renderSignalToProject(); break;
             default: break;
         }
         return;
@@ -4889,7 +4956,10 @@ void MainComponent::setWorkspaceMode(WorkspaceMode mode)
     if (mode != activeMode)
         metricsCollector.logFeatureUsage("workspace_opened:" + workspaceModeName(mode));
 
+    const auto signalTargetBefore = activeMode == WorkspaceMode::signal;
     activeMode = mode;
+    if (signalTargetBefore != (activeMode == WorkspaceMode::signal))
+        menuItemsChanged();
     activateDockPanel(mode == WorkspaceMode::tracker ? trackerPanelId
                      : mode == WorkspaceMode::sampler ? samplerPanelId
                      : mode == WorkspaceMode::signal ? signalPanelId

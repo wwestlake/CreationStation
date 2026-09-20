@@ -255,6 +255,46 @@ int main()
         check(relative < 0.05, "a custom range sounds like that stretch of the full render (rel err " + juce::String(relative, 5) + ")");
     }
 
+    // Signal Lab "Play" through the engine's real audio callback: a sine wired to a Sink, no mixer node, started the
+    // way the Play button starts it. Drives the same callback a sound device drives, so it needs no hardware.
+    {
+        WorkstationAudioEngine liveEngine;
+        liveEngine.audioDeviceAboutToStart(nullptr);
+
+        auto patch = makeVariablePatch();
+        patch.variables.clear();
+        patch.variableBindings.clear();
+        cw::PatchNode sink;
+        sink.id = "sink1";
+        sink.kind = "output";
+        patch.nodes.add(sink);
+        cw::PatchConnection wire;
+        wire.from = "src_sine";
+        wire.to = "sink1";
+        wire.fromPort = "signalOut";
+        wire.toPort = "signalIn";
+        wire.weight = 1.0;
+        patch.connections.add(wire);
+
+        liveEngine.rebuildSignalLabLiveGraph(patch, PatchLiveBindingMap {});
+        liveEngine.startSignalLabLivePlayback(1.0);
+        check(liveEngine.isSignalLabLivePlaybackActive(), "the engine reports Signal Lab live playback as active after start");
+
+        constexpr int block = 512;
+        juce::AudioBuffer<float> left(1, block * 20), right(1, block * 20);
+        left.clear();
+        right.clear();
+        for (int done = 0; done < block * 20; done += block)
+        {
+            float* outs[2] = { left.getWritePointer(0) + done, right.getWritePointer(0) + done };
+            liveEngine.audioDeviceIOCallbackWithContext(nullptr, 0, outs, 2, block, juce::AudioIODeviceCallbackContext {});
+        }
+        const auto peak = left.getMagnitude(0, left.getNumSamples());
+        std::printf("INFO: Signal Lab live via the engine callback: peak %.4f\n", peak);
+        // Not silence, and not above digital full scale (1.0): a runaway value here means stale mixer memory leaked in.
+        check(peak > 0.0f && peak <= 1.0f, "Signal Lab live playback is a real signal within digital full scale through the engine's audio callback");
+    }
+
     std::printf("%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }
