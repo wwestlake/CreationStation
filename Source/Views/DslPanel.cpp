@@ -1,4 +1,5 @@
 #include "DslPanel.h"
+#include <creation/suite/SuiteStoragePaths.h>
 
 // DslPanel's "Compile" button shells out to the real frust_compiler CLI in
 // --emit-obj mode (parses, runs sema/codegen, emits an object file, never
@@ -99,8 +100,11 @@ void DslPanel::resized()
 
 void DslPanel::compileSource()
 {
-    const auto scratchDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                                 .getChildFile("djehuti_station_dsl_panel");
+    const auto scratchRoot = creation::suite::getCurrentScratchDirectory();
+    if (scratchRoot == juce::File())
+        return; // no VFS root: nowhere to compile
+
+    const auto scratchDir = scratchRoot.getChildFile("djehuti_station_dsl_panel");
     scratchDir.createDirectory();
     const auto sourceFile = scratchDir.getChildFile("patch.frust");
     const auto objectFile = scratchDir.getChildFile("patch.o");

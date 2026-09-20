@@ -1,34 +1,26 @@
 #include "SamplePlayerLibrarySettings.h"
 
+#include <creation/services/SuiteVfsJsonStore.h>
+
+// The sample library folder is a suite setting: it lives in the VFS with the rest, never in the OS user-data folder.
 namespace
 {
-juce::File getSettingsFile()
-{
-    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-        .getChildFile("CreationStation")
-        .getChildFile("sample-player-library.xml");
-}
+constexpr const char* kSettingsPath = "sample-player-library.json";
 }
 
 juce::File SamplePlayerLibrarySettings::getLibraryPath()
 {
-    auto file = getSettingsFile();
-    if (! file.existsAsFile())
-        return {};
-
-    std::unique_ptr<juce::XmlElement> xml(juce::XmlDocument::parse(file));
-    if (xml == nullptr)
-        return {};
-
-    return juce::File(xml->getStringAttribute("libraryPath"));
+    juce::String error;
+    const auto value = creation::services::SuiteVfsJsonStore::loadJson(kSettingsPath, error);
+    const auto path = value.getProperty("libraryPath", juce::var()).toString();
+    return path.isNotEmpty() ? juce::File(path) : juce::File();
 }
 
 void SamplePlayerLibrarySettings::setLibraryPath(const juce::File& folder)
 {
-    auto file = getSettingsFile();
-    file.getParentDirectory().createDirectory();
+    auto* object = new juce::DynamicObject();
+    object->setProperty("libraryPath", folder.getFullPathName());
 
-    juce::XmlElement xml("SamplePlayerLibrary");
-    xml.setAttribute("libraryPath", folder.getFullPathName());
-    xml.writeTo(file);
+    juce::String error;
+    creation::services::SuiteVfsJsonStore::saveJson(kSettingsPath, juce::var(object), error);
 }

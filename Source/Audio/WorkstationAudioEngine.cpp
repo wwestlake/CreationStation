@@ -1,5 +1,8 @@
 #include "WorkstationAudioEngine.h"
 
+#include <creation/suite/SuiteSettings.h>
+#include <creation/suite/SuiteStoragePaths.h>
+
 #include <cmath>
 #include <array>
 #include <algorithm>
@@ -127,10 +130,18 @@ void configureMainBusOnly(juce::AudioPluginInstance& instance)
     }
 }
 
+// Inside the VFS root's Logs folder, never in the OS user-data folder. Empty (nothing is logged) until a root is chosen.
 juce::File getPluginStateDiagnosticsFile()
 {
-    auto logDirectory = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                            .getChildFile("Djehuti Station");
+    static const auto logDirectory = []
+    {
+        juce::String error;
+        return creation::suite::getLogsDirectory(creation::suite::SuiteSettingsStore().load(error));
+    }();
+
+    if (logDirectory == juce::File())
+        return {};
+
     logDirectory.createDirectory();
     return logDirectory.getChildFile("plugin-state-diagnostics.log");
 }
@@ -146,7 +157,8 @@ void appendPluginStateDiagnostic(const juce::String& eventName,
                 + " | file=" + pluginFile.getFullPathName()
                 + " | bytes=" + juce::String((int64) stateBytes)
                 + "\n";
-    getPluginStateDiagnosticsFile().appendText(line, false, false, "\n");
+    if (const auto file = getPluginStateDiagnosticsFile(); file != juce::File())
+        file.appendText(line, false, false, "\n");
 }
 }
 
@@ -3046,7 +3058,7 @@ bool WorkstationAudioEngine::renderMidiClipToFile(const juce::File& instrumentPl
     instance->releaseResources();
     instance.reset();
 
-    auto cacheDir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("CreationStationMidiRender");
+    auto cacheDir = creation::suite::getCurrentScratchDirectory().getChildFile("CreationStationMidiRender");
     cacheDir.createDirectory();
     auto renderFile = cacheDir.getChildFile("clip_" + juce::Uuid().toString() + ".wav");
 
