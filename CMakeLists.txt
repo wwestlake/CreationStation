@@ -170,6 +170,15 @@ if(NOT TARGET frust_host)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FrustHost" CreationSuiteSharedFrustHost)
 endif()
 
+# The AI framework (message model, providers, tool registry, agent engine) and the tools that let an AI work as a
+# coder in FRust. Shared across the suite; an app supplies its panel, its context and its own script API.
+if(NOT TARGET creation_suite_ai_core)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiCore" CreationSuiteSharedAiCore)
+endif()
+if(NOT TARGET creation_suite_ai_frust_tools)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiFrustTools" CreationSuiteSharedAiFrustTools)
+endif()
+
 juce_add_gui_app(CreativeWorkstation
     PRODUCT_NAME "DjehutiStation"
     COMPANY_NAME "LagDaemon Software"
