@@ -1,15 +1,8 @@
 #include "DslPanel.h"
 
-#include <CompilerApi.h>
-
-// DslPanel's "Compile" button runs the embedded FRust compiler in this
-// process (frust::Compile, CompilerApi.h): the editor's text goes in as a
-// string and the diagnostics come back as data. Nothing is written to a
-// file, not even a temporary one, and no other program is started. It parses
-// and generates code exactly as the command-line compiler does, but never
-// executes anything and never requires a `manifest "...";` declaration the
-// way frust_plugin_host's load path does -- the right check for a free-form
-// scratch/patch editor that isn't a loadable plugin.
+// The Script panel does not compile anything itself: pressing Compile hands the text to the host
+// (onCompileRequested), which stores it in the project VFS and compiles it there with the FRust
+// libraries built into the app. The panel only shows what comes back.
 DslPanel::DslPanel()
 {
     setName("Code");
@@ -102,27 +95,14 @@ void DslPanel::resized()
 
 void DslPanel::compileSource()
 {
-    frust::CompileRequest request;
-    request.sources.push_back({ "patch.frust", sourceEditor.getText().toStdString() });
-    request.emitObject = false; // check only: nothing here needs the object code
-
-    const auto result = frust::Compile(request);
-    lastCompileSucceeded = result.ok;
-
-    juce::String output;
-    if (result.ok)
-    {
-        output = "Compiled cleanly.";
-    }
+    CompileOutcome outcome;
+    if (onCompileRequested)
+        outcome = onCompileRequested(sourceEditor.getText());
     else
-    {
-        for (const auto& diagnostic : result.diagnostics)
-            output << juce::String(frust::FormatDiagnostic(diagnostic)) << "\n";
-        if (output.isEmpty())
-            output = "The FRust compiler reported a failure without a message.";
-    }
+        outcome.output = "Compiling is not available here.";
 
-    outputEditor.setText(output, juce::dontSendNotification);
+    lastCompileSucceeded = outcome.ok;
+    outputEditor.setText(outcome.output, juce::dontSendNotification);
     exportButton.setEnabled(lastCompileSucceeded);
     saveButton.setEnabled(lastCompileSucceeded);
 }

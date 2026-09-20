@@ -163,12 +163,11 @@ if(NOT TARGET node_library_loader)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeLibraryLoader" CreationSuiteSharedNodeLibraryLoader)
 endif()
 
-# VFS-cache-first pod resolution: checks the Suite VFS cache, falls back to
-# the live lagdaemon.com registry on a miss, stores the result back into
-# the VFS. Needed before Station can reference a published pod inside a
-# schematic.
-if(NOT TARGET frate_pod_cache)
-    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FratePodCache" CreationSuiteSharedFratePodCache)
+# The Suite's front end for the FRust libraries: the compiler and Frate work on the VFS (as their
+# file system and their log) through SuiteFrust. Needs frust_lang / frate_lib / the plugin runtime and
+# the asset system, all added above.
+if(NOT TARGET frust_host)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FrustHost" CreationSuiteSharedFrustHost)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
@@ -438,7 +437,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     CreationDock
     creation_station_language_host
     creation_suite_frust_plugin_runtime
-    creation_suite_frate_pod_cache
+    creation_suite_frust_host
     node_library_loader
     node_system
     juce::juce_audio_devices
