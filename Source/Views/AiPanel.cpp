@@ -2,6 +2,10 @@
 
 namespace
 {
+// The message box starts one line high and grows with what is typed, up to about eight lines.
+constexpr int kMinPromptHeight = 34;
+constexpr int kMaxPromptHeight = 180;
+
     struct MarkdownRenderStyle
     {
         juce::Font bodyFont { 14.0f };
@@ -596,7 +600,10 @@ AiPanel::AiPanel()
     promptEditor.setMultiLine(true, true);
     promptEditor.setReturnKeyStartsNewLine(true);
     promptEditor.setScrollbarsShown(true);
-    promptEditor.setText("Describe the sound or change you want.");
+    // Room at the right for the send arrow, which sits inside the box. The box starts one line high
+    // (the mode's hint shows while it is empty) and grows as you type.
+    promptEditor.setBorder(juce::BorderSize<int>(4, 6, 4, 38));
+    promptEditor.onSend = [this] { sendButton.triggerClick(); };
     promptEditor.addListener(this);
     addAndMakeVisible(promptEditor);
 
@@ -622,6 +629,15 @@ AiPanel::AiPanel()
     };
     sendButton.setTooltip("Send your message to the assistant");
     addAndMakeVisible(sendButton);
+
+    enterSendsToggle.setTooltip("On: Enter sends and Shift+Enter starts a new line. Off: Enter starts a new line and Ctrl+Enter sends.");
+    enterSendsToggle.onClick = [this]
+    {
+        setEnterSendsMessage(enterSendsToggle.getToggleState());
+        if (onEnterSendsChanged)
+            onEnterSendsChanged(promptEditor.enterSends);
+    };
+    addAndMakeVisible(enterSendsToggle);
 
     collapseButton.setTooltip("Collapse or expand the assistant sidebar");
     collapseButton.onClick = [this]
@@ -909,6 +925,7 @@ void AiPanel::setCollapsed(bool shouldCollapse)
     transcriptViewport.setVisible(! collapsed);
     promptEditor.setVisible(! collapsed);
     sendButton.setVisible(! collapsed);
+    enterSendsToggle.setVisible(! collapsed);
     footerHintLabel.setVisible(! collapsed);
 
     repaint();
@@ -922,10 +939,22 @@ void AiPanel::paint(juce::Graphics& g)
     g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 14.0f, 1.0f);
 }
 
+void AiPanel::setSendButtonIcon(station_ui::SendArrowButton::Icon icon, const juce::String& tooltip)
+{
+    sendButton.setIcon(icon);
+    sendButton.setTooltip(tooltip);
+}
+
+void AiPanel::setEnterSendsMessage(bool shouldSend)
+{
+    promptEditor.enterSends = shouldSend;
+    enterSendsToggle.setToggleState(shouldSend, juce::dontSendNotification);
+}
+
 void AiPanel::refreshPromptHeight()
 {
     auto textHeight = promptEditor.getTextHeight();
-    auto estimated = juce::jlimit(72, 220, textHeight + 26);
+    auto estimated = juce::jlimit(kMinPromptHeight, kMaxPromptHeight, textHeight + 12);
     if (promptEditorHeight != estimated)
     {
         promptEditorHeight = estimated;
@@ -1043,7 +1072,7 @@ void AiPanel::resized()
     promptLabel.setBounds(area.removeFromTop(16));
     area.removeFromTop(4);
 
-    auto promptHeight = juce::jlimit(72, 220, promptEditorHeight > 0 ? promptEditorHeight : 96);
+    auto promptHeight = juce::jlimit(kMinPromptHeight, kMaxPromptHeight, promptEditorHeight > 0 ? promptEditorHeight : kMinPromptHeight);
     auto transcriptAreaHeight = juce::jmax(160, area.getHeight() - promptHeight - 44);
     auto transcriptArea = area.removeFromTop(transcriptAreaHeight);
     transcriptViewport.setBounds(transcriptArea);
@@ -1051,10 +1080,12 @@ void AiPanel::resized()
     area.removeFromTop(6);
 
     auto promptArea = area.removeFromTop(promptHeight);
-    auto promptButtonArea = promptArea.removeFromRight(100);
-    sendButton.setBounds(promptButtonArea.reduced(0, 2));
-    promptEditor.setBounds(promptArea.reduced(0, 0));
-    footerHintLabel.setBounds(area);
+    promptEditor.setBounds(promptArea);
+    // The send arrow sits inside the box, at the bottom right.
+    sendButton.setBounds(promptArea.getRight() - 34, promptArea.getBottom() - 32, 28, 28);
+    auto footerRow = area.removeFromTop(20);
+    enterSendsToggle.setBounds(footerRow.removeFromRight(110));
+    footerHintLabel.setBounds(footerRow);
 
     refreshChatLayout();
     scrollChatToBottom();

@@ -5118,6 +5118,7 @@ juce::ValueTree MainComponent::createLayoutState() const
     layout.setProperty("formatVersion", 1, nullptr);
     layout.setProperty("activeMode", static_cast<int>(activeMode), nullptr);
     layout.setProperty("aiSidebarCollapsed", aiSidebarCollapsed, nullptr);
+    layout.setProperty("aiEnterSends", aiPanel.getEnterSendsMessage(), nullptr);
     if (dockManager != nullptr)
         layout.setProperty("dockLayoutJson", juce::JSON::toString(dockManager->captureLayout()), nullptr);
 
@@ -5147,6 +5148,7 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
 
     aiSidebarCollapsed = (bool) state.getProperty("aiSidebarCollapsed", false);
     aiPanel.setCollapsed(aiSidebarCollapsed);
+    aiPanel.setEnterSendsMessage((bool) state.getProperty("aiEnterSends", false));
 
     auto dockLayoutJson = state.getProperty("dockLayoutJson").toString();
     if (dockManager != nullptr && dockLayoutJson.isNotEmpty())
