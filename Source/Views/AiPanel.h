@@ -95,6 +95,7 @@ private:
     void refreshModeUi();
     void refreshAccessUi();
     void refreshPromptHeight();
+    int measurePromptHeight(int width) const;
     void refreshChatLayout();
     void scrollChatToBottom();
     void textEditorTextChanged(juce::TextEditor& editor) override;

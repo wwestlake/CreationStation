@@ -951,10 +951,31 @@ void AiPanel::setEnterSendsMessage(bool shouldSend)
     enterSendsToggle.setToggleState(shouldSend, juce::dontSendNotification);
 }
 
+int AiPanel::measurePromptHeight(int width) const
+{
+    // Measured from the text and the box's width alone. (TextEditor::getTextHeight() reports the
+    // content area, which is never smaller than the box itself, so growing from it never shrinks.)
+    const int textWidth = width - 6 - 38 - 8;   // the box's left and right border, and a little slack
+    if (textWidth <= 0)
+        return kMinPromptHeight;
+
+    auto text = promptEditor.getText();
+    if (text.endsWithChar('\n'))
+        text += " ";   // a trailing newline is a real, empty last line
+
+    juce::AttributedString attributed;
+    attributed.setWordWrap(juce::AttributedString::byWord);
+    attributed.append(text.isEmpty() ? juce::String(" ") : text, promptEditor.getFont());
+
+    juce::TextLayout layout;
+    layout.createLayout(attributed, (float) textWidth);
+
+    return juce::jlimit(kMinPromptHeight, kMaxPromptHeight, (int) std::ceil(layout.getHeight()) + 8 + 6);
+}
+
 void AiPanel::refreshPromptHeight()
 {
-    auto textHeight = promptEditor.getTextHeight();
-    auto estimated = juce::jlimit(kMinPromptHeight, kMaxPromptHeight, textHeight + 12);
+    const auto estimated = measurePromptHeight(promptEditor.getWidth());
     if (promptEditorHeight != estimated)
     {
         promptEditorHeight = estimated;
@@ -1072,7 +1093,8 @@ void AiPanel::resized()
     promptLabel.setBounds(area.removeFromTop(16));
     area.removeFromTop(4);
 
-    auto promptHeight = juce::jlimit(kMinPromptHeight, kMaxPromptHeight, promptEditorHeight > 0 ? promptEditorHeight : kMinPromptHeight);
+    promptEditorHeight = measurePromptHeight(area.getWidth());
+    auto promptHeight = promptEditorHeight;
     auto transcriptAreaHeight = juce::jmax(160, area.getHeight() - promptHeight - 44);
     auto transcriptArea = area.removeFromTop(transcriptAreaHeight);
     transcriptViewport.setBounds(transcriptArea);
