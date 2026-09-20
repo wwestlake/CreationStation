@@ -259,7 +259,8 @@ juce_add_binary_data(StationBuiltInFrust
     NAMESPACE BuiltInFrustData
     SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
-        "${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust")
+        "${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Agent/StationAgentApi.frust")
 set_target_properties(StationBuiltInFrust PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_sources(CreativeWorkstation PRIVATE
@@ -338,6 +339,10 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/AudioNodeCatalog.h
     Source/Language/AudioGraphCodegen.cpp
     Source/Language/AudioGraphCodegen.h
+    Source/Agent/StationAgentHost.h
+    Source/Agent/StationAgentHostImpl.cpp
+    Source/Agent/StationScriptApi.cpp
+    Source/Agent/StationScriptApi.h
     Source/Language/StationFrustPodService.cpp
     Source/Language/StationFrustPodService.h
     Source/Views/AuthGateView.cpp
@@ -439,6 +444,7 @@ endif()
 target_link_libraries(CreativeWorkstation PRIVATE
     StationHelpData
     StationBuiltInFrust
+    creation_suite_ai_frust_tools
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_RENDER_TARGET}
     juce::juce_opengl
@@ -827,3 +833,15 @@ set_target_properties(CreationStationPluginKit PROPERTIES OUTPUT_NAME "DjehutiSt
 set_target_properties(CreativeWorkstation PROPERTIES OUTPUT_NAME "DjehutiStation")
 set_target_properties(creation_station_language_host PROPERTIES OUTPUT_NAME "djehuti_station_language_host")
 set_target_properties(CreationStationInstrument PROPERTIES OUTPUT_NAME "DjehutiStationInstrument")
+
+# Station's API for FRust scripts, through the real script runner and Station's real declarations, against a
+# fake host that records what a script did.
+add_executable(StationScriptApiSmoke
+    tests/StationScriptApiSmoke.cpp
+    Source/Agent/StationScriptApi.cpp
+)
+target_link_libraries(StationScriptApiSmoke PRIVATE
+    StationBuiltInFrust
+    creation_suite_frust_plugin_runtime
+    frust_lang
+)

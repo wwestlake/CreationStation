@@ -24,7 +24,7 @@ extern fn station_track_soloed(track: i64) -> i64;   // 1 or 0
 // ---- Changing tracks ----
 extern fn station_track_add(name: String) -> i64;    // returns the new track's number, or 0 if it failed
 extern fn station_track_set_name(track: i64, name: String) -> i64;
-extern fn station_track_set_volume_db(track: i64, db: f64) -> i64;  // -60.0 to +6.0
+extern fn station_track_set_volume_db(track: i64, db: f64) -> i64;  // -60.0 to 0.0 (0 is the top of the fader)
 extern fn station_track_set_pan(track: i64, pan: f64) -> i64;       // -1.0 to 1.0
 extern fn station_track_set_muted(track: i64, muted: i64) -> i64;
 extern fn station_track_set_soloed(track: i64, soloed: i64) -> i64;

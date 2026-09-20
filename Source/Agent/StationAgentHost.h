@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <string>
 
 // What Station offers the scripts the Virtual Engineer writes (see StationAgentApi.frust). MainComponent
@@ -31,3 +33,21 @@ public:
     virtual bool transportPlay(std::string& error) = 0;
     virtual bool transportStop(std::string& error) = 0;
 };
+
+// The mixer fader is a linear gain from 0 to 1, where 1 is the top of the fader. The API speaks decibels, from
+// -60 up to 0.
+namespace station_agent
+{
+constexpr double minVolumeDb = -60.0;
+constexpr double maxVolumeDb = 0.0;
+
+inline float gainFromDb(double db)
+{
+    return db <= minVolumeDb ? 0.0f : (float) std::pow(10.0, std::min(db, maxVolumeDb) / 20.0);
+}
+
+inline double dbFromGain(float gain)
+{
+    return gain <= 0.0f ? minVolumeDb : std::max(minVolumeDb, 20.0 * std::log10((double) gain));
+}
+}
