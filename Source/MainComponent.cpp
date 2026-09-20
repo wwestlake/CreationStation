@@ -2743,7 +2743,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         auto logicalPath = creation::assets::ProjectContainerPaths::derivedAssetRoot
                          + assetSlug + "-" + makeRecordingTimestamp() + ".wav";
 
-        auto tempRenderFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+        auto tempRenderFile = creation::suite::getCurrentScratchDirectory()
                                   .getChildFile(assetSlug + "-" + juce::Uuid().toString() + ".wav");
 
         if (writeWavFile(tempRenderFile, buffer, sampleRate, errorMessage))
@@ -9309,9 +9309,7 @@ void MainComponent::chooseSuiteDirectory(const juce::String& fieldId)
     juce::String currentPath = suiteSettings.suiteVfsRoot;
 
     suiteDirectoryChooser = std::make_unique<juce::FileChooser>("Choose a folder for the Djehuti Suite",
-                                                                currentPath.isNotEmpty()
-                                                                    ? juce::File(currentPath)
-                                                                    : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory),
+                                                                currentPath.isNotEmpty() ? juce::File(currentPath) : juce::File(),
                                                                 "*",
                                                                 true);
     auto chooser = suiteDirectoryChooser.get();
@@ -9726,7 +9724,7 @@ bool MainComponent::startRecordingSession()
 
         WorkstationAudioEngine::RecordingTarget target;
         target.trackIndex = trackIndex;
-        target.file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("Take-" + timestamp
+        target.file = creation::suite::getCurrentScratchDirectory().getChildFile("Take-" + timestamp
                                                                                     + "-T" + juce::String(trackIndex + 1).paddedLeft('0', 2)
                                                                                     + "-" + trackName
                                                                                     + ".wav");
