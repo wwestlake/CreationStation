@@ -243,6 +243,16 @@ juce_add_binary_data(StationHelpData
     SOURCES ${CS_HELP_TOPIC_FILES} "${CMAKE_CURRENT_SOURCE_DIR}/help/help-inventory.json")
 set_target_properties(StationHelpData PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# The built-in FRust the app runs (the Signal Lab runtime and its node library) is compiled into the
+# executable and loaded from memory. It is never found or read from a path on the machine.
+juce_add_binary_data(StationBuiltInFrust
+    HEADER_NAME BuiltInFrustData.h
+    NAMESPACE BuiltInFrustData
+    SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
+        "${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust")
+set_target_properties(StationBuiltInFrust PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_sources(CreativeWorkstation PRIVATE
     Source/Help/HelpLibrary.cpp
     Source/Help/HelpLibrary.h
@@ -319,8 +329,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Language/AudioNodeCatalog.h
     Source/Language/AudioGraphCodegen.cpp
     Source/Language/AudioGraphCodegen.h
-    Source/Language/AudioGraphSelfTest.cpp
-    Source/Language/AudioGraphSelfTest.h
     Source/Language/StationFrustPodService.cpp
     Source/Language/StationFrustPodService.h
     Source/Views/AuthGateView.cpp
@@ -378,11 +386,6 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     JUCE_PLUGINHOST_VST3=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:CreativeWorkstation,JUCE_VERSION>"
-    # AudioGraphSelfTest.cpp's real .frust node-library module -- same
-    # "compiler-provided absolute path" convention Creation Engine's own
-    # CE_CORE_NODE_LIBRARY uses for CoreNodesLibrary.frust.
-    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
-    CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
 )
 
 target_include_directories(CreativeWorkstation PRIVATE
@@ -426,6 +429,7 @@ endif()
 
 target_link_libraries(CreativeWorkstation PRIVATE
     StationHelpData
+    StationBuiltInFrust
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_RENDER_TARGET}
     juce::juce_opengl
@@ -649,10 +653,10 @@ install(TARGETS CreativeWorkstation
 add_executable(StationFrustIntegrationSmoke
     tests/StationFrustIntegrationSmoke.cpp
     Source/Language/AudioGraphCodegen.cpp
-    Source/Language/AudioGraphSelfTest.cpp
+    tests/AudioGraphSelfTest.cpp
     Source/Language/AudioNodeCatalog.cpp
 )
-target_include_directories(StationFrustIntegrationSmoke PRIVATE Source)
+target_include_directories(StationFrustIntegrationSmoke PRIVATE Source Source/Language tests)
 target_compile_definitions(StationFrustIntegrationSmoke PRIVATE
     CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
     CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
@@ -697,6 +701,7 @@ target_compile_definitions(SignalClipLiveSmoke PRIVATE
     CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
 )
 target_link_libraries(SignalClipLiveSmoke PRIVATE
+    StationBuiltInFrust
     creation_suite_frust_plugin_runtime
     juce::juce_dsp
     juce::juce_graphics
@@ -724,6 +729,7 @@ target_compile_definitions(SignalClipRenderSmoke PRIVATE
     CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
 )
 target_link_libraries(SignalClipRenderSmoke PRIVATE
+    StationBuiltInFrust
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_TIMELINE_TARGET}
     creation_suite_frust_plugin_runtime
