@@ -842,6 +842,38 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
         return false;
     }
 
+    return loadReader(reader, file, settings, errorMessage);
+}
+
+bool WorkstationAudioEngine::AssetPreviewSource::loadData(const std::shared_ptr<const juce::MemoryBlock>& encodedData,
+                                                          const PreviewSettings& settings,
+                                                          juce::String& errorMessage)
+{
+    stop();
+
+    if (encodedData == nullptr || encodedData->getSize() == 0)
+    {
+        errorMessage = "That project sound is empty.";
+        return false;
+    }
+
+    // The reader reads the whole section it needs into memory below and is deleted before this returns, so the
+    // caller's block only has to stay alive for the duration of this call.
+    auto* reader = formatManager.createReaderFor(std::make_unique<juce::MemoryInputStream>(encodedData->getData(), encodedData->getSize(), false));
+    if (reader == nullptr)
+    {
+        errorMessage = "That sound could not be opened for preview.";
+        return false;
+    }
+
+    return loadReader(reader, juce::File(), settings, errorMessage);
+}
+
+bool WorkstationAudioEngine::AssetPreviewSource::loadReader(juce::AudioFormatReader* reader,
+                                                            const juce::File& labelFile,
+                                                            const PreviewSettings& settings,
+                                                            juce::String& errorMessage)
+{
     auto totalSamples = (int) reader->lengthInSamples;
     if (totalSamples <= 0)
     {
@@ -896,7 +928,7 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
     }
 
     playbackPosition = 0;
-    previewFile = file;
+    previewFile = labelFile;
     previewing.store(true);
     return true;
 }
@@ -2194,6 +2226,13 @@ bool WorkstationAudioEngine::previewAssetFile(const juce::File& file,
     return loaded;
 }
 
+bool WorkstationAudioEngine::previewAssetData(const std::shared_ptr<const juce::MemoryBlock>& encodedData,
+                                              const PreviewSettings& settings,
+                                              juce::String& errorMessage)
+{
+    return assetPreviewSource.loadData(encodedData, settings, errorMessage);
+}
+
 bool WorkstationAudioEngine::previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer,
                                                     double sampleRate,
                                                     juce::String& errorMessage)
@@ -2213,23 +2252,33 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
 
     for (const auto& target : targets)
     {
-        if (! target.file.existsAsFile())
+        const auto clipName = target.displayName.isNotEmpty() ? target.displayName : target.file.getFileName();
+
+        std::unique_ptr<juce::AudioFormatReader> reader;
+        if (target.encodedData != nullptr && target.encodedData->getSize() > 0)
         {
-            errorMessage = "Tracker clip file is missing: " + target.file.getFullPathName();
-            continue;
+            reader.reset(formatManager.createReaderFor(std::make_unique<juce::MemoryInputStream>(target.encodedData->getData(), target.encodedData->getSize(), false)));
+        }
+        else
+        {
+            if (! target.file.existsAsFile())
+            {
+                errorMessage = "Tracker clip file is missing: " + clipName;
+                continue;
+            }
+            reader.reset(formatManager.createReaderFor(target.file));
         }
 
-        std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(target.file));
         if (reader == nullptr)
         {
-            errorMessage = "Could not open recorded clip: " + target.file.getFileName();
+            errorMessage = "Could not open recorded clip: " + clipName;
             continue;
         }
 
         const auto totalSamples = (int64) reader->lengthInSamples;
         if (totalSamples <= 0)
         {
-            errorMessage = "Tracker clip has no audio data: " + target.file.getFileName();
+            errorMessage = "Tracker clip has no audio data: " + clipName;
             continue;
         }
 
@@ -2245,7 +2294,7 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
         clip.buffer.setSize(juce::jmax(2, (int) reader->numChannels), (int) samplesToRead, false, false, true);
         if (! readAndResampleSection(*reader, sourceStartSample, samplesToRead, graphSampleRate, clip.buffer))
         {
-            errorMessage = "Could not resample recorded clip: " + target.file.getFileName();
+            errorMessage = "Could not resample recorded clip: " + clipName;
             continue;
         }
         clip.startSample = (int64) std::llround(target.startSeconds * graphSampleRate);
@@ -2636,19 +2685,12 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
 
     for (const auto& target : targets)
     {
-        target.file.getParentDirectory().createDirectory();
-        if (target.file.existsAsFile())
-            target.file.deleteFile();
-
-        std::unique_ptr<juce::FileOutputStream> outputStream(target.file.createOutputStream());
-        if (outputStream == nullptr)
-        {
-            errorMessage = "Could not create recording file: " + target.file.getFileName();
-            return false;
-        }
+        // A recording is written into memory (as a complete WAV) and handed over when it stops; nothing goes to the disk.
+        auto takeData = std::make_shared<juce::MemoryBlock>();
+        auto* outputStream = new juce::MemoryOutputStream(*takeData, false);
 
         auto numChannels = tracks[(size_t) target.trackIndex]->isStereoEnabled() ? 2 : 1;
-        auto* writer = wavFormat.createWriterFor(outputStream.release(),
+        auto* writer = wavFormat.createWriterFor(outputStream,
                                                  graphSampleRate,
                                                  (unsigned int) numChannels,
                                                  24,
@@ -2657,6 +2699,7 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
 
         if (writer == nullptr)
         {
+            delete outputStream;
             errorMessage = "Could not create audio writer: " + target.file.getFileName();
             return false;
         }
@@ -2665,6 +2708,7 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
         recordingWriter.trackIndex = target.trackIndex;
         recordingWriter.numChannels = numChannels;
         recordingWriter.file = target.file;
+        recordingWriter.data = takeData;
         recordingWriter.writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(writer, recordingThread, 32768);
         newWriters.push_back(std::move(recordingWriter));
     }
@@ -2679,9 +2723,31 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
 void WorkstationAudioEngine::stopRecording()
 {
     const juce::ScopedLock lock(recordingLock);
-    recordingWriters.clear();
     recording = false;
+
+    // Closing each writer flushes what is buffered and finishes the WAV header; then the take is ready to be taken.
+    auto stopped = std::move(recordingWriters);
+    recordingWriters.clear();
+    for (auto& recordingWriter : stopped)
+    {
+        recordingWriter.writer.reset();
+        if (recordingWriter.data != nullptr && recordingWriter.data->getSize() > 0)
+            finishedTakes[recordingWriter.file.getFullPathName()] = recordingWriter.data;
+    }
+
     recordingFile = {};
+}
+
+std::shared_ptr<const juce::MemoryBlock> WorkstationAudioEngine::takeFinishedRecording(const juce::File& takeName)
+{
+    const juce::ScopedLock lock(recordingLock);
+    const auto found = finishedTakes.find(takeName.getFullPathName());
+    if (found == finishedTakes.end())
+        return nullptr;
+
+    auto data = found->second;
+    finishedTakes.erase(found);
+    return data;
 }
 
 juce::Array<juce::File> WorkstationAudioEngine::getRecordingFiles() const
@@ -2945,144 +3011,6 @@ void WorkstationAudioEngine::setTrackPluginBypassedRealtime(int trackIndex, int 
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
         tracks[(size_t) trackIndex]->insertChain.setBypassed(slotIndex, shouldBypass);
-}
-
-bool WorkstationAudioEngine::renderMidiClipToFile(const juce::File& instrumentPluginFile,
-                                                  const std::vector<cs::MidiNoteEvent>& notes,
-                                                  const std::vector<cs::MidiCCEvent>& ccEvents,
-                                                  double tempoBpm,
-                                                  double durationSeconds,
-                                                  juce::File& outputFile,
-                                                  juce::String& errorMessage) const
-{
-    if (! instrumentPluginFile.existsAsFile())
-    {
-        errorMessage = "No instrument plugin is loaded on this track.";
-        return false;
-    }
-
-    if (notes.empty())
-    {
-        errorMessage = "The MIDI clip has no notes to render.";
-        return false;
-    }
-
-    juce::AudioPluginFormatManager formatManager;
-    formatManager.addDefaultFormats();
-
-    juce::OwnedArray<juce::PluginDescription> pluginDescriptions;
-    for (auto* format : formatManager.getFormats())
-    {
-        if (format != nullptr && format->fileMightContainThisPluginType(instrumentPluginFile.getFullPathName()))
-            format->findAllTypesForFile(pluginDescriptions, instrumentPluginFile.getFullPathName());
-    }
-
-    if (pluginDescriptions.isEmpty())
-    {
-        errorMessage = "Could not identify the instrument plugin format.";
-        return false;
-    }
-
-    const auto sampleRate = juce::jmax(8000.0, graphSampleRate);
-    const auto blockSize = juce::jmax(64, graphBlockSize);
-
-    std::unique_ptr<juce::AudioPluginInstance> instance;
-    for (auto* pluginDescription : pluginDescriptions)
-    {
-        if (pluginDescription == nullptr)
-            continue;
-
-        juce::String creationError;
-        instance = formatManager.createPluginInstance(*pluginDescription, sampleRate, blockSize, creationError);
-        if (instance != nullptr)
-            break;
-    }
-
-    if (instance == nullptr)
-    {
-        errorMessage = "Could not create an instance of the instrument plugin for rendering.";
-        return false;
-    }
-
-    configureMainBusOnly(*instance);
-    instance->setPlayHead(&enginePlayHead);
-    instance->setPlayConfigDetails(2, 2, sampleRate, blockSize);
-    instance->prepareToPlay(sampleRate, blockSize);
-
-    // Sample-accurate note/CC scheduling, converted from clip-relative beats to samples.
-    const auto beatsToSamples = [tempoBpm, sampleRate](double beats)
-    {
-        return (int64) std::llround((beats * 60.0 / juce::jmax(1.0, tempoBpm)) * sampleRate);
-    };
-
-    juce::MidiBuffer fullMidi;
-    for (const auto& note : notes)
-    {
-        auto onSample = beatsToSamples(note.startBeats);
-        auto offSample = beatsToSamples(note.startBeats + note.lengthBeats);
-        fullMidi.addEvent(juce::MidiMessage::noteOn((int) note.channel, note.pitch, (juce::uint8) note.velocity), (int) onSample);
-        fullMidi.addEvent(juce::MidiMessage::noteOff((int) note.channel, note.pitch), (int) juce::jmax(onSample + 1, offSample));
-    }
-
-    for (const auto& point : ccEvents)
-        fullMidi.addEvent(juce::MidiMessage::controllerEvent(1, point.controller, point.value), (int) beatsToSamples(point.beats));
-
-    // Add a release tail so one-shot samples and reverb/decay aren't cut off.
-    auto tailSeconds = juce::jlimit(0.0, 4.0, instance->getTailLengthSeconds());
-    const auto totalSamples = (int64) std::ceil((durationSeconds + juce::jmax(0.5, tailSeconds)) * sampleRate);
-
-    juce::AudioBuffer<float> outputBuffer(2, (int) totalSamples);
-    outputBuffer.clear();
-
-    juce::AudioBuffer<float> blockBuffer(2, blockSize);
-
-    for (int64 blockStart = 0; blockStart < totalSamples; blockStart += blockSize)
-    {
-        const auto samplesThisBlock = (int) juce::jmin<int64>(blockSize, totalSamples - blockStart);
-
-        blockBuffer.clear();
-
-        juce::MidiBuffer blockMidi;
-        for (const auto metadata : fullMidi)
-        {
-            auto samplePos = (int64) metadata.samplePosition;
-            if (samplePos >= blockStart && samplePos < blockStart + samplesThisBlock)
-                blockMidi.addEvent(metadata.getMessage(), (int) (samplePos - blockStart));
-        }
-
-        instance->processBlock(blockBuffer, blockMidi);
-        outputBuffer.copyFrom(0, (int) blockStart, blockBuffer, 0, 0, samplesThisBlock);
-        outputBuffer.copyFrom(1, (int) blockStart, blockBuffer, 1, 0, samplesThisBlock);
-    }
-
-    instance->releaseResources();
-    instance.reset();
-
-    auto cacheDir = creation::suite::getCurrentScratchDirectory().getChildFile("CreationStationMidiRender");
-    cacheDir.createDirectory();
-    auto renderFile = cacheDir.getChildFile("clip_" + juce::Uuid().toString() + ".wav");
-
-    juce::WavAudioFormat wavFormat;
-    std::unique_ptr<juce::FileOutputStream> outputStream(renderFile.createOutputStream());
-    if (outputStream == nullptr)
-    {
-        errorMessage = "Could not create a temporary render file.";
-        return false;
-    }
-
-    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(outputStream.get(), sampleRate, 2, 24, {}, 0));
-    if (writer == nullptr)
-    {
-        errorMessage = "Could not create a WAV writer for the rendered clip.";
-        return false;
-    }
-
-    outputStream.release(); // writer now owns the stream
-    writer->writeFromAudioSampleBuffer(outputBuffer, 0, outputBuffer.getNumSamples());
-    writer.reset();
-
-    outputFile = renderFile;
-    return true;
 }
 
 bool WorkstationAudioEngine::hasTrackPlugin(int trackIndex) const noexcept

@@ -305,6 +305,64 @@ int TimelineModel::addClip(ClipKind kind,
     return clipIndex;
 }
 
+int TimelineModel::addClipFromData(ClipKind kind,
+                                   int trackIndex,
+                                   const juce::String& displayName,
+                                   const juce::String& assetId,
+                                   const juce::String& sourceTool,
+                                   const juce::MemoryBlock* encodedAudio,
+                                   double startSeconds,
+                                   double durationSeconds,
+                                   juce::String& errorMessage)
+{
+    if (trackIndex < 0)
+    {
+        errorMessage = "Choose a valid track before placing the sound.";
+        return -1;
+    }
+
+    if (! juce::isPositiveAndBelow(trackIndex, getTrackCount()))
+        setTrackCount(trackIndex + 1);
+
+    if (! canTrackContainClip(getTrackKind(trackIndex), kind))
+    {
+        errorMessage = "That clip type cannot live on the selected track.";
+        return -1;
+    }
+
+    const auto isAudioBacked = kind == ClipKind::audio || kind == ClipKind::foley;
+    if (isAudioBacked && (encodedAudio == nullptr || encodedAudio->getSize() == 0))
+    {
+        errorMessage = "The sound has no data.";
+        return -1;
+    }
+
+    TimelineClip clip;
+    clip.id = juce::Uuid().toString();
+    clip.kind = kind;
+    clip.displayName = displayName.trim().isNotEmpty() ? displayName.trim() : toDisplayName(kind) + " Clip";
+    clip.assetId = assetId.trim();
+    clip.sourceTool = sourceTool.trim();
+    clip.trackIndex = trackIndex;
+    clip.startSeconds = juce::jmax(0.0, startSeconds);
+    clip.durationSeconds = (isAudioBacked || kind == ClipKind::video) ? juce::jmax(0.0, durationSeconds)
+                                                                      : juce::jmax(0.05, durationSeconds);
+    clip.sourceStartSeconds = 0.0;
+    clip.sourceDurationSeconds = clip.durationSeconds;
+    clip.recording = false;
+
+    clips.push_back(std::move(clip));
+    const auto clipIndex = static_cast<int>(clips.size()) - 1;
+
+    if (isAudioBacked && ! analyzeClipWaveformFromData(clipIndex, *encodedAudio, errorMessage))
+    {
+        clips.erase(clips.begin() + clipIndex);
+        return -1;
+    }
+
+    return clipIndex;
+}
+
 void TimelineModel::setClipDisplayName(int clipIndex, const juce::String& displayName)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
@@ -1011,7 +1069,60 @@ void TimelineModel::removeTrack(int trackIndex)
     activeRecordingClips.clear();
 }
 
+namespace
+{
+// A clip's waveform is saved with the arrangement (one byte per bar, 0-255), so it never has to be measured again from
+// the audio - which lives in the VFS and is not copied out to a file just to draw it.
+juce::String encodePeaks(const std::vector<float>& peaks)
+{
+    juce::String text;
+    text.preallocateBytes(peaks.size() * 2 + 1);
+    for (const auto peak : peaks)
+        text << juce::String::toHexString((int) juce::roundToInt(juce::jlimit(0.0f, 1.0f, peak) * 255.0f)).paddedLeft('0', 2);
+    return text;
+}
+
+std::vector<float> decodePeaks(const juce::String& text)
+{
+    std::vector<float> peaks;
+    peaks.reserve((size_t) text.length() / 2);
+    for (int i = 0; i + 1 < text.length(); i += 2)
+        peaks.push_back((float) text.substring(i, i + 2).getHexValue32() / 255.0f);
+    return peaks;
+}
+}
+
 bool TimelineModel::analyzeClipWaveform(int clipIndex, juce::String& errorMessage)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
+        return false;
+
+    auto& clip = clips[(size_t) clipIndex];
+
+    // A clip whose audio lives in the VFS has no file: its waveform is measured from its bytes when it is added (and
+    // saved), and must not be wiped here.
+    if (! clip.file.existsAsFile())
+    {
+        errorMessage = "Recorded audio file does not exist yet.";
+        return false;
+    }
+
+    clip.peaks.clear();
+    clip.rightPeaks.clear();
+    clip.sourceNumChannels = 0;
+
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(clip.file));
+    if (reader == nullptr)
+    {
+        errorMessage = "Could not read recorded audio for waveform display.";
+        return false;
+    }
+
+    return analyzeClipWaveformFromReader(clipIndex, *reader, errorMessage);
+}
+
+bool TimelineModel::analyzeClipWaveformFromData(int clipIndex, const juce::MemoryBlock& encodedAudio, juce::String& errorMessage)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
@@ -1021,19 +1132,26 @@ bool TimelineModel::analyzeClipWaveform(int clipIndex, juce::String& errorMessag
     clip.rightPeaks.clear();
     clip.sourceNumChannels = 0;
 
-    if (! clip.file.existsAsFile())
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(
+        std::make_unique<juce::MemoryInputStream>(encodedAudio.getData(), encodedAudio.getSize(), false)));
+    if (reader == nullptr)
     {
-        errorMessage = "Recorded audio file does not exist yet.";
+        errorMessage = "Could not read the audio to draw its waveform.";
         return false;
     }
 
-    formatManager.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(clip.file));
-    if (reader == nullptr)
-    {
-        errorMessage = "Could not read recorded audio for waveform display.";
+    return analyzeClipWaveformFromReader(clipIndex, *reader, errorMessage);
+}
+
+bool TimelineModel::analyzeClipWaveformFromReader(int clipIndex, juce::AudioFormatReader& readerRef, juce::String& errorMessage)
+{
+    juce::ignoreUnused(errorMessage);
+    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
-    }
+
+    auto& clip = clips[(size_t) clipIndex];
+    auto* reader = &readerRef;
 
     const auto fullDurationSeconds = reader->sampleRate > 0.0 ? static_cast<double>(reader->lengthInSamples) / reader->sampleRate
                                                               : clip.durationSeconds;
@@ -1617,6 +1735,11 @@ juce::ValueTree TimelineModel::createState() const
         clipState.setProperty("sourceTool", clip.sourceTool, nullptr);
         clipState.setProperty("trackIndex", clip.trackIndex, nullptr);
         clipState.setProperty("file", clip.file.getFullPathName(), nullptr);
+        if (! clip.peaks.empty())
+            clipState.setProperty("peaks", encodePeaks(clip.peaks), nullptr);
+        if (! clip.rightPeaks.empty())
+            clipState.setProperty("rightPeaks", encodePeaks(clip.rightPeaks), nullptr);
+        clipState.setProperty("sourceNumChannels", clip.sourceNumChannels, nullptr);
         clipState.setProperty("startSeconds", clip.startSeconds, nullptr);
         clipState.setProperty("durationSeconds", clip.durationSeconds, nullptr);
         clipState.setProperty("sourceStartSeconds", clip.sourceStartSeconds, nullptr);
@@ -1786,6 +1909,9 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
         clip.sourceTool = child.getProperty("sourceTool").toString();
         clip.trackIndex = (int) child.getProperty("trackIndex", -1);
         clip.file = juce::File(child.getProperty("file").toString());
+        clip.peaks = decodePeaks(child.getProperty("peaks").toString());
+        clip.rightPeaks = decodePeaks(child.getProperty("rightPeaks").toString());
+        clip.sourceNumChannels = (int) child.getProperty("sourceNumChannels", 0);
         clip.startSeconds = (double) child.getProperty("startSeconds", 0.0);
         clip.durationSeconds = (double) child.getProperty("durationSeconds", 0.0);
         clip.sourceStartSeconds = (double) child.getProperty("sourceStartSeconds", 0.0);
@@ -1869,8 +1995,12 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
         if (clips.back().trackIndex >= 0 && ! juce::isPositiveAndBelow(clips.back().trackIndex, getTrackCount()))
             setTrackCount(clips.back().trackIndex + 1);
 
-        juce::String errorMessage;
-        analyzeClipWaveform(static_cast<int>(clips.size()) - 1, errorMessage);
+        // A saved waveform is used as it is; only a clip without one (a local file from an older save) is measured.
+        if (clips.back().peaks.empty())
+        {
+            juce::String errorMessage;
+            analyzeClipWaveform(static_cast<int>(clips.size()) - 1, errorMessage);
+        }
     }
 }
 }

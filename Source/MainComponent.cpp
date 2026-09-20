@@ -8,6 +8,7 @@
 #include "Branding.h"
 #include "Patch/PatchModel.h"
 #include "Video/VideoDecodeService.h"
+#include <creation/assets/VfsEntryInputStream.h>
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectWorkspaceService.h>
 #include <creation/suite/SuiteStoragePaths.h>
@@ -902,6 +903,36 @@ bool encodeWavToMemory(const juce::AudioBuffer<float>& source,
     return true;
 }
 
+// A 24-bit WAV of the buffer, in memory.
+bool writeWavData(juce::MemoryBlock& wavData,
+                  const juce::AudioBuffer<float>& buffer,
+                  double sampleRate,
+                  juce::String& errorMessage)
+{
+    if (buffer.getNumChannels() <= 0 || buffer.getNumSamples() <= 0)
+    {
+        errorMessage = "There is no audio to export.";
+        return false;
+    }
+
+    wavData.reset();
+    auto* stream = new juce::MemoryOutputStream(wavData, false);
+    juce::WavAudioFormat wavFormat;
+    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(stream, sampleRate, (unsigned int) buffer.getNumChannels(), 24, {}, 0));
+    if (writer == nullptr)
+    {
+        delete stream;
+        errorMessage = "Could not create a WAV writer for this export.";
+        return false;
+    }
+
+    const auto ok = writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+    writer.reset(); // finishes the WAV header
+    if (! ok)
+        errorMessage = "Could not write the WAV export.";
+    return ok;
+}
+
 bool writeWavFile(const juce::File& destination,
                   const juce::AudioBuffer<float>& buffer,
                   double sampleRate,
@@ -1624,38 +1655,24 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                                                                 {
                                                                                     return projectSession.getManifest().assetCatalog.assets;
                                                                                 },
-                                                                                [this](const creation::assets::AssetDescriptor& asset)
+                                                                                [](const creation::assets::AssetDescriptor& asset)
                                                                                 {
+                                                                                    // What the manifest records about the asset. Reading it never opens or copies the
+                                                                                    // asset's file, however big it is.
                                                                                     juce::String details;
-                                                                                    if (! projectSession.isValid())
-                                                                                        return details;
-
-                                                                                    juce::String errorMessage;
-                                                                                    creation::assets::MaterializedAssetLease lease;
-                                                                                    if (! projectSession.materializeEntry(suiteSettings,
-                                                                                                                          asset.logicalPath,
-                                                                                                                          creation::assets::MaterializationAccess::readOnly,
-                                                                                                                          lease,
-                                                                                                                          errorMessage))
-                                                                                        return details;
-
-                                                                                    juce::AudioFormatManager formatManager;
-                                                                                    formatManager.registerBasicFormats();
-
-                                                                                    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(lease.materializedFile));
-                                                                                    if (reader != nullptr)
-                                                                                    {
-                                                                                        details << "\nFormat: " << reader->getFormatName();
-                                                                                        details << "\nSample Rate: " << juce::String(reader->sampleRate, 0) << " Hz";
-                                                                                        details << "\nChannels: " << reader->numChannels;
-                                                                                        details << "\nBit Depth: " << reader->bitsPerSample;
-                                                                                        details << "\nLength: " << juce::String(reader->lengthInSamples) << " samples";
-                                                                                        if (reader->sampleRate > 0.0)
-                                                                                            details << " (" << juce::String(reader->lengthInSamples / reader->sampleRate, 2) << " sec)";
-                                                                                    }
-
-                                                                                    juce::String releaseError;
-                                                                                    creation::assets::AssetMaterializer::releaseLease(lease, releaseError);
+                                                                                    const auto& d = asset.details;
+                                                                                    if (d.getValue("durationSeconds", {}).isNotEmpty())
+                                                                                        details << "\nLength: " << juce::String(d.getValue("durationSeconds", {}).getDoubleValue(), 2) << " s";
+                                                                                    if (d.getValue("width", {}).isNotEmpty() && d.getValue("height", {}).isNotEmpty())
+                                                                                        details << "\nPicture: " << d.getValue("width", {}) << " x " << d.getValue("height", {});
+                                                                                    if (d.getValue("frameRate", {}).isNotEmpty())
+                                                                                        details << "\nFrame rate: " << juce::String(d.getValue("frameRate", {}).getDoubleValue(), 2) << " fps";
+                                                                                    if (d.getValue("sampleRate", {}).isNotEmpty())
+                                                                                        details << "\nSample rate: " << d.getValue("sampleRate", {}) << " Hz";
+                                                                                    if (d.getValue("channels", {}).isNotEmpty())
+                                                                                        details << "\nChannels: " << d.getValue("channels", {});
+                                                                                    if (d.getValue("hasAudio", {}).isNotEmpty())
+                                                                                        details << "\nHas sound: " << (d.getValue("hasAudio", {}) == "1" ? "yes" : "no");
                                                                                     return details;
                                                                                 },
                                                                                 [this](const creation::assets::AssetDescriptor& asset)
@@ -2754,23 +2771,12 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         auto logicalPath = creation::assets::ProjectContainerPaths::derivedAssetRoot
                          + assetSlug + "-" + makeRecordingTimestamp() + ".wav";
 
-        auto tempRenderFile = creation::suite::getCurrentScratchDirectory()
-                                  .getChildFile(assetSlug + "-" + juce::Uuid().toString() + ".wav");
-
-        if (writeWavFile(tempRenderFile, buffer, sampleRate, errorMessage))
+        juce::MemoryBlock fileData;
+        if (writeWavData(fileData, buffer, sampleRate, errorMessage))
         {
-            juce::MemoryBlock fileData;
-            if (! tempRenderFile.loadFileAsData(fileData))
-            {
-                transportBar.setStatusText("Rendered WAV was created, but could not be read back into the project.");
-                tempRenderFile.deleteFile();
-                return;
-            }
-
             if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
             {
                 transportBar.setStatusText("Could not write the rendered WAV into the project.");
-                tempRenderFile.deleteFile();
                 return;
             }
 
@@ -2791,7 +2797,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             if (! projectSession.commit(errorMessage))
             {
                 transportBar.setStatusText(errorMessage.isNotEmpty() ? errorMessage : "Could not save the rendered WAV asset.");
-                tempRenderFile.deleteFile();
                 return;
             }
 
@@ -2799,7 +2804,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
             refreshContentLibrary();
             saveSessionToDisk(true);
             transportBar.setStatusText("Rendered Signal Lab WAV asset: " + renderedAsset.displayName);
-            tempRenderFile.deleteFile();
         }
         else if (errorMessage.isNotEmpty())
         {
@@ -2887,7 +2891,7 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         refreshProjectAssets();
         refreshContentLibrary();
         // Any Signal clip built from this patch must be re-rendered from the new patch content.
-        signalRenderFiles.clear();
+        signalRenderBytes.clear();
         signalPatchDocs.clear();
         refreshTrackerPlaybackClips();
         saveSessionToDisk(true);
@@ -7144,19 +7148,18 @@ void MainComponent::activateContentItem(const ContentLibrary::Item& item)
 void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& asset)
 {
     juce::String errorMessage;
-    creation::assets::MaterializedAssetLease lease;
-    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
-                                          creation::assets::MaterializationAccess::readOnly,
-                                          lease, errorMessage))
-    {
-        contentPanel.setStatusText("Could not read that project asset: " + errorMessage);
-        return;
-    }
 
     if (asset.kind == creation::assets::AssetKind::patch)
     {
+        juce::MemoryBlock patchData;
+        if (! projectSession.readEntry(asset.logicalPath, patchData))
+        {
+            contentPanel.setStatusText("Could not read that project asset.");
+            return;
+        }
+
         cw::PatchDocument document;
-        if (! cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), document, errorMessage))
+        if (! cw::parsePatchDocumentJson(patchData.toString(), document, errorMessage))
         {
             contentPanel.setStatusText(errorMessage);
             return;
@@ -7179,9 +7182,10 @@ void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& as
     if (asset.kind == creation::assets::AssetKind::audio
         || asset.kind == creation::assets::AssetKind::render)
     {
-        if (! engine.previewAssetFile(lease.materializedFile, errorMessage))
+        const auto bytes = readAssetBytes(asset.logicalPath, asset.versionId);
+        if (bytes == nullptr || ! engine.previewAssetData(bytes, {}, errorMessage))
         {
-            contentPanel.setStatusText(errorMessage);
+            contentPanel.setStatusText(errorMessage.isNotEmpty() ? errorMessage : juce::String("Could not read that project asset."));
             return;
         }
 
@@ -7215,8 +7219,7 @@ void MainComponent::openProjectAsset(const creation::assets::AssetDescriptor& as
         return;
     }
 
-    lease.materializedFile.revealToUser();
-    transportBar.setStatusText("Revealed project asset: " + asset.displayName);
+    transportBar.setStatusText("There is nothing to open for " + asset.displayName + " here.");
 }
 
 bool MainComponent::restoreArrangementAsset(const creation::assets::AssetDescriptor& asset)
@@ -7364,14 +7367,12 @@ void MainComponent::performNewArrangement()
 bool MainComponent::restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset)
 {
     juce::String errorMessage;
-    creation::assets::MaterializedAssetLease lease;
-    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
-                                          creation::assets::MaterializationAccess::readOnly,
-                                          lease, errorMessage))
+    juce::MemoryBlock patchData;
+    if (! projectSession.readEntry(asset.logicalPath, patchData))
         return false;
 
     cw::PatchDocument document;
-    if (! cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), document, errorMessage))
+    if (! cw::parsePatchDocumentJson(patchData.toString(), document, errorMessage))
         return false;
 
     if (! signalLabPanel.loadPatchDocument(document, errorMessage))
@@ -7462,123 +7463,50 @@ void MainComponent::placeProjectAssetOnTracker(const creation::assets::AssetDesc
             engine.setTrackIsAutomationKind(targetTrack, false);
         }
 
-        if (progressTask != nullptr)
+        // The video stays in the project: it is opened as a stream when it plays, so nothing is copied out.
+        double videoSeconds = asset.details["durationSeconds"].getDoubleValue();
+        if (videoSeconds <= 0.0)
         {
-            reportError("Could not add the video: another long action is still running. Wait for it to finish, or cancel it.");
+            const auto source = makeVideoSource(asset.id, asset.logicalPath);
+            auto stream = source.makeStream();
+            cs::VideoDecodeService probe;
+            const auto info = stream != nullptr ? probe.open(std::move(stream), source.nameHint) : cs::VideoStreamInfo {};
+            videoSeconds = info.valid ? info.durationSeconds : 0.0;
+        }
+
+        cs::AssetRef videoRef;
+        videoRef.id = asset.id;
+        videoRef.versionId = asset.versionId;
+        videoRef.mode = creation::assets::AssetReferenceMode::exact;
+
+        const auto videoClipIndex = timelineModel.addClipFromData(cs::ClipKind::video, targetTrack, asset.displayName, asset.id, "project-video",
+                                                                  nullptr, startSeconds, videoSeconds > 0.0 ? videoSeconds : 10.0, errorMessage);
+        if (videoClipIndex < 0)
+        {
+            reportError("Could not add " + asset.displayName + " to the Tracker" + (errorMessage.isNotEmpty() ? ": " + errorMessage : juce::String()));
             return;
         }
 
-        // Copying a big video out of the project and opening it takes seconds: it runs in a progress window (bar,
-        // status, Cancel) instead of freezing the app, and any failure is shown with its reason.
-        struct PlaceVideoResult
-        {
-            creation::assets::MaterializedAssetLease lease;
-            cs::VideoStreamInfo info;
-            juce::String error;
-        };
-        auto result = std::make_shared<PlaceVideoResult>();
-        auto safeThis = juce::Component::SafePointer<MainComponent>(this);
-
-        auto work = [safeThis, asset, result](ProgressTask& task)
-        {
-            if (safeThis == nullptr)
-                return;
-
-            const auto sizeText = juce::File::descriptionOfSizeInBytes((juce::int64) asset.fileSizeBytes);
-            task.report(0.0, "Fetching " + asset.displayName + " (" + sizeText + ") from the project...");
-
-            if (! safeThis->projectSession.materializeEntry(safeThis->suiteSettings, asset.logicalPath,
-                                                            creation::assets::MaterializationAccess::readOnly,
-                                                            result->lease, result->error,
-                                                            [&](double fraction)
-                                                            {
-                                                                task.report(0.9 * fraction, "Fetching " + asset.displayName + " (" + sizeText + ") from the project - "
-                                                                                                + juce::String((int) std::round(fraction * 100.0)) + "%");
-                                                                return ! task.cancelRequested();
-                                                            }))
-            {
-                if (result->error.isEmpty())
-                    result->error = "the video could not be copied out of the project";
-                return;
-            }
-
-            task.report(0.92, "Opening the video...");
-            cs::VideoDecodeService decodeService;
-            result->info = decodeService.open(result->lease.materializedFile);
-            if (! result->info.valid)
-            {
-                const auto reason = decodeService.getLastError();
-                result->error = "Could not open video " + asset.displayName + (reason.isNotEmpty() ? ": " + reason : juce::String());
-            }
-        };
-
-        auto finished = [safeThis, asset, targetTrack, startSeconds, result](bool cancelled)
-        {
-            if (safeThis == nullptr)
-                return;
-
-            auto* self = safeThis.getComponent();
-
-            if (result->error.isNotEmpty())
-            {
-                if (! cancelled && result->error != "Cancelled.")
-                    self->reportError(result->error.startsWithIgnoreCase("could not") ? result->error
-                                                                                        : "Could not add " + asset.displayName + " to the Tracker: " + result->error);
-                else
-                    self->showToast("Adding the video was cancelled.");
-
-                if (result->lease.leaseRoot != juce::File())
-                    result->lease.leaseRoot.deleteRecursively();
-            }
-            else if (! cancelled)
-            {
-                juce::String clipError;
-                cs::AssetRef assetRef;
-                assetRef.id = asset.id;
-                assetRef.versionId = asset.versionId;
-                assetRef.mode = creation::assets::AssetReferenceMode::exact;
-
-                const auto clipIndex = self->timelineModel.addClip(cs::ClipKind::video, targetTrack, asset.displayName, asset.id, "project-video",
-                                                                   result->lease.materializedFile, startSeconds,
-                                                                   result->info.durationSeconds > 0.0 ? result->info.durationSeconds : 10.0, clipError);
-                if (clipIndex >= 0)
-                {
-                    self->timelineModel.setClipAssetReference(clipIndex, assetRef);
-                    self->trackerPanel.setSelectedTrack(targetTrack);
-                    self->trackerPanel.refreshTimelineView();
-                    self->setWorkspaceMode(WorkspaceMode::tracker);
-                    self->saveSessionToDisk();
-                    self->showToast("Added " + asset.displayName + " to the Tracker.");
-                }
-                else
-                {
-                    self->reportError("Could not add " + asset.displayName + " to the Tracker" + (clipError.isNotEmpty() ? ": " + clipError : juce::String()));
-                }
-            }
-
-            juce::MessageManager::callAsync([safeThis]
-            {
-                if (safeThis != nullptr)
-                    safeThis->progressTask.reset();
-            });
-        };
-
-        progressTask = std::make_unique<ProgressTask>("Adding video", std::move(work), std::move(finished));
-        progressTask->start();
+        timelineModel.setClipAssetReference(videoClipIndex, videoRef);
+        trackerPanel.setSelectedTrack(targetTrack);
+        trackerPanel.refreshTimelineView();
+        setWorkspaceMode(WorkspaceMode::tracker);
+        saveSessionToDisk();
+        showToast("Added " + asset.displayName + " to the Tracker.");
         return;
     }
 
     if (asset.kind == creation::assets::AssetKind::patch)
     {
-        creation::assets::MaterializedAssetLease lease;
-        if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath, creation::assets::MaterializationAccess::readOnly, lease, errorMessage))
+        juce::MemoryBlock patchData;
+        if (! projectSession.readEntry(asset.logicalPath, patchData))
         {
-            contentPanel.setStatusText("Could not materialize patch asset: " + errorMessage);
+            contentPanel.setStatusText("Could not read the patch asset from the project.");
             return;
         }
 
         cw::PatchDocument doc;
-        if (! cw::parsePatchDocumentJson(lease.materializedFile.loadFileAsString(), doc, errorMessage))
+        if (! cw::parsePatchDocumentJson(patchData.toString(), doc, errorMessage))
         {
             contentPanel.setStatusText("Could not parse patch asset: " + errorMessage);
             return;
@@ -7633,27 +7561,28 @@ int MainComponent::placeAudioAssetOnTracker(const creation::assets::AssetDescrip
                                             const juce::String& sourceTool,
                                             juce::String& errorMessage)
 {
-    // Materialize the asset from the VFS container to a real temp file for the audio engine
-    creation::assets::MaterializedAssetLease lease;
-    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
-                                          creation::assets::MaterializationAccess::readOnly,
-                                          lease, errorMessage))
+    // The sound is read into memory through the VFS service; nothing is copied out to a file.
+    const auto bytes = readAssetBytes(asset.logicalPath, asset.versionId);
+    if (bytes == nullptr)
+    {
+        errorMessage = "the sound could not be read from the project";
         return -1;
+    }
 
     cs::AssetRef assetRef;
     assetRef.id = asset.id;
     assetRef.versionId = asset.versionId;
     assetRef.mode = creation::assets::AssetReferenceMode::exact;
 
-    auto clipIndex = timelineModel.addClip(cs::ClipKind::audio,
-                                           targetTrack,
-                                           asset.displayName,
-                                           asset.id,
-                                           sourceTool,
-                                           lease.materializedFile,
-                                           startSeconds,
-                                           0.0,
-                                           errorMessage);
+    auto clipIndex = timelineModel.addClipFromData(cs::ClipKind::audio,
+                                                   targetTrack,
+                                                   asset.displayName,
+                                                   asset.id,
+                                                   sourceTool,
+                                                   bytes.get(),
+                                                   startSeconds,
+                                                   0.0,
+                                                   errorMessage);
 
     if (clipIndex >= 0)
         timelineModel.setClipAssetReference(clipIndex, assetRef);
@@ -7834,15 +7763,15 @@ int MainComponent::addImportedVideoToTracker(const juce::File& sourceFile, const
     // project the moment it goes in. durationSeconds comes from the probed VideoStreamInfo -- addClip()
     // deliberately never runs waveform/duration analysis for ClipKind::video (it can't open a video
     // container as audio), so this is the only source of truth for how long the clip is.
-    return timelineModel.addClip(cs::ClipKind::video,
-                                 targetTrack,
-                                 importedAsset.displayName,
-                                 importedAsset.id,
-                                 "import",
-                                 sourceFile,
-                                 startSeconds,
-                                 info.durationSeconds,
-                                 errorMessage);
+    return timelineModel.addClipFromData(cs::ClipKind::video,
+                                         targetTrack,
+                                         importedAsset.displayName,
+                                         importedAsset.id,
+                                         "import",
+                                         nullptr,
+                                         startSeconds,
+                                         info.durationSeconds,
+                                         errorMessage);
 }
 
 void MainComponent::importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds)
@@ -7891,17 +7820,27 @@ struct VideoImportItem
     juce::MemoryBlock thumbnailJpeg; // a small picture from near the start of the video, for the Add Clip picker
     juce::String error; // why this file could not be imported ("" when it went in)
     bool uploaded = false;
-    juce::File audioFile; // the video's own sound as a WAV, once extracted
+    std::shared_ptr<juce::MemoryBlock> audioBytes; // the video's own sound as a WAV, in memory
     bool hasAudio = false;
 };
 
-// Decodes a video's own sound track to a 16-bit WAV. hasAudio comes back false (and the call still succeeds)
-// for a video with no sound.
-bool writeVideoAudioWav(const juce::File& videoFile, const juce::File& wavFile, bool& hasAudio, juce::String& error)
+// Decodes a video's own sound track to a 16-bit WAV, in memory. hasAudio comes back false (and the call still succeeds)
+// for a video with no sound. Nothing is written to the disk.
+bool renderVideoAudioWav(const cs::VideoSource& source, juce::MemoryBlock& wavData, bool& hasAudio, juce::String& error)
 {
     hasAudio = false;
     cs::VideoDecodeService decoder;
-    const auto info = decoder.open(videoFile);
+    cs::VideoStreamInfo info;
+    if (source.makeStream)
+    {
+        auto stream = source.makeStream();
+        info = stream != nullptr ? decoder.open(std::move(stream), source.nameHint) : cs::VideoStreamInfo {};
+    }
+    else
+    {
+        info = decoder.open(source.file);
+    }
+
     if (! info.valid)
     {
         error = "the video could not be opened to read its sound" + (decoder.getLastError().isNotEmpty() ? ": " + decoder.getLastError() : juce::String());
@@ -7918,37 +7857,58 @@ bool writeVideoAudioWav(const juce::File& videoFile, const juce::File& wavFile, 
         return false;
     }
 
-    wavFile.getParentDirectory().createDirectory();
-    wavFile.deleteFile();
-    auto* stream = new juce::FileOutputStream(wavFile);
-    if (stream->failedToOpen())
-    {
-        delete stream;
-        error = "the sound file could not be written";
-        return false;
-    }
+    wavData.reset();
+    auto* wavStream = new juce::MemoryOutputStream(wavData, false);
 
     // The writer takes ownership of (and deletes) the stream.
     juce::WavAudioFormat format;
     std::unique_ptr<juce::AudioFormatWriter> writer(
-        format.createWriterFor(stream, info.audioSampleRate > 0.0 ? info.audioSampleRate : 48000.0, (unsigned int) pcm.getNumChannels(), 16, {}, 0));
+        format.createWriterFor(wavStream, info.audioSampleRate > 0.0 ? info.audioSampleRate : 48000.0, (unsigned int) pcm.getNumChannels(), 16, {}, 0));
     if (writer == nullptr)
     {
-        delete stream;
-        error = "the sound file could not be created";
+        delete wavStream;
+        error = "the sound could not be encoded";
         return false;
     }
 
     writer->writeFromAudioSampleBuffer(pcm, 0, pcm.getNumSamples());
-    writer.reset();
+    writer.reset(); // flushes the WAV header into wavData
     hasAudio = true;
     return true;
 }
 }
 
-juce::File MainComponent::getVideoAudioFolder() const
+std::shared_ptr<const juce::MemoryBlock> MainComponent::readAssetBytes(const juce::String& logicalPath, const juce::String& versionKey)
 {
-    return creation::suite::getMaterializedFilesDirectory(suiteSettings, projectSession.getManifest().projectId).getChildFile("video-audio");
+    const auto key = projectSession.getManifest().projectId + "|" + logicalPath + "|" + versionKey;
+    if (const auto found = assetBytesCache.find(key); found != assetBytesCache.end())
+        return found->second;
+
+    auto block = std::make_shared<juce::MemoryBlock>();
+    if (! projectSession.readEntry(logicalPath, *block) || block->getSize() == 0)
+        return nullptr;
+
+    // Keep what was read for reuse, but never more than about 1.5 GB of it.
+    constexpr juce::int64 kMaxCachedBytes = 1500LL * 1024 * 1024;
+    if (assetBytesCacheSize + (juce::int64) block->getSize() > kMaxCachedBytes)
+    {
+        assetBytesCache.clear();
+        assetBytesCacheSize = 0;
+    }
+
+    assetBytesCacheSize += (juce::int64) block->getSize();
+    assetBytesCache[key] = block;
+    return block;
+}
+
+cs::VideoSource MainComponent::makeVideoSource(const juce::String& assetId, const juce::String& logicalPath) const
+{
+    cs::VideoSource source;
+    source.key = assetId;
+    source.nameHint = juce::File(logicalPath).getFileName();
+    const auto projectId = projectSession.getManifest().projectId;
+    source.makeStream = [projectId, logicalPath] { return creation::assets::openVfsEntryStream(projectId, logicalPath); };
+    return source;
 }
 
 juce::String MainComponent::videoAudioCachePath(const juce::String& assetId)
@@ -7963,8 +7923,8 @@ bool MainComponent::videoClipsNeedAudio() const
         if (clip.kind != cs::ClipKind::video || clip.assetId.isEmpty() || videosWithoutAudio.count(clip.assetId) > 0)
             continue;
 
-        const auto found = videoAudioFiles.find(clip.assetId);
-        if (found == videoAudioFiles.end() || ! found->second.existsAsFile())
+        const auto found = videoAudioBytes.find(clip.assetId);
+        if (found == videoAudioBytes.end() || found->second == nullptr)
             return true;
     }
     return false;
@@ -7978,9 +7938,8 @@ bool MainComponent::prepareVideoAudio(std::function<void()> whenDone)
     struct Job
     {
         juce::String assetId;
-        juce::File videoFile; // a local copy, if there is one already
-        juce::String logicalPath;
-        juce::File audioFile;
+        cs::VideoSource source;
+        std::shared_ptr<juce::MemoryBlock> audio;
         bool hasAudio = false;
         juce::String error;
     };
@@ -7992,25 +7951,22 @@ bool MainComponent::prepareVideoAudio(std::function<void()> whenDone)
         if (clip.kind != cs::ClipKind::video || clip.assetId.isEmpty() || videosWithoutAudio.count(clip.assetId) > 0 || ! seen.insert(clip.assetId).second)
             continue;
 
-        const auto found = videoAudioFiles.find(clip.assetId);
-        if (found != videoAudioFiles.end() && found->second.existsAsFile())
+        if (const auto found = videoAudioBytes.find(clip.assetId); found != videoAudioBytes.end() && found->second != nullptr)
             continue;
 
         Job job;
         job.assetId = clip.assetId;
-        job.videoFile = clip.file;
         if (const auto asset = resolveTimelineClipAsset(clip); asset.has_value())
-            job.logicalPath = asset->logicalPath;
+            job.source = makeVideoSource(clip.assetId, asset->logicalPath);
         jobs->push_back(std::move(job));
     }
 
     if (jobs->empty())
         return false;
 
-    const auto folder = getVideoAudioFolder();
     auto safeThis = juce::Component::SafePointer<MainComponent>(this);
 
-    auto work = [safeThis, jobs, folder](ProgressTask& task)
+    auto work = [safeThis, jobs](ProgressTask& task)
     {
         const auto count = (int) jobs->size();
         for (int i = 0; i < count && ! task.cancelRequested() && safeThis != nullptr; ++i)
@@ -8020,66 +7976,36 @@ bool MainComponent::prepareVideoAudio(std::function<void()> whenDone)
             const auto share = 1.0 / (double) count;
             auto& session = safeThis->projectSession;
             const auto cachePath = videoAudioCachePath(job.assetId);
-            const auto localWav = folder.getChildFile(job.assetId.replaceCharacters(":\\/ ", "____") + ".wav");
 
-            // 1. Already extracted before (this machine, or saved in the project)?
-            if (localWav.existsAsFile())
-            {
-                job.audioFile = localWav;
-                job.hasAudio = true;
-                continue;
-            }
-
+            // 1. Already extracted before and saved in the project?
             task.report(base, "Looking for the video's saved sound...");
-            juce::String matError;
-            creation::assets::MaterializedAssetLease savedLease;
-            if (session.materializeEntry(safeThis->suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, savedLease, matError)
-                && savedLease.materializedFile.existsAsFile())
             {
-                job.audioFile = savedLease.materializedFile;
-                job.hasAudio = true;
+                juce::MemoryBlock saved;
+                if (session.readEntry(cachePath, saved) && saved.getSize() > 0)
+                {
+                    job.audio = std::make_shared<juce::MemoryBlock>(std::move(saved));
+                    job.hasAudio = true;
+                    continue;
+                }
+            }
+
+            // 2. Otherwise read it out of the video, which is streamed from the project (never copied out to a file).
+            if (! job.source.isValid())
+            {
+                job.error = "the video is not in the project any more";
                 continue;
             }
 
-            // 2. Otherwise read it out of the video.
-            auto videoFile = job.videoFile;
-            creation::assets::MaterializedAssetLease videoLease;
-            if (! videoFile.existsAsFile())
-            {
-                if (job.logicalPath.isEmpty())
-                {
-                    job.error = "the video is not in the project any more";
-                    continue;
-                }
-
-                task.report(base, "Fetching the video from the project...");
-                if (! session.materializeEntry(safeThis->suiteSettings, job.logicalPath, creation::assets::MaterializationAccess::readOnly, videoLease, matError))
-                {
-                    job.error = matError;
-                    continue;
-                }
-                videoFile = videoLease.materializedFile;
-            }
-
-            if (task.cancelRequested())
-                break;
-
-            task.report(base + share * 0.4, "Reading the video's sound...");
-            if (! writeVideoAudioWav(videoFile, localWav, job.hasAudio, job.error))
+            task.report(base + share * 0.1, "Reading the video's sound...");
+            auto wav = std::make_shared<juce::MemoryBlock>();
+            if (! renderVideoAudioWav(job.source, *wav, job.hasAudio, job.error) || ! job.hasAudio)
                 continue;
 
-            job.audioFile = localWav;
-            if (! job.hasAudio)
-                continue;
+            job.audio = wav;
 
-            // 3. Keep a copy in the project, so it does not have to be read out of the video again.
-            juce::String uploadError;
-            session.writeEntryFromFile(cachePath, localWav, uploadError, 9,
-                [&](double f)
-                {
-                    task.report(base + share * (0.6 + 0.4 * f), "Saving the video's sound into the project...");
-                    return ! task.cancelRequested();
-                });
+            // 3. Keep it in the project, so it does not have to be read out of the video again.
+            task.report(base + share * 0.8, "Saving the video's sound into the project...");
+            session.writeEntry(cachePath, *wav, juce::Time::getCurrentTime());
         }
     };
 
@@ -8094,9 +8020,9 @@ bool MainComponent::prepareVideoAudio(std::function<void()> whenDone)
         {
             if (job.error.isNotEmpty())
                 problems.add("Could not read the sound of a video: " + job.error + ".");
-            else if (job.hasAudio && job.audioFile.existsAsFile())
-                self->videoAudioFiles[job.assetId] = job.audioFile;
-            else if (! cancelled && job.audioFile == juce::File() && ! job.hasAudio)
+            else if (job.hasAudio && job.audio != nullptr)
+                self->videoAudioBytes[job.assetId] = job.audio;
+            else if (! cancelled && ! job.hasAudio)
                 self->videosWithoutAudio.insert(job.assetId);
         }
 
@@ -8174,171 +8100,7 @@ void MainComponent::showAddClipPicker(int trackIndex, double startSeconds)
                               });
     };
 
-    // Older items were never read for their details; do that first (once), so the list can say what each one is.
-    if (! ensureAssetDetails(open))
-        open();
-}
-
-bool MainComponent::ensureAssetDetails(std::function<void()> whenDone)
-{
-    using Kind = creation::assets::AssetKind;
-    if (progressTask != nullptr || ! projectSession.isValid())
-        return false;
-
-    struct Job
-    {
-        creation::assets::AssetDescriptor asset;
-        juce::StringPairArray details;
-        juce::MemoryBlock thumbnailJpeg;
-        juce::String error;
-    };
-
-    auto jobs = std::make_shared<std::vector<Job>>();
-    for (const auto& asset : projectSession.getManifest().assetCatalog.assets)
-        if ((asset.kind == Kind::video || asset.kind == Kind::audio || asset.kind == Kind::render || asset.kind == Kind::patch)
-            && (asset.details["durationSeconds"].isEmpty() || (asset.kind == Kind::video && asset.details["thumbnail"].isEmpty())))
-            jobs->push_back({ asset, {}, {}, {} });
-
-    if (jobs->empty())
-        return false;
-
-    auto safeThis = juce::Component::SafePointer<MainComponent>(this);
-
-    auto work = [safeThis, jobs](ProgressTask& task)
-    {
-        const auto count = (int) jobs->size();
-        for (int i = 0; i < count && ! task.cancelRequested() && safeThis != nullptr; ++i)
-        {
-            auto& job = (*jobs)[(size_t) i];
-            const auto base = (double) i / (double) count;
-            const auto share = 1.0 / (double) count;
-            const auto label = " (" + juce::String(i + 1) + " of " + juce::String(count) + ")";
-            task.report(base, "Reading what " + job.asset.displayName + " is" + label + "...");
-
-            creation::assets::MaterializedAssetLease lease;
-            juce::String matError;
-            const auto sizeText = juce::File::descriptionOfSizeInBytes((juce::int64) job.asset.fileSizeBytes);
-            if (! safeThis->projectSession.materializeEntry(safeThis->suiteSettings, job.asset.logicalPath,
-                                                            creation::assets::MaterializationAccess::readOnly, lease, matError,
-                                                            [&](double f)
-                                                            {
-                                                                task.report(base + share * 0.8 * f, "Reading " + job.asset.displayName + " (" + sizeText + ")" + label + "...");
-                                                                return ! task.cancelRequested();
-                                                            }))
-            {
-                job.error = matError;
-                continue;
-            }
-
-            const auto file = lease.materializedFile;
-            if (job.asset.kind == Kind::video)
-            {
-                cs::VideoDecodeService decoder;
-                const auto info = decoder.open(file);
-                if (info.valid)
-                {
-                    job.details.set("durationSeconds", juce::String(info.durationSeconds, 3));
-                    job.details.set("width", juce::String(info.width));
-                    job.details.set("height", juce::String(info.height));
-                    job.details.set("frameRate", juce::String(info.frameRate, 3));
-                    job.details.set("hasAudio", info.hasAudio ? "1" : "0");
-                    if (info.hasAudio)
-                    {
-                        job.details.set("channels", juce::String(info.audioNumChannels));
-                        job.details.set("sampleRate", juce::String(info.audioSampleRate, 0));
-                    }
-                    encodeThumbnailJpeg(decoder.decodeFrameAt(juce::jmin(1.0, info.durationSeconds * 0.1), 320, 180), job.thumbnailJpeg);
-                }
-                else
-                {
-                    job.error = decoder.getLastError();
-                }
-            }
-            else if (job.asset.kind == Kind::patch)
-            {
-                cw::PatchDocument doc;
-                juce::String parseError;
-                if (cw::parsePatchDocumentJson(file.loadFileAsString(), doc, parseError))
-                {
-                    int publicVariables = 0;
-                    for (const auto& variable : doc.variables)
-                        if (variable.isPublic)
-                            ++publicVariables;
-                    job.details.set("durationSeconds", juce::String(doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, 3));
-                    job.details.set("variables", juce::String(publicVariables));
-                }
-                else
-                {
-                    job.error = parseError;
-                }
-            }
-            else
-            {
-                juce::AudioFormatManager formats;
-                formats.registerBasicFormats();
-                if (const std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file)); reader != nullptr && reader->sampleRate > 0.0)
-                {
-                    job.details.set("durationSeconds", juce::String((double) reader->lengthInSamples / reader->sampleRate, 3));
-                    job.details.set("channels", juce::String((int) reader->numChannels));
-                    job.details.set("sampleRate", juce::String(reader->sampleRate, 0));
-                }
-                else
-                {
-                    job.error = "the audio could not be read";
-                }
-            }
-
-            lease.leaseRoot.deleteRecursively(); // nothing to keep: this was only to look at the file
-
-            if (job.thumbnailJpeg.getSize() > 0)
-            {
-                const auto thumbnailPath = "Assets/Thumbnails/" + job.asset.id.replaceCharacters(":\\\\/ ", "____") + ".jpg";
-                if (safeThis->projectSession.writeEntry(thumbnailPath, job.thumbnailJpeg, juce::Time::getCurrentTime()))
-                    job.details.set("thumbnail", thumbnailPath);
-            }
-        }
-    };
-
-    auto finished = [safeThis, jobs, whenDone](bool cancelled)
-    {
-        if (safeThis == nullptr)
-            return;
-
-        auto* self = safeThis.getComponent();
-        bool changed = false;
-        for (auto& job : *jobs)
-        {
-            if (job.details.size() == 0)
-                continue;
-
-            auto updated = job.asset;
-            updated.details = job.details;
-            self->projectSession.upsertAssetDescriptor(updated);
-            changed = true;
-        }
-
-        if (changed)
-        {
-            juce::String commitError;
-            self->projectSession.commit(commitError);
-            self->refreshProjectAssets();
-        }
-
-        // A cancelled read still opens the picker, with whatever was learned so far.
-        if (whenDone)
-            whenDone();
-        juce::ignoreUnused(cancelled);
-
-        juce::MessageManager::callAsync([safeThis]
-        {
-            if (safeThis != nullptr)
-                safeThis->progressTask.reset();
-        });
-    };
-
-    progressTask = std::make_unique<ProgressTask>("Reading what is in your project", std::move(work), std::move(finished));
-    progressTask->start();
-    return true;
+    open();
 }
 
 void MainComponent::handleClipSoundAction(int clipIndex, int action)
@@ -8437,8 +8199,8 @@ void MainComponent::splitSoundFromVideo(int clipIndex)
     }
 
     // The video's sound has to be extracted first (a progress window); the split carries on once it is.
-    const auto found = videoAudioFiles.find(clip.assetId);
-    if (found == videoAudioFiles.end() || ! found->second.existsAsFile())
+    const auto found = videoAudioBytes.find(clip.assetId);
+    if (found == videoAudioBytes.end() || found->second == nullptr)
     {
         const auto clipId = clip.id;
         const auto started = prepareVideoAudio([this, clipId]
@@ -8456,7 +8218,7 @@ void MainComponent::splitSoundFromVideo(int clipIndex)
         return;
     }
 
-    const auto wavFile = found->second;
+    const auto wavBytes = found->second;
 
     // Keep the sound in the project's asset list, so it survives closing and reopening the project.
     creation::assets::AssetDescriptor soundAsset;
@@ -8474,7 +8236,7 @@ void MainComponent::splitSoundFromVideo(int clipIndex)
         soundAsset.logicalPath = soundPath;
         soundAsset.kind = creation::assets::AssetKind::audio;
         soundAsset.mediaType = "audio/wav";
-        soundAsset.fileSizeBytes = (int64) wavFile.getSize();
+        soundAsset.fileSizeBytes = (int64) wavBytes->getSize();
         soundAsset.createdAt = soundAsset.modifiedAt = juce::Time::getCurrentTime();
         soundAsset.sourceApp = "Djehuti Station";
         projectSession.upsertAssetDescriptor(soundAsset);
@@ -8520,9 +8282,9 @@ void MainComponent::splitSoundFromVideo(int clipIndex)
         return;
 
     juce::String clipError;
-    const auto soundIndex = timelineModel.addClip(cs::ClipKind::audio, soundTrackIndex, clip.displayName + " sound", soundAsset.id,
-                                                  cs::TimelineModel::videoSoundSourceTool(clip.assetId), wavFile,
-                                                  clip.startSeconds, clip.durationSeconds, clipError);
+    const auto soundIndex = timelineModel.addClipFromData(cs::ClipKind::audio, soundTrackIndex, clip.displayName + " sound", soundAsset.id,
+                                                          cs::TimelineModel::videoSoundSourceTool(clip.assetId), wavBytes.get(),
+                                                          clip.startSeconds, clip.durationSeconds, clipError);
     if (soundIndex < 0)
     {
         reportError("Could not split the sound: " + (clipError.isNotEmpty() ? clipError : juce::String("the sound clip could not be added.")));
@@ -8631,6 +8393,14 @@ void MainComponent::updateVideoView(double timelineSeconds)
             feedSlot = std::make_unique<VideoLayerFeed>();
         auto& feed = *feedSlot;
 
+        if (! feed.source.isValid())
+        {
+            const auto asset = resolveTimelineClipAsset(*clip);
+            if (! asset.has_value())
+                continue;
+            feed.source = makeVideoSource(clip->assetId, asset->logicalPath);
+        }
+
         // Decode at the size the layer is drawn at, never above it: a small picture-in-picture costs less.
         const auto scale = juce::jlimit(0.05f, 1.0f, cs::videoparams::number(clip->videoParams, cs::videoparams::layoutScale, 1.0f));
         const auto width = juce::jmax(32, juce::roundToInt((float) videoView.getWidth() * scale));
@@ -8638,12 +8408,12 @@ void MainComponent::updateVideoView(double timelineSeconds)
         const auto sourceSeconds = clip->sourceStartSeconds + (timelineSeconds - clip->startSeconds);
 
         // Paused and nothing changed: no new decode.
-        const auto key = clip->file.getFullPathName() + "|" + juce::String(sourceSeconds, 3) + "|" + juce::String(width) + "x" + juce::String(height);
+        const auto key = clip->assetId + "|" + juce::String(sourceSeconds, 3) + "|" + juce::String(width) + "x" + juce::String(height);
         if (key == feed.requestKey)
             continue;
         feed.requestKey = key;
 
-        feed.scrub.requestFrame(clip->file, sourceSeconds,
+        feed.scrub.requestFrame(feed.source, sourceSeconds,
                                 [safeThis, clipId = clip->id](juce::Image image)
                                 {
                                     if (safeThis == nullptr)
@@ -8787,8 +8557,7 @@ void MainComponent::runVideoImport(juce::StringArray filePaths, int trackIndex, 
     // Everything slow happens on the task's thread: opening the video (file I/O and negotiation with the OS
     // decoder -- not safe on the message thread, see VideoDecodeService.h) and streaming it into the project
     // in pieces. Only the quick bookkeeping (asset list, clip) is done afterwards, on the message thread.
-    const auto audioFolder = getVideoAudioFolder();
-    auto work = [safeThis, items, audioFolder](ProgressTask& task)
+    auto work = [safeThis, items](ProgressTask& task)
     {
         const auto count = (int) items->size();
         for (int i = 0; i < count && ! task.cancelRequested(); ++i)
@@ -8844,34 +8613,32 @@ void MainComponent::runVideoImport(juce::StringArray filePaths, int trackIndex, 
 
             item.uploaded = true;
 
-            // The video's own sound: read once here (the file is local), and keep a copy in the project.
+            // The video's own sound: read once here (the file is local), kept in memory, and saved into the project.
             if (task.cancelRequested())
                 continue;
 
             task.report(base + share * 0.7, "Reading " + name + "'s sound" + label + "...");
-            const auto localWav = audioFolder.getChildFile(item.assetId.replaceCharacters(":\\/ ", "____") + ".wav");
+            cs::VideoSource localSource;
+            localSource.key = item.assetId;
+            localSource.file = item.file;
+            auto wav = std::make_shared<juce::MemoryBlock>();
             juce::String soundError;
-            if (! writeVideoAudioWav(item.file, localWav, item.hasAudio, soundError))
+            if (! renderVideoAudioWav(localSource, *wav, item.hasAudio, soundError))
             {
                 // The video is in; only its sound is missing, and playing will offer to try again.
                 DBG("video sound extraction failed: " + soundError);
                 item.hasAudio = false;
-                item.audioFile = {};
                 continue;
             }
 
             if (! item.hasAudio)
                 continue;
 
-            item.audioFile = localWav;
             task.report(base + share * 0.8, "Saving " + name + "'s sound into the project" + label + "...");
-            juce::String saveError;
-            safeThis->projectSession.writeEntryFromFile(MainComponent::videoAudioCachePath(item.assetId), localWav, saveError, 9,
-                [&](double fraction)
-                {
-                    task.report(base + share * (0.8 + 0.2 * fraction), "Saving " + name + "'s sound into the project" + label + "...");
-                    return ! task.cancelRequested();
-                });
+            if (safeThis->projectSession.writeEntry(MainComponent::videoAudioCachePath(item.assetId), *wav, juce::Time::getCurrentTime()))
+                item.audioBytes = wav;
+            else
+                item.hasAudio = false;
         }
     };
 
@@ -8895,8 +8662,8 @@ void MainComponent::runVideoImport(juce::StringArray filePaths, int trackIndex, 
             }
 
             juce::String clipError;
-            if (item.audioFile.existsAsFile())
-                self->videoAudioFiles[item.assetId] = item.audioFile;
+            if (item.audioBytes != nullptr)
+                self->videoAudioBytes[item.assetId] = item.audioBytes;
             else if (! item.hasAudio && ! item.info.hasAudio)
                 self->videosWithoutAudio.insert(item.assetId);
 
@@ -9203,31 +8970,6 @@ std::optional<creation::assets::AssetDescriptor> MainComponent::resolveTimelineC
     return std::nullopt;
 }
 
-void MainComponent::resolveTrackerClipAssetFiles()
-{
-    const auto& clips = timelineModel.getClips();
-    for (int clipIndex = 0; clipIndex < (int) clips.size(); ++clipIndex)
-    {
-        const auto& clip = clips[(size_t) clipIndex];
-        if (clip.assetId.isEmpty() || clip.file.existsAsFile())
-            continue;
-
-        auto assetOpt = resolveTimelineClipAsset(clip);
-        if (! assetOpt.has_value())
-            continue;
-
-        // Materialize the asset from the VFS so the audio engine can access a real file
-        juce::String matError;
-        creation::assets::MaterializedAssetLease lease;
-        if (projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
-                                            creation::assets::MaterializationAccess::readOnly,
-                                            lease, matError))
-        {
-            timelineModel.setClipFile(clipIndex, lease.materializedFile);
-        }
-    }
-}
-
 void MainComponent::exportProjectAssetRaw(const creation::assets::AssetDescriptor& asset)
 {
     if (asset.kind != creation::assets::AssetKind::audio
@@ -9237,13 +8979,10 @@ void MainComponent::exportProjectAssetRaw(const creation::assets::AssetDescripto
         return;
     }
 
-    juce::String matError;
-    creation::assets::MaterializedAssetLease lease;
-    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
-                                          creation::assets::MaterializationAccess::readOnly,
-                                          lease, matError))
+    const auto exportBytes = readAssetBytes(asset.logicalPath, asset.versionId);
+    if (exportBytes == nullptr)
     {
-        contentPanel.setStatusText("Could not read asset for export: " + matError);
+        contentPanel.setStatusText("Could not read that asset for export.");
         return;
     }
 
@@ -9254,9 +8993,8 @@ void MainComponent::exportProjectAssetRaw(const creation::assets::AssetDescripto
                                                                 "*.wav",
                                                                 true);
     auto chooser = rawAssetExportChooser.get();
-    auto materializedFile = lease.materializedFile;
     chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-                         [this, chooser, asset, materializedFile](const juce::FileChooser& result)
+                         [this, chooser, asset, exportBytes](const juce::FileChooser& result)
                          {
                              auto destination = result.getResult();
                              if (chooser == rawAssetExportChooser.get())
@@ -9266,7 +9004,7 @@ void MainComponent::exportProjectAssetRaw(const creation::assets::AssetDescripto
                                  return;
 
                              if (destination.getFileExtension().isEmpty())
-                                 destination = destination.withFileExtension(materializedFile.getFileExtension());
+                                 destination = destination.withFileExtension(juce::File(asset.logicalPath).getFileExtension());
 
                              if (destination.existsAsFile() && ! destination.deleteFile())
                              {
@@ -9274,7 +9012,7 @@ void MainComponent::exportProjectAssetRaw(const creation::assets::AssetDescripto
                                  return;
                              }
 
-                             if (! materializedFile.copyFileTo(destination))
+                             if (! destination.replaceWithData(exportBytes->getData(), exportBytes->getSize()))
                              {
                                  contentPanel.setStatusText("Could not export the raw audio file.");
                                  return;
@@ -9402,17 +9140,16 @@ void MainComponent::toggleProjectAssetPreview(const creation::assets::AssetDescr
         return;
     }
 
-    creation::assets::MaterializedAssetLease lease;
     juce::String error;
-    if (! projectSession.materializeEntry(suiteSettings, asset.logicalPath,
-                                          creation::assets::MaterializationAccess::readOnly, lease, error))
+    const auto previewBytes = readAssetBytes(asset.logicalPath, asset.versionId);
+    if (previewBytes == nullptr)
     {
-        transportBar.setStatusText(error.isNotEmpty() ? error : "Could not open that asset to play it.");
+        transportBar.setStatusText("Could not open that asset to play it.");
         return;
     }
 
     engine.stopAssetPreview();
-    if (! engine.previewAssetFile(lease.materializedFile, error))
+    if (! engine.previewAssetData(previewBytes, {}, error))
     {
         transportBar.setStatusText(error.isNotEmpty() ? error : "Could not play that asset.");
         previewingProjectAssetId = {};
@@ -10212,7 +9949,7 @@ bool MainComponent::startRecordingSession()
 
         WorkstationAudioEngine::RecordingTarget target;
         target.trackIndex = trackIndex;
-        target.file = creation::suite::getCurrentScratchDirectory().getChildFile("Take-" + timestamp
+        target.file = juce::File::getCurrentWorkingDirectory().getChildFile("Take-" + timestamp
                                                                                     + "-T" + juce::String(trackIndex + 1).paddedLeft('0', 2)
                                                                                     + "-" + trackName
                                                                                     + ".wav");
@@ -10342,7 +10079,9 @@ void MainComponent::stopRecordingSession()
 
     for (const auto& takeFile : takeFiles)
     {
-        if (! takeFile.existsAsFile())
+        // A take is only a name here; its audio was recorded into memory and is handed over now.
+        const auto takeData = engine.takeFinishedRecording(takeFile);
+        if (takeData == nullptr)
             continue;
 
         juce::String importError;
@@ -10357,12 +10096,7 @@ void MainComponent::stopRecordingSession()
         auto logicalPath = creation::assets::ProjectContainerPaths::sourceAssetRoot
                          + takeFile.getFileName();
 
-        juce::MemoryBlock fileData;
-        if (! takeFile.loadFileAsData(fileData))
-        {
-            recordingSaveErrors.add("Could not read recorded take: " + takeFile.getFileName());
-            continue;
-        }
+        const juce::MemoryBlock& fileData = *takeData;
 
         if (! projectSession.writeEntry(logicalPath, fileData, juce::Time::getCurrentTime()))
         {
@@ -10390,16 +10124,6 @@ void MainComponent::stopRecordingSession()
             continue;
         }
 
-        creation::assets::MaterializedAssetLease lease;
-        if (! projectSession.materializeEntry(suiteSettings, importedAsset.logicalPath,
-                                              creation::assets::MaterializationAccess::readOnly,
-                                              lease, importError))
-        {
-            recordingSaveErrors.add((importError.isNotEmpty() ? importError : "Could not read back the recorded take.")
-                                     + " (" + takeFile.getFileName() + ")");
-            continue;
-        }
-
         cs::AssetRef assetRef;
         assetRef.id = importedAsset.id;
         assetRef.versionId = importedAsset.versionId;
@@ -10413,11 +10137,11 @@ void MainComponent::stopRecordingSession()
                 continue;
 
             timelineModel.setClipAssetReference(clipIndex, assetRef);
-            timelineModel.setClipFile(clipIndex, lease.materializedFile);
+            timelineModel.setClipFile(clipIndex, juce::File());
+            juce::String waveformError;
+            timelineModel.analyzeClipWaveformFromData(clipIndex, fileData, waveformError);
         }
 
-        if (lease.materializedFile != takeFile && takeFile.existsAsFile())
-            takeFile.deleteFile();
     }
 
     timelineModel.finishRecordingClip(timelineModel.getTransportSeconds());
@@ -10705,49 +10429,6 @@ juce::ValueTree MainComponent::createProjectStateForSave()
     return state;
 }
 
-void MainComponent::remapTemplateStateFilesToCurrentProject(juce::ValueTree& state) const
-{
-    if (! projectSession.isValid())
-        return;
-
-    juce::StringPairArray filesByName;
-    for (const auto& asset : projectSession.getManifest().assetCatalog.query({}))
-    {
-        // Map the logical filename -> materialized path so the template remapper can work
-        auto fileName = asset.logicalPath.fromLastOccurrenceOf("/", false, false).toLowerCase();
-        if (fileName.isNotEmpty() && ! filesByName.containsKey(fileName))
-        {
-            juce::String matError;
-            creation::assets::MaterializedAssetLease lease;
-            if (projectSession.materializeEntry(suiteSettings, asset.logicalPath,
-                                                creation::assets::MaterializationAccess::readOnly,
-                                                lease, matError))
-            {
-                filesByName.set(fileName, lease.materializedFile.getFullPathName());
-            }
-        }
-    }
-
-    std::function<void(juce::ValueTree&)> remapTree = [&](juce::ValueTree& tree)
-    {
-        if (tree.hasProperty("file"))
-        {
-            auto oldFileName = juce::File(tree.getProperty("file").toString()).getFileName().toLowerCase();
-            auto newPath = filesByName[oldFileName];
-            if (newPath.isNotEmpty())
-                tree.setProperty("file", newPath, nullptr);
-        }
-
-        for (int index = 0; index < tree.getNumChildren(); ++index)
-        {
-            auto child = tree.getChild(index);
-            remapTree(child);
-        }
-    };
-
-    remapTree(state);
-}
-
 void MainComponent::saveSessionToDisk(bool userInitiated)
 {
     if (! suiteSettings.suiteVfsRoot.isNotEmpty())
@@ -10906,7 +10587,7 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
             continue;
         }
 
-        auto clipFile = clip.file;
+        std::shared_ptr<const juce::MemoryBlock> clipBytes;
 
         if (clip.kind == cs::ClipKind::video)
         {
@@ -10916,135 +10597,107 @@ bool MainComponent::buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngi
             if (clip.soundDetached)
                 continue; // its sound is a clip of its own now; playing it here too would double it
 
-            const auto extracted = videoAudioFiles.find(clip.assetId);
-            if (extracted == videoAudioFiles.end() || ! extracted->second.existsAsFile())
+            const auto extracted = videoAudioBytes.find(clip.assetId);
+            if (extracted == videoAudioBytes.end() || extracted->second == nullptr)
                 continue;
 
-            clipFile = extracted->second;
+            clipBytes = extracted->second;
         }
-
-        bool haveSignalRender = false;
-        if (clip.kind == cs::ClipKind::signal && clip.assetId.isNotEmpty())
+        else if (clip.kind == cs::ClipKind::signal)
         {
-            auto cached = signalRenderFiles.find(clip.assetId);
-            if (cached != signalRenderFiles.end() && cached->second.existsAsFile())
+            // A Signal clip's source is a patch document (.cspatch), never playable audio. It is rendered to a WAV, kept
+            // in the project VFS (never as a file on the disk) and played from memory.
+            const auto cached = clip.assetId.isNotEmpty() ? signalRenderBytes.find(clip.assetId) : signalRenderBytes.end();
+            if (cached != signalRenderBytes.end() && cached->second != nullptr)
             {
-                clipFile = cached->second;
-                haveSignalRender = true;
+                clipBytes = cached->second;
+            }
+            else
+            {
+                // Always re-read the patch from the project: it may have been re-saved since the last render.
+                juce::String patchText, matError;
+                if (clip.assetId.isNotEmpty())
+                {
+                    const auto assetOpt = resolveTimelineClipAsset(clip);
+                    juce::MemoryBlock patchData;
+                    if (assetOpt.has_value() && projectSession.readEntry(assetOpt->logicalPath, patchData))
+                        patchText = patchData.toString();
+                }
+
+                if (patchText.isEmpty())
+                    continue;
+
+                // Key the cache on the patch content, so editing the patch invalidates the cached render.
+                const auto cacheKey = clip.assetId.isNotEmpty() ? clip.assetId : clip.displayName;
+                const auto cachePath = "cache/signal_render_" + cacheKey.replaceCharacters(":\\/ ", "____")
+                                     + "_" + juce::String::toHexString(patchText.hashCode64()) + ".wav";
+
+                juce::MemoryBlock saved;
+                if (projectSession.readEntry(cachePath, saved) && saved.getSize() > 0)
+                {
+                    clipBytes = std::make_shared<const juce::MemoryBlock>(std::move(saved));
+                }
+                else
+                {
+                    cw::PatchDocument doc;
+                    if (! cw::parsePatchDocumentJson(patchText, doc, matError))
+                    {
+                        errorMessage = "Signal track render failed (parse): " + matError;
+                        return false;
+                    }
+
+                    PatchRuntimePlayer player;
+                    player.prepare(48000.0, 512);
+                    juce::AudioBuffer<float> buffer;
+                    if (! player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr))
+                    {
+                        errorMessage = "Signal track render failed (render): " + matError;
+                        return false;
+                    }
+
+                    auto wavData = std::make_shared<juce::MemoryBlock>();
+                    juce::WavAudioFormat wavFormat;
+                    // The writer takes ownership of (and deletes) the stream, so it must be heap-allocated.
+                    auto* wavStream = new juce::MemoryOutputStream(*wavData, false);
+                    std::unique_ptr<juce::AudioFormatWriter> writer(
+                        wavFormat.createWriterFor(wavStream, 48000.0, (unsigned int) buffer.getNumChannels(), 24, {}, 0));
+                    if (writer == nullptr)
+                    {
+                        delete wavStream;
+                        errorMessage = "Could not create a WAV writer for the rendered Signal clip.";
+                        return false;
+                    }
+                    writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+                    writer.reset(); // Flushes the WAV header and finalizes wavData
+
+                    if (! projectSession.writeEntry(cachePath, *wavData, juce::Time::getCurrentTime()))
+                    {
+                        errorMessage = "Could not write rendered WAV into VFS.";
+                        return false;
+                    }
+
+                    clipBytes = wavData;
+                }
+
+                if (clip.assetId.isNotEmpty())
+                    signalRenderBytes[clip.assetId] = clipBytes;
             }
         }
-
-        if (clip.kind == cs::ClipKind::signal && ! haveSignalRender)
+        else if (clip.assetId.isNotEmpty())
         {
-            // A Signal clip's source is a patch document (.cspatch), never playable audio. Render it
-            // to a WAV, cached in the project VFS, whether the patch is already a real local file
-            // (resolveTrackerClipAssetFiles materializes it into clip.file) or still has to be
-            // materialized from the project's asset catalog.
-            auto patchFile = clip.file;
-            juce::String matError;
-            creation::assets::MaterializedAssetLease patchLease;
-            // Always re-read the patch from the project when it has an asset: clip.file is only a local
-            // copy made when the project loaded, so it goes stale as soon as the patch is re-saved.
-            if (clip.assetId.isNotEmpty())
-            {
-                auto assetOpt = resolveTimelineClipAsset(clip);
-                if (assetOpt.has_value()
-                    && projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
-                                                       creation::assets::MaterializationAccess::readOnly,
-                                                       patchLease, matError))
-                {
-                    patchFile = patchLease.materializedFile;
-                }
-            }
-
-            if (! patchFile.existsAsFile())
-                continue;
-
-            // Key the cache on the patch content, so editing the patch invalidates the cached render
-            // (the VFS materializer does not preserve source modification times, so mtimes can't be used).
-            const auto patchText = patchFile.loadFileAsString();
-            auto cacheKey = clip.assetId.isNotEmpty() ? clip.assetId : patchFile.getFileNameWithoutExtension();
-            auto cachePath = "cache/signal_render_" + cacheKey.replaceCharacters(":\\/ ", "____")
-                           + "_" + juce::String::toHexString(patchText.hashCode64()) + ".wav";
-            creation::assets::MaterializedAssetLease renderLease;
-
-            const bool needsRender = ! (projectSession.materializeEntry(suiteSettings, cachePath,
-                                                                         creation::assets::MaterializationAccess::readOnly,
-                                                                         renderLease, matError)
-                                        && renderLease.materializedFile.existsAsFile());
-
-            if (needsRender)
-            {
-                cw::PatchDocument doc;
-                if (! cw::parsePatchDocumentJson(patchText, doc, matError))
-                {
-                    errorMessage = "Signal track render failed (parse): " + matError;
-                    return false;
-                }
-
-                PatchRuntimePlayer player;
-                player.prepare(48000.0, 512);
-                juce::AudioBuffer<float> buffer;
-                if (! player.renderPatchToBuffer(doc, doc.durationSeconds > 0.0 ? doc.durationSeconds : 5.0, buffer, matError, nullptr))
-                {
-                    errorMessage = "Signal track render failed (render): " + matError;
-                    return false;
-                }
-
-                juce::MemoryBlock wavData;
-                juce::WavAudioFormat wavFormat;
-                // The writer takes ownership of (and deletes) the stream, so it must be heap-allocated.
-                auto* wavStream = new juce::MemoryOutputStream(wavData, false);
-                std::unique_ptr<juce::AudioFormatWriter> writer(
-                    wavFormat.createWriterFor(wavStream, 48000.0, (unsigned int) buffer.getNumChannels(), 24, {}, 0));
-                if (writer == nullptr)
-                {
-                    delete wavStream;
-                    errorMessage = "Could not create a WAV writer for the rendered Signal clip.";
-                    return false;
-                }
-                writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
-                writer.reset(); // Flushes the WAV header and finalizes wavData
-
-                if (! projectSession.writeEntry(cachePath, wavData, juce::Time::getCurrentTime()))
-                {
-                    errorMessage = "Could not write rendered WAV into VFS.";
-                    return false;
-                }
-
-                if (! projectSession.materializeEntry(suiteSettings, cachePath, creation::assets::MaterializationAccess::readOnly, renderLease, matError))
-                {
-                    errorMessage = "Could not materialize rendered WAV from VFS: " + matError;
-                    return false;
-                }
-            }
-
-            clipFile = renderLease.materializedFile;
-            if (clip.assetId.isNotEmpty())
-                signalRenderFiles[clip.assetId] = clipFile;
-        }
-        else if (clip.kind != cs::ClipKind::signal && ! clipFile.existsAsFile() && clip.assetId.isNotEmpty())
-        {
-            auto assetOpt = resolveTimelineClipAsset(clip);
-            if (assetOpt.has_value())
-            {
-                juce::String matError;
-                creation::assets::MaterializedAssetLease lease;
-                if (projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
-                                                    creation::assets::MaterializationAccess::readOnly,
-                                                    lease, matError))
-                {
-                    clipFile = lease.materializedFile;
-                }
-            }
+            // An audio clip: the asset's bytes, read into memory through the VFS service.
+            if (const auto assetOpt = resolveTimelineClipAsset(clip); assetOpt.has_value())
+                clipBytes = readAssetBytes(assetOpt->logicalPath, assetOpt->versionId);
         }
 
-        if (! clipFile.existsAsFile())
+        if (clipBytes == nullptr && ! clip.file.existsAsFile())
             continue;
 
         WorkstationAudioEngine::PlaybackClipTarget target;
         target.trackIndex = clip.trackIndex;
-        target.file = clipFile;
+        target.file = clip.file;
+        target.encodedData = clipBytes;
+        target.displayName = clip.displayName;
         target.startSeconds = clip.startSeconds;
         target.sourceStartSeconds = clip.sourceStartSeconds;
         target.durationSeconds = clip.durationSeconds;
@@ -11076,13 +10729,10 @@ bool MainComponent::loadSignalClipPatch(const cs::TimelineClip& clip, cw::PatchD
     juce::String patchText, matError;
     if (clip.assetId.isNotEmpty())
     {
-        auto assetOpt = resolveTimelineClipAsset(clip);
-        creation::assets::MaterializedAssetLease lease;
-        if (assetOpt.has_value()
-            && projectSession.materializeEntry(suiteSettings, assetOpt->logicalPath,
-                                               creation::assets::MaterializationAccess::readOnly,
-                                               lease, matError))
-            patchText = lease.materializedFile.loadFileAsString();
+        const auto assetOpt = resolveTimelineClipAsset(clip);
+        juce::MemoryBlock patchData;
+        if (assetOpt.has_value() && projectSession.readEntry(assetOpt->logicalPath, patchData))
+            patchText = patchData.toString();
     }
 
     if (patchText.isEmpty() && clip.file.existsAsFile())
@@ -11217,7 +10867,6 @@ void MainComponent::restoreTimelineEditState(const juce::ValueTree& state, const
     transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);
     transportBar.loopDelaySlider.setValue(timelineModel.getLoopDelaySeconds(), juce::dontSendNotification);
 
-    resolveTrackerClipAssetFiles();
     refreshTrackerPlaybackClips();
     selectedClipIndex = -1;
     syncTrackViews();
@@ -11513,7 +11162,6 @@ void MainComponent::loadSessionFromDisk()
     if (auto timelineState = state.getChildWithName("Timeline"); timelineState.isValid())
         timelineModel.restoreState(timelineState);
 
-    resolveTrackerClipAssetFiles();
     markArrangementClean();
 
     transportBar.loopButton.setToggleState(timelineModel.isLoopEnabled(), juce::dontSendNotification);

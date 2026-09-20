@@ -45,6 +45,7 @@
 #include "Video/Gl/VideoLayerParams.h"
 #include "Video/Gl/VideoPanelHost.h"
 #include "Video/VideoScrubPreview.h"
+#include "Video/VideoSource.h"
 #include "Views/RenderDialog.h"
 #include "Views/ToastMessage.h"
 #include "Views/DslPanel.h"
@@ -288,7 +289,7 @@ private:
     creation::assets::ProjectSession projectSession;
     // Rendered WAV file for each Signal clip's source patch asset, so playback-target builds (which
     // run on every scrub) don't hit the VFS. Cleared whenever a patch is saved.
-    std::map<juce::String, juce::File> signalRenderFiles;
+    std::map<juce::String, std::shared_ptr<const juce::MemoryBlock>> signalRenderBytes; // asset id -> the rendered sound of a Signal clip, in memory
 
     // Video. The picture is a dock panel (dock it, float it, resize it); the sound is the video's own audio
     // track, decoded once to a WAV so it plays through the clip's mixer track like any other audio clip.
@@ -300,13 +301,14 @@ private:
         cs::VideoScrubPreview scrub;
         juce::Image frame;
         juce::String requestKey;
+        cs::VideoSource source;
     };
     std::map<juce::String, std::unique_ptr<VideoLayerFeed>> videoFeeds; // clip id -> its decoder and latest frame
     std::vector<juce::String> videoActiveOrder;                          // clip ids at the playhead, bottom layer first
     void refreshVideoLayers();                                           // republish the layers from the feeds and the clips' settings
     void showVideoClipSettings(int clipIndex);
     std::unique_ptr<juce::DocumentWindow> videoSettingsWindow;
-    std::map<juce::String, juce::File> videoAudioFiles; // asset id -> local WAV of that video's sound
+    std::map<juce::String, std::shared_ptr<const juce::MemoryBlock>> videoAudioBytes; // asset id -> that video's sound as a WAV, in memory
     std::set<juce::String> videosWithoutAudio;          // asset ids whose video has no sound track
     void updateVideoView(double timelineSeconds);
     void openVideoViewForPlayback();
@@ -317,14 +319,20 @@ private:
     void showAddClipPicker(int trackIndex, double startSeconds);
     // Reads what each video/audio/render/patch asset actually is (length, size of picture, channels, a thumbnail)
     // for any asset that has no details yet, in a progress window. Returns false when there was nothing to do.
-    bool ensureAssetDetails(std::function<void()> whenDone);
     void splitSoundFromVideo(int clipIndex);
     bool videoClipsNeedAudio() const;
     // Makes sure every video clip's sound is ready (extracting and caching it in the project when it is not),
     // in a progress window. Returns false when nothing needed doing.
     bool prepareVideoAudio(std::function<void()> whenDone = {});
-    juce::File getVideoAudioFolder() const;
     static juce::String videoAudioCachePath(const juce::String& assetId);
+
+    // An asset's bytes, read into memory through the VFS service (never copied out to a file); kept for reuse until the
+    // memory limit is reached. versionKey makes a re-saved asset be read again.
+    std::shared_ptr<const juce::MemoryBlock> readAssetBytes(const juce::String& logicalPath, const juce::String& versionKey);
+    std::map<juce::String, std::shared_ptr<const juce::MemoryBlock>> assetBytesCache;
+    juce::int64 assetBytesCacheSize = 0;
+    // Where a video in the project is read from: a stream of the VFS entry, never a file on the disk.
+    cs::VideoSource makeVideoSource(const juce::String& assetId, const juce::String& logicalPath) const;
     // Parsed patch (and its content key) for each Signal clip's patch asset, so timeline refreshes
     // don't re-fetch it from the VFS. Cleared whenever a patch is saved.
     std::map<juce::String, std::pair<juce::String, cw::PatchDocument>> signalPatchDocs;
@@ -413,7 +421,6 @@ private:
     void parentHierarchyChanged() override;
     bool handleGlobalKeyPress(const juce::KeyPress& key);
     juce::ValueTree createProjectStateForSave();
-    void remapTemplateStateFilesToCurrentProject(juce::ValueTree& state) const;
     void saveSessionToDisk(bool userInitiated = false);
     void loadSessionFromDisk();
     void pollHostedPluginStateAutosave();
@@ -642,7 +649,6 @@ private:
     // The window for whatever long action is running (import, ...): progress bar, status line, Cancel.
     std::unique_ptr<ProgressTask> progressTask;
     std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
-    void resolveTrackerClipAssetFiles();
     void launchTutorialItem(const ContentPanel::TutorialItem& item);
     bool chooseStorageRoot(bool promptWhenAlreadyConfigured = false);
     bool ensureStorageRootConfigured();

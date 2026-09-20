@@ -1,5 +1,8 @@
 #pragma once
 
+#include <map>
+#include <memory>
+
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
@@ -46,7 +49,11 @@ public:
     struct PlaybackClipTarget
     {
         int trackIndex = -1;
+        // A clip's audio comes either from encodedData (the asset's bytes, read into memory through the VFS service:
+        // nothing is copied out to a file) or, for a file that was never in the VFS, from `file`.
         juce::File file;
+        std::shared_ptr<const juce::MemoryBlock> encodedData;
+        juce::String displayName;
         double startSeconds = 0.0;
         double sourceStartSeconds = 0.0;
         double durationSeconds = 0.0;
@@ -111,10 +118,14 @@ public:
     bool startRecordingToFile(const juce::File& file, juce::String& errorMessage);
     bool startRecordingToFiles(const juce::Array<RecordingTarget>& targets, juce::String& errorMessage);
     void stopRecording();
+    // The finished recording of a take (a complete WAV, in memory), handed over once; null if there is none.
+    std::shared_ptr<const juce::MemoryBlock> takeFinishedRecording(const juce::File& takeName);
     juce::File getRecordingFile() const { return recordingFile; }
     juce::Array<juce::File> getRecordingFiles() const;
     bool previewAssetFile(const juce::File& file, juce::String& errorMessage);
     bool previewAssetFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
+    // Previews an asset from its bytes (read into memory through the VFS service), never from a copied-out file.
+    bool previewAssetData(const std::shared_ptr<const juce::MemoryBlock>& encodedData, const PreviewSettings& settings, juce::String& errorMessage);
     bool previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer, double sampleRate, juce::String& errorMessage);
     bool setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets, juce::String& errorMessage);
     // Message thread. Replaces the set of live Signal clips; see SignalClipTarget.
@@ -353,16 +364,6 @@ public:
     void setTrackPluginParameterValueRealtime(int trackIndex, int slotIndex, int paramIndex, float normalizedValue);
     void setTrackPluginBypassedRealtime(int trackIndex, int slotIndex, bool shouldBypass);
 
-    // Offline-renders a MIDI clip's notes/CC through the given instrument plugin into a
-    // temporary WAV file, so it can be scheduled for playback the same way as a recorded
-    // audio clip. Uses a fresh plugin instance - never touches the live, real-time track chain.
-    bool renderMidiClipToFile(const juce::File& instrumentPluginFile,
-                              const std::vector<cs::MidiNoteEvent>& notes,
-                              const std::vector<cs::MidiCCEvent>& ccEvents,
-                              double tempoBpm,
-                              double durationSeconds,
-                              juce::File& outputFile,
-                              juce::String& errorMessage) const;
 
     void audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
                                           int totalNumInputChannels,
@@ -650,6 +651,9 @@ private:
         void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
 
         bool loadFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
+        bool loadData(const std::shared_ptr<const juce::MemoryBlock>& encodedData, const PreviewSettings& settings, juce::String& errorMessage);
+        // Shared tail of loadFile/loadData; takes ownership of `reader`.
+        bool loadReader(juce::AudioFormatReader* reader, const juce::File& labelFile, const PreviewSettings& settings, juce::String& errorMessage);
         bool loadBuffer(const juce::AudioBuffer<float>& buffer, double sourceSampleRate, juce::String& errorMessage);
         void stop();
         bool isPreviewing() const noexcept { return previewing.load(); }
@@ -835,9 +839,13 @@ private:
     {
         int trackIndex = -1;
         int numChannels = 1;
-        juce::File file;
+        juce::File file; // only the take's name: a recording is held in memory, never written to a file
+        // Declared before the writer so it is destroyed after it: the writer's last flush still writes into this block.
+        std::shared_ptr<juce::MemoryBlock> data;
         std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
     };
+
+    std::map<juce::String, std::shared_ptr<juce::MemoryBlock>> finishedTakes; // take name -> its finished WAV
 
     std::vector<TrackRecordingWriter> recordingWriters;
     juce::File recordingFile;

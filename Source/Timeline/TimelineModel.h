@@ -55,6 +55,19 @@ public:
                 double startSeconds,
                 double durationSeconds,
                 juce::String& errorMessage);
+    // Adds a clip whose audio lives in the VFS: nothing is copied out to a file. For audio/foley clips `encodedAudio`
+    // (the asset's bytes, read through the VFS service) is used once, to measure the clip and draw its waveform; the
+    // waveform is then saved with the arrangement, so the bytes are never needed for display again. A video clip
+    // passes nullptr and gives its length in durationSeconds.
+    int addClipFromData(ClipKind kind,
+                        int trackIndex,
+                        const juce::String& displayName,
+                        const juce::String& assetId,
+                        const juce::String& sourceTool,
+                        const juce::MemoryBlock* encodedAudio,
+                        double startSeconds,
+                        double durationSeconds,
+                        juce::String& errorMessage);
     bool moveClip(int clipIndex, int trackIndex, double startSeconds);
     void setClipDisplayName(int clipIndex, const juce::String& displayName);
     void setClipAssetReference(int clipIndex, const cs::AssetRef& assetRef);
@@ -158,6 +171,8 @@ public:
     void clear();
 
     bool analyzeClipWaveform(int clipIndex, juce::String& errorMessage);
+    bool analyzeClipWaveformFromData(int clipIndex, const juce::MemoryBlock& encodedAudio, juce::String& errorMessage);
+    bool analyzeClipWaveformFromReader(int clipIndex, juce::AudioFormatReader& reader, juce::String& errorMessage);
     juce::ValueTree createState() const;
     void restoreState(const juce::ValueTree& state);
 
