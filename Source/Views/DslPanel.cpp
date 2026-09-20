@@ -1,15 +1,15 @@
 #include "DslPanel.h"
-#include <creation/suite/SuiteStoragePaths.h>
 
-// DslPanel's "Compile" button shells out to the real frust_compiler CLI in
-// --emit-obj mode (parses, runs sema/codegen, emits an object file, never
-// executes anything) rather than linking an embeddable FRust frontend
-// library -- FrustLang doesn't package its parser/sema as one today (see
-// CS_FRUST_COMPILER_EXECUTABLE's own comment in CMakeLists.txt). This also
-// means a bare, manifest-free patch compiles here exactly like it did under
-// CEL -- frust_plugin_host's JIT load path (used by Signal Lab/Foley's real
-// node-graph output) refuses to load anything without a `manifest "...";`
-// declaration, which would be unwanted boilerplate for a scratch patch.
+#include <CompilerApi.h>
+
+// DslPanel's "Compile" button runs the embedded FRust compiler in this
+// process (frust::Compile, CompilerApi.h): the editor's text goes in as a
+// string and the diagnostics come back as data. Nothing is written to a
+// file, not even a temporary one, and no other program is started. It parses
+// and generates code exactly as the command-line compiler does, but never
+// executes anything and never requires a `manifest "...";` declaration the
+// way frust_plugin_host's load path does -- the right check for a free-form
+// scratch/patch editor that isn't a loadable plugin.
 DslPanel::DslPanel()
 {
     setName("Code");
@@ -60,8 +60,6 @@ pub fn gain(input: f64, amount: f64) -> f64 = {
     loadButton.setTooltip("Load a saved .frust file");
     addAndMakeVisible(loadButton);
 
-    // Compiling writes two temporary files (the compiler works on files), so it only happens when the user presses
-    // Compile - never on its own at startup.
     outputEditor.setText("Press Compile to check this source.", juce::dontSendNotification);
     exportButton.setEnabled(false);
     saveButton.setEnabled(false);
@@ -104,45 +102,25 @@ void DslPanel::resized()
 
 void DslPanel::compileSource()
 {
-    const auto scratchRoot = creation::suite::getCurrentScratchDirectory();
-    if (scratchRoot == juce::File())
-        return; // no VFS root: nowhere to compile
+    frust::CompileRequest request;
+    request.sources.push_back({ "patch.frust", sourceEditor.getText().toStdString() });
+    request.emitObject = false; // check only: nothing here needs the object code
 
-    const auto scratchDir = scratchRoot.getChildFile("djehuti_station_dsl_panel");
-    scratchDir.createDirectory();
-    const auto sourceFile = scratchDir.getChildFile("patch.frust");
-    const auto objectFile = scratchDir.getChildFile("patch.o");
-    sourceFile.replaceWithText(sourceEditor.getText());
-
-    juce::ChildProcess compilerProcess;
-    const juce::StringArray arguments {
-        CS_FRUST_COMPILER_EXECUTABLE,
-        "--emit-obj",
-        objectFile.getFullPathName(),
-        sourceFile.getFullPathName()
-    };
+    const auto result = frust::Compile(request);
+    lastCompileSucceeded = result.ok;
 
     juce::String output;
-    if (!compilerProcess.start(arguments, juce::ChildProcess::wantStdOut | juce::ChildProcess::wantStdErr))
+    if (result.ok)
     {
-        output = "Could not launch frust_compiler.";
-        lastCompileSucceeded = false;
+        output = "Compiled cleanly.";
     }
     else
     {
-        output = compilerProcess.readAllProcessOutput();
-        compilerProcess.waitForProcessToFinish(10000);
-
-        // frust_compiler prints nothing at all on a clean --emit-obj compile
-        // (see its own Main.cpp) -- any output at all means a parse/sema/
-        // codegen diagnostic fired. Not the process exit code: a known,
-        // separately-tracked frust_compiler bug means it doesn't yet exit
-        // nonzero on a compile error, so exit code can't be trusted here.
-        lastCompileSucceeded = output.isEmpty();
+        for (const auto& diagnostic : result.diagnostics)
+            output << juce::String(frust::FormatDiagnostic(diagnostic)) << "\n";
+        if (output.isEmpty())
+            output = "The FRust compiler reported a failure without a message.";
     }
-
-    if (lastCompileSucceeded)
-        output = "Compiled cleanly.";
 
     outputEditor.setText(output, juce::dontSendNotification);
     exportButton.setEnabled(lastCompileSucceeded);

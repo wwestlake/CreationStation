@@ -384,14 +384,6 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     # CE_CORE_NODE_LIBRARY uses for CoreNodesLibrary.frust.
     CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
     CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
-    # DslPanel's "Compile" button shells out to the real frust_compiler CLI
-    # (--emit-obj: parses, runs sema/codegen, and emits an object file, but
-    # never executes anything and never requires a `manifest "...";`
-    # declaration the way frust_plugin_host's JIT load path does) -- the
-    # right tool for a free-form scratch/patch editor that isn't a loadable
-    # plugin. frust_compiler is built as part of the FrustPluginRuntime
-    # subdirectory above, so its build output path is already known here.
-    CS_FRUST_COMPILER_EXECUTABLE="$<TARGET_FILE:frust_compiler>"
     CS_FRATE_EXECUTABLE="$<TARGET_FILE:frate_cli>"
 )
 
@@ -399,10 +391,9 @@ target_include_directories(CreativeWorkstation PRIVATE
     "${CREATION_SUITE_SHARED_DIR}/JuceDocking/include"
 )
 
-# CS_FRUST_COMPILER_EXECUTABLE above only bakes in the path -- this makes
-# sure the exe is actually built (and, on Windows, its PDB/DLL deps are
-# up to date) before CreativeWorkstation, since nothing else in this
-# target's own source tree references the frust_compiler target.
+# The Script panel compiles in-process (frust::Compile, from frust_lang) and
+# needs no compiler executable. The frust_compiler CLI is still built alongside
+# Station because frate, which Station uses for pods, launches it.
 add_dependencies(CreativeWorkstation frust_compiler)
 
 if(CREATION_STATION_ENABLE_ASIO)
