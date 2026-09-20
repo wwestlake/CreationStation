@@ -427,6 +427,39 @@ int main()
               "a block straddling the end writes only the samples inside the patch");
     }
 
+    // Signal Lab "Play": a sine wired straight to a Sink node (no Mix), played the way the live engine plays it -
+    // start(), then the mixer pulling blocks - with the preview voice's own default output scale.
+    {
+        auto patch = makePatch();
+        cw::PatchNode sink;
+        sink.id = "sink1";
+        sink.kind = "output";
+        patch.nodes.add(sink);
+
+        cw::PatchConnection wire;
+        wire.from = "src_sine";
+        wire.to = "sink1";
+        wire.fromPort = "signalOut";
+        wire.toPort = "signalIn";
+        wire.weight = 1.0;
+        patch.connections.add(wire);
+
+        auto voice = std::make_unique<PatchLiveVoice>();
+        voice->prepareToPlay(kBlockSize, kSampleRate);
+        voice->rebuild(patch, PatchLiveBindingMap {});
+        voice->start(kPatchSeconds);
+
+        juce::AudioBuffer<float> out(2, kBlockSize * 8);
+        out.clear();
+        for (int done = 0; done < out.getNumSamples(); done += kBlockSize)
+        {
+            juce::AudioSourceChannelInfo info(&out, done, kBlockSize);
+            voice->getNextAudioBlock(info);
+        }
+        std::printf("INFO: sine -> sink via start()/getNextAudioBlock: rms %.4f\n", rms(out, 0, out.getNumSamples()));
+        check(rms(out, 0, out.getNumSamples()) > 0.0, "a sine wired to a Sink is not silent when played live (Signal Lab Play path)");
+    }
+
     std::printf("%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");
     return failures == 0 ? 0 : 1;
 }

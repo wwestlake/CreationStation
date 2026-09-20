@@ -2988,12 +2988,6 @@ SignalLabPanel::SignalLabPanel()
     statusLabel.setColour(juce::Label::textColourId, juce::Colour(0xffa7b6cb));
     addAndMakeVisible(statusLabel);
 
-    signalMenuButton.onClick = [this]
-    {
-        showSignalMenu();
-    };
-    addAndMakeVisible(signalMenuButton);
-
     compileButton.onClick = [this] { compileGraph(); };
     addAndMakeVisible(compileButton);
 
@@ -4105,41 +4099,28 @@ void SignalLabPanel::showNodeContextMenu(int nodeIndex, juce::Point<int> canvasP
                        });
 }
 
-void SignalLabPanel::showSignalMenu()
+void SignalLabPanel::newSignal()
 {
-    juce::PopupMenu menu;
-    menu.addItem(1, "New");
-    menu.addItem(2, "Open");
-    menu.addItem(3, "Save");
-    menu.addItem(4, "Save As");
-    menu.addItem(5, "Render to Project");
+    createNewSignal();
+}
 
-    auto area = signalMenuButton.getScreenBounds();
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(area),
-                       [this](int result)
-                       {
-                           juce::MessageManager::callAsync([this, result]()
-                           {
-                               if (result == 1)
-                                   createNewSignal();
-                               else if (result == 2)
-                               {
-                                   if (onPatchLoadRequested)
-                                       onPatchLoadRequested();
-                               }
-                               else if (result == 3 || result == 4)
-                               {
-                                   if (onPatchSaveToLibraryRequested)
-                                       onPatchSaveToLibraryRequested(cw::serialisePatchDocumentJson(buildPatchDocument(recipe)), recipe.name);
-                               }
-                               else if (result == 5)
-                               {
-                                   ensureAudioRendered();
-                                   if (onRenderRequested)
-                                       onRenderRequested(generatedBuffer, recipe.sampleRate, resolveRenderAssetName());
-                               }
-                           });
-                       });
+void SignalLabPanel::openSignal()
+{
+    if (onPatchLoadRequested)
+        onPatchLoadRequested();
+}
+
+void SignalLabPanel::saveSignal()
+{
+    if (onPatchSaveToLibraryRequested)
+        onPatchSaveToLibraryRequested(cw::serialisePatchDocumentJson(buildPatchDocument(recipe)), recipe.name);
+}
+
+void SignalLabPanel::renderSignalToProject()
+{
+    ensureAudioRendered();
+    if (onRenderRequested)
+        onRenderRequested(generatedBuffer, recipe.sampleRate, resolveRenderAssetName());
 }
 
 void SignalLabPanel::createNewSignal()
@@ -6584,6 +6565,17 @@ void SignalLabPanel::triggerTransportPlay()
         onLiveStartRequested(recipe.durationSeconds);
 
     updateStatusText();
+
+    // Say what Play actually did, so a silent Play explains itself instead of just staying quiet.
+    {
+        const auto patch = buildPatchDocument(recipe);
+        const auto active = onLiveIsActiveRequested && onLiveIsActiveRequested();
+        statusLabel.setText(active ? "Playing live: " + juce::String(patch.sources.size()) + " source(s), "
+                                         + juce::String(patch.connections.size()) + " wire(s)"
+                                   : "Play did not start the live engine (" + juce::String(patch.sources.size())
+                                         + " source(s) found, live graph " + (wasDirty ? "rebuilt now" : "not rebuilt") + ")",
+                            juce::dontSendNotification);
+    }
 }
 
 void SignalLabPanel::stopTransport()
@@ -6669,8 +6661,6 @@ void SignalLabPanel::resized()
     area.removeFromTop(8);
 
     auto topBar = area.removeFromTop(30);
-    signalMenuButton.setBounds(topBar.removeFromLeft(110));
-    topBar.removeFromLeft(10);
     auto transportArea = topBar.removeFromLeft(546);
     compileButton.setBounds(transportArea.removeFromLeft(80));
 

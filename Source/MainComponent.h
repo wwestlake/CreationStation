@@ -519,6 +519,10 @@ private:
     // a previously-closed panel means calling this again, not reusing an old handle.
     CreationDock::DockPanel* registerNamedDockPanel(const juce::String& panelId, CreationDock::DockTargetZone zone);
     void setWorkspaceMode(WorkspaceMode mode);
+    // Transport (Play/Pause/Stop, undo) goes to whichever of the Tracker or Signal Lab has focus, not to whichever tab
+    // was last clicked: the active mode only changed when a tab was clicked, so a Signal Lab shown by a restored layout
+    // (or clicked into) still sent Play to the tracker and nothing played.
+    void syncActiveModeToFocus();
     void resetDockLayout();
     void toggleToolWindow(WorkspaceMode mode);
     void toggleAiToolWindow();

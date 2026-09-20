@@ -88,6 +88,11 @@ public:
     bool loadPatchDocument(const cw::PatchDocument& document, juce::String& errorMessage);
     void applyAiTemplate(const juce::String& templateName);
     bool previewCurrentSignal();
+    // What the File menu offers while the Signal Lab has focus.
+    void newSignal();
+    void openSignal();
+    void saveSignal();
+    void renderSignalToProject();
     // Called at UI-timer rate (see MainComponent::timerCallback) with any
     // MIDI control values that changed since the last call. Updates every
     // placed midiFader/midiButton node whose learned binding matches one of
@@ -703,7 +708,6 @@ private:
     juce::AudioBuffer<float> buildSignalBuffer(const SignalRecipe& recipe) const;
     cw::PatchDocument buildPatchDocument(const SignalRecipe& recipe) const;
     void applyTemplate(const juce::String& templateName);
-    void showSignalMenu();
     void createNewSignal();
     void refreshControlsFromRecipe();
     void updateStatusText();
@@ -877,7 +881,6 @@ private:
     juce::Label titleLabel;
     juce::Label subtitleLabel;
     juce::Label statusLabel;
-    juce::TextButton signalMenuButton { "Signal" };
     juce::TextButton compileButton { "Compile" };
     juce::Label propertiesHeaderLabel;
     juce::Label signalSectionLabel;

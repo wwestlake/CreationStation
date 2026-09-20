@@ -1025,6 +1025,12 @@ void PatchLiveVoice::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffe
     if (bufferToFill.buffer == nullptr)
         return;
 
+    // An AudioSource must overwrite its region. When a MixerAudioSource pulls this voice as anything but its first
+    // input, the buffer it hands over is a scratch buffer holding whatever the previous block left in it, and the DSP
+    // below only adds - so without this the stale contents were mixed into the output every block (garbage, or
+    // silence once the garbage settled), whether or not the voice was even playing.
+    bufferToFill.clearActiveBufferRegion();
+
     if (! active.load())
         return;
 
