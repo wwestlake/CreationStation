@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.conversations-saved-securely",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "Your conversations with the assistant are saved as a tamper-evident chain",
+  "summary": "How the assistant's conversations are recorded: what is saved and where, how each message is chained to the one before it, what that protects against, and what it does not.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "conversation",
+    "conversations",
+    "saved",
+    "history",
+    "record",
+    "recorded",
+    "blockchain",
+    "block chain",
+    "chain",
+    "ledger",
+    "hash",
+    "sha-256",
+    "tamper",
+    "tamper-evident",
+    "altered",
+    "integrity",
+    "verify",
+    "secure",
+    "immutable",
+    "signed",
+    "signing",
+    "audit",
+    "log",
+    "chat history"
+  ],
+  "alternateQueries": [
+    "Are my conversations with the assistant saved?",
+    "Where are my conversations stored?",
+    "Is the conversation history secure?",
+    "Can a saved conversation be edited?",
+    "What does ALTERED mean?",
+    "Is it a blockchain?",
+    "How do I know a conversation was not changed?",
+    "What is saved in a conversation?",
+    "Can the assistant change its own saved conversations?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.conversations-managing"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.virtual-engineer"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "Every conversation you have with the assistant is saved automatically, as you talk, inside the project you have open. Your message is saved the moment you send it, before the assistant starts work, and the answer is saved when it arrives. Nothing is lost if Station closes: the conversation is already in the project."
+    },
+    {
+      "term": "Where it is kept",
+      "definition": "In the project's own storage, in the assistant's area for Station: Assistants/Station/conversations, one file per conversation. Because it lives in the project, it travels with the project and is private to whoever owns it. If no project is open, there is nowhere to save, and Station says so instead of saving silently.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "What is saved",
+      "definition": "Only what you can see in the panel: your messages and the assistant's answers (including the scripts an answer shows and the note of which help topics it used). Not saved: the assistant's hidden instructions, your account keys, the help excerpts and project context added behind the scenes, or the assistant's inner tool steps.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "The chain",
+      "definition": "Each message is a block. Every block carries a fingerprint (a SHA-256 hash) worked out from its own content and from the fingerprint of the block before it. This is the same idea a blockchain uses to link blocks, on your own machine only: there is no network, no mining and no coin. Because each block depends on the one before, changing, inserting, removing or reordering any message breaks every fingerprint after it, and the break is found when the conversation is loaded.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "What that protects against",
+      "definition": "It makes changes detectable. When a conversation is opened, Station checks the whole chain. If anything does not match, the conversation is marked [ALTERED] in the Chats list, it can never be opened or fed back to the assistant, and it can only be deleted or left as evidence. One damaged file never stops you starting a fresh conversation.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Where the protection stops",
+      "definition": "It is tamper-evident, not tamper-proof. Someone with the ability to rewrite the whole file could recalculate every fingerprint and produce a new chain that looks valid. To close that gap the design adds signing later (for example a key kept privately by each app, with the public half registered on the website). That is not built yet, so today the chain protects against accidental damage and casual edits, not a determined forger.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "id": "b7",
+      "kind": "note",
+      "text": "The assistant has no tool for reading or changing its saved conversations. It cannot rewrite its own record."
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-21",
+  "reviewedBy": "Claude (from the code as built, not yet reviewed by a person)"
+}

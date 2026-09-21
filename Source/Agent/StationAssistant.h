@@ -63,6 +63,9 @@ public:
     void stop();
     bool isRunning() const noexcept { return running; }
     void clearConversation();
+    // Continues a saved conversation: what it remembers becomes these turns, each ("user" or "assistant", text). Does
+    // nothing while a request is running.
+    void restoreConversation(const std::vector<std::pair<std::string, std::string>>& turns);
 
     // What the model is told about writing FRust for Station, and Station's API. Added to the system prompt.
     juce::String codingGuidance() const;

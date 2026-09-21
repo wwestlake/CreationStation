@@ -594,6 +594,13 @@ AiPanel::AiPanel()
     roleComboBox.addListener(this);
     addAndMakeVisible(roleComboBox);
 
+    chatsButton.setTooltip("Your saved conversations with the assistant: open one to continue it, archive, export or delete");
+    chatsButton.onClick = [this] { if (onChatsRequested) onChatsRequested(); };
+    addAndMakeVisible(chatsButton);
+    newChatButton.setTooltip("Start a new conversation (the current one stays saved)");
+    newChatButton.onClick = [this] { if (onNewConversationRequested) onNewConversationRequested(); };
+    addAndMakeVisible(newChatButton);
+
     promptLabel.setText("Message", juce::dontSendNotification);
     promptLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
     addAndMakeVisible(promptLabel);
@@ -895,6 +902,24 @@ void AiPanel::setAssistantResponse(const juce::String& responseText)
     scrollChatToBottom();
 }
 
+void AiPanel::clearTranscript()
+{
+    transcriptContent->clear();
+    pendingAssistantBubbleIndex = -1;
+    refreshChatLayout();
+    scrollChatToBottom();
+}
+
+void AiPanel::showConversation(const std::vector<std::pair<bool, juce::String>>& turns)
+{
+    transcriptContent->clear();
+    pendingAssistantBubbleIndex = -1;
+    for (const auto& [user, text] : turns)
+        transcriptContent->addMessage(user, user ? "You" : "Virtual Engineer", text);
+    refreshChatLayout();
+    scrollChatToBottom();
+}
+
 void AiPanel::appendUserMessage(const juce::String& promptText)
 {
     transcriptContent->addMessage(true, "You", promptText);
@@ -936,6 +961,8 @@ void AiPanel::setCollapsed(bool shouldCollapse)
     accessLabelTitle.setVisible(! collapsed);
     accessComboBox.setVisible(! collapsed);
     roleComboBox.setVisible(! collapsed);
+    chatsButton.setVisible(! collapsed);
+    newChatButton.setVisible(! collapsed);
     promptLabel.setVisible(! collapsed);
     transcriptViewport.setVisible(! collapsed);
     promptEditor.setVisible(! collapsed);
@@ -1097,9 +1124,15 @@ void AiPanel::resized()
     auto titleRow = area.removeFromTop(40);
     headerLabel.setBounds(titleRow.removeFromLeft(200));
     collapseButton.setBounds(titleRow.removeFromRight(90));
-    titleRow.removeFromRight(8);
-    roleComboBox.setBounds(titleRow.removeFromRight(120).reduced(0, 6));
     subtitleLabel.setBounds(titleRow);
+
+    // Who it works as, and the saved conversations.
+    auto actionRow = area.removeFromTop(30);
+    roleComboBox.setBounds(actionRow.removeFromLeft(140).reduced(0, 2));
+    actionRow.removeFromLeft(10);
+    chatsButton.setBounds(actionRow.removeFromLeft(72).reduced(0, 2));
+    actionRow.removeFromLeft(6);
+    newChatButton.setBounds(actionRow.removeFromLeft(56).reduced(0, 2));
 
     area.removeFromTop(6);
 

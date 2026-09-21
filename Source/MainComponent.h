@@ -29,6 +29,9 @@
 #include "Language/StationFrustPodService.h"
 #include "Agent/StationAgentHost.h"
 #include "Agent/StationAssistant.h"
+#include "Views/ConversationManager.h"
+
+#include <creation/assistant/ConversationLedger.h>
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectAssetService.h>
 #include <creation/assets/ProjectSession.h>
@@ -540,6 +543,22 @@ private:
     // The Virtual Engineer as a coder (Agent/StationAssistant): declared after agentHost so it is destroyed first.
     std::unique_ptr<StationAssistant> assistant;
     void launchAssistantRun(const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& suppliedHelp);
+    StationAssistant& ensureAssistant();
+
+    // The assistant's conversations, recorded in the project's own storage (Assistants/Station/conversations) as a
+    // tamper-evident chain, and managed from the Chats window. Defined in Agent/StationConversations.cpp.
+    creation::assistant::Conversation currentConversation;
+    bool conversationOpen = false;               // whether currentConversation has been started
+    juce::String conversationProjectId;          // the project it is being recorded in
+    juce::Component::SafePointer<ConversationManager> conversationManager;
+    std::shared_ptr<juce::FileChooser> exportChooser;
+    void recordConversationTurn(const char* role, const juce::String& text);
+    void startNewConversation();
+    void openSavedConversation(const std::string& id);
+    void showConversationManager();
+    void exportSavedConversation(const creation::assistant::ConversationSummary& summary);
+    void deleteSavedConversation(const creation::assistant::ConversationSummary& summary);
+    void archiveOrRestoreSavedConversation(const creation::assistant::ConversationSummary& summary);
     void removeTrack(int trackIndex);
     void performTrackRemoval(int trackIndex);
     void initialiseDockingWorkspace();
