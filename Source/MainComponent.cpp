@@ -6997,9 +6997,13 @@ void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const j
 {
     if (assistant == nullptr)
     {
-        int size = 0;
-        const char* data = BuiltInFrustData::getNamedResource("StationAgentApi_frust", size);
-        assistant = std::make_unique<StationAssistant>(getAgentHost(), data != nullptr ? std::string(data, (size_t) size) : std::string());
+        auto embedded = [](const char* resource)
+        {
+            int size = 0;
+            const char* data = BuiltInFrustData::getNamedResource(resource, size);
+            return data != nullptr ? std::string(data, (size_t) size) : std::string();
+        };
+        assistant = std::make_unique<StationAssistant>(getAgentHost(), embedded("StationAgentApi_frust"), embedded("StationScriptGuide_md"));
     }
 
     creation::services::SuiteAiResolvedRuntimeSettings account;

@@ -263,7 +263,8 @@ juce_add_binary_data(StationBuiltInFrust
     SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
         "${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Agent/StationAgentApi.frust")
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Agent/StationAgentApi.frust"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Agent/StationScriptGuide.md")
 set_target_properties(StationBuiltInFrust PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_sources(CreativeWorkstation PRIVATE
@@ -848,6 +849,19 @@ add_executable(StationScriptApiSmoke
 )
 target_link_libraries(StationScriptApiSmoke PRIVATE
     StationBuiltInFrust
+    creation_suite_frust_plugin_runtime
+    frust_lang
+)
+
+# Every example in the guide the assistant is given compiles, and a battery of typical mistakes an AI makes gets a
+# plain error and never a crash.
+add_executable(StationScriptGuideSmoke
+    tests/StationScriptGuideSmoke.cpp
+    Source/Agent/StationScriptApi.cpp
+)
+target_link_libraries(StationScriptGuideSmoke PRIVATE
+    StationBuiltInFrust
+    creation_suite_ai_frust_tools
     creation_suite_frust_plugin_runtime
     frust_lang
 )

@@ -31,8 +31,9 @@ public:
         int toolCalls = 0;
     };
 
-    // `apiDeclarations` is the text of StationAgentApi.frust. The host must outlive the assistant.
-    StationAssistant(StationAgentHost& host, std::string apiDeclarations);
+    // `apiDeclarations` is the text of StationAgentApi.frust and `guide` the text of StationScriptGuide.md (how to
+    // write FRust for Station). The host must outlive the assistant.
+    StationAssistant(StationAgentHost& host, std::string apiDeclarations, std::string guide);
     ~StationAssistant();
 
     // Whether the agent path can talk to this provider yet (the OpenAI chat-completions protocol, which OpenAI and
@@ -60,6 +61,7 @@ public:
 private:
     StationAgentHost& host;
     std::string apiDeclarations;
+    std::string guide;
     std::unique_ptr<creation::frust::ScriptRunner> runner;
     creation::ai::ToolRegistry tools;
     creation::ai::CancelToken cancel;

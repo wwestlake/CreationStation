@@ -74,14 +74,26 @@ juce::String codeOf(const ToolCallBlock& call)
     return {};
 }
 
-juce::String firstLine(const std::string& text)
+// Why a run failed, in a line or two for the transcript: the compile errors themselves (not the heading above
+// them, and not the hints), so what is shown is what went wrong.
+juce::String shortReason(const std::string& content)
 {
-    return juce::String(text).upToFirstOccurrenceOf("\n", false, false).trim();
+    juce::StringArray kept;
+    for (const auto& line : juce::StringArray::fromLines(juce::String(content)))
+    {
+        const auto trimmed = line.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("The script did not compile") || trimmed.startsWith("Hint:"))
+            continue;
+        kept.add(trimmed);
+        if (kept.size() == 2)
+            break;
+    }
+    return kept.joinIntoString("; ").substring(0, 240);
 }
 }
 
-StationAssistant::StationAssistant(StationAgentHost& hostToUse, std::string declarations)
-    : host(hostToUse), apiDeclarations(std::move(declarations))
+StationAssistant::StationAssistant(StationAgentHost& hostToUse, std::string declarations, std::string guideText)
+    : host(hostToUse), apiDeclarations(std::move(declarations)), guide(std::move(guideText))
 {
     auto api = station_script::makeApi(host, apiDeclarations);
     runner = std::make_unique<creation::frust::ScriptRunner>(
@@ -126,23 +138,10 @@ juce::String StationAssistant::codingGuidance() const
 {
     juce::String text;
     text << "\n\nYou can act in Station by writing FRust scripts and running them with the run_frust tool (check_frust only "
-            "compiles; frust_api_reference shows the API again). FRust is the suite's language. A script looks like this:\n\n"
-            "```\npub fn run() -> String = {\n    let t = station_track_add(\"Bass\");\n    station_track_set_volume_db(t, -6.0);\n"
-            "    station_log_i64(\"track\", t);\n    \"Added Bass\"\n}\n```\n\n"
-            "Rules that matter:\n"
-            "- The script must define `pub fn run() -> String`. The last expression is its result. Statements end with `;`.\n"
-            "- A `while (condition) { ... }` block needs a `;` after its closing brace. `if (condition) { a } else { b }` "
-            "gives a value. Comments start with `//`.\n"
-            "- Whole numbers are i64 (`3`); decimals are f64 and must be written with a point (`-6.0`, `0.5`).\n"
-            "- Tracks are numbered from 1. Functions that change something return 1 when they worked and 0 when they did "
-            "not; call `station_last_error()` after a 0 to learn why.\n"
-            "- To report a number use station_log_i64 or station_log_f64; to report text use station_log or return it.\n"
-            "- If run_frust returns compile errors, they name the line and column of your script: fix that and run again. "
-            "Do not repeat a call that failed the same way.\n"
-            "- Do the work, then check it by reading the project back if it matters, and tell the user briefly what "
-            "you did. Never say something worked unless a run confirmed it. Only change what was asked.\n\n"
-            "Station's API for scripts (already available to every script; you do not need to declare it):\n\n"
-         << juce::String(apiDeclarations);
+            "compiles a script; frust_api_reference shows the API again). Write scripts exactly as the guide below says.\n\n"
+         << juce::String(guide)
+         << "\n\n## Station's script API (already available to every script; do not declare it)\n\n```\n"
+         << juce::String(apiDeclarations) << "```\n";
     return text;
 }
 
@@ -211,7 +210,7 @@ bool StationAssistant::start(const creation::services::SuiteAiResolvedRuntimeSet
         {
             std::lock_guard<std::mutex> lock(shared->mutex);
             shared->scripts.push_back(codeOf(call));
-            shared->results.push_back(result.ok ? juce::String("ran") : juce::String("failed: ") + firstLine(result.content).substring(0, 160));
+            shared->results.push_back(result.ok ? juce::String("ran") : juce::String("failed: ") + shortReason(result.content));
         }
         post([onProgress, ok = result.ok] { if (onProgress) onProgress(ok ? "Working..." : "That did not work; trying again..."); });
     };
