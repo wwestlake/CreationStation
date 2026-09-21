@@ -42,7 +42,9 @@
 
     <Feature Id="StationFeature" Title="Djehuti Station" Level="1" Absent="disallow" ConfigurableDirectory="INSTALLFOLDER">
       <ComponentRef Id="StationExe" />
-      <ComponentRef Id="StationDocs" />
+      <ComponentRef Id="StationReadme" />
+      <ComponentRef Id="StationLicense" />
+      <ComponentRef Id="StationEula" />
       <ComponentRef Id="StationMenuShortcut" />
       <ComponentRef Id="StationDesktopShortcut" />
       <!-- Required, not optional: Station cannot run without the storage service. -->
@@ -53,25 +55,32 @@
       <Component Id="StationExe" Guid="*" Win64="yes">
         <File Id="DjehutiStation.exe" Name="DjehutiStation.exe" Source="$(var.StageDir)\DjehutiStation.exe" KeyPath="yes" Vital="yes" />
       </Component>
-      <Component Id="StationDocs" Guid="*" Win64="yes">
+      <!-- One file per component: a component with several files cannot use an automatically generated GUID. -->
+      <Component Id="StationReadme" Guid="*" Win64="yes">
         <File Id="README.md" Name="README.md" Source="$(var.StageDir)\README.md" KeyPath="yes" />
-        <File Id="LICENSE" Name="LICENSE" Source="$(var.StageDir)\LICENSE" />
-        <File Id="EULA.txt" Name="EULA.txt" Source="$(var.StageDir)\EULA.txt" />
+      </Component>
+      <Component Id="StationLicense" Guid="*" Win64="yes">
+        <File Id="LICENSE" Name="LICENSE" Source="$(var.StageDir)\LICENSE" KeyPath="yes" />
+      </Component>
+      <Component Id="StationEula" Guid="*" Win64="yes">
+        <File Id="EULA.txt" Name="EULA.txt" Source="$(var.StageDir)\EULA.txt" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
+    <!-- The shortcut components' key paths are per-machine (HKLM), like everything else here: a per-user key path in a per-machine
+         install fails Windows Installer's own validation (ICE57). -->
     <DirectoryRef Id="StationMenuFolder">
       <Component Id="StationMenuShortcut" Guid="*" Win64="yes">
         <Shortcut Id="StationMenuLink" Name="Djehuti Station" Target="[INSTALLFOLDER]DjehutiStation.exe" WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="RemoveStationMenuFolder" On="uninstall" />
-        <RegistryValue Root="HKCU" Key="Software\LagDaemon Software\Djehuti Station" Name="MenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\LagDaemon Software\Djehuti Station" Name="MenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="DesktopFolder">
       <Component Id="StationDesktopShortcut" Guid="*" Win64="yes">
         <Shortcut Id="StationDesktopLink" Name="Djehuti Station" Target="[INSTALLFOLDER]DjehutiStation.exe" WorkingDirectory="INSTALLFOLDER" />
-        <RegistryValue Root="HKCU" Key="Software\LagDaemon Software\Djehuti Station" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKLM" Key="Software\LagDaemon Software\Djehuti Station" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
