@@ -57,7 +57,12 @@ jobs:
       - name: Fetch ASIO SDK
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/audiosdk/asio.git "$env:RUNNER_TEMP\ASIO"
+          # Pinned: the exact ASIO SDK release (2.3.4, dual licensed proprietary / GPLv3) every build uses.
+          $asioCommit = "496a0765b8bb9c26f764f22f9a9712a937177db2"
+          git init "$env:RUNNER_TEMP\ASIO"
+          git -C "$env:RUNNER_TEMP\ASIO" fetch --depth 1 https://github.com/audiosdk/asio.git $asioCommit
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch the pinned ASIO SDK." }
+          git -C "$env:RUNNER_TEMP\ASIO" checkout FETCH_HEAD
 
           if (-not (Test-Path "$env:RUNNER_TEMP\ASIO\common\iasiodrv.h")) {
             throw "Could not find iasiodrv.h in fetched ASIO SDK."
@@ -127,7 +132,18 @@ jobs:
           # GITHUB_TOKEN available for free, which raises the limit to
           # 5000/hr scoped to this run.
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN" }
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/lexxmark/winflexbison/releases/latest" -Headers $headers
+          # GitHub's API sometimes answers a temporary 404 or 5xx; that killed a whole release run once, so ask up to five times.
+          $release = $null
+          for ($attempt = 1; $attempt -le 5 -and -not $release; $attempt++) {
+            try {
+              $release = Invoke-RestMethod -Uri "https://api.github.com/repos/lexxmark/winflexbison/releases/latest" -Headers $headers
+            }
+            catch {
+              Write-Host "Attempt $attempt failed: $($_.Exception.Message)"
+              if ($attempt -eq 5) { throw }
+              Start-Sleep -Seconds (5 * $attempt)
+            }
+          }
           $asset = $release.assets | Where-Object { $_.name -like "*win_flex_bison*.zip" } | Select-Object -First 1
           if (-not $asset) {
             throw "Could not find a WinFlexBison release zip asset."
@@ -220,7 +236,7 @@ jobs:
           # exist on a runner) -- point it at the S3-restored one from the
           # "Restore prebuilt LLVM from S3" step above, same working
           # directory as this command.
-          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DFRUST_VCPKG_INSTALLED_DIR=$PWD\vcpkg_installed\x64-windows" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" -DCREATION_STATION_ENABLE_ASIO=ON "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common" -DCREATION_STATION_ENABLE_LTO=OFF
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" -DCE_WINFLEXBISON_DIR="C:\tools\winflexbison" "-DFRUST_VCPKG_INSTALLED_DIR=$PWD\vcpkg_installed\x64-windows" "-DCREATION_STATION_VERSION=${{ steps.classify.outputs.version }}" "-DCREATION_STATION_ASIO_SDK_DIR=$env:RUNNER_TEMP\ASIO\common" -DCREATION_STATION_ENABLE_LTO=OFF
 
       - name: Build app
         shell: pwsh
@@ -288,6 +304,15 @@ jobs:
             $shippedLibraries | ForEach-Object { Write-Host "SHIPPED LIBRARY: $($_.FullName)" }
             throw "The package contains library files. The application must ship none."
           }
+
+          # ASIO must be built in. If this build lost it, the ASIO device type would be missing from every user's audio settings, and
+          # nothing else would say so. JUCE's ASIO code reads the registry key "software\asio", so that text (UTF-16) is in an exe
+          # that has ASIO and not in one that does not.
+          $exeBytes = [System.IO.File]::ReadAllBytes($exe.FullName)
+          $exeText = [System.Text.Encoding]::Latin1.GetString($exeBytes)
+          $asioMarker = "software\asio".ToCharArray() -join "`0"
+          if (-not $exeText.Contains($asioMarker)) { throw "The executable was built WITHOUT ASIO. ASIO is required." }
+          Write-Host "ASIO is built into the executable."
 
           # Its own imports may only be Windows system libraries and the Visual C++ runtime.
           $dumpbin = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find "**\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
