@@ -834,15 +834,11 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "DjehutiStation")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME "djehuti-station-${CPACK_PACKAGE_VERSION}-win64")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "DjehutiStation")
-set(CPACK_GENERATOR "ZIP;WIX")
+# The zip only. The MSI is not made by CPack: it is built by the release pipeline from installer/DjehutiStation.wxs
+# (installer/build-msi.ps1), because it also installs the suite's storage service, which Station cannot run without.
+set(CPACK_GENERATOR "ZIP")
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-set(CPACK_WIX_COMPONENT_INSTALL ON)
-set(CPACK_WIX_PROGRAM_MENU_FOLDER "DjehutiStation")
-set(CPACK_WIX_LICENSE_RTF "${CMAKE_CURRENT_SOURCE_DIR}/installer/EULA.rtf")
-set(CPACK_PACKAGE_EXECUTABLES "DjehutiStation" "Djehuti Station")
-set(CPACK_CREATE_DESKTOP_LINKS "DjehutiStation")
 set(CPACK_COMPONENTS_ALL CreativeWorkstation)
-set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")
 set(CPACK_STRIP_FILES TRUE)
 
 include(CPack)
