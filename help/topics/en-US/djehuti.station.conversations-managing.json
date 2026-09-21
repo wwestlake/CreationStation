@@ -1,0 +1,104 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.conversations-managing",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Open, continue, archive, export and delete conversations (Chats)",
+  "summary": "How to use the Chats window: see your saved conversations, continue one, start a new one, put one away, restore it, export it to a file, or delete it.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "chats",
+    "conversation list",
+    "list of conversations",
+    "open conversation",
+    "continue conversation",
+    "new conversation",
+    "archive",
+    "restore",
+    "export",
+    "delete conversation",
+    "markdown",
+    "json",
+    "history",
+    "past conversations",
+    "saved chats"
+  ],
+  "alternateQueries": [
+    "How do I see my past conversations?",
+    "How do I continue an old conversation?",
+    "How do I start a new conversation?",
+    "How do I delete a conversation?",
+    "How do I export a conversation?",
+    "How do I archive a conversation?",
+    "Where is the Chats button?",
+    "How do I get an archived conversation back?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.conversations-saved-securely"
+    }
+  ],
+  "blocks": [
+    {
+      "term": "Chats",
+      "definition": "The Chats button is in the row under the assistant panel's title, next to the Engineer/Producer box. It opens a window that lists this project's conversations, newest first: the title (taken from your first message), the date and time it was last used, and how many messages it holds.",
+      "id": "b1",
+      "kind": "definition"
+    },
+    {
+      "term": "Open and continue",
+      "definition": "Select a conversation and press Open (or double-click it). Its messages appear in the panel and the assistant is given the conversation as its memory, so you can carry on where you stopped. You cannot open one while the assistant is still working: let it finish or press Stop.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "New",
+      "definition": "The New button starts a fresh conversation. The one you were in stays saved in Chats. Until you send your first message, nothing new is saved.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Archive and restore",
+      "definition": "Archive puts a conversation away: it leaves the main list but is kept exactly as it was. Turn on Show archived to see archived conversations, and press Restore to bring one back. Only a conversation that passes its integrity check can be archived.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Export",
+      "definition": "Export saves a conversation to a file you choose. Name it with .md to get a readable document (title, dates, then each turn), or with .json to get the verifiable record exactly as stored, which anyone can check against the chain. A conversation that fails its integrity check cannot be exported.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Delete",
+      "definition": "Delete removes a conversation for good, after a confirmation. It cannot be undone. A conversation marked [ALTERED] can be deleted even though it cannot be opened. Deleting the conversation on screen means your next message starts a new one.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "id": "b7",
+      "kind": "note",
+      "text": "Conversations belong to the project. Open a different project and you see that project's conversations."
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-21",
+  "reviewedBy": "Claude (from the code as built, not yet reviewed by a person)"
+}

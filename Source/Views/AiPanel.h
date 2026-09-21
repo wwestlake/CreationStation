@@ -41,6 +41,14 @@ public:
     Role getRole() const noexcept { return role; }
     std::function<void(Role role)> onRoleChanged;
 
+    // Saved conversations. "Chats" asks the host to show the list (open, archive, export, delete) and "New" to start a
+    // fresh conversation; what they do is the host's, which owns the storage.
+    std::function<void()> onChatsRequested;
+    std::function<void()> onNewConversationRequested;
+    // Empties the transcript (a new conversation), or replaces it with a saved one: each turn is (true for the user, text).
+    void clearTranscript();
+    void showConversation(const std::vector<std::pair<bool, juce::String>>& turns);
+
     void setAccessLevel(AccessLevel newLevel);
     AccessLevel getAccessLevel() const noexcept { return accessLevel; }
 
@@ -126,6 +134,8 @@ private:
     juce::Label accessLabelTitle;
     juce::ComboBox accessComboBox;
     juce::ComboBox roleComboBox;
+    juce::TextButton chatsButton { "Chats" };
+    juce::TextButton newChatButton { "New" };
     Role role = Role::engineer;
     juce::Label promptLabel;
     juce::Viewport transcriptViewport;

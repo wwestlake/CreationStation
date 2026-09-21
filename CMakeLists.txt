@@ -178,6 +178,9 @@ endif()
 if(NOT TARGET creation_suite_audio_analysis)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AudioAnalysis" CreationSuiteSharedAudioAnalysis)
 endif()
+if(NOT TARGET creation_suite_assistant_store)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AssistantStore" CreationSuiteSharedAssistantStore)
+endif()
 if(NOT TARGET creation_suite_ai_providers)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiProviders" CreationSuiteSharedAiProviders)
 endif()
@@ -350,6 +353,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Agent/StationAgentHostImpl.cpp
     Source/Agent/StationAssistant.cpp
     Source/Agent/StationAssistant.h
+    Source/Agent/StationConversations.cpp
+    Source/Agent/VfsAssistantFiles.h
     Source/Agent/StationScriptApi.cpp
     Source/Agent/StationScriptApi.h
     Source/Language/StationFrustPodService.cpp
@@ -358,6 +363,8 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/AuthGateView.h
     Source/Views/AiPanel.cpp
     Source/Views/AiPanel.h
+    Source/Views/ConversationManager.cpp
+    Source/Views/ConversationManager.h
     Source/Views/ContentPanel.cpp
     Source/Views/ContentPanel.h
     Source/Views/RenderDialog.cpp
@@ -456,6 +463,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     creation_suite_ai_frust_tools
     creation_suite_ai_providers
     creation_suite_audio_analysis
+    creation_suite_assistant_store
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_RENDER_TARGET}
     juce::juce_opengl

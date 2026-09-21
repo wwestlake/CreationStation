@@ -316,6 +316,17 @@ void StationAssistant::clearConversation()
         history.clear();
 }
 
+void StationAssistant::restoreConversation(const std::vector<std::pair<std::string, std::string>>& turns)
+{
+    if (running)
+        return;
+
+    history.clear();
+    for (const auto& [who, text] : turns)
+        history.push_back(creation::ai::Message::text(who == "user" ? creation::ai::Role::user : creation::ai::Role::assistant, text));
+    AgentEngine::trimToFit(history, 120000);
+}
+
 void StationAssistant::stop()
 {
     cancel.cancel();

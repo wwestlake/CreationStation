@@ -3281,11 +3281,15 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
         transportBar.setStatusText("AI account: " + aiProviderSettings.providerDisplayName + ".");
     };
 
+    aiPanel.onChatsRequested = [this] { showConversationManager(); };
+    aiPanel.onNewConversationRequested = [this] { startNewConversation(); };
+
     aiPanel.onPromptSubmitted = [this](const juce::String& submittedPrompt)
     {
         refreshAiContextStore();
         pendingAiPrompt = submittedPrompt;
         pendingAiQuestion = aiPanel.getLastQuestion();
+        recordConversationTurn("user", pendingAiQuestion);   // saved before the request starts
 
         CreationStationContextEngine::RetrievalRequest request;
         request.prompt = pendingAiPrompt;
@@ -6984,8 +6988,9 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
             if (ok)
             {
                 // Show which help topics the assistant was given, so an answer can be checked against its sources.
-                safeThis->aiPanel.setAssistantResponse(
-                    suppliedHelp.isNotEmpty() ? result.text + "\n\n_Help topics supplied: " + suppliedHelp + "_" : result.text);
+                const auto shown = suppliedHelp.isNotEmpty() ? result.text + "\n\n_Help topics supplied: " + suppliedHelp + "_" : result.text;
+                safeThis->aiPanel.setAssistantResponse(shown);
+                safeThis->recordConversationTurn("assistant", shown);
                 safeThis->transportBar.setStatusText("AI response ready.");
             }
             else
@@ -6997,7 +7002,7 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     }).detach();
 }
 
-void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& suppliedHelp)
+StationAssistant& MainComponent::ensureAssistant()
 {
     if (assistant == nullptr)
     {
@@ -7015,6 +7020,12 @@ void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const j
                 return helpLibrary.buildPromptContext(juce::String(query), {}, 6000).toStdString();
             });
     }
+    return *assistant;
+}
+
+void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& suppliedHelp)
+{
+    ensureAssistant();
 
     creation::services::SuiteAiResolvedRuntimeSettings account;
     account.providerId = aiProviderSettings.providerId;
@@ -7051,6 +7062,8 @@ void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const j
             if (suppliedHelp.isNotEmpty() && outcome.finished)
                 text << "\n\n_Help topics supplied: " << suppliedHelp << "_";
             aiPanel.setAssistantResponse(text);
+            if (outcome.error.isEmpty())
+                recordConversationTurn("assistant", text);
             transportBar.setStatusText(outcome.error.isNotEmpty() ? outcome.error
                                        : outcome.finished ? juce::String("AI response ready.") : juce::String("The assistant stopped."));
         });
