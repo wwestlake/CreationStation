@@ -227,6 +227,34 @@ jobs:
         run: |
           cmake --build build --config Release --target ${{ steps.classify.outputs.cmake_target }} -- /m:1
 
+      - name: Build the storage service
+        shell: pwsh
+        run: |
+          # Station cannot run without the suite's storage service, so the release builds it and installs it with Station.
+          # It is built with vcpkg's static-md triplet so it ships as ONE exe with no zlib or other library beside it.
+          #
+          # vcpkg runs in CLASSIC mode from a folder outside the repository, with the packages named on the command line.
+          # Never in manifest mode from inside the repo: a manifest that lists llvm would start an LLVM build, and LLVM is
+          # never built here (it is restored from S3 above).
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT "vcpkg.exe"
+          Push-Location $env:RUNNER_TEMP
+          & $vcpkg install "cpp-httplib:x64-windows-static-md" "ixwebsocket[core]:x64-windows-static-md" --clean-after-build
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg could not install the storage service's packages." }
+          Pop-Location
+
+          $version = "${{ steps.classify.outputs.version }}"
+          cmake -S ../../services/VfsService -B build-vfs -A x64 -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$env:RUNNER_TEMP\JUCE" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DVCPKG_MANIFEST_MODE=OFF "-DCREATION_SUITE_VFS_SERVICE_VERSION=$version"
+          if ($LASTEXITCODE -ne 0) { throw "Could not configure the storage service." }
+          cmake --build build-vfs --config Release --target CreationSuiteVfsService -- /m:1
+          if ($LASTEXITCODE -ne 0) { throw "Could not build the storage service." }
+
+          $service = Get-ChildItem build-vfs -Recurse -File -Filter DjehutiSuiteVfsService.exe | Select-Object -First 1
+          if (-not $service) { throw "The storage service was not produced." }
+          Write-Host "Storage service: $($service.FullName)"
+          Add-Content -Path $env:GITHUB_ENV -Value "VFS_SERVICE_EXE=$($service.FullName)"
+
       - name: Install MSI packaging tools
         shell: pwsh
         run: |
@@ -272,6 +300,17 @@ jobs:
             throw "The executable imports libraries that are not part of Windows or the Visual C++ runtime."
           }
 
+          # The storage service ships beside Station (the zip is portable: Station finds the service in its own folder). It must
+          # be as self-contained as the app, so a clean machine can run it: only Windows and the Visual C++ runtime.
+          if (-not $env:VFS_SERVICE_EXE -or -not (Test-Path $env:VFS_SERVICE_EXE)) { throw "The storage service was not built." }
+          $serviceImports = & $dumpbin /dependents $env:VFS_SERVICE_EXE | Where-Object { $_ -match '\.dll' } | ForEach-Object { $_.Trim().ToLower() }
+          $serviceForeign = $serviceImports | Where-Object { $_ -notmatch $allowed }
+          if ($serviceForeign) {
+            $serviceForeign | ForEach-Object { Write-Host "NON-SYSTEM IMPORT (storage service): $_" }
+            throw "The storage service imports libraries that are not part of Windows or the Visual C++ runtime."
+          }
+          Copy-Item -Path $env:VFS_SERVICE_EXE -Destination (Join-Path $installRoot "DjehutiSuiteVfsService.exe") -Force
+
           $zipName = Join-Path $PWD ("artifacts\{0}.zip" -f "${{ steps.classify.outputs.tag }}")
           if (Test-Path $zipName) {
             Remove-Item $zipName -Force
@@ -282,38 +321,84 @@ jobs:
       - name: Build MSI installer
         shell: pwsh
         run: |
-          $wixBins = @(
-            "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin",
-            "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
-          )
+          # The installer installs Station AND the storage service it cannot run without (see installer/DjehutiStation.wxs and
+          # services/VfsService/installer/SuiteServices.wxs).
+          $stage = Join-Path $PWD "artifacts\stage\${{ steps.classify.outputs.product_slug }}"
+          $msi = Join-Path $PWD ("artifacts\{0}.msi" -f "${{ steps.classify.outputs.tag }}")
+          & "$PWD\installer\build-msi.ps1" -StageDir $stage -VfsServiceExe $env:VFS_SERVICE_EXE `
+            -ServicesWxs (Resolve-Path "..\..\services\VfsService\installer\SuiteServices.wxs").Path `
+            -Version "${{ steps.classify.outputs.version }}" -OutFile $msi
+          if (-not (Test-Path $msi)) { throw "The MSI was not produced." }
 
-          foreach ($wixBin in $wixBins) {
-            if (Test-Path $wixBin) {
-              $env:PATH = "$wixBin;$env:PATH"
+      - name: Verify the installer on a clean machine
+        shell: pwsh
+        run: |
+          # Nothing is published unless this passes. A runner is a clean machine: it has never had Djehuti or its service, so
+          # this is exactly the situation a customer is in - the one a developer's machine (which has the service) hides.
+          $msi = Join-Path $PWD ("artifacts\{0}.msi" -f "${{ steps.classify.outputs.tag }}")
+          $version = "${{ steps.classify.outputs.version }}"
+          $servicesDir = Join-Path $env:ProgramFiles "Djehuti Suite\Services"
+          $stationExe = Join-Path $env:ProgramFiles "DjehutiStation\DjehutiStation.exe"
+
+          # 1. The package itself contains the service and records where it is.
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($msi, 0))
+          function Query($sql) {
+            $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
+            $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+            $rows = @()
+            while ($true) {
+              $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+              if ($null -eq $record) { break }
+              $rows += $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, @(1))
             }
+            $rows
+          }
+          $files = Query "SELECT FileName FROM File"
+          if (-not ($files | Where-Object { $_ -like "*DjehutiSuiteVfsService.exe" })) { throw "The MSI does not contain the storage service." }
+          if (-not ($files | Where-Object { $_ -like "*DjehutiStation.exe" })) { throw "The MSI does not contain Station." }
+          if (-not (Query "SELECT Name FROM Registry WHERE Name='ServicesDir'")) { throw "The MSI does not record where the storage service is." }
+
+          # 2. It installs on this clean machine.
+          $log = Join-Path $PWD "artifacts\install.log"
+          $p = Start-Process msiexec.exe -ArgumentList "/i", "`"$msi`"", "/qn", "/l*v", "`"$log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "The installer failed with exit code $($p.ExitCode)." }
+          if (-not (Test-Path $stationExe)) { throw "Station was not installed at $stationExe." }
+          $serviceExe = Join-Path $servicesDir "DjehutiSuiteVfsService.exe"
+          if (-not (Test-Path $serviceExe)) { throw "The storage service was not installed at $serviceExe." }
+          $recorded = (Get-ItemProperty "HKLM:\SOFTWARE\LagDaemon Software\Djehuti Suite" -Name ServicesDir -ErrorAction Stop).ServicesDir
+          if ($recorded.TrimEnd('\') -ne $servicesDir.TrimEnd('\')) { throw "The registry says the service is at '$recorded', not '$servicesDir'." }
+
+          # 3. The installed service really starts, and says which protocol it speaks and which version it is.
+          $root = Join-Path $env:RUNNER_TEMP "vfs-root-check"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $config = Join-Path $env:APPDATA "Djehuti-Suite"
+          New-Item -ItemType Directory -Force -Path $config | Out-Null
+          (@{ suiteVfsRoot = $root } | ConvertTo-Json) | Set-Content -Path (Join-Path $config "suite-settings.json") -Encoding UTF8
+          $service = Start-Process $serviceExe -PassThru -WindowStyle Hidden
+          try {
+            $heartbeat = $null
+            for ($i = 0; $i -lt 40 -and -not $heartbeat; $i++) {
+              Start-Sleep -Milliseconds 500
+              $heartbeat = Get-ChildItem $root -Recurse -File -Filter VfsHeartbeat.json -ErrorAction SilentlyContinue | Select-Object -First 1
+            }
+            if (-not $heartbeat) { throw "The installed storage service did not start (no heartbeat within 20 seconds)." }
+            $record = Get-Content $heartbeat.FullName -Raw | ConvertFrom-Json
+            Write-Host "Service heartbeat: $($heartbeat.FullName)"
+            Write-Host ($record | ConvertTo-Json -Compress)
+            if ([int]$record.serviceProtocol -lt 1) { throw "The service did not report its protocol version." }
+            if ($record.serviceVersion -ne $version) { throw "The service reports version '$($record.serviceVersion)', expected '$version'." }
+          }
+          finally {
+            Stop-Process -Id $service.Id -Force -ErrorAction SilentlyContinue
           }
 
-          $cpack = "${env:ProgramFiles}\CMake\bin\cpack.exe"
-          if (-not (Test-Path $cpack)) {
-            $cpack = "cpack"
-          }
-
-          & $cpack -C Release -G WIX --config build\CPackConfig.cmake
-          if ($LASTEXITCODE -ne 0) {
-            throw "MSI packaging failed."
-          }
-
-          $msi = Get-ChildItem $PWD -Recurse -File -Filter *.msi | Select-Object -First 1
-          if (-not $msi) {
-            throw "Could not find the packaged MSI for ${{ steps.classify.outputs.display_name }}."
-          }
-
-          $msiName = Join-Path $PWD ("artifacts\{0}.msi" -f "${{ steps.classify.outputs.tag }}")
-          if (Test-Path $msiName) {
-            Remove-Item $msiName -Force
-          }
-
-          Move-Item -Path $msi.FullName -Destination $msiName -Force
+          # 4. It uninstalls cleanly.
+          $p = Start-Process msiexec.exe -ArgumentList "/x", "`"$msi`"", "/qn", "/l*v", "`"$(Join-Path $PWD 'artifacts\uninstall.log')`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "The uninstaller failed with exit code $($p.ExitCode)." }
+          if (Test-Path $stationExe) { throw "Station was left behind after uninstalling." }
+          Remove-Item (Join-Path $PWD "artifacts\install.log"), (Join-Path $PWD "artifacts\uninstall.log") -Force -ErrorAction SilentlyContinue
+          Write-Host "The installer installs Station and the storage service on a clean machine, the service starts, and it uninstalls cleanly."
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
