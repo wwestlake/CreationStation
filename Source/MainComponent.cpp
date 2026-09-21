@@ -13,6 +13,7 @@
 #include <creation/assets/ProjectWorkspaceService.h>
 #include <creation/suite/SuiteStoragePaths.h>
 #include <creation/ui/CreationSuiteLogos.h>
+#include "BuiltInFrustData.h"
 #include <creation/services/SuiteAiProviderRuntime.h>
 #include "Tutorial/TutorialScriptCompiler.h"
 #include <creation/services/SuiteAiSettings.h>
@@ -5119,6 +5120,7 @@ juce::ValueTree MainComponent::createLayoutState() const
     layout.setProperty("activeMode", static_cast<int>(activeMode), nullptr);
     layout.setProperty("aiSidebarCollapsed", aiSidebarCollapsed, nullptr);
     layout.setProperty("aiEnterSends", aiPanel.getEnterSendsMessage(), nullptr);
+    layout.setProperty("aiRole", aiPanel.getRole() == AiPanel::Role::producer ? "producer" : "engineer", nullptr);
     if (dockManager != nullptr)
         layout.setProperty("dockLayoutJson", juce::JSON::toString(dockManager->captureLayout()), nullptr);
 
@@ -5149,6 +5151,7 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
     aiSidebarCollapsed = (bool) state.getProperty("aiSidebarCollapsed", false);
     aiPanel.setCollapsed(aiSidebarCollapsed);
     aiPanel.setEnterSendsMessage((bool) state.getProperty("aiEnterSends", false));
+    aiPanel.setRole(state.getProperty("aiRole", "engineer").toString() == "producer" ? AiPanel::Role::producer : AiPanel::Role::engineer);
 
     auto dockLayoutJson = state.getProperty("dockLayoutJson").toString();
     if (dockManager != nullptr && dockLayoutJson.isNotEmpty())
@@ -6927,9 +6930,11 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     // Station's own help, chosen for this question and the panel the user is in. The same topics are what the Help window
     // shows, so the assistant and the manual never disagree.
     juce::String helpBlock;
-    const auto helpExcerpts = helpLibrary.buildPromptContext(pendingAiQuestion, currentHelpId(), 7000);
+    // Help excerpts answer how-to questions about Station; the Producer is talking about the music, so it gets none.
+    const bool producerRole = aiPanel.getRole() == AiPanel::Role::producer;
+    const auto helpExcerpts = producerRole ? juce::String() : helpLibrary.buildPromptContext(pendingAiQuestion, currentHelpId(), 7000);
     juce::String suppliedHelp;
-    for (const auto* topic : helpLibrary.topicsForPrompt(pendingAiQuestion, currentHelpId()))
+    for (const auto* topic : (producerRole ? std::vector<const cs::help::Topic*>() : helpLibrary.topicsForPrompt(pendingAiQuestion, currentHelpId())))
         suppliedHelp << (suppliedHelp.isEmpty() ? "" : "; ") << topic->title;
     if (helpExcerpts.isNotEmpty())
     {
@@ -6943,6 +6948,14 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     }
 
     userPrompt = helpBlock + contextBlock + userPrompt;
+
+    // Providers that speak the OpenAI chat protocol go through the assistant: it can write and run FRust against
+    // Station, see the result, and keep going. Other providers keep the single answer for now.
+    if (StationAssistant::supportsProvider(aiProviderSettings.providerId))
+    {
+        launchAssistantRun(systemPrompt, userPrompt, suppliedHelp);
+        return;
+    }
 
     std::thread([safeThis = juce::Component::SafePointer<MainComponent>(this),
                  systemPrompt = std::move(systemPrompt),
@@ -6982,6 +6995,72 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
             }
         });
     }).detach();
+}
+
+void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& suppliedHelp)
+{
+    if (assistant == nullptr)
+    {
+        auto embedded = [](const char* resource)
+        {
+            int size = 0;
+            const char* data = BuiltInFrustData::getNamedResource(resource, size);
+            return data != nullptr ? std::string(data, (size_t) size) : std::string();
+        };
+        assistant = std::make_unique<StationAssistant>(
+            getAgentHost(), embedded("StationAgentApi_frust"), embedded("StationScriptGuide_md"),
+            [this](const std::string& query)
+            {
+                // Runs on the assistant's thread; the help library is read-only data, so this is safe.
+                return helpLibrary.buildPromptContext(juce::String(query), {}, 6000).toStdString();
+            });
+    }
+
+    creation::services::SuiteAiResolvedRuntimeSettings account;
+    account.providerId = aiProviderSettings.providerId;
+    account.providerDisplayName = aiProviderSettings.providerDisplayName;
+    account.baseUrl = aiProviderSettings.baseUrl;
+    account.modelName = aiProviderSettings.modelName;
+    account.apiKey = aiProviderSettings.apiKey;
+
+    aiPanel.onStopRequested = [this]
+    {
+        if (assistant != nullptr)
+            assistant->stop();
+        transportBar.setStatusText("Stopping the assistant...");
+    };
+
+    // Who it works as this time: the Engineer (changes the project) or the Producer (talks about the music, measures).
+    assistant->setRole(aiPanel.getRole() == AiPanel::Role::producer ? StationAssistant::Role::producer : StationAssistant::Role::engineer);
+
+    aiPanel.setRunning(true);
+    transportBar.setStatusText("The assistant is working...");
+
+    const bool started = assistant->start(
+        account, systemPrompt, userPrompt, pendingAiQuestion,
+        [this](const juce::String& status)
+        {
+            aiPanel.setAssistantResponse("_" + status + "_");
+        },
+        [this, suppliedHelp](const StationAssistant::Outcome& outcome)
+        {
+            aiCompletionInFlight = false;
+            aiPanel.setRunning(false);
+
+            auto text = outcome.text;
+            if (suppliedHelp.isNotEmpty() && outcome.finished)
+                text << "\n\n_Help topics supplied: " << suppliedHelp << "_";
+            aiPanel.setAssistantResponse(text);
+            transportBar.setStatusText(outcome.error.isNotEmpty() ? outcome.error
+                                       : outcome.finished ? juce::String("AI response ready.") : juce::String("The assistant stopped."));
+        });
+
+    if (! started)
+    {
+        aiCompletionInFlight = false;
+        aiPanel.setRunning(false);
+        aiPanel.setAssistantResponse("The assistant is still working on the previous request.");
+    }
 }
 
 void MainComponent::refreshAiPanelAccountsAndModels()

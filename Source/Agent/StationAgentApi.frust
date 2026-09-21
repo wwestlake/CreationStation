@@ -24,10 +24,33 @@ extern fn station_track_soloed(track: i64) -> i64;   // 1 or 0
 // ---- Changing tracks ----
 extern fn station_track_add(name: String) -> i64;    // returns the new track's number, or 0 if it failed
 extern fn station_track_set_name(track: i64, name: String) -> i64;
-extern fn station_track_set_volume_db(track: i64, db: f64) -> i64;  // -60.0 to +6.0
+extern fn station_track_set_volume_db(track: i64, db: f64) -> i64;  // -60.0 to 0.0 (0 is the top of the fader)
 extern fn station_track_set_pan(track: i64, pan: f64) -> i64;       // -1.0 to 1.0
 extern fn station_track_set_muted(track: i64, muted: i64) -> i64;
 extern fn station_track_set_soloed(track: i64, soloed: i64) -> i64;
+
+// ---- The rest of a track's controls ----
+extern fn station_track_kind(track: i64) -> String;  // "audio", "midi", "automation", "signal", "foley", "video", "folder" or "marker"
+extern fn station_track_set_kind(track: i64, kind: String) -> i64;   // change what kind of track it is, using one of those words
+extern fn station_track_armed(track: i64) -> i64;    // 1 or 0
+extern fn station_track_set_armed(track: i64, armed: i64) -> i64;
+extern fn station_track_monitored(track: i64) -> i64;   // 1 or 0
+extern fn station_track_set_monitored(track: i64, monitored: i64) -> i64;
+extern fn station_track_stereo(track: i64) -> i64;   // 1 for stereo, 0 for mono
+extern fn station_track_set_stereo(track: i64, stereo: i64) -> i64;
+extern fn station_track_move(track: i64, destination: i64) -> i64;  // moves the track so it ends up at position `destination`
+
+// ---- Automation ----
+// An automation track (a track whose kind is "automation") draws how one control of ANOTHER track changes over time.
+// Setting one up is three steps: add a track, make it an automation track, then say what it controls.
+//     let lane = station_track_add("Clap volume");
+//     station_track_set_kind(lane, "automation");
+//     station_automation_set_target(lane, clap_track, "volume");
+// Points are optional: with none, the lane just exists and the control stays where it is. Add points to change the
+// control over time.
+extern fn station_automation_set_target(automation_track: i64, target_track: i64, control: String) -> i64;   // control is "volume" or "pan"
+extern fn station_automation_add_point(automation_track: i64, seconds: f64, value: f64) -> i64;   // value is in the control's units: dB (-60.0 to 0.0) for volume, -1.0 to 1.0 for pan
+extern fn station_automation_clear(automation_track: i64) -> i64;    // removes every point from the lane
 
 // ---- Transport ----
 extern fn station_transport_play() -> i64;
@@ -35,4 +58,6 @@ extern fn station_transport_stop() -> i64;
 
 // ---- Reporting ----
 extern fn station_log(text: String) -> i64;          // adds a line to what the script reports
+extern fn station_log_i64(label: String, value: i64) -> i64;   // adds the line "label: value"
+extern fn station_log_f64(label: String, value: f64) -> i64;   // adds the line "label: value"
 extern fn station_last_error() -> String;            // why the last call that returned 0 failed

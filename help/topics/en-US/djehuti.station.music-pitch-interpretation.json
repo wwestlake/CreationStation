@@ -1,0 +1,125 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.music-pitch-interpretation",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "Reading pitch measurements: out of tune, or expressive?",
+  "summary": "How to interpret a pitch report: what bends, slides, scoops, vibrato, blue notes and real tuning problems look like in the numbers.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "pitch",
+    "tuning",
+    "cents",
+    "sharp",
+    "flat",
+    "bend",
+    "slide",
+    "glissando",
+    "portamento",
+    "scoop",
+    "fall",
+    "vibrato",
+    "blue note",
+    "intonation",
+    "out of tune",
+    "wobble",
+    "guitar",
+    "vocal",
+    "expressive",
+    "intent",
+    "motion",
+    "rises",
+    "falls"
+  ],
+  "alternateQueries": [
+    "Is this note out of tune or a bend?",
+    "How do I tell vibrato from wobble?",
+    "What does 'rises 100 cents across the note' mean?",
+    "Is a slide a mistake?",
+    "What is a blue note?",
+    "How sharp is too sharp?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-judging-intent"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-rhythm-interpretation"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "A pitch report gives, for each note, how many cents sharp (+) or flat (-) its steady middle sits, how much it wobbles, and, when they happen, how the pitch moves across the note and whether it has vibrato. A cent is a hundredth of a semitone. As a first guide: under about 10 cents most listeners cannot hear; 10 to 25 a trained ear notices; over about 25 is clearly out. But the number alone never says whether it is a mistake. Read it together with the motion, the vibrato, and the context (see the topic on judging intent)."
+    },
+    {
+      "term": "Bend",
+      "definition": "The pitch rises (or falls) through the note toward a target, typical of guitar. In the report: the note \"rises N cents across the note\". A clean bend covers a musical step: about 100 cents is a semitone, 200 a whole tone, 50 a quarter-tone bend. If the motion is close to a multiple of 100 and the note then holds steady, the bend is probably deliberate and on target. The note's own cents figure describes its steady middle, so for a note that moves by 50 cents or more do not judge its tuning from that figure alone; judge where it ends up.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Slide, glissando, portamento",
+      "definition": "A smooth move from one note to another. It shows as a note with a large rise or fall across it, or as a short glide between two steady notes. If the glide is smooth in one direction and arrives at the next note steady, it is expressive, not a wrong note.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Scoop and fall-off",
+      "definition": "A scoop starts below the pitch and swoops up to it (common in singing, blues, country); a fall-off drops away at the end of a note. In the numbers: a rise across the note that lands close to the note's centre (a scoop), or a fall at the end. If it lands on pitch, it is style. If a note starts on pitch and simply sags flat at the end of every long note, that is more likely breath or support than style.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Vibrato",
+      "definition": "Regular oscillation of the pitch. Typical: about 5 to 7 cycles a second, roughly 20 to 100 cents either side (singers and string players often more, guitarists a bit less). It is expressive when it is regular, starts after the note settles, and is centred on the target pitch. Slow (under about 4 Hz), very wide, or uneven oscillation is more likely a wobble. Judge the tuning of a note with vibrato by its centre, which is the cents figure reported, not by the extremes.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Wobble versus vibrato",
+      "definition": "Wobble is irregular and unintended: no steady rate, often growing toward the end of long notes or when tired. No vibrato is reported for it. If the report shows a large spread and no vibrato, treat it as unsteadiness.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "term": "Blue notes and expressive intonation",
+      "definition": "Some styles deliberately place certain notes flat or sharp, for example the flat third and seventh in blues. The mark of intent is consistency: the same scale degree is off in the same direction every time it appears.",
+      "id": "b7",
+      "kind": "definition"
+    },
+    {
+      "term": "Common tendencies",
+      "definition": "Singers and players often go sharp when pushing, excited or loud, and flat when tired, quiet or short of breath. Guitarists fretting hard tend sharp. A steady overall lean in one direction (the report's overall figure) points at tuning of the instrument or of the whole take rather than at individual notes.",
+      "id": "b8",
+      "kind": "definition"
+    },
+    {
+      "id": "b9",
+      "kind": "warning",
+      "text": "Limits. The pitch tool measures one melodic line at a time. Chords, double stops, heavy distortion, reverb tails and other instruments bleeding in can give wrong or missing notes; a note may be read an octave away. A low confidence or few notes found means the measurement is unreliable, not that the playing is fine. Check the tuning reference (A = 440 Hz by default) if everything reads consistently sharp or flat."
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from general music practice, not yet reviewed by a person)"
+}

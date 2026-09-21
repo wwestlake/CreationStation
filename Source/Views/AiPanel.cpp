@@ -587,6 +587,13 @@ AiPanel::AiPanel()
     accessComboBox.addListener(this);
     addAndMakeVisible(accessComboBox);
 
+    roleComboBox.addItem("Engineer", 1);
+    roleComboBox.addItem("Producer", 2);
+    roleComboBox.setSelectedId(1, juce::dontSendNotification);
+    roleComboBox.setTooltip("Engineer: changes your project by writing scripts. Producer: talks about the music and listens through measuring tools.");
+    roleComboBox.addListener(this);
+    addAndMakeVisible(roleComboBox);
+
     promptLabel.setText("Message", juce::dontSendNotification);
     promptLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
     addAndMakeVisible(promptLabel);
@@ -603,12 +610,19 @@ AiPanel::AiPanel()
     // Room at the right for the send arrow, which sits inside the box. The box starts one line high
     // (the mode's hint shows while it is empty) and grows as you type.
     promptEditor.setBorder(juce::BorderSize<int>(4, 6, 4, 38));
-    promptEditor.onSend = [this] { sendButton.triggerClick(); };
+    promptEditor.onSend = [this] { if (! running) sendButton.triggerClick(); };
     promptEditor.addListener(this);
     addAndMakeVisible(promptEditor);
 
     sendButton.onClick = [this]
     {
+        if (running)
+        {
+            if (onStopRequested)
+                onStopRequested();
+            return;
+        }
+
         auto prompt = getPromptText().trim();
         if (prompt.isEmpty())
             return;
@@ -921,6 +935,7 @@ void AiPanel::setCollapsed(bool shouldCollapse)
     modelComboBox.setVisible(! collapsed);
     accessLabelTitle.setVisible(! collapsed);
     accessComboBox.setVisible(! collapsed);
+    roleComboBox.setVisible(! collapsed);
     promptLabel.setVisible(! collapsed);
     transcriptViewport.setVisible(! collapsed);
     promptEditor.setVisible(! collapsed);
@@ -943,6 +958,22 @@ void AiPanel::setSendButtonIcon(station_ui::SendArrowButton::Icon icon, const ju
 {
     sendButton.setIcon(icon);
     sendButton.setTooltip(tooltip);
+}
+
+void AiPanel::setRole(Role newRole)
+{
+    role = newRole;
+    roleComboBox.setSelectedId(role == Role::producer ? 2 : 1, juce::dontSendNotification);
+    headerLabel.setText(role == Role::producer ? "Virtual Producer" : "Virtual Engineer", juce::dontSendNotification);
+}
+
+void AiPanel::setRunning(bool isRunning)
+{
+    running = isRunning;
+    if (running)
+        setSendButtonIcon(station_ui::SendArrowButton::Icon::stop, "Stop the assistant");
+    else
+        setSendButtonIcon(station_ui::SendArrowButton::Icon::send, "Send your message to the assistant");
 }
 
 void AiPanel::setEnterSendsMessage(bool shouldSend)
@@ -1020,7 +1051,13 @@ void AiPanel::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
     if (updatingComboBoxes)
         return;
 
-    if (comboBoxThatHasChanged == &modelComboBox)
+    if (comboBoxThatHasChanged == &roleComboBox)
+    {
+        setRole(roleComboBox.getSelectedId() == 2 ? Role::producer : Role::engineer);
+        if (onRoleChanged)
+            onRoleChanged(role);
+    }
+    else if (comboBoxThatHasChanged == &modelComboBox)
     {
         if (onModelChanged)
             onModelChanged(modelComboBox.getText().trim());
@@ -1060,6 +1097,8 @@ void AiPanel::resized()
     auto titleRow = area.removeFromTop(40);
     headerLabel.setBounds(titleRow.removeFromLeft(200));
     collapseButton.setBounds(titleRow.removeFromRight(90));
+    titleRow.removeFromRight(8);
+    roleComboBox.setBounds(titleRow.removeFromRight(120).reduced(0, 6));
     subtitleLabel.setBounds(titleRow);
 
     area.removeFromTop(6);

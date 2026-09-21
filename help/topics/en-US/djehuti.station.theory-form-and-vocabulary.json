@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.theory-form-and-vocabulary",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Music theory: song form, dynamics and the words producers use",
+  "summary": "Song sections, arrangement and texture, dynamics and articulation terms, and common production vocabulary such as pocket, headroom and tension.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "song form",
+    "structure",
+    "verse",
+    "chorus",
+    "bridge",
+    "intro",
+    "outro",
+    "pre-chorus",
+    "hook",
+    "arrangement",
+    "texture",
+    "dynamics",
+    "forte",
+    "piano",
+    "crescendo",
+    "staccato",
+    "legato",
+    "accent",
+    "pocket",
+    "groove",
+    "headroom",
+    "mix",
+    "range",
+    "register"
+  ],
+  "alternateQueries": [
+    "What is a bridge?",
+    "What does legato mean?",
+    "What is the pocket?",
+    "What are the parts of a song?",
+    "What does forte mean?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-judging-intent"
+    }
+  ],
+  "blocks": [
+    {
+      "term": "Song sections",
+      "definition": "Intro sets the scene. Verse carries the story and changes its words each time. Pre-chorus builds toward the chorus. Chorus is the repeated, memorable core, the hook. Bridge (middle eight) is a contrast, usually once, in different harmony or feel, before returning. Outro ends the song. A common form: intro, verse, chorus, verse, chorus, bridge, chorus, outro.",
+      "id": "b1",
+      "kind": "definition"
+    },
+    {
+      "term": "Arrangement and texture",
+      "definition": "Arrangement is which instruments play what, and when. Adding instruments raises energy, taking them away creates space. Texture describes the layering: a single line (monophonic), melody over chords (homophonic), or several independent lines (polyphonic). Contrast between sections is what keeps a song moving.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Dynamics",
+      "definition": "Loudness, in Italian marks: pp very soft, p soft, mp medium soft, mf medium loud, f loud, ff very loud; crescendo growing louder, diminuendo growing softer. In production, dynamics also means the difference between quiet and loud within a part, which compression reduces.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Articulation",
+      "definition": "How each note is shaped. Staccato is short and detached; legato smooth and connected; tenuto held its full length; an accent stresses a note; a slur joins notes in one motion; pizzicato is plucked, and palm-muted guitar is dampened and percussive.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Range and register",
+      "definition": "The span from a voice's or instrument's lowest to highest note. Registers colour the sound: low is weighty, middle is natural, high is bright and exposed. Notes at the edge of a range are often where tuning and timing suffer, and where emotion peaks.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Production vocabulary",
+      "definition": "The pocket is the groove locked in place between the players, tight without stiffness. Feel is how the timing and dynamics breathe. Headroom is the space left below full level before clipping. Tension and release is the rise and settling of energy, harmonic or dynamic. Space is deliberate silence or sparse playing that lets other parts speak. Hook is the part a listener remembers.",
+      "id": "b6",
+      "kind": "definition"
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from standard music theory, not yet reviewed by a person)"
+}

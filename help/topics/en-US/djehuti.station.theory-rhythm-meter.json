@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.theory-rhythm-meter",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Music theory: rhythm, meter and tempo",
+  "summary": "Note values, time signatures, simple and compound meter, syncopation, backbeat, tuplets and tempo terms.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "rhythm",
+    "meter",
+    "time signature",
+    "4/4",
+    "3/4",
+    "6/8",
+    "12/8",
+    "waltz",
+    "compound",
+    "simple",
+    "syncopation",
+    "backbeat",
+    "polyrhythm",
+    "tuplet",
+    "triplet",
+    "note value",
+    "quarter note",
+    "eighth note",
+    "downbeat",
+    "bar",
+    "measure",
+    "tempo",
+    "allegro",
+    "andante",
+    "swing"
+  ],
+  "alternateQueries": [
+    "What does 6/8 mean?",
+    "What is a backbeat?",
+    "What is the difference between 3/4 and 6/8?",
+    "What is syncopation?",
+    "What tempo is allegro?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-rhythm-interpretation"
+    }
+  ],
+  "blocks": [
+    {
+      "term": "Note values",
+      "definition": "A whole note lasts four beats (in 4/4), a half note two, a quarter note one, an eighth half a beat, a sixteenth a quarter of a beat. A dot adds half again. A triplet fits three notes in the time of two.",
+      "id": "b1",
+      "kind": "definition"
+    },
+    {
+      "term": "Time signatures",
+      "definition": "The top number is how many beats in a bar; the bottom says which note value is one beat. 4/4 (common time): four quarter-note beats, the default of pop, rock and most dance music. 3/4: three beats, a waltz. 2/4: a march. 6/8, 9/8 and 12/8 (compound): beats divide into three, so 6/8 is two big beats of three eighths each, with a rolling, swaying feel. 5/4 and 7/8 (odd meters): uneven groupings, often felt as 3+2 or 2+2+3.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Downbeat, backbeat, off-beat",
+      "definition": "The downbeat is beat one, the anchor. In 4/4 the backbeat is the snare on beats two and four, the heart of rock and pop. The off-beat sits between the beats (the 'and' of a count), giving reggae and funk their lift.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Syncopation and polyrhythm",
+      "definition": "Syncopation accents weak beats or off-beats, or leaves an expected beat silent, creating forward push. Polyrhythm plays two different groupings at once, such as three against four; a hemiola makes a bar of 6 feel like 3 groups of 2 then 2 groups of 3.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Swing and shuffle",
+      "definition": "Pairs of eighth notes played long-short instead of even, near a triplet ratio of about 2 to 1. Jazz, blues and shuffle grooves are built on it.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Tempo terms",
+      "definition": "Beats per minute: largo about 40 to 60, adagio 66 to 76, andante 76 to 108, moderato 108 to 120, allegro 120 to 156, vivace 156 to 176, presto 168 and up. Pop is commonly 90 to 130, house about 120 to 130, drum and bass about 170 to 175. Half time or double time counts the same music at half or twice the rate.",
+      "id": "b6",
+      "kind": "definition"
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from standard music theory, not yet reviewed by a person)"
+}

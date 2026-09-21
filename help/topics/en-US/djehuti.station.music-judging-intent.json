@@ -1,0 +1,119 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.music-judging-intent",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "Judging intent: mistake, or a clever emotional choice?",
+  "summary": "How to decide from measured data whether a pitch or timing deviation is a mistake or expression, and how to say it to an artist.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "intent",
+    "mistake",
+    "expressive",
+    "deliberate",
+    "feedback",
+    "producer",
+    "critique",
+    "artistic",
+    "emotional",
+    "judge",
+    "consistency",
+    "context",
+    "tuning",
+    "timing",
+    "feel",
+    "phrase"
+  ],
+  "alternateQueries": [
+    "How do I know if it is a mistake or on purpose?",
+    "How should I give feedback on tuning?",
+    "What makes a deviation expressive?",
+    "How do I tell the artist their timing is off?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-pitch-interpretation"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-rhythm-interpretation"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.producer-tools-guide"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "The numbers say what happened, never why. The same 30 cents flat can be a sagging note at the end of a breath or a deliberate blue note; the same 20 milliseconds late can be dragging or a relaxed backbeat. Decide by asking these questions of the data, and when they do not settle it, say so and ask."
+    },
+    {
+      "term": "1. Is it consistent?",
+      "definition": "A deviation that repeats in the same way in the same musical place (the same scale degree, the same beat of the bar, every phrase ending) is almost always a choice or a habit. A deviation that appears once, or varies wildly, is more likely a slip.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "2. Is it in a meaningful place?",
+      "definition": "Expression tends to sit at phrase peaks and endings, on held or emphasised notes, and at emotional turns. Errors are scattered, or cluster where the player is under strain: fast passages, high notes, the ends of long breaths, the start of a take.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "3. Does it resolve?",
+      "definition": "A bend, scoop or slide that arrives on a pitch and settles there was aimed at it. A move that never lands, or lands between notes, was not. Likewise a push or lag that the band settles back from is a gesture; one that keeps growing is drift.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "4. What is its size and direction?",
+      "definition": "Small and steady is feel. Very large deviations, or deviations that move away from the pitch or beat rather than toward a target, are more likely faults. Slow, deep vibrato and very wide wobble are less likely to be intended.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "5. What does the genre expect?",
+      "definition": "Blues, country, gospel and jazz welcome bent and scooped notes, swing, and laid-back timing. Pop vocals and tightly programmed dance music expect close tuning and tight timing. Judge against what the artist is going for; ask if it is unknown.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "term": "6. Does the rest of the take agree?",
+      "definition": "Compare with other notes, sections and takes. If the whole part leans one way, the reference or instrument tuning is the likelier cause. If one note is off in an otherwise steady line, that is a slip worth fixing.",
+      "id": "b7",
+      "kind": "definition"
+    },
+    {
+      "id": "b8",
+      "kind": "paragraph",
+      "text": "How to say it. Describe what was measured with specifics: which track, which moment, the numbers (\"the held note at 0:12 is about 30 cents flat and stays there\"). Offer both readings honestly: \"if you were aiming for a bluesy flat third, it works; if not, it will sound like tuning\". Say how sure you are, and when the measurement is unreliable, say that instead of judging. Ask what the artist intended, because only they know. Suggest a way to test it: listen with and without the deviation, or compare with another take. Be constructive, and never claim a problem you did not measure."
+    },
+    {
+      "id": "b9",
+      "kind": "note",
+      "text": "Rules of thumb are not laws. A rule that is broken consistently and on purpose is a style. When the data cannot separate an error from an expressive choice, the honest answer is \"this could be either; which did you mean?\""
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from general music practice, not yet reviewed by a person)"
+}

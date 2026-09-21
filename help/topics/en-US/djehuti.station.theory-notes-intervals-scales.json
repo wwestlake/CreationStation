@@ -1,0 +1,120 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.theory-notes-intervals-scales",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Music theory: notes, intervals and scales",
+  "summary": "Note names, semitones and tones, intervals and how they sound, the major and minor scales, modes, pentatonic and blues scales, and how notes map to MIDI numbers and frequencies.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "theory",
+    "note",
+    "notes",
+    "interval",
+    "semitone",
+    "tone",
+    "scale",
+    "major",
+    "minor",
+    "mode",
+    "pentatonic",
+    "blues",
+    "chromatic",
+    "octave",
+    "midi",
+    "frequency",
+    "A440",
+    "enharmonic",
+    "sharp",
+    "flat",
+    "fifth",
+    "third",
+    "degree"
+  ],
+  "alternateQueries": [
+    "What is a semitone?",
+    "What notes are in a major scale?",
+    "What is the minor pentatonic scale?",
+    "What is an interval?",
+    "What MIDI number is middle C?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.theory-keys-circle-of-fifths"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.theory-chords-harmony"
+    }
+  ],
+  "blocks": [
+    {
+      "term": "Notes and the octave",
+      "definition": "There are twelve notes in an octave: C, C#/Db, D, D#/Eb, E, F, F#/Gb, G, G#/Ab, A, A#/Bb, B, then C again an octave higher, at twice the frequency. The step between neighbouring notes is a semitone (a half step); two semitones make a tone (a whole step). C# and Db are the same pitch with different names (enharmonic).",
+      "id": "b1",
+      "kind": "definition"
+    },
+    {
+      "term": "Frequencies and MIDI numbers",
+      "definition": "Concert pitch puts A4 at 440 Hz, which is MIDI note 69. Each semitone is a factor of about 1.0595 in frequency, and 100 cents; twelve semitones double the frequency. Middle C (C4) is MIDI 60, about 261.6 Hz.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Intervals",
+      "definition": "The distance between two notes, counted in semitones. 1 minor second (tense, half step); 2 major second; 3 minor third (sad, dark); 4 major third (bright, happy); 5 perfect fourth; 6 tritone (the most unstable, augmented fourth or diminished fifth); 7 perfect fifth (the strongest, most stable); 8 minor sixth; 9 major sixth; 10 minor seventh (bluesy, leads onward); 11 major seventh (dreamy, wants to resolve up); 12 octave.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Major scale",
+      "definition": "Seven notes in the pattern whole, whole, half, whole, whole, whole, half. From C: C D E F G A B. Its notes are called degrees: 1 (tonic, home), 2, 3, 4, 5 (dominant), 6, 7 (leading note, a half step under the tonic and wanting to rise to it). Bright and settled.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Natural minor scale",
+      "definition": "Whole, half, whole, whole, half, whole, whole. From A: A B C D E F G. It has a lowered third, sixth and seventh compared with the major scale on the same note, and sounds darker. Harmonic minor raises the seventh (leading note) and melodic minor raises the sixth and seventh going up.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Modes",
+      "definition": "Scales built by starting a major scale on a different degree: Ionian (the major scale itself), Dorian (minor with a raised sixth; jazz, funk, folk), Phrygian (minor with a lowered second; Spanish, metal), Lydian (major with a raised fourth; dreamy, film), Mixolydian (major with a lowered seventh; rock, blues, folk), Aeolian (natural minor), Locrian (rare, unstable).",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "term": "Pentatonic and blues scales",
+      "definition": "The major pentatonic drops the fourth and seventh: 1 2 3 5 6 (open, folk and country). The minor pentatonic is 1 b3 4 5 b7, the backbone of rock and blues guitar. Adding the flat fifth (a 'blue note') makes the blues scale: 1 b3 4 b5 5 b7.",
+      "id": "b7",
+      "kind": "definition"
+    },
+    {
+      "term": "Chromatic scale",
+      "definition": "All twelve semitones in a row; notes outside the key are heard as colour or tension.",
+      "id": "b8",
+      "kind": "definition"
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from standard music theory, not yet reviewed by a person)"
+}

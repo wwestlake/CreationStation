@@ -34,6 +34,13 @@ public:
     void setGuidanceMode(GuidanceMode newMode);
     GuidanceMode getGuidanceMode() const noexcept { return guidanceMode; }
 
+    // Who the assistant is working as. The Engineer changes the project by writing scripts; the Producer talks about the
+    // music and listens through measuring tools. The choice sits in the title row.
+    enum class Role { engineer, producer };
+    void setRole(Role newRole);
+    Role getRole() const noexcept { return role; }
+    std::function<void(Role role)> onRoleChanged;
+
     void setAccessLevel(AccessLevel newLevel);
     AccessLevel getAccessLevel() const noexcept { return accessLevel; }
 
@@ -71,6 +78,11 @@ public:
     // What the round button at the right of the message box shows, and its tooltip. The host changes it as
     // the assistant's state changes (send while idle, stop while a request runs).
     void setSendButtonIcon(station_ui::SendArrowButton::Icon icon, const juce::String& tooltip);
+
+    // While the assistant is working the arrow becomes Stop, and pressing it (not Enter) calls onStopRequested.
+    void setRunning(bool isRunning);
+    bool isRunning() const noexcept { return running; }
+    std::function<void()> onStopRequested;
     bool isCollapsed() const noexcept { return collapsed; }
 
     std::function<void(GuidanceMode mode)> onModeChanged;
@@ -113,6 +125,8 @@ private:
     juce::ComboBox modelComboBox;
     juce::Label accessLabelTitle;
     juce::ComboBox accessComboBox;
+    juce::ComboBox roleComboBox;
+    Role role = Role::engineer;
     juce::Label promptLabel;
     juce::Viewport transcriptViewport;
     std::unique_ptr<ChatTranscriptComponent> transcriptContent;
@@ -127,6 +141,7 @@ private:
     AccessLevel accessLevel = AccessLevel::askFirst;
     bool collapsed = false;
     int promptEditorHeight = 0;
+    bool running = false;
     bool updatingComboBoxes = false;
     juce::Array<AccountEntry> availableAccounts;
     juce::StringArray availableModels;

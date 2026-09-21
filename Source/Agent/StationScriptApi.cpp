@@ -116,6 +116,68 @@ std::int64_t station_track_set_soloed(std::int64_t track, std::int64_t soloed)
     return change([&](StationAgentHost& h, std::string& error) { return h.setTrackSoloed((int) track, soloed != 0, error); });
 }
 
+const char* station_track_kind(std::int64_t track)
+{
+    return Call::handBack(fromHost<std::string>([=](StationAgentHost& h) { return h.trackKind((int) track); }, ""));
+}
+
+std::int64_t station_track_set_kind(std::int64_t track, const char* kind)
+{
+    const std::string text = kind != nullptr ? kind : "";
+    return change([&](StationAgentHost& h, std::string& error) { return h.setTrackKind((int) track, text, error); });
+}
+
+std::int64_t station_track_armed(std::int64_t track)
+{
+    return fromHost<std::int64_t>([=](StationAgentHost& h) -> std::int64_t { return h.trackArmed((int) track) ? 1 : 0; }, 0);
+}
+
+std::int64_t station_track_set_armed(std::int64_t track, std::int64_t armed)
+{
+    return change([&](StationAgentHost& h, std::string& error) { return h.setTrackArmed((int) track, armed != 0, error); });
+}
+
+std::int64_t station_track_monitored(std::int64_t track)
+{
+    return fromHost<std::int64_t>([=](StationAgentHost& h) -> std::int64_t { return h.trackMonitored((int) track) ? 1 : 0; }, 0);
+}
+
+std::int64_t station_track_set_monitored(std::int64_t track, std::int64_t monitored)
+{
+    return change([&](StationAgentHost& h, std::string& error) { return h.setTrackMonitored((int) track, monitored != 0, error); });
+}
+
+std::int64_t station_track_stereo(std::int64_t track)
+{
+    return fromHost<std::int64_t>([=](StationAgentHost& h) -> std::int64_t { return h.trackStereo((int) track) ? 1 : 0; }, 0);
+}
+
+std::int64_t station_track_set_stereo(std::int64_t track, std::int64_t stereo)
+{
+    return change([&](StationAgentHost& h, std::string& error) { return h.setTrackStereo((int) track, stereo != 0, error); });
+}
+
+std::int64_t station_track_move(std::int64_t track, std::int64_t destination)
+{
+    return change([&](StationAgentHost& h, std::string& error) { return h.moveTrack((int) track, (int) destination, error); });
+}
+
+std::int64_t station_automation_set_target(std::int64_t automationTrack, std::int64_t targetTrack, const char* control)
+{
+    const std::string text = control != nullptr ? control : "";
+    return change([&](StationAgentHost& h, std::string& error) { return h.setAutomationTarget((int) automationTrack, (int) targetTrack, text, error); });
+}
+
+std::int64_t station_automation_add_point(std::int64_t automationTrack, double seconds, double value)
+{
+    return change([&](StationAgentHost& h, std::string& error) { return h.addAutomationPoint((int) automationTrack, seconds, value, error); });
+}
+
+std::int64_t station_automation_clear(std::int64_t automationTrack)
+{
+    return change([&](StationAgentHost& h, std::string& error) { return h.clearAutomation((int) automationTrack, error); });
+}
+
 std::int64_t station_transport_play()
 {
     return change([](StationAgentHost& h, std::string& error) { return h.transportPlay(error); });
@@ -129,6 +191,23 @@ std::int64_t station_transport_stop()
 std::int64_t station_log(const char* text)
 {
     Call::log(text != nullptr ? text : "");
+    return 1;
+}
+
+std::int64_t station_log_i64(const char* label, std::int64_t value)
+{
+    Call::log(std::string(label != nullptr ? label : "") + ": " + std::to_string(value));
+    return 1;
+}
+
+std::int64_t station_log_f64(const char* label, double value)
+{
+    // Trim trailing zeros so 0.5 reads "0.5" and -6 reads "-6".
+    std::string text = std::to_string(value);
+    text.erase(text.find_last_not_of('0') + 1);
+    if (! text.empty() && text.back() == '.')
+        text.pop_back();
+    Call::log(std::string(label != nullptr ? label : "") + ": " + text);
     return 1;
 }
 
@@ -162,9 +241,23 @@ creation::frust::ScriptApi makeApi(StationAgentHost& host, std::string declarati
         { "station_track_set_pan", reinterpret_cast<void*>(&station_track_set_pan) },
         { "station_track_set_muted", reinterpret_cast<void*>(&station_track_set_muted) },
         { "station_track_set_soloed", reinterpret_cast<void*>(&station_track_set_soloed) },
+        { "station_track_kind", reinterpret_cast<void*>(&station_track_kind) },
+        { "station_track_set_kind", reinterpret_cast<void*>(&station_track_set_kind) },
+        { "station_track_armed", reinterpret_cast<void*>(&station_track_armed) },
+        { "station_track_set_armed", reinterpret_cast<void*>(&station_track_set_armed) },
+        { "station_track_monitored", reinterpret_cast<void*>(&station_track_monitored) },
+        { "station_track_set_monitored", reinterpret_cast<void*>(&station_track_set_monitored) },
+        { "station_track_stereo", reinterpret_cast<void*>(&station_track_stereo) },
+        { "station_track_set_stereo", reinterpret_cast<void*>(&station_track_set_stereo) },
+        { "station_track_move", reinterpret_cast<void*>(&station_track_move) },
+        { "station_automation_set_target", reinterpret_cast<void*>(&station_automation_set_target) },
+        { "station_automation_add_point", reinterpret_cast<void*>(&station_automation_add_point) },
+        { "station_automation_clear", reinterpret_cast<void*>(&station_automation_clear) },
         { "station_transport_play", reinterpret_cast<void*>(&station_transport_play) },
         { "station_transport_stop", reinterpret_cast<void*>(&station_transport_stop) },
         { "station_log", reinterpret_cast<void*>(&station_log) },
+        { "station_log_i64", reinterpret_cast<void*>(&station_log_i64) },
+        { "station_log_f64", reinterpret_cast<void*>(&station_log_f64) },
         { "station_last_error", reinterpret_cast<void*>(&station_last_error) },
     };
     return api;

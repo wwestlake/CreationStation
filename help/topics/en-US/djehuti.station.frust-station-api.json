@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.frust-station-api",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Station's script API: every function a script can call",
+  "summary": "The functions Station gives a FRust script: reading the project, changing tracks, the transport, and reporting results.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "station api",
+    "script",
+    "frust",
+    "track",
+    "volume",
+    "pan",
+    "mute",
+    "solo",
+    "transport",
+    "station_",
+    "add track",
+    "log"
+  ],
+  "alternateQueries": [
+    "What can a FRust script do in Station?",
+    "How do I add a track from a script?",
+    "How do I set a track's volume from a script?",
+    "How do I report a number from a script?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.frust-language"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.assistant-writes-scripts"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "Tracks are numbered from 1, as you see them. A function that changes something returns 1 when it worked and 0 when it did not; call station_last_error() after a 0 to learn why. Volumes are in decibels from -60.0 up to 0.0 (0 is the top of the fader; there is no boost)."
+    },
+    {
+      "term": "Reading the project",
+      "definition": "station_project_summary() -> String; station_track_count() -> i64; station_track_name(track: i64) -> String; station_track_volume_db(track: i64) -> f64; station_track_pan(track: i64) -> f64 (-1.0 left to 1.0 right); station_track_muted(track: i64) -> i64 (1 or 0); station_track_soloed(track: i64) -> i64 (1 or 0).",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Changing tracks",
+      "definition": "station_track_add(name: String) -> i64 (the new track's number, or 0); station_track_set_name(track: i64, name: String) -> i64; station_track_set_volume_db(track: i64, db: f64) -> i64; station_track_set_pan(track: i64, pan: f64) -> i64; station_track_set_muted(track: i64, muted: i64) -> i64; station_track_set_soloed(track: i64, soloed: i64) -> i64.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "The rest of a track's controls",
+      "definition": "station_track_kind(track: i64) -> String (audio, midi, automation, signal, foley, video, folder or marker); station_track_set_kind(track: i64, kind: String) -> i64; station_track_armed / station_track_monitored / station_track_stereo(track: i64) -> i64 (1 or 0); station_track_set_armed / set_monitored / set_stereo(track: i64, on: i64) -> i64; station_track_move(track: i64, destination: i64) -> i64.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Automation",
+      "definition": "An automation track draws how one control of another track changes over time. Setup is three steps: station_track_add(name) to make a track, station_track_set_kind(track, \"automation\") to make it an automation track, station_automation_set_target(automation_track: i64, target_track: i64, control: String) -> i64 with control \"volume\" or \"pan\". Points are optional: station_automation_add_point(automation_track: i64, seconds: f64, value: f64) -> i64 (value in dB, -60.0 to 0.0, for volume; -1.0 to 1.0 for pan); station_automation_clear(automation_track: i64) -> i64 removes all points.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Transport",
+      "definition": "station_transport_play() -> i64; station_transport_stop() -> i64.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "term": "Reporting",
+      "definition": "station_log(text: String) -> i64 adds a line to the result; station_log_i64(label: String, value: i64) -> i64 and station_log_f64(label: String, value: f64) -> i64 add the line \"label: value\"; station_last_error() -> String says why the last call that returned 0 failed.",
+      "id": "b7",
+      "kind": "definition"
+    },
+    {
+      "id": "b8",
+      "kind": "paragraph",
+      "text": "Recipes, each compiled against the real compiler.\n\nAdd two tracks and set them up:\n\n```frust\npub fn run() -> String = {\n    let drums = station_track_add(\"Drums\");\n    let bass = station_track_add(\"Bass\");\n    station_track_set_volume_db(drums, -8.0);\n    station_track_set_volume_db(bass, -6.0);\n    station_track_set_pan(bass, 0.3);\n    \"Added Drums and Bass\"\n}\n```\n\nReport every track:\n\n```frust\npub fn run() -> String = {\n    let count = station_track_count();\n    station_log_i64(\"tracks\", count);\n    for track in 1..(count + 1) {\n        station_log(station_track_name(track));\n        station_log_f64(\"volume dB\", station_track_volume_db(track));\n    };\n    \"done\"\n}\n```\n\nSet every track to -12 dB:\n\n```frust\npub fn run() -> String = {\n    let mut track = 1;\n    while (track <= station_track_count()) {\n        station_track_set_volume_db(track, -12.0);\n        track = track + 1;\n    };\n    \"All tracks set to -12 dB\"\n}\n```\n\nRename and pan track 1:\n\n```frust\npub fn run() -> String = {\n    station_track_set_name(1, \"Lead\");\n    station_track_set_pan(1, -0.5);\n    \"Track 1 is now Lead, panned left\"\n}\n```\n\nList the muted tracks:\n\n```frust\npub fn run() -> String = {\n    let count = station_track_count();\n    if (count == 0) {\n        return \"The project has no tracks\";\n    };\n    let mut track = 1;\n    while (track <= count) {\n        if (station_track_muted(track) == 1) {\n            station_log(station_track_name(track));\n        };\n        track = track + 1;\n    };\n    \"Listed the muted tracks above\"\n}\n```"
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from the FRust grammar and the compiler, not yet reviewed by a person)"
+}

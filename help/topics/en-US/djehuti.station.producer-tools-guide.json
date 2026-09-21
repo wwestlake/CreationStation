@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.producer-tools-guide",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "The Producer's measuring tools and what their numbers mean",
+  "summary": "What analyze_pitch, analyze_tempo and project_overview report, how to read each figure, how to combine them, and where they fall short.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "producer",
+    "analyze_pitch",
+    "analyze_tempo",
+    "project_overview",
+    "cents",
+    "bpm",
+    "confidence",
+    "measure",
+    "tools",
+    "report",
+    "wobble",
+    "vibrato",
+    "motion",
+    "tightness",
+    "steadiness",
+    "pattern"
+  ],
+  "alternateQueries": [
+    "What does the pitch report mean?",
+    "What does the tempo report mean?",
+    "What can the Producer measure?",
+    "How sure is the measurement?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-judging-intent"
+    }
+  ],
+  "blocks": [
+    {
+      "term": "project_overview",
+      "definition": "Lists the tracks with name, volume, pan, mute and solo, and whether the transport is playing. Use it first, to know what is in the session.",
+      "id": "b1",
+      "kind": "definition"
+    },
+    {
+      "term": "analyze_pitch",
+      "definition": "For one track (a single melodic line): each note's time range, name, cents from exact pitch (+ sharp, - flat), wobble in cents, level, and, where they occur, \"rises/falls N cents across the note\" (a bend, scoop or slide) and \"vibrato R Hz +/-D cents\". The summary gives the average distance from pitch and whether the take leans sharp or flat. Tuning is judged from the steady middle of each note.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "analyze_midi_drums",
+      "definition": "For a MIDI drum track, read straight from the notes so it is exact. Per drum (kick, snare, hi-hats...): number of hits, average distance from the beat grid in ms, lean (negative ahead of the beat, positive behind), spread, and velocity (average, range, variation). Hits exactly on the grid with identical velocity are quantized and unhumanized; a steady lean on one drum is a chosen feel; varied velocity in a pattern is accents and ghost notes.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "analyze_tempo",
+      "definition": "For a track or the whole mix: the BPM with a confidence, how steady the beat is (jitter in ms, drift in BPM), tightness (average distance from the grid in ms, spread, lean ahead or behind), which grid the playing sits on (eighths, triplets or swing, sixteenths, sextuplets), and the rhythm pattern bar by bar. It compares the tempo with the project's, noting half or double time.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "id": "b5",
+      "kind": "paragraph",
+      "text": "Combining them. Timing and tuning often move together: a singer who rushes may also go sharp as excitement builds, and both drifting late in a take suggests fatigue. Look for the moments where several measurements change at once. A part that is loose in timing but consistent in feel (a steady lean, a swing grid) is a groove; one that is loose and uneven is unsteady."
+    },
+    {
+      "id": "b6",
+      "kind": "warning",
+      "text": "Reliability. Each report is a measurement of one section of one track, not a verdict. Low confidence, few notes, or a note about chords or noise means the tool could not measure well. Never report a figure the tool did not give, and say when something was not measured."
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from general music practice, not yet reviewed by a person)"
+}

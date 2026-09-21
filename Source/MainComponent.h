@@ -27,6 +27,8 @@
 #include "Feedback/FeedbackMetricsClient.h"
 #include "Feedback/MetricsCollector.h"
 #include "Language/StationFrustPodService.h"
+#include "Agent/StationAgentHost.h"
+#include "Agent/StationAssistant.h"
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectAssetService.h>
 #include <creation/assets/ProjectSession.h>
@@ -530,6 +532,14 @@ private:
     void setAudioInputDevice(const juce::String& inputDeviceName);
     void setAudioOutputDevice(const juce::String& outputDeviceName);
     void addTrack();
+    // Station's host for the scripts the Virtual Engineer writes (Source/Agent): what a script's calls do to the
+    // real project. Defined in Agent/StationAgentHostImpl.cpp.
+    class AgentHost;
+    std::unique_ptr<StationAgentHost> agentHost;
+    StationAgentHost& getAgentHost();
+    // The Virtual Engineer as a coder (Agent/StationAssistant): declared after agentHost so it is destroyed first.
+    std::unique_ptr<StationAssistant> assistant;
+    void launchAssistantRun(const juce::String& systemPrompt, const juce::String& userPrompt, const juce::String& suppliedHelp);
     void removeTrack(int trackIndex);
     void performTrackRemoval(int trackIndex);
     void initialiseDockingWorkspace();
