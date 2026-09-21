@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.theory-tuning-intonation",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "Music theory: tuning systems and what 'in tune' means",
+  "summary": "Equal temperament versus just intonation, why a well-sung interval can measure a few cents off the piano, and what that means for judging tuning.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "tuning",
+    "intonation",
+    "equal temperament",
+    "just intonation",
+    "temperament",
+    "pythagorean",
+    "cents",
+    "in tune",
+    "out of tune",
+    "third",
+    "fifth",
+    "reference pitch",
+    "432",
+    "440",
+    "guitar tuning",
+    "capo",
+    "beats",
+    "harmonic"
+  ],
+  "alternateQueries": [
+    "What does in tune mean?",
+    "Why is my third flat against the piano?",
+    "What is just intonation?",
+    "Is A432 better?",
+    "Why is a guitar never perfectly in tune?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-pitch-interpretation"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.theory-chords-harmony"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "Pitch is measured in cents, 100 to a semitone, against equal temperament (ET): the tuning of pianos, keyboards and most software, where every semitone is exactly 100 cents. But ET is a compromise. Its intervals are not the purest ones, and voices, strings and horns, which can bend pitch freely, often tune to purer ones by ear."
+    },
+    {
+      "term": "Just intonation",
+      "definition": "Intervals tuned as simple frequency ratios, which sound smoothest because their overtones line up and beating disappears. A just major third (5:4) is about 386 cents, so 14 cents flatter than the 400 of ET. A just minor third (6:5) is about 316 cents, 16 cents sharper than ET's 300. A just perfect fifth (3:2) is 702 cents, 2 cents wider than ET. A just harmonic seventh (7:4) is about 969 cents, 31 cents flatter than the ET minor seventh.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Why it matters when measuring",
+      "definition": "A singer or string player holding the third of a major chord in pure tune will measure roughly 14 cents flat against ET. That is not a mistake: against the other notes of the chord it is in tune, and can sound better than the ET value. Judge a held chord note against the chord, not only against the piano.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Melodic tuning",
+      "definition": "Melody wants the opposite: leading notes and the tops of ascending lines are often sung a little sharp (Pythagorean thirds are about 408 cents, 8 sharp of ET) for brightness and pull toward the next note. So a slightly sharp leading note and a slightly flat chord third can both be musical, the same singer doing two right things.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Equal temperament in practice",
+      "definition": "Fixed-pitch instruments (piano, marimba, fretted guitar, MIDI) cannot bend to purity, so they are tuned to ET with every interval slightly impure. A guitar adds its own errors: pressing a string hard sharpens it, the nut and frets compensate imperfectly, and chords tuned pure at one position sound slightly off at another. Guitarists nudge chord shapes by ear for this reason.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Reference pitch",
+      "definition": "Concert pitch is A4 = 440 Hz. Some music is tuned to 415 (baroque), 432 or 442 (some orchestras). If every note in a take measures consistently sharp or flat by the same amount, the take (or an instrument) is tuned to a different reference, not the player, and the analysis reference can be set to match. Nothing about 432 Hz makes the music better in any way that has been measured; it is simply a different reference.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "id": "b7",
+      "kind": "warning",
+      "text": "So a measurement in cents against ET is a good first look, not a verdict. Weigh it with what the harmony is doing (a chord third), whether the note is melodic or harmonic, and the instrument."
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from standard music theory, not yet reviewed by a person)"
+}

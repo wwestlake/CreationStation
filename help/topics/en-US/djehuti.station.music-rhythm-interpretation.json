@@ -1,0 +1,140 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.music-rhythm-interpretation",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "Reading tempo and beat measurements: sloppy, or a feel?",
+  "summary": "How to interpret a tempo and beat report: swing, triplets, pushing and laying back, rushing, rubato, ghost notes and real timing problems.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "tempo",
+    "beat",
+    "rhythm",
+    "timing",
+    "swing",
+    "shuffle",
+    "triplet",
+    "straight",
+    "sixteenth",
+    "eighth",
+    "groove",
+    "push",
+    "pull",
+    "laid back",
+    "rushing",
+    "dragging",
+    "rubato",
+    "drift",
+    "ghost note",
+    "syncopation",
+    "polyrhythm",
+    "tight",
+    "loose",
+    "humanize",
+    "feel",
+    "pocket"
+  ],
+  "alternateQueries": [
+    "Is my timing bad or is it swing?",
+    "What does laid back mean?",
+    "Am I rushing?",
+    "What is a ghost note?",
+    "How tight should I be?",
+    "What is a triplet feel?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-judging-intent"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.music-pitch-interpretation"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "A tempo report gives the BPM and how sure it is, how steady the beat is, how tightly the hits sit on the beat grid (in milliseconds), whether they lean ahead of or behind the beat, which grid they fit best, and the rhythm pattern bar by bar. Tightness is judged against the grid the playing actually uses, so a swung or triplet groove is not called loose for not being straight."
+    },
+    {
+      "term": "Grid and feel",
+      "definition": "Straight eighths or sixteenths put hits at even fractions of the beat. Triplets or swing put them on thirds of the beat: swing plays pairs of eighth notes long-short (about 2:1, the first and the third of a triplet). Sextuplets are six to a beat. If the report says the hits sit best on triplets or swing, the player is swinging on purpose, and the offsets from a straight grid are the swing, not error.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Tightness numbers",
+      "definition": "Average distance from the grid: under about 10 ms is very tight (studio or programmed feel), 10 to 25 ms is a natural human feel, over about 30 ms is audibly loose. Spread says how consistent that distance is: a small spread with a large average distance means consistently early or late (a feel), a large spread means uneven timing.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Pushing and laying back",
+      "definition": "The lean figure is the average distance ahead (-) or behind (+) of the beat. Leaning ahead 5 to 15 ms feels urgent and driving; leaning behind 10 to 30 ms feels relaxed and heavy (a laid-back snare or bass). A steady lean is a choice of feel. It is only a problem if it changes over the take or fights the other instruments.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Rushing and dragging",
+      "definition": "Rushing is speeding up unintentionally; it shows as the tempo drifting upward across the section (positive drift in BPM) and the hits moving ahead of the original grid. Dragging is the opposite. Small drift in a groove-based style is usually a fault; in a ballad or a rubato passage it can be breathing.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Rubato",
+      "definition": "Deliberate flexing of the tempo for expression: speeding into a phrase and easing at the end, in both directions, often at phrase boundaries. It fits slower, expressive music. In dance, funk, rock and anything played to a click it is not expected.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "term": "Ghost notes and syncopation",
+      "definition": "Ghost notes are very quiet hits between the main ones; they show as lighter marks (x) in the pattern and give a groove its texture. Syncopation puts accents on the off-beats or leaves the expected beat empty; it shows as strong marks (X) between the beats or gaps on the beats. Neither is a timing error.",
+      "id": "b7",
+      "kind": "definition"
+    },
+    {
+      "term": "Slip versus habit",
+      "definition": "One hit far off (over about 40 ms) while the rest are tight is a slip. The same offset repeating at the same place in every bar (a late backbeat, an early first note) is a habit or a feel. Check whether the deviation repeats before calling it an error.",
+      "id": "b8",
+      "kind": "definition"
+    },
+    {
+      "term": "Fills and pickups",
+      "definition": "A fast fill or pickup can look off-grid because it sits on a finer grid than the groove (thirty-second notes, sextuplets). Do not judge fills against the main grid.",
+      "id": "b9",
+      "kind": "definition"
+    },
+    {
+      "term": "MIDI drum tracks and humanization",
+      "definition": "A MIDI drum track is played by the computer from notes, and Station's Humanize edit moves each note's timing, velocity and length by an amount the producer chose. After it is applied, the variation is simply in the notes; there is no setting left to read. So timing deviation on a MIDI drum track is deliberate by design and must not be called sloppy: the question is whether the amount suits the style (a few milliseconds is subtle and tight; 10 to 25 ms is a natural human feel; beyond about 30 ms on a tight genre sounds careless). Measuring the rendered audio of such a track only measures the humanization itself, and the notes are the more exact source. Advice worth giving: real drummers do not shake randomly; they lean consistently, for example a snare slightly behind the beat and hi-hats slightly ahead, and they play louder on strong beats. Uniform random jitter on every hit, and random velocity, sounds like a machine imitating a person. A consistent offset per drum, with accents on the beat, usually sounds more human than more randomness.",
+      "id": "b10",
+      "kind": "definition"
+    },
+    {
+      "id": "b11",
+      "kind": "warning",
+      "text": "Limits. Tempo comes from the attacks in the sound, so it suits drums and plucked or struck instruments; smooth vocals and pads give a low confidence. A strummed chord spreads over 20 to 40 ms. Bars are counted as four beats from the first beat found, which may not be the downbeat, and other meters are not detected. A reading of double or half the project tempo usually means the same rhythm counted at twice or half the rate."
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from general music practice, not yet reviewed by a person)"
+}

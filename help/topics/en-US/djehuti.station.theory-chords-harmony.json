@@ -1,0 +1,118 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.theory-chords-harmony",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Music theory: chords and harmony",
+  "summary": "Triads and seventh chords, chord function, common progressions, cadences, tension and release.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "chord",
+    "chords",
+    "triad",
+    "seventh",
+    "major",
+    "minor",
+    "diminished",
+    "augmented",
+    "sus",
+    "inversion",
+    "progression",
+    "cadence",
+    "tonic",
+    "dominant",
+    "subdominant",
+    "12 bar blues",
+    "ii V I",
+    "harmony",
+    "tension",
+    "resolution",
+    "voice leading"
+  ],
+  "alternateQueries": [
+    "What is a ii V I?",
+    "What is a cadence?",
+    "What are the chords in a 12 bar blues?",
+    "What makes a chord major or minor?",
+    "What is a dominant seventh?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.theory-keys-circle-of-fifths"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.theory-tuning-intonation"
+    }
+  ],
+  "blocks": [
+    {
+      "term": "Triads",
+      "definition": "Three notes stacked in thirds. Major: root, major third, fifth (0-4-7 semitones; bright). Minor: root, minor third, fifth (0-3-7; darker). Diminished: 0-3-6 (tense). Augmented: 0-4-8 (unresolved, floating). Suspended chords replace the third with a second or fourth (sus2 0-2-7, sus4 0-5-7) and want to resolve.",
+      "id": "b1",
+      "kind": "definition"
+    },
+    {
+      "term": "Seventh chords",
+      "definition": "Add another third on top. Major seventh 0-4-7-11 (smooth, dreamy); dominant seventh 0-4-7-10 (bluesy, pulls toward the chord a fifth below); minor seventh 0-3-7-10 (mellow); half-diminished 0-3-6-10; diminished seventh 0-3-6-9. Extensions (9th, 11th, 13th) add colour above.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Inversions",
+      "definition": "The same chord with a different note in the bass: root position has the root lowest; first inversion has the third lowest; second inversion the fifth. Written C/E means C major with E in the bass.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Function",
+      "definition": "Chords do jobs. Tonic (I, vi) is home and rest. Subdominant (IV, ii) leaves home, a step of tension. Dominant (V, vii diminished) creates the strongest pull back to tonic. A progression is a journey: rest, departure, tension, resolution.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Cadences",
+      "definition": "Chord endings that punctuate a phrase. Authentic V to I: the strongest full stop. Plagal IV to I: the 'amen', gentler. Half cadence ending on V: a comma, unresolved. Deceptive V to vi: the expected home is replaced by its relative minor, a surprise.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Common progressions",
+      "definition": "I-V-vi-IV (pop, endlessly used). I-vi-IV-V (fifties and doo-wop). ii-V-I (the backbone of jazz; in C: Dm7 G7 Cmaj7). I-IV-V (rock, country, folk). vi-IV-I-V. The twelve-bar blues: I I I I, IV IV I I, V IV I I, usually with dominant sevenths.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "term": "Tension and release",
+      "definition": "Dissonant intervals (minor second, major seventh, tritone) create tension that is released by resolving to consonant ones (thirds, fifths, sixths, the octave). The leading note resolves up to the tonic; the seventh of a dominant chord resolves down. A phrase ending on tension feels open; on the tonic, closed.",
+      "id": "b7",
+      "kind": "definition"
+    },
+    {
+      "term": "Voice leading",
+      "definition": "Smooth harmony moves each note of a chord by the smallest step to the next chord, keeping common notes. It is what makes a progression sound connected instead of jumpy.",
+      "id": "b8",
+      "kind": "definition"
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from standard music theory, not yet reviewed by a person)"
+}

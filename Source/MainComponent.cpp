@@ -5120,6 +5120,7 @@ juce::ValueTree MainComponent::createLayoutState() const
     layout.setProperty("activeMode", static_cast<int>(activeMode), nullptr);
     layout.setProperty("aiSidebarCollapsed", aiSidebarCollapsed, nullptr);
     layout.setProperty("aiEnterSends", aiPanel.getEnterSendsMessage(), nullptr);
+    layout.setProperty("aiRole", aiPanel.getRole() == AiPanel::Role::producer ? "producer" : "engineer", nullptr);
     if (dockManager != nullptr)
         layout.setProperty("dockLayoutJson", juce::JSON::toString(dockManager->captureLayout()), nullptr);
 
@@ -5150,6 +5151,7 @@ void MainComponent::restoreLayoutState(const juce::ValueTree& state)
     aiSidebarCollapsed = (bool) state.getProperty("aiSidebarCollapsed", false);
     aiPanel.setCollapsed(aiSidebarCollapsed);
     aiPanel.setEnterSendsMessage((bool) state.getProperty("aiEnterSends", false));
+    aiPanel.setRole(state.getProperty("aiRole", "engineer").toString() == "producer" ? AiPanel::Role::producer : AiPanel::Role::engineer);
 
     auto dockLayoutJson = state.getProperty("dockLayoutJson").toString();
     if (dockManager != nullptr && dockLayoutJson.isNotEmpty())
@@ -6928,9 +6930,11 @@ void MainComponent::launchAiCompletion(const CreationStationContextEngine::Conte
     // Station's own help, chosen for this question and the panel the user is in. The same topics are what the Help window
     // shows, so the assistant and the manual never disagree.
     juce::String helpBlock;
-    const auto helpExcerpts = helpLibrary.buildPromptContext(pendingAiQuestion, currentHelpId(), 7000);
+    // Help excerpts answer how-to questions about Station; the Producer is talking about the music, so it gets none.
+    const bool producerRole = aiPanel.getRole() == AiPanel::Role::producer;
+    const auto helpExcerpts = producerRole ? juce::String() : helpLibrary.buildPromptContext(pendingAiQuestion, currentHelpId(), 7000);
     juce::String suppliedHelp;
-    for (const auto* topic : helpLibrary.topicsForPrompt(pendingAiQuestion, currentHelpId()))
+    for (const auto* topic : (producerRole ? std::vector<const cs::help::Topic*>() : helpLibrary.topicsForPrompt(pendingAiQuestion, currentHelpId())))
         suppliedHelp << (suppliedHelp.isEmpty() ? "" : "; ") << topic->title;
     if (helpExcerpts.isNotEmpty())
     {
@@ -7003,7 +7007,13 @@ void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const j
             const char* data = BuiltInFrustData::getNamedResource(resource, size);
             return data != nullptr ? std::string(data, (size_t) size) : std::string();
         };
-        assistant = std::make_unique<StationAssistant>(getAgentHost(), embedded("StationAgentApi_frust"), embedded("StationScriptGuide_md"));
+        assistant = std::make_unique<StationAssistant>(
+            getAgentHost(), embedded("StationAgentApi_frust"), embedded("StationScriptGuide_md"),
+            [this](const std::string& query)
+            {
+                // Runs on the assistant's thread; the help library is read-only data, so this is safe.
+                return helpLibrary.buildPromptContext(juce::String(query), {}, 6000).toStdString();
+            });
     }
 
     creation::services::SuiteAiResolvedRuntimeSettings account;
@@ -7019,6 +7029,9 @@ void MainComponent::launchAssistantRun(const juce::String& systemPrompt, const j
             assistant->stop();
         transportBar.setStatusText("Stopping the assistant...");
     };
+
+    // Who it works as this time: the Engineer (changes the project) or the Producer (talks about the music, measures).
+    assistant->setRole(aiPanel.getRole() == AiPanel::Role::producer ? StationAssistant::Role::producer : StationAssistant::Role::engineer);
 
     aiPanel.setRunning(true);
     transportBar.setStatusText("The assistant is working...");

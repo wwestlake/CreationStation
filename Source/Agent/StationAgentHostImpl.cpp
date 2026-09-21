@@ -131,7 +131,306 @@ public:
         return true;
     }
 
+    // ---- The rest of a track's controls: each calls the same handler the track's own button or menu calls ----
+
+    std::string trackKind(int track) override
+    {
+        return exists(track) ? kindName(owner.timelineModel.getTrackKind(track - 1)) : std::string();
+    }
+
+    bool setTrackKind(int track, const std::string& kind, std::string& error) override
+    {
+        if (! check(track, error))
+            return false;
+
+        cs::TrackKind wanted = cs::TrackKind::audio;
+        if (! kindFromName(kind, wanted))
+        {
+            error = "'" + kind + "' is not a track kind. Use audio, midi, automation, signal, foley, video, folder or marker.";
+            return false;
+        }
+        if (owner.trackerPanel.onTrackKindChanged)
+            owner.trackerPanel.onTrackKindChanged(track - 1, wanted);
+        return true;
+    }
+
+    bool trackArmed(int track) override
+    {
+        return exists(track) && juce::isPositiveAndBelow(track - 1, (int) owner.armedTracks.size()) && owner.armedTracks[(size_t) track - 1];
+    }
+
+    bool setTrackArmed(int track, bool armed, std::string& error) override
+    {
+        if (! check(track, error))
+            return false;
+        if (owner.trackerPanel.onTrackArmChanged)
+            owner.trackerPanel.onTrackArmChanged(track - 1, armed);
+        return true;
+    }
+
+    bool trackMonitored(int track) override
+    {
+        return exists(track) && juce::isPositiveAndBelow(track - 1, (int) owner.monitoredTracks.size()) && owner.monitoredTracks[(size_t) track - 1];
+    }
+
+    bool setTrackMonitored(int track, bool monitored, std::string& error) override
+    {
+        if (! check(track, error))
+            return false;
+        if (owner.trackerPanel.onTrackMonitorChanged)
+            owner.trackerPanel.onTrackMonitorChanged(track - 1, monitored);
+        return true;
+    }
+
+    bool trackStereo(int track) override { return exists(track) && owner.engine.isTrackStereoEnabled(track - 1); }
+
+    bool setTrackStereo(int track, bool stereo, std::string& error) override
+    {
+        if (! check(track, error))
+            return false;
+        if (owner.trackerPanel.onTrackStereoChanged)
+            owner.trackerPanel.onTrackStereoChanged(track - 1, stereo);
+        return true;
+    }
+
+    bool moveTrack(int track, int destination, std::string& error) override
+    {
+        if (! check(track, error))
+            return false;
+        if (destination < 1 || destination > owner.engine.getTrackCount())
+        {
+            error = "There is no position " + std::to_string(destination) + ". The project has " + std::to_string(owner.engine.getTrackCount()) + " track(s).";
+            return false;
+        }
+        if (! owner.performTrackMove(track - 1, destination - 1))
+        {
+            error = "That track could not be moved there.";
+            return false;
+        }
+        owner.syncTrackViews();
+        owner.saveSessionToDisk();
+        return true;
+    }
+
+    bool setAutomationTarget(int automationTrack, int targetTrack, const std::string& control, std::string& error) override
+    {
+        if (! checkAutomation(automationTrack, error) || ! check(targetTrack, error))
+            return false;
+        if (targetTrack == automationTrack || owner.timelineModel.getTrackKind(targetTrack - 1) == cs::TrackKind::automation)
+        {
+            error = "An automation track must control another track that is not itself an automation track.";
+            return false;
+        }
+
+        cs::AutomationTarget target;
+        target.targetTrackIndex = targetTrack - 1;
+        auto trackName = owner.timelineModel.getTrackName(targetTrack - 1);
+        if (trackName.isEmpty())
+            trackName = "Track " + juce::String(targetTrack);
+        if (control == "volume")
+        {
+            target.kind = cs::AutomationTargetKind::trackVolume;
+            target.displayName = trackName + " \xe2\x86\x92 Volume";
+        }
+        else if (control == "pan")
+        {
+            target.kind = cs::AutomationTargetKind::trackPan;
+            target.displayName = trackName + " \xe2\x86\x92 Pan";
+        }
+        else
+        {
+            error = "'" + control + "' is not a control an automation track can drive from a script. Use volume or pan.";
+            return false;
+        }
+
+        owner.timelineModel.setAutomationTarget(automationTrack - 1, target);
+        owner.pushAutomationDataToEngine(automationTrack - 1);
+        owner.trackerPanel.setAutomationTargetLabel(automationTrack - 1, target.displayName);
+        owner.saveSessionToDisk();
+        return true;
+    }
+
+    bool addAutomationPoint(int automationTrack, double seconds, double value, std::string& error) override
+    {
+        if (! checkAutomation(automationTrack, error))
+            return false;
+        const auto target = owner.timelineModel.getAutomationTarget(automationTrack - 1);
+        float normalized = 0.0f;
+        if (target.kind == cs::AutomationTargetKind::trackVolume)
+        {
+            if (value < station_agent::minVolumeDb || value > station_agent::maxVolumeDb)
+            {
+                error = "A volume point must be between -60 and 0 dB.";
+                return false;
+            }
+            normalized = station_agent::gainFromDb(value);
+        }
+        else if (target.kind == cs::AutomationTargetKind::trackPan)
+        {
+            if (value < -1.0 || value > 1.0)
+            {
+                error = "A pan point must be between -1.0 (left) and 1.0 (right).";
+                return false;
+            }
+            normalized = (float) ((value + 1.0) * 0.5);
+        }
+        else
+        {
+            error = "Point this automation track at a control first (station_automation_set_target).";
+            return false;
+        }
+        if (seconds < 0.0)
+        {
+            error = "A point's time cannot be before the start (0 seconds).";
+            return false;
+        }
+
+        owner.timelineModel.addOrUpdateAutomationPoint(automationTrack - 1, seconds, normalized, 0.001);
+        owner.pushAutomationDataToEngine(automationTrack - 1);
+        owner.trackerPanel.refreshTimelineView();
+        owner.saveSessionToDisk();
+        return true;
+    }
+
+    bool clearAutomation(int automationTrack, std::string& error) override
+    {
+        if (! checkAutomation(automationTrack, error))
+            return false;
+        owner.timelineModel.clearAutomationLane(automationTrack - 1);
+        owner.pushAutomationDataToEngine(automationTrack - 1);
+        owner.trackerPanel.refreshTimelineView();
+        owner.saveSessionToDisk();
+        return true;
+    }
+
+    double projectTempoBpm() override { return owner.timelineModel.getTempoBpm(); }
+
+    bool trackMidiNotes(int track, std::vector<MidiNoteInfo>& notes, std::string& error) override
+    {
+        if (! check(track, error))
+            return false;
+
+        const double bpm = owner.timelineModel.getTempoBpm();
+        notes.clear();
+        for (const auto& clip : owner.timelineModel.getClips())
+        {
+            if (clip.kind != cs::ClipKind::midi || clip.trackIndex != track - 1)
+                continue;
+            const double clipStartBeats = clip.startSeconds * bpm / 60.0;
+            for (const auto& note : clip.midiNotes)
+                if (! note.muted)
+                    notes.push_back({ note.pitch, note.velocity, clipStartBeats + note.startBeats, note.lengthBeats });
+        }
+        if (notes.empty())
+        {
+            error = "Track " + std::to_string(track) + " has no MIDI notes.";
+            return false;
+        }
+        return true;
+    }
+
+    bool trackAudio(int track, double startSeconds, double durationSeconds, std::vector<float>& mono, double& sampleRate,
+                    std::string& error) override
+    {
+        // Track 0 is the whole mix.
+        if (track != 0 && ! check(track, error))
+            return false;
+
+        // The audio clips on this track, rendered on their own through the engine's own offline path.
+        juce::Array<WorkstationAudioEngine::PlaybackClipTarget> all;
+        double lastClipEnd = 0.0;
+        juce::String message;
+        if (! owner.buildTrackerPlaybackTargets(all, lastClipEnd, message, false))
+        {
+            error = message.isNotEmpty() ? message.toStdString() : "The project's audio could not be prepared.";
+            return false;
+        }
+
+        juce::Array<WorkstationAudioEngine::PlaybackClipTarget> mine;
+        for (const auto& target : all)
+            if (track == 0 || target.trackIndex == track - 1)
+                mine.add(target);
+        if (mine.isEmpty())
+        {
+            error = track == 0 ? std::string("The project has no audio clips to measure.")
+                               : "Track " + std::to_string(track) + " has no audio clips to measure.";
+            return false;
+        }
+
+        WorkstationAudioEngine::RenderSettings settings;
+        settings.sampleRate = 48000.0;
+        settings.startSeconds = juce::jmax(0.0, startSeconds);
+        const double duration = juce::jlimit(0.5, 120.0, durationSeconds);
+
+        juce::AudioBuffer<float> buffer;
+        juce::String renderError;
+        if (! owner.engine.renderTrackerMixToBuffer(mine, duration, settings, buffer, renderError))
+        {
+            error = renderError.isNotEmpty() ? renderError.toStdString() : "The track could not be rendered.";
+            return false;
+        }
+
+        const int channels = buffer.getNumChannels();
+        const int samples = buffer.getNumSamples();
+        if (channels == 0 || samples == 0)
+        {
+            error = "The track produced no audio in that time range.";
+            return false;
+        }
+
+        mono.assign((size_t) samples, 0.0f);
+        for (int c = 0; c < channels; ++c)
+        {
+            const float* in = buffer.getReadPointer(c);
+            for (int i = 0; i < samples; ++i)
+                mono[(size_t) i] += in[i] / (float) channels;
+        }
+        sampleRate = settings.sampleRate;
+        return true;
+    }
+
 private:
+    static std::string kindName(cs::TrackKind kind)
+    {
+        switch (kind)
+        {
+            case cs::TrackKind::audio: return "audio";
+            case cs::TrackKind::midi: return "midi";
+            case cs::TrackKind::automation: return "automation";
+            case cs::TrackKind::signal: return "signal";
+            case cs::TrackKind::foley: return "foley";
+            case cs::TrackKind::video: return "video";
+            case cs::TrackKind::folder: return "folder";
+            case cs::TrackKind::marker: return "marker";
+        }
+        return "audio";
+    }
+
+    static bool kindFromName(const std::string& name, cs::TrackKind& kind)
+    {
+        static const cs::TrackKind all[] = { cs::TrackKind::audio, cs::TrackKind::midi, cs::TrackKind::automation, cs::TrackKind::signal,
+                                             cs::TrackKind::foley, cs::TrackKind::video, cs::TrackKind::folder, cs::TrackKind::marker };
+        for (auto candidate : all)
+            if (kindName(candidate) == name)
+            {
+                kind = candidate;
+                return true;
+            }
+        return false;
+    }
+
+    bool checkAutomation(int track, std::string& error) const
+    {
+        if (! check(track, error))
+            return false;
+        if (owner.timelineModel.getTrackKind(track - 1) != cs::TrackKind::automation)
+        {
+            error = "Track " + std::to_string(track) + " is not an automation track. Change its kind to \"automation\" first (station_track_set_kind).";
+            return false;
+        }
+        return true;
+    }
+
     bool exists(int track) const { return track >= 1 && track <= owner.engine.getTrackCount(); }
 
     bool check(int track, std::string& error) const

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.assistant-writes-scripts",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "How the Virtual Engineer writes and runs scripts",
+  "summary": "How the Virtual Engineer uses FRust to change your project: the tools it has, how a run works, what you see, and its limits.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "virtual engineer",
+    "assistant",
+    "script",
+    "frust",
+    "run_frust",
+    "check_frust",
+    "tools",
+    "stop",
+    "limits",
+    "scripts run",
+    "coder"
+  ],
+  "alternateQueries": [
+    "How does the Virtual Engineer change my project?",
+    "What tools does the Virtual Engineer have?",
+    "How do I stop the Virtual Engineer?",
+    "What are Scripts run?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.frust-station-api"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.frust-language"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "The Virtual Engineer changes your project by writing a short FRust script and running it. A script can only do what Station's script API offers (see the Station script API topic): it cannot reach your files, the network or other programs."
+    },
+    {
+      "term": "Tools",
+      "definition": "run_frust compiles and runs a script and reports what it returned and logged, or the compile errors with line and column. check_frust compiles a script without running it. frust_api_reference shows Station's script API. frust_lookup searches Station's help (the FRust language, the API, how the tools work) when the assistant is unsure.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "id": "b3",
+      "kind": "paragraph",
+      "text": "A request runs like this: the assistant writes a script, runs it, reads the result (or the compile errors), and fixes and retries until it works, then tells you what it did. It works on its own thread, so Station stays usable. The arrow at the end of the message box becomes Stop while it works; Stop ends the request at the script's next call into Station."
+    },
+    {
+      "id": "b4",
+      "kind": "paragraph",
+      "text": "Every script it ran is shown under \"Scripts run\" in its reply, with whether it ran or the error it failed with, so nothing it did is hidden."
+    },
+    {
+      "id": "b5",
+      "kind": "note",
+      "text": "Limits: a request has a step limit, a time limit and a limit on repeating the same failing call. A script that never calls back into Station cannot be interrupted until it returns."
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from the FRust grammar and the compiler, not yet reviewed by a person)"
+}

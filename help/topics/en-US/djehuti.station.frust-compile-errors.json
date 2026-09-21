@@ -1,0 +1,149 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.frust-compile-errors",
+  "locale": "en-US",
+  "type": "troubleshooting",
+  "title": "FRust compile errors and how to fix them",
+  "summary": "What each common FRust compile error means and how to fix it.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "frust",
+    "error",
+    "compile",
+    "syntax error",
+    "unexpected",
+    "expecting",
+    "fix",
+    "semicolon",
+    "operator",
+    "condition",
+    "return value"
+  ],
+  "alternateQueries": [
+    "Why does my FRust script not compile?",
+    "What does 'unexpected STRING_LITERAL, expecting }' mean?",
+    "What does 'has no return value' mean?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.frust-language"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "A compile error names a line and column in your script. The cause is often on the line BEFORE the one named."
+    },
+    {
+      "symptoms": [
+        "unexpected STRING_LITERAL, expecting }  (or unexpected IDENT, expecting })"
+      ],
+      "cause": "A block statement (`if`, `else`, `while`, `for`, `match`) is followed by more code but its closing brace has no `;`. Or an `if`/`while` condition is a bare name before `{`, which is read as a struct value.",
+      "resolution": "Write `};` after the block, and put every condition in parentheses: `if (ok) { ... };`.",
+      "id": "b2",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "unexpected !, expecting }"
+      ],
+      "cause": "A macro such as format!(...) or println!(...) was used. FRust has no macros.",
+      "resolution": "Return a plain string literal, and report numbers with station_log_i64 or station_log_f64.",
+      "id": "b3",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "cannot call a method on an expression of unknown struct type"
+      ],
+      "cause": "A method was called on a value that has none, such as \"x\".to_string() or n.abs().",
+      "resolution": "Values have no methods. Use plain functions from the API; only a struct with an `impl` block has methods.",
+      "id": "b4",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "unexpected &  (from &&)"
+      ],
+      "cause": "FRust has no && or ||.",
+      "resolution": "Nest the if blocks, or write `if ((a == 1) & (b == 2)) { ... }`; use | for or.",
+      "id": "b5",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "the operator '+' does not work on text"
+      ],
+      "cause": "Text was added, subtracted or otherwise combined with an operator. There is no string concatenation.",
+      "resolution": "Report separate pieces with separate station_log calls.",
+      "id": "b6",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "function 'run' has no return value"
+      ],
+      "cause": "The last line of the function ends with `;` or is not an expression.",
+      "resolution": "End the function with an expression and no `;`, for example the text to report.",
+      "id": "b7",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "the condition of 'if' must be a true/false value or a number, not text"
+      ],
+      "cause": "A String was used as a condition.",
+      "resolution": "Compare it first, or use a number or a true/false value.",
+      "id": "b8",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "the two branches of this 'if' give different kinds of value"
+      ],
+      "cause": "One branch gives a number and the other text.",
+      "resolution": "Make both branches give the same kind of value.",
+      "id": "b9",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "the script has no `pub fn run() -> String`"
+      ],
+      "cause": "The entry function is missing or named differently.",
+      "resolution": "Define `pub fn run() -> String = { ... }`.",
+      "id": "b10",
+      "kind": "troubleshooting"
+    },
+    {
+      "symptoms": [
+        "argument N of 'f' must be ..., or 'f' takes N argument(s)"
+      ],
+      "cause": "A call passes the wrong number or kind of arguments.",
+      "resolution": "Check the function's declaration in the Station script API topic.",
+      "id": "b11",
+      "kind": "troubleshooting"
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from the FRust grammar and the compiler, not yet reviewed by a person)"
+}

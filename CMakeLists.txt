@@ -175,6 +175,9 @@ endif()
 if(NOT TARGET creation_suite_ai_core)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiCore" CreationSuiteSharedAiCore)
 endif()
+if(NOT TARGET creation_suite_audio_analysis)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AudioAnalysis" CreationSuiteSharedAudioAnalysis)
+endif()
 if(NOT TARGET creation_suite_ai_providers)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/AiProviders" CreationSuiteSharedAiProviders)
 endif()
@@ -452,6 +455,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     StationBuiltInFrust
     creation_suite_ai_frust_tools
     creation_suite_ai_providers
+    creation_suite_audio_analysis
     ${CS_ASSET_SYSTEM_TARGET}
     ${CS_RENDER_TARGET}
     juce::juce_opengl

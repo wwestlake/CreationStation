@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 // What Station offers the scripts the Virtual Engineer writes (see StationAgentApi.frust). MainComponent
 // implements this over the real project; a test implements it over a recording fake. Every method is
@@ -32,6 +33,80 @@ public:
 
     virtual bool transportPlay(std::string& error) = 0;
     virtual bool transportStop(std::string& error) = 0;
+
+    // ---- The rest of what a track's controls can do. Optional: a host that cannot do one leaves it as it is. ----
+
+    // "audio", "midi", "automation", "signal", "foley", "video", "folder" or "marker" ("" if there is no such track).
+    virtual std::string trackKind(int track) { (void) track; return {}; }
+    virtual bool setTrackKind(int track, const std::string& kind, std::string& error)
+    {
+        (void) track; (void) kind;
+        error = "Changing a track's kind is not available.";
+        return false;
+    }
+
+    virtual bool trackArmed(int track) { (void) track; return false; }
+    virtual bool setTrackArmed(int track, bool armed, std::string& error) { (void) track; (void) armed; error = "Arming is not available."; return false; }
+    virtual bool trackMonitored(int track) { (void) track; return false; }
+    virtual bool setTrackMonitored(int track, bool monitored, std::string& error) { (void) track; (void) monitored; error = "Monitoring is not available."; return false; }
+    virtual bool trackStereo(int track) { (void) track; return false; }
+    virtual bool setTrackStereo(int track, bool stereo, std::string& error) { (void) track; (void) stereo; error = "Mono/stereo is not available."; return false; }
+
+    // Moves a track so it ends up at position `destination` (from 1).
+    virtual bool moveTrack(int track, int destination, std::string& error) { (void) track; (void) destination; error = "Moving tracks is not available."; return false; }
+
+    // ---- Automation. An automation track (kind "automation") drives one control of another track. ----
+
+    // Point `automationTrack` at `control` ("volume" or "pan") of `targetTrack`.
+    virtual bool setAutomationTarget(int automationTrack, int targetTrack, const std::string& control, std::string& error)
+    {
+        (void) automationTrack; (void) targetTrack; (void) control;
+        error = "Automation is not available.";
+        return false;
+    }
+
+    // Adds a point to the lane at `seconds` on the timeline. `value` is in the target's own units: decibels (-60 to 0) for a
+    // volume lane, -1 (left) to 1 (right) for a pan lane.
+    virtual bool addAutomationPoint(int automationTrack, double seconds, double value, std::string& error)
+    {
+        (void) automationTrack; (void) seconds; (void) value;
+        error = "Automation is not available.";
+        return false;
+    }
+
+    virtual bool clearAutomation(int automationTrack, std::string& error) { (void) automationTrack; error = "Automation is not available."; return false; }
+
+    // The tempo the project is set to, in beats per minute (0 if unknown).
+    virtual double projectTempoBpm() { return 0.0; }
+
+    // The audio of one track as mono samples, for measuring: `durationSeconds` of it starting `startSeconds` along the
+    // timeline. Track 0 means the whole mix (every audio clip). False, with the reason, if there is no audio to measure or
+    // it cannot be rendered. Optional: a host that cannot supply audio leaves this as it is.
+    virtual bool trackAudio(int track, double startSeconds, double durationSeconds, std::vector<float>& mono,
+                            double& sampleRate, std::string& error)
+    {
+        (void) track; (void) startSeconds; (void) durationSeconds; (void) mono; (void) sampleRate;
+        error = "Audio is not available.";
+        return false;
+    }
+
+    // One note of a MIDI track, positioned in beats from the start of the timeline.
+    struct MidiNoteInfo
+    {
+        int pitch = 60;
+        int velocity = 100;
+        double beat = 0.0;
+        double lengthBeats = 0.0;
+    };
+
+    // Every MIDI note on one track (all its MIDI clips), for reading exactly what was played. False, with the reason, if the
+    // track has no MIDI notes. Optional.
+    virtual bool trackMidiNotes(int track, std::vector<MidiNoteInfo>& notes, std::string& error)
+    {
+        (void) track; (void) notes;
+        error = "MIDI is not available.";
+        return false;
+    }
 };
 
 // The mixer fader is a linear gain from 0 to 1, where 1 is the top of the fader. The API speaks decibels, from

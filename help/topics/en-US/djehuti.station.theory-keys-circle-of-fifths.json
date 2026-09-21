@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.theory-keys-circle-of-fifths",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Music theory: keys and the circle of fifths",
+  "summary": "Keys and key signatures, the circle of fifths, relative and parallel keys, which keys are close together, and the chords that belong to a key.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [],
+  "keywords": [
+    "circle of fifths",
+    "key",
+    "key signature",
+    "sharps",
+    "flats",
+    "relative minor",
+    "parallel",
+    "modulation",
+    "transpose",
+    "closely related",
+    "diatonic",
+    "tonic",
+    "dominant",
+    "subdominant",
+    "capo",
+    "fifth"
+  ],
+  "alternateQueries": [
+    "What is the circle of fifths?",
+    "How many sharps are in the key of D?",
+    "What is the relative minor of C?",
+    "What chords are in the key of G?",
+    "How do I change key?",
+    "What keys sound close together?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.theory-chords-harmony"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.theory-notes-intervals-scales"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "b1",
+      "kind": "paragraph",
+      "text": "A key is a home note (the tonic) and the scale of notes that belong with it. A song 'in C major' mostly uses the notes of the C major scale and feels settled when it lands on C."
+    },
+    {
+      "term": "The circle of fifths",
+      "definition": "Arrange the twelve keys so each step clockwise goes up a perfect fifth (seven semitones): C, G, D, A, E, B, F#/Gb, Db, Ab, Eb, Bb, F, and back to C. Each step clockwise adds one sharp to the key signature; each step counter-clockwise adds one flat.",
+      "id": "b2",
+      "kind": "definition"
+    },
+    {
+      "term": "Key signatures",
+      "definition": "C major has no sharps or flats. Clockwise: G has 1 sharp (F#), D 2 (F#, C#), A 3, E 4, B 5, F#/Gb 6. Counter-clockwise: F has 1 flat (Bb), Bb 2 (Bb, Eb), Eb 3, Ab 4, Db 5, Gb 6. The sharps appear in the order F C G D A E B; the flats in the reverse order B E A D G C F.",
+      "id": "b3",
+      "kind": "definition"
+    },
+    {
+      "term": "Relative minor",
+      "definition": "Every major key shares its notes with a minor key that starts on its sixth degree, three semitones below: C major and A minor, G and E minor, D and B minor, A and F# minor, E and C# minor, F and D minor, Bb and G minor, Eb and C minor. Same key signature, different home note. The parallel minor shares the same tonic (C major and C minor) and has three more flats.",
+      "id": "b4",
+      "kind": "definition"
+    },
+    {
+      "term": "Close and distant keys",
+      "definition": "Keys next to each other on the circle share six of their seven notes, so moving to a neighbour (a fifth up or down) is the smoothest change of key: from C to G (dominant) or to F (subdominant), or to the relative minor. Keys far across the circle (C and F#) share few notes and a change between them is dramatic.",
+      "id": "b5",
+      "kind": "definition"
+    },
+    {
+      "term": "Chords of a key",
+      "definition": "Build a triad on each degree of the major scale: I major, ii minor, iii minor, IV major, V major, vi minor, vii diminished. In C: C, Dm, Em, F, G, Am, Bdim. In G: G, Am, Bm, C, D, Em, F#dim. The three major chords (I, IV, V) sit side by side on the circle: F, C and G in the key of C. The most common minor chord in a major key is vi.",
+      "id": "b6",
+      "kind": "definition"
+    },
+    {
+      "term": "Using the circle for movement",
+      "definition": "Chord roots moving down a fifth (or up a fourth) are the strongest, most natural motion: V to I, ii to V, vi to ii. This is why so many progressions travel counter-clockwise round the circle.",
+      "id": "b7",
+      "kind": "definition"
+    },
+    {
+      "term": "Transposing and capos",
+      "definition": "To move a song to another key, shift every note by the same number of semitones. A capo on fret N raises the pitch of open strings by N semitones, so the chord shapes stay the same but the key rises: capo 2 with G shapes sounds in A.",
+      "id": "b8",
+      "kind": "definition"
+    }
+  ],
+  "contentRevision": 1,
+  "reviewedAt": "2026-09-20",
+  "reviewedBy": "Claude (from standard music theory, not yet reviewed by a person)"
+}

@@ -587,6 +587,13 @@ AiPanel::AiPanel()
     accessComboBox.addListener(this);
     addAndMakeVisible(accessComboBox);
 
+    roleComboBox.addItem("Engineer", 1);
+    roleComboBox.addItem("Producer", 2);
+    roleComboBox.setSelectedId(1, juce::dontSendNotification);
+    roleComboBox.setTooltip("Engineer: changes your project by writing scripts. Producer: talks about the music and listens through measuring tools.");
+    roleComboBox.addListener(this);
+    addAndMakeVisible(roleComboBox);
+
     promptLabel.setText("Message", juce::dontSendNotification);
     promptLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaebbd0));
     addAndMakeVisible(promptLabel);
@@ -928,6 +935,7 @@ void AiPanel::setCollapsed(bool shouldCollapse)
     modelComboBox.setVisible(! collapsed);
     accessLabelTitle.setVisible(! collapsed);
     accessComboBox.setVisible(! collapsed);
+    roleComboBox.setVisible(! collapsed);
     promptLabel.setVisible(! collapsed);
     transcriptViewport.setVisible(! collapsed);
     promptEditor.setVisible(! collapsed);
@@ -950,6 +958,13 @@ void AiPanel::setSendButtonIcon(station_ui::SendArrowButton::Icon icon, const ju
 {
     sendButton.setIcon(icon);
     sendButton.setTooltip(tooltip);
+}
+
+void AiPanel::setRole(Role newRole)
+{
+    role = newRole;
+    roleComboBox.setSelectedId(role == Role::producer ? 2 : 1, juce::dontSendNotification);
+    headerLabel.setText(role == Role::producer ? "Virtual Producer" : "Virtual Engineer", juce::dontSendNotification);
 }
 
 void AiPanel::setRunning(bool isRunning)
@@ -1036,7 +1051,13 @@ void AiPanel::comboBoxChanged(juce::ComboBox* comboBoxThatHasChanged)
     if (updatingComboBoxes)
         return;
 
-    if (comboBoxThatHasChanged == &modelComboBox)
+    if (comboBoxThatHasChanged == &roleComboBox)
+    {
+        setRole(roleComboBox.getSelectedId() == 2 ? Role::producer : Role::engineer);
+        if (onRoleChanged)
+            onRoleChanged(role);
+    }
+    else if (comboBoxThatHasChanged == &modelComboBox)
     {
         if (onModelChanged)
             onModelChanged(modelComboBox.getText().trim());
@@ -1076,6 +1097,8 @@ void AiPanel::resized()
     auto titleRow = area.removeFromTop(40);
     headerLabel.setBounds(titleRow.removeFromLeft(200));
     collapseButton.setBounds(titleRow.removeFromRight(90));
+    titleRow.removeFromRight(8);
+    roleComboBox.setBounds(titleRow.removeFromRight(120).reduced(0, 6));
     subtitleLabel.setBounds(titleRow);
 
     area.removeFromTop(6);

@@ -33,7 +33,13 @@ public:
 
     // `apiDeclarations` is the text of StationAgentApi.frust and `guide` the text of StationScriptGuide.md (how to
     // write FRust for Station). The host must outlive the assistant.
-    StationAssistant(StationAgentHost& host, std::string apiDeclarations, std::string guide);
+    // Who the assistant is working as. The Engineer changes the project by writing scripts; the Producer talks about the
+    // music and listens through measuring tools, and has no tool that can change anything.
+    enum class Role { engineer, producer };
+
+    // `lookup` searches Station's help for the frust_lookup tool.
+    StationAssistant(StationAgentHost& host, std::string apiDeclarations, std::string guide,
+                     std::function<std::string(const std::string& query)> lookup);
     ~StationAssistant();
 
     // Whether the agent path can talk to this provider yet (the OpenAI chat-completions protocol, which OpenAI and
@@ -51,19 +57,26 @@ public:
                std::function<void(const juce::String& status)> onProgress,
                std::function<void(const Outcome& outcome)> onFinished);
 
+    void setRole(Role newRole) noexcept { role = newRole; }
+    Role getRole() const noexcept { return role; }
+
     void stop();
     bool isRunning() const noexcept { return running; }
     void clearConversation();
 
     // What the model is told about writing FRust for Station, and Station's API. Added to the system prompt.
     juce::String codingGuidance() const;
+    // What the Producer is told: who it is, how to use what it measures, and what it cannot do.
+    juce::String producerGuidance() const;
 
 private:
     StationAgentHost& host;
     std::string apiDeclarations;
     std::string guide;
     std::unique_ptr<creation::frust::ScriptRunner> runner;
-    creation::ai::ToolRegistry tools;
+    creation::ai::ToolRegistry tools;           // the Engineer's
+    creation::ai::ToolRegistry producerTools;   // the Producer's: reading and measuring only
+    Role role = Role::engineer;
     creation::ai::CancelToken cancel;
     std::vector<creation::ai::Message> history;
     std::thread worker;

@@ -34,6 +34,13 @@ public:
     void setGuidanceMode(GuidanceMode newMode);
     GuidanceMode getGuidanceMode() const noexcept { return guidanceMode; }
 
+    // Who the assistant is working as. The Engineer changes the project by writing scripts; the Producer talks about the
+    // music and listens through measuring tools. The choice sits in the title row.
+    enum class Role { engineer, producer };
+    void setRole(Role newRole);
+    Role getRole() const noexcept { return role; }
+    std::function<void(Role role)> onRoleChanged;
+
     void setAccessLevel(AccessLevel newLevel);
     AccessLevel getAccessLevel() const noexcept { return accessLevel; }
 
@@ -118,6 +125,8 @@ private:
     juce::ComboBox modelComboBox;
     juce::Label accessLabelTitle;
     juce::ComboBox accessComboBox;
+    juce::ComboBox roleComboBox;
+    Role role = Role::engineer;
     juce::Label promptLabel;
     juce::Viewport transcriptViewport;
     std::unique_ptr<ChatTranscriptComponent> transcriptContent;
