@@ -36,18 +36,42 @@ if(MSVC)
     string(APPEND CMAKE_MODULE_LINKER_FLAGS_RELEASE " /DEBUG /OPT:REF /OPT:ICF")
 endif()
 
-option(CREATION_STATION_ENABLE_ASIO "Enable Steinberg ASIO support in Creation Station" OFF)
-set(CREATION_STATION_ASIO_SDK_DIR "" CACHE PATH "Path to the Steinberg ASIO SDK folder containing iasiodrv.h")
+# ASIO is REQUIRED, not an option. Station always ships with it, built with the GPLv3 version of Steinberg's ASIO SDK
+# (2.3.4, which is dual-licensed proprietary / GPLv3). It used to be a switch that defaulted to OFF, and a build made
+# without the switch silently lost the ASIO device type, so there is no switch any more.
+#
+# The SDK is not stored in this repository. Where a build gets it, in order:
+#   1. CREATION_STATION_ASIO_SDK_DIR (a folder containing iasiodrv.h: the SDK's "common" folder), or the
+#      CREATION_STATION_ASIO_SDK_DIR / ASIO_SDK_DIR environment variables;
+#   2. otherwise it is downloaded when CMake configures, from the pinned commit below (the same one the release pipeline uses).
+# If neither works, configuring FAILS. It never carries on without ASIO.
+set(CREATION_STATION_ASIO_SDK_DIR "" CACHE PATH "Folder containing iasiodrv.h (the ASIO SDK's common folder). Downloaded automatically if empty.")
 set(CREATION_SUITE_SHARED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../shared" CACHE PATH "Path to the Creation Suite shared code root")
 
-if(CREATION_STATION_ENABLE_ASIO AND NOT CREATION_STATION_ASIO_SDK_DIR)
-    if(DEFINED ENV{CREATION_STATION_ASIO_SDK_DIR} AND NOT "$ENV{CREATION_STATION_ASIO_SDK_DIR}" STREQUAL "")
-        set(CREATION_STATION_ASIO_SDK_DIR "$ENV{CREATION_STATION_ASIO_SDK_DIR}" CACHE PATH
-            "Path to the Steinberg ASIO SDK folder containing iasiodrv.h" FORCE)
-    elseif(DEFINED ENV{ASIO_SDK_DIR} AND NOT "$ENV{ASIO_SDK_DIR}" STREQUAL "")
-        set(CREATION_STATION_ASIO_SDK_DIR "$ENV{ASIO_SDK_DIR}" CACHE PATH
-            "Path to the Steinberg ASIO SDK folder containing iasiodrv.h" FORCE)
-    endif()
+if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
+    foreach(candidate "$ENV{CREATION_STATION_ASIO_SDK_DIR}" "$ENV{ASIO_SDK_DIR}")
+        if(candidate AND EXISTS "${candidate}/iasiodrv.h")
+            set(CREATION_STATION_ASIO_SDK_DIR "${candidate}" CACHE PATH "Folder containing iasiodrv.h (the ASIO SDK's common folder). Downloaded automatically if empty." FORCE)
+            break()
+        endif()
+    endforeach()
+endif()
+
+if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
+    include(FetchContent)
+    FetchContent_Declare(asio_sdk
+        GIT_REPOSITORY https://github.com/audiosdk/asio.git
+        GIT_TAG 496a0765b8bb9c26f764f22f9a9712a937177db2   # ASIO SDK 2.3.4, dual licensed proprietary / GPLv3
+    )
+    FetchContent_MakeAvailable(asio_sdk)
+    set(CREATION_STATION_ASIO_SDK_DIR "${asio_sdk_SOURCE_DIR}/common" CACHE PATH "Folder containing iasiodrv.h (the ASIO SDK's common folder). Downloaded automatically if empty." FORCE)
+endif()
+
+if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
+    message(FATAL_ERROR
+        "The ASIO SDK is required and iasiodrv.h was not found in '${CREATION_STATION_ASIO_SDK_DIR}'.\n"
+        "Station always builds with ASIO. It is downloaded automatically when CMake can reach github.com; otherwise point\n"
+        "-DCREATION_STATION_ASIO_SDK_DIR at the SDK's \"common\" folder (or set the ASIO_SDK_DIR environment variable).")
 endif()
 
 add_subdirectory("${JUCE_DIR}" juce)
@@ -423,21 +447,9 @@ target_include_directories(CreativeWorkstation PRIVATE
 )
 
 
-if(CREATION_STATION_ENABLE_ASIO)
-    if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
-        message(FATAL_ERROR
-            "CREATION_STATION_ENABLE_ASIO is ON, but iasiodrv.h was not found.\n"
-            "Djehuti Station does not vendor the Steinberg ASIO SDK in this repository.\n"
-            "Install or clone the ASIO SDK separately, then configure one of:\n"
-            "  -DCREATION_STATION_ASIO_SDK_DIR=<path-to-folder-containing-iasiodrv.h>\n"
-            "  CREATION_STATION_ASIO_SDK_DIR environment variable\n"
-            "  ASIO_SDK_DIR environment variable\n"
-            "Example: -DCREATION_STATION_ASIO_SDK_DIR=D:/sdk/asio/common")
-    endif()
-
-    target_compile_definitions(CreativeWorkstation PRIVATE JUCE_ASIO=1)
-    target_include_directories(CreativeWorkstation PRIVATE "${CREATION_STATION_ASIO_SDK_DIR}")
-endif()
+# ASIO is always compiled in (see the top of this file).
+target_compile_definitions(CreativeWorkstation PRIVATE JUCE_ASIO=1)
+target_include_directories(CreativeWorkstation PRIVATE "${CREATION_STATION_ASIO_SDK_DIR}")
 
 target_compile_definitions(CreationStationInstrument PRIVATE
     JUCE_WEB_BROWSER=0

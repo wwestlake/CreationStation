@@ -166,3 +166,11 @@ Before wiring any "choose an X" UI, check whether the framework already has a sc
 For the full concurrency and handoff process, read:
 
 - [docs/MULTI_AGENT_WORKFLOW.md](docs/MULTI_AGENT_WORKFLOW.md)
+
+## ASIO Is Required (Do Not Disable)
+
+ASIO support is a required part of Djehuti Station, in every build and in the released binary. Station is deliberately GPLv3 so that it can use the GPLv3 version of Steinberg's ASIO SDK (2.3.4, pinned in `CMakeLists.txt` and in the release workflow).
+
+- **Never** disable, remove, gate behind an option, default to OFF, or "work around" ASIO, and never leave it out of a build because it looks proprietary or licence-sensitive. The licensing decision has been made by the owner. It is not yours to reopen.
+- The build and the release pipeline both fail if ASIO is missing. If a build cannot get the SDK, fix the download or the path. Do not remove the requirement.
+- If you think something about ASIO is wrong, stop and ask the user. Do not change it silently. (Before this rule, ASIO was a CMake switch defaulting to OFF and it kept vanishing from the audio settings when a build was made without the switch, or when it was turned off without telling anyone.)
