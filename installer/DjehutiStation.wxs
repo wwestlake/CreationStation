@@ -67,20 +67,21 @@
       </Component>
     </DirectoryRef>
 
-    <!-- The shortcut components' key paths are per-machine (HKLM), like everything else here: a per-user key path in a per-machine
-         install fails Windows Installer's own validation (ICE57). -->
+    <!-- The shortcut components' key paths are per-user (HKCU): Windows Installer's validation requires it for shortcuts in the
+         Start menu and desktop folders (ICE38, ICE43). In a per-machine install that trips a third rule, ICE57, which
+         contradicts those two, so build-msi.ps1 skips it. This is the usual pattern; do not change these to HKLM. -->
     <DirectoryRef Id="StationMenuFolder">
       <Component Id="StationMenuShortcut" Guid="*" Win64="yes">
         <Shortcut Id="StationMenuLink" Name="Djehuti Station" Target="[INSTALLFOLDER]DjehutiStation.exe" WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="RemoveStationMenuFolder" On="uninstall" />
-        <RegistryValue Root="HKLM" Key="Software\LagDaemon Software\Djehuti Station" Name="MenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\LagDaemon Software\Djehuti Station" Name="MenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
     <DirectoryRef Id="DesktopFolder">
       <Component Id="StationDesktopShortcut" Guid="*" Win64="yes">
         <Shortcut Id="StationDesktopLink" Name="Djehuti Station" Target="[INSTALLFOLDER]DjehutiStation.exe" WorkingDirectory="INSTALLFOLDER" />
-        <RegistryValue Root="HKLM" Key="Software\LagDaemon Software\Djehuti Station" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+        <RegistryValue Root="HKCU" Key="Software\LagDaemon Software\Djehuti Station" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 

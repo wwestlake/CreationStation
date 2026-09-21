@@ -51,6 +51,7 @@ Invoke-Wix "candle.exe" @(
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutFile) | Out-Null
 Invoke-Wix "light.exe" @(
     "-nologo", "-ext", "WixUtilExtension", "-ext", "WixUIExtension", "-cultures:en-us",
+    "-sice:ICE57",   # per-user shortcut key paths in a per-machine install: required by ICE38/ICE43, contradicted by ICE57
     "-out", $OutFile, "$work\DjehutiStation.wixobj", "$work\SuiteServices.wixobj")
 
 Remove-Item -Recurse -Force $work
