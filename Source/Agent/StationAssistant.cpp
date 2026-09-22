@@ -129,6 +129,18 @@ StationAssistant::StationAssistant(StationAgentHost& hostToUse, std::string decl
         }));
     tools.add(makeFrustLookupTool(std::move(lookup)));
 
+    // What pods (FRust packages) the Frate registry has, so the Engineer knows what exists instead of guessing. The registry is a web
+    // service, the same one `frate` pulls dependencies from. Read-only. This runs on the tool's own thread, so waiting on the network
+    // here never blocks Station.
+    tools.add(makeFrateRegistryTool([](const std::string& url) -> std::string
+    {
+        auto stream = juce::URL(juce::String(url)).createInputStream(
+            juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                .withConnectionTimeoutMs(15000)
+                .withNumRedirectsToFollow(3));
+        return stream != nullptr ? stream->readEntireStreamAsString().toStdString() : std::string();
+    }));
+
     // ---- The Producer's tools: reading and measuring, nothing that changes the project ----
     auto alivePtr = alive;
 
@@ -439,6 +451,7 @@ bool StationAssistant::start(const creation::services::SuiteAiResolvedRuntimeSet
                                   : call.name == "analyze_pitch" ? "Listening to the track..."
                                   : call.name == "analyze_tempo" ? "Listening for the beat..."
                                   : call.name == "analyze_midi_drums" ? "Reading the drum notes..."
+                                  : call.name == "frate_registry" ? "Checking the pod registry..."
                                   : call.name == "project_overview" ? "Looking at the project..."
                                                                     : "Looking things up...";
         post([onProgress, what] { if (onProgress) onProgress(what); });
