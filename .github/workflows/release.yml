@@ -365,24 +365,15 @@ jobs:
           $servicesDir = Join-Path $env:ProgramFiles "Djehuti Suite\Services"
           $stationExe = Join-Path $env:ProgramFiles "DjehutiStation\DjehutiStation.exe"
 
-          # 1. The package itself contains the service and records where it is.
-          $installer = New-Object -ComObject WindowsInstaller.Installer
-          $db = $installer.GetType().InvokeMember("OpenDatabase", "InvokeMethod", $null, $installer, @($msi, 0))
-          function Query($sql) {
-            $view = $db.GetType().InvokeMember("OpenView", "InvokeMethod", $null, $db, @($sql))
-            $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
-            $rows = @()
-            while ($true) {
-              $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
-              if ($null -eq $record) { break }
-              $rows += $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, @(1))
-            }
-            $rows
-          }
-          $files = Query "SELECT FileName FROM File"
-          if (-not ($files | Where-Object { $_ -like "*DjehutiSuiteVfsService.exe" })) { throw "The MSI does not contain the storage service." }
-          if (-not ($files | Where-Object { $_ -like "*DjehutiStation.exe" })) { throw "The MSI does not contain Station." }
-          if (-not (Query "SELECT Name FROM Registry WHERE Name='ServicesDir'")) { throw "The MSI does not record where the storage service is." }
+          # 1. The package itself contains Station and the service. It is unpacked into a temporary folder (an administrative install:
+          # nothing is installed or registered) and the files are looked for. Where the service is recorded is checked after the real
+          # install below.
+          $unpacked = Join-Path $env:RUNNER_TEMP "msi-unpacked"
+          $p = Start-Process msiexec.exe -ArgumentList "/a", "`"$msi`"", "/qn", "TARGETDIR=`"$unpacked`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "The MSI could not be unpacked (exit code $($p.ExitCode)); it is not a valid installer." }
+          if (-not (Get-ChildItem $unpacked -Recurse -File -Filter DjehutiSuiteVfsService.exe -ErrorAction SilentlyContinue)) { throw "The MSI does not contain the storage service." }
+          if (-not (Get-ChildItem $unpacked -Recurse -File -Filter DjehutiStation.exe -ErrorAction SilentlyContinue)) { throw "The MSI does not contain Station." }
+          Write-Host "The MSI contains Station and the storage service."
 
           # 2. It installs on this clean machine.
           $log = Join-Path $PWD "artifacts\install.log"
