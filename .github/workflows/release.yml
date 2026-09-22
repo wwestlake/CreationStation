@@ -362,8 +362,11 @@ jobs:
           # this is exactly the situation a customer is in - the one a developer's machine (which has the service) hides.
           $msi = Join-Path $PWD ("artifacts\{0}.msi" -f "${{ steps.classify.outputs.tag }}")
           $version = "${{ steps.classify.outputs.version }}"
-          $servicesDir = Join-Path $env:ProgramFiles "Djehuti Suite\Services"
-          $stationExe = Join-Path $env:ProgramFiles "DjehutiStation\DjehutiStation.exe"
+          # Installed into a folder that is NOT the default (and on the runner's D: drive), to prove everything follows the
+          # user's choice: <suite folder>\Djehuti Station and <suite folder>\Services, nothing anywhere else.
+          $suiteDir = Join-Path $env:RUNNER_TEMP "Chosen Place\Djehuti Suite"
+          $servicesDir = Join-Path $suiteDir "Services"
+          $stationExe = Join-Path $suiteDir "Djehuti Station\DjehutiStation.exe"
 
           # 1. The package itself contains Station and the service. It is unpacked into a temporary folder (an administrative install:
           # nothing is installed or registered) and the files are looked for. Where the service is recorded is checked after the real
@@ -377,13 +380,18 @@ jobs:
 
           # 2. It installs on this clean machine.
           $log = Join-Path $PWD "artifacts\install.log"
-          $p = Start-Process msiexec.exe -ArgumentList "/i", "`"$msi`"", "/qn", "/l*v", "`"$log`"" -Wait -PassThru
+          $p = Start-Process msiexec.exe -ArgumentList "/i", "`"$msi`"", "/qn", "SUITEFOLDER=`"$suiteDir\`"", "/l*v", "`"$log`"" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60; throw "The installer failed with exit code $($p.ExitCode)." }
           if (-not (Test-Path $stationExe)) { throw "Station was not installed at $stationExe." }
           $serviceExe = Join-Path $servicesDir "DjehutiSuiteVfsService.exe"
           if (-not (Test-Path $serviceExe)) { throw "The storage service was not installed at $serviceExe." }
           $recorded = (Get-ItemProperty "HKLM:\SOFTWARE\LagDaemon Software\Djehuti Suite" -Name ServicesDir -ErrorAction Stop).ServicesDir
           if ($recorded.TrimEnd('\') -ne $servicesDir.TrimEnd('\')) { throw "The registry says the service is at '$recorded', not '$servicesDir'." }
+          $recordedSuite = (Get-ItemProperty "HKLM:\SOFTWARE\LagDaemon Software\Djehuti Suite" -Name SuiteDir -ErrorAction Stop).SuiteDir
+          if ($recordedSuite.TrimEnd('\') -ne $suiteDir.TrimEnd('\')) { throw "The registry says the suite is at '$recordedSuite', not '$suiteDir'." }
+          foreach ($stray in @((Join-Path $env:ProgramFiles "Djehuti Suite"), (Join-Path $env:ProgramFiles "DjehutiStation"))) {
+            if (Test-Path $stray) { throw "Something was installed at '$stray', outside the folder that was chosen." }
+          }
 
           # 3. The installed service really starts, and says which protocol it speaks and which version it is.
           $root = Join-Path $env:RUNNER_TEMP "vfs-root-check"

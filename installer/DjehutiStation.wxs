@@ -3,6 +3,14 @@
   The Djehuti Station installer (WiX v3). Built by the release pipeline (installer/build-msi.ps1); nothing here is meant
   to be built by hand.
 
+  Everything goes into the one folder the user chooses for the Djehuti Suite (default: Program Files\Djehuti Suite, shown in
+  the dialog so the user decides):
+
+      <suite folder>\Djehuti Station\     Station
+      <suite folder>\Services\            the suite's shared storage service
+
+  If the suite is already installed, its folder is the starting point, so Station joins it.
+
   It installs Station, and the Djehuti Suite's storage service that Station cannot run without (the shared fragment
   services/VfsService/installer/SuiteServices.wxs, linked in by the build script). An older copy of the service is
   replaced, a newer one is left alone. If the service cannot be installed the whole installation fails, so nobody is left
@@ -32,7 +40,9 @@
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLFOLDER" Name="DjehutiStation" />
+        <Directory Id="SUITEFOLDER" Name="Djehuti Suite">
+          <Directory Id="INSTALLFOLDER" Name="Djehuti Station" />
+        </Directory>
       </Directory>
       <Directory Id="ProgramMenuFolder">
         <Directory Id="StationMenuFolder" Name="Djehuti Station" />
@@ -40,7 +50,7 @@
       <Directory Id="DesktopFolder" />
     </Directory>
 
-    <Feature Id="StationFeature" Title="Djehuti Station" Level="1" Absent="disallow" ConfigurableDirectory="INSTALLFOLDER">
+    <Feature Id="StationFeature" Title="Djehuti Station" Level="1" Absent="disallow" ConfigurableDirectory="SUITEFOLDER">
       <ComponentRef Id="StationExe" />
       <ComponentRef Id="StationReadme" />
       <ComponentRef Id="StationLicense" />
@@ -85,8 +95,9 @@
       </Component>
     </DirectoryRef>
 
-    <!-- The usual install dialogs: licence, folder, progress. -->
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <!-- The usual install dialogs: licence, folder, progress. The folder the user picks is the SUITE folder; Station and the
+         services go in their own folders under it. -->
+    <Property Id="WIXUI_INSTALLDIR" Value="SUITEFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.EulaRtf)" />
     <UIRef Id="WixUI_InstallDir" />
   </Product>
