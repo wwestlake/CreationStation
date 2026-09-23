@@ -1,0 +1,102 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.troubleshoot-service",
+  "locale": "en-US",
+  "type": "troubleshooting",
+  "title": "The project service is missing or out of date",
+  "summary": "If Station cannot reach the project service, or the service is an older version, restart Station so it starts the current one.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.error.service",
+      "anchorBlockId": "not-running",
+      "verifiedBehaviorSignature": "sha256:6881c9973107da0a0701dfbe0370146343ab8e60d16eaea55a41efda88064e5e"
+    },
+    {
+      "helpId": "djehuti.station.storage.folder",
+      "anchorBlockId": "not-running",
+      "verifiedBehaviorSignature": "sha256:9a96679003406aa5df811ee77eb127a8a3906059bb617482ecdc70bf756a2004"
+    }
+  ],
+  "keywords": [
+    "project service",
+    "VFS service",
+    "service not running",
+    "out of date",
+    "storage prompt",
+    "DjehutiSuiteVfsService"
+  ],
+  "alternateQueries": [
+    "Why will my project not open?",
+    "What is DjehutiSuiteVfsService?",
+    "Why does it ask for the storage folder again?"
+  ],
+  "relations": [
+    {
+      "type": "explains",
+      "topicId": "djehuti.station.storage-vfs"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "not-running",
+      "kind": "troubleshooting",
+      "title": "\"the project service is not running\" or it stopped answering",
+      "symptoms": [
+        "projects will not open",
+        "imports stop partway"
+      ],
+      "resolution": "Station starts the project service by itself when it needs it. Close Station, then start it again. The service also closes itself after an hour of inactivity; the next start brings it back."
+    },
+    {
+      "id": "out-of-date",
+      "kind": "troubleshooting",
+      "title": "The service is out of date",
+      "symptoms": [
+        "\"out of date\"",
+        "cannot send or take large files"
+      ],
+      "resolution": "Close Djehuti Station and its project service (DjehutiSuiteVfsService.exe in Task Manager), then start Station again."
+    },
+    {
+      "id": "no-folder",
+      "kind": "troubleshooting",
+      "title": "The storage folder prompt appears again",
+      "symptoms": [
+        "asked where to keep data on every start"
+      ],
+      "resolution": "The storage location is recorded in one small file (suite-settings.json in your Roaming application data, Djehuti-Suite folder). If that file is missing you are asked again; choose the same folder to use your existing projects."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "shared/AssetSystem/src/SuiteVfsServiceClient.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "services/VfsService/Source/Main.cpp"
+      }
+    ]
+  }
+}

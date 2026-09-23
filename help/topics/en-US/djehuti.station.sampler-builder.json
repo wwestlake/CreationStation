@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.sampler-builder",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Build a sample pack from single-note recordings",
+  "summary": "The Sampler panel (Sample Pack Builder) turns a folder of single-note recordings into a chromatic sample pack.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.sampler",
+      "anchorBlockId": "build",
+      "verifiedBehaviorSignature": "sha256:ea400554d55cd40322ee60ab31686372fbc4d16fed3cfeb0060de98422fa79c4"
+    },
+    {
+      "helpId": "djehuti.station.sampler.build-pack",
+      "anchorBlockId": "build",
+      "verifiedBehaviorSignature": "sha256:3b3c1795e0cb6e138505f85a5f4cab280c252ab98dc285991d7959d70205d645"
+    }
+  ],
+  "keywords": [
+    "sample pack",
+    "sampler",
+    "single note",
+    "chromatic",
+    "sample builder"
+  ],
+  "alternateQueries": [
+    "How do I make a sample pack?",
+    "How do I turn recordings into an instrument?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.plugins-vst"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "build",
+      "kind": "steps",
+      "title": "Build a pack",
+      "steps": [
+        {
+          "id": "open",
+          "instruction": "Open View > Sampler, or press Build Sample Pack... in the Plugins panel.",
+          "expectedResult": "The Sample Pack Builder opens.",
+          "uiTarget": "djehuti.station.view.sampler"
+        },
+        {
+          "id": "input",
+          "instruction": "Under Raw captures folder press Browse... and choose the folder of raw single-note captures."
+        },
+        {
+          "id": "export",
+          "instruction": "Under Export folder choose where the pack should be exported."
+        },
+        {
+          "id": "go",
+          "instruction": "Press Build Sample Pack.",
+          "expectedResult": "The status shows the build; a failure shows \"Build failed\" with the reason.",
+          "uiTarget": "djehuti.station.sampler.build-pack"
+        }
+      ]
+    },
+    {
+      "id": "valid",
+      "kind": "note",
+      "text": "Choose a valid input folder and an export folder first; the panel tells you when either is missing."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SamplePackBuilderPanel.cpp"
+      }
+    ]
+  }
+}

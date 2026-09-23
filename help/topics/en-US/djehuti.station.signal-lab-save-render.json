@@ -1,0 +1,131 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.signal-lab-save-render",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Save, open and render a signal",
+  "summary": "While the Signal Lab has focus, the File menu offers New, Open, Save and Render Signal to Project.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.file.new-signal",
+      "anchorBlockId": "menu",
+      "verifiedBehaviorSignature": "sha256:adaec97787d308acfe0aaa9d5d0aecb6949f4e71770d378d5e1f1faba34478f0"
+    },
+    {
+      "helpId": "djehuti.station.file.open-signal",
+      "anchorBlockId": "menu",
+      "verifiedBehaviorSignature": "sha256:22d03d079cad345a869f8a9b7757e8a3c3db7770463e03ad9702de60d974b3b6"
+    },
+    {
+      "helpId": "djehuti.station.file.save-signal",
+      "anchorBlockId": "menu",
+      "verifiedBehaviorSignature": "sha256:b29f75b4608c030f50346e4c06c9b9abae15ace315a184485c37f2f4fc611c51"
+    },
+    {
+      "helpId": "djehuti.station.file.render-signal",
+      "anchorBlockId": "menu",
+      "verifiedBehaviorSignature": "sha256:cedc437e6360330889919490a0705bbf100ae914813c34b8b23e7d9ff1aa3df4"
+    }
+  ],
+  "keywords": [
+    "save signal",
+    "open signal",
+    "render signal",
+    "export sound",
+    "patch",
+    "signal asset"
+  ],
+  "alternateQueries": [
+    "How do I save my sound?",
+    "How do I turn a signal into a WAV?",
+    "How do I open a saved signal?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.signal-lab-first-sound"
+    },
+    {
+      "type": "next",
+      "topicId": "djehuti.station.signal-clips"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "menu",
+      "kind": "paragraph",
+      "text": "Click into the Signal Lab; the File menu then shows the signal items: New Signal, Open Signal..., Save Signal..., Render Signal to Project and Save Project."
+    },
+    {
+      "id": "save",
+      "kind": "steps",
+      "title": "Save a signal",
+      "steps": [
+        {
+          "id": "name",
+          "instruction": "Give the signal a Sound Name in the Properties column."
+        },
+        {
+          "id": "save",
+          "instruction": "Choose File > Save Signal...",
+          "expectedResult": "The signal is saved to the library as a project asset.",
+          "uiTarget": "djehuti.station.file.save-signal"
+        }
+      ]
+    },
+    {
+      "id": "render",
+      "kind": "steps",
+      "title": "Render a signal into the project",
+      "steps": [
+        {
+          "id": "render",
+          "instruction": "Choose File > Render Signal to Project.",
+          "expectedResult": "A WAV is rendered and added to the project as a render asset named \"<name> Render\".",
+          "uiTarget": "djehuti.station.file.render-signal"
+        },
+        {
+          "id": "use",
+          "instruction": "Find it in the Assets window, or place it on a track."
+        }
+      ]
+    },
+    {
+      "id": "new-open",
+      "kind": "paragraph",
+      "text": "New Signal starts a blank graph. Open Signal... loads a saved one."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SignalLabPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      }
+    ]
+  }
+}

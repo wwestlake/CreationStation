@@ -83,6 +83,11 @@ struct PatchLiveBindingMap
     }
 };
 
+// Builds the live bindings for a patch from the variables and variable bindings saved in it: each
+// bound port gets a live slot addressed by its variable's id (seeded with the variable's default),
+// so a timeline clip's voice can be driven by variable id alone, with no Signal Lab involved.
+PatchLiveBindingMap makeVariableBindingMap(const cw::PatchDocument& patch);
+
 class PatchLiveVoice final : public juce::AudioSource
 {
 public:
@@ -112,6 +117,27 @@ public:
     void start(double durationSeconds);
     // Message-thread: stops immediately.
     void stop();
+
+    // Timeline-driven use (one voice per Signal clip on the Tracker). start()/getNextAudioBlock()
+    // free-run a one-shot from 0 to the end; renderAt() instead renders the patch at an explicit
+    // patch-relative sample position, so the transport (play, loop, scrub, start mid-clip)
+    // decides what is heard. setPatchDurationSeconds() sets the patch's designed length (its
+    // envelopes and motion lanes are normalized over it).
+    void setPatchDurationSeconds(double seconds);
+    // Final gain applied as this voice adds into its destination. 0.9 (the default) is Signal Lab's
+    // own preview headroom. The offline renderer has no such factor, so a voice standing in for a
+    // timeline clip sets 1.0 to sound exactly like the bounce. Message thread, before publishing.
+    void setOutputScale(float scale) noexcept { outputScale = scale; }
+    // Message thread only, and only before the voice is visible to the audio thread: builds the
+    // per-entity DSP state for the graph rebuild() just published, so the audio thread never has
+    // to allocate it.
+    void adoptPublishedGraphNow();
+    // Audio thread only. Adds `numSamples` of the patch, starting at `patchSamplePosition`, into
+    // `destination` at `destStartSample`. A position that is not the continuation of the previous
+    // call (loop, scrub, start mid-clip) resets the filter/envelope state so stale state from the
+    // old position can't leak into the new one.
+    void renderAt(int64 patchSamplePosition, juce::AudioBuffer<float>& destination, int destStartSample, int numSamples);
+
     bool isActive() const noexcept { return active.load(); }
     // Message-thread: true, and consumed, the first time this is checked
     // after a playthrough reached its natural end on its own (as opposed to
@@ -126,6 +152,9 @@ public:
     // hasn't caught up yet -- harmless, nothing reads a stale slot since
     // slots are keyed to the graph that owns them).
     void setLiveMidiValue(const juce::String& nodeId, float value);
+    // A variable's live slot is addressed by the variable's id (see makeVariableBindingMap); value is
+    // its normalized 0..1 value. Same cost and thread rules as setLiveMidiValue.
+    void setVariableValue(const juce::String& variableId, float normalizedValue) { setLiveMidiValue(variableId, normalizedValue); }
 
     // Live scope tap: up to maxTapSlots rolling ~2.7s mono histories, one per
     // entity a currently-open Scope node is wired to (see
@@ -188,7 +217,8 @@ private:
     // help. Allocated and explicitly zero-filled once in the constructor
     // instead; every [slot][index] call site is unchanged since
     // unique_ptr<T[]>::operator[] behaves the same as a raw/std::array
-    // subscript.
+    // subscript. Each ring is allocated lazily, the first time
+    // registerOrReuseTapSlot() hands out that slot.
     std::array<std::unique_ptr<std::atomic<float>[]>, maxTapSlots> tapBuffers;
     std::array<juce::String, maxTapSlots> tapSlotNodeIds;
     int tapSlotCount = 0;
@@ -285,6 +315,12 @@ private:
         float previousEnvelope = 0.0f;    // Mix entity only: persistent, for the transient (rate-of-change) term
         float sampleHoldValue = 0.0f;     // SampleHold entity only: the currently-latched value
         float sampleHoldPreviousTrigger = 0.0f; // SampleHold entity only: for rising-edge detection across blocks
+        // Oscillator Source entities only. Phase is integrated sample by sample (phase += 2*pi*f/fs) instead of
+        // computed as 2*pi*f*t, so a frequency that changes mid-note (a pitch lane, or a live/automated
+        // value) bends the pitch smoothly instead of jumping the phase and clicking. resyncPhase asks the
+        // next sample to re-derive the phase from the transport position (start, loop, scrub).
+        double phase = 0.0;
+        bool resyncPhase = true;
     };
     juce::OwnedArray<RuntimeEntityState> runtimeStates; // audio-thread only
     std::shared_ptr<const EntityGraph> activeGraphForAudioThread; // audio-thread only: last graph this thread adopted
@@ -309,6 +345,7 @@ private:
 
     double sampleRate = 48000.0;
     int maxBlockSize = 512;
+    float outputScale = 0.9f;
     // Both written by start() (message thread) and read/advanced every
     // block by the audio thread -- must be atomic, unlike the rest of this
     // class's "which thread owns which field" split.
@@ -316,8 +353,8 @@ private:
     std::atomic<int64> elapsedSamples { 0 };
     std::atomic<bool> active { false };
     std::atomic<bool> finished { false };
+    std::atomic<bool> resyncPhaseRequested { false }; // set by start(); consumed by the audio thread
 
     using FrustSineFn = double (*)(double, double);
-    std::unique_ptr<creation::frust::PluginRuntime> frustRuntime;
-    FrustSineFn frustSine = nullptr;
+    FrustSineFn frustSine = nullptr; // shared process-wide FRust render_sine, see sharedFrustSine()
 };

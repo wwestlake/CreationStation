@@ -1,0 +1,103 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.foley",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "Foley: node graphs for sound-design logic",
+  "summary": "The Foley panel is a node-graph editor for sequencing and choice logic; it generates FRust source and can build a reusable pod.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.foley",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:d159bd5d1ddab9f2f8b8ac2912a7e655e75374bf1071ab6f5ebdb5f804c3c4f8"
+    },
+    {
+      "helpId": "djehuti.station.foley.build-pod",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:3a364ca059822670ff72fe2c03a766afc24cca0c9f83d86b10a5248eb577a7b9"
+    }
+  ],
+  "keywords": [
+    "Foley",
+    "node graph",
+    "FRust",
+    "pod",
+    "Frate",
+    "sound design logic",
+    "On Trigger"
+  ],
+  "alternateQueries": [
+    "What is Foley?",
+    "How do I build a pod?",
+    "How do I save a Foley setup?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.script-panel"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "what",
+      "kind": "paragraph",
+      "text": "Foley is an execution-style node editor, like a visual script. Drag a node from the palette onto the canvas (right-drag pans, the wheel zooms). A new graph starts with a hint to add an On Trigger node to generate a cue."
+    },
+    {
+      "id": "generate",
+      "kind": "definition",
+      "term": "Generate FRust",
+      "definition": "Turns the graph into FRust source you can read in the panel; \"Generated OK.\" or the errors are shown below."
+    },
+    {
+      "id": "build-pod",
+      "kind": "definition",
+      "term": "Build FRust Pod",
+      "definition": "Builds the graph as a reusable FRust pod in the current project through the project's Frate service. The pod's reflected nodes are added back to this palette."
+    },
+    {
+      "id": "add-pod",
+      "kind": "definition",
+      "term": "Add Frate Pod",
+      "definition": "Resolves a published Frate pod and adds its reflected nodes to the palette."
+    },
+    {
+      "id": "setups",
+      "kind": "definition",
+      "term": "Save Setup... and Load Setup...",
+      "definition": "Save or load the graph as a named project asset."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/FoleyPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/FoleyPanel.h"
+      }
+    ]
+  }
+}

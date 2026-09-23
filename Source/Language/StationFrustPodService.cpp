@@ -1,10 +1,6 @@
 #include "StationFrustPodService.h"
 
-#include <creation/frust/FratePodVfsResolver.h>
 #include <creation/frust/NodeLibraryLoader.h>
-#include <creation/frust/SuiteFrateBuildService.h>
-#include <creation/frust/SuiteFratePodWorkspace.h>
-#include <creation/suite/SuiteStoragePaths.h>
 
 #include <cmath>
 #include <set>
@@ -15,11 +11,6 @@ namespace {
 void foleyPlaySample(const char*) {}
 void foleyGainMix(double) {}
 void foleyDelaySeconds(double) {}
-
-juce::File podEntrySource(const juce::File& podDirectory) {
-    const auto lib = podDirectory.getChildFile("src/lib.fr");
-    return lib.existsAsFile() ? lib : podDirectory.getChildFile("src/main.fr");
-}
 
 } // namespace
 
@@ -34,10 +25,6 @@ bool StationFrustPodService::ensureVfs(juce::String& error) {
     if (vfsClient_.discover()) return true;
     error = "The Suite VFS service is unavailable.";
     return false;
-}
-
-juce::File StationFrustPodService::cacheRoot(const creation::suite::SuiteSettings& settings) {
-    return creation::suite::getCacheDirectory(settings).getChildFile("FRust");
 }
 
 juce::String StationFrustPodService::wrapAsPluginSource(const juce::String& podName,
@@ -70,68 +57,64 @@ bool StationFrustPodService::registerLoadedLibraries(const std::string& key,
     return true;
 }
 
+creation::frust::FrustOutcome StationFrustPodService::checkScript(creation::assets::ProjectSession& session,
+                                                                  const juce::String& source) {
+    creation::frust::FrustOutcome outcome;
+    if (!ensureVfs(outcome.output)) return outcome;
+    creation::frust::SuiteFrust frust(session, vfsClient_, registryClient_);
+    return frust.checkSource("Assets/Source/FRust/Scripts/patch.frust", source);
+}
+
 bool StationFrustPodService::buildGeneratedNodePod(creation::assets::ProjectSession& session,
-                                                    const creation::suite::SuiteSettings& settings,
                                                     const juce::String& podName,
                                                     const juce::String& generatedSource,
                                                     ce::node_system::NodeLibraryRegistry& nodeLibraries,
                                                     juce::String& status) {
     if (!ensureVfs(status)) return false;
 
-    const auto root = cacheRoot(settings);
-    creation::frust::SuiteFrateBuildService builder(
-        vfsClient_, registryClient_, juce::File(CS_FRATE_EXECUTABLE), root.getChildFile("registry-cache"));
-    creation::frust::SuiteFratePodWorkspace workspace(session, builder, root.getChildFile("workspaces"));
+    creation::frust::SuiteFrust frust(session, vfsClient_, registryClient_);
     creation::frust::PodScaffoldOptions options;
     options.name = podName;
     options.intendedApplication = "djehuti-station";
-    if (!workspace.writeSource(options, wrapAsPluginSource(podName, generatedSource), status)) return false;
+    if (!frust.writePodSource(options, wrapAsPluginSource(podName, generatedSource), status)) return false;
 
-    const auto result = workspace.build(podName);
-    if (result.build.status != creation::frust::BuildStatus::Success) {
-        status = result.build.output;
+    const auto built = frust.buildPod(podName);
+    if (!built.ok) {
+        status = built.output;
         return false;
     }
+    (void) frust.packagePod(podName);
 
-    const auto source = podEntrySource(result.materializedPodDirectory);
-    std::string runtimeError;
     const auto key = podName.toStdString();
-    runtime_.unload(key);
-    if (!runtime_.load(key, source.getFullPathName().toStdString(), runtimeError)) {
-        status = "Built and packaged, but JIT loading failed: " + juce::String(runtimeError);
+    juce::String loadError;
+    if (!frust.loadAuthoredPod(runtime_, podName, podName, loadError)) {
+        status = "Built and packaged, but JIT loading failed: " + loadError;
         return false;
     }
     if (!registerLoadedLibraries(key, nodeLibraries, status)) return false;
 
-    status = "Built, packaged, loaded, and registered " + podName + " from project VFS.";
+    status = "Built, packaged, loaded, and registered " + podName + " from the project VFS.";
     return true;
 }
 
-bool StationFrustPodService::loadRegistryNodePod(const creation::suite::SuiteSettings& settings,
+bool StationFrustPodService::loadRegistryNodePod(creation::assets::ProjectSession& session,
                                                   const juce::String& podName,
                                                   const juce::String& version,
                                                   ce::node_system::NodeLibraryRegistry& nodeLibraries,
                                                   juce::String& status) {
     if (!ensureVfs(status)) return false;
-    creation::frust::FratePodVfsResolver resolver(
-        vfsClient_, registryClient_, cacheRoot(settings).getChildFile("registry-cache"));
-    juce::File podDirectory;
-    const auto resolved = resolver.resolve(podName.toStdString(), version.toStdString(), podDirectory);
-    if (resolved != creation::frust::PodResolveStatus::ResolvedFromRegistry
-        && resolved != creation::frust::PodResolveStatus::ResolvedFromVfsCache) {
-        status = "Could not resolve " + podName + " " + version + " from the Frate registry.";
+
+    creation::frust::SuiteFrust frust(session, vfsClient_, registryClient_);
+    juce::String installError;
+    if (!frust.installRegistryPod(podName, version, installError)) {
+        status = installError;
         return false;
     }
-    const auto source = podEntrySource(podDirectory);
-    if (!source.existsAsFile()) {
-        status = "Resolved pod has no src/lib.fr or src/main.fr entry point.";
-        return false;
-    }
+
     const auto key = (podName + "@" + version).toStdString();
-    runtime_.unload(key);
-    std::string runtimeError;
-    if (!runtime_.load(key, source.getFullPathName().toStdString(), runtimeError)) {
-        status = "Pod resolved but JIT loading failed: " + juce::String(runtimeError);
+    juce::String loadError;
+    if (!frust.loadInstalledPod(runtime_, juce::String(key), podName, version, loadError)) {
+        status = "Pod resolved but JIT loading failed: " + loadError;
         return false;
     }
     if (!registerLoadedLibraries(key, nodeLibraries, status)) return false;

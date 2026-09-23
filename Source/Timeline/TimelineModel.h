@@ -55,6 +55,19 @@ public:
                 double startSeconds,
                 double durationSeconds,
                 juce::String& errorMessage);
+    // Adds a clip whose audio lives in the VFS: nothing is copied out to a file. For audio/foley clips `encodedAudio`
+    // (the asset's bytes, read through the VFS service) is used once, to measure the clip and draw its waveform; the
+    // waveform is then saved with the arrangement, so the bytes are never needed for display again. A video clip
+    // passes nullptr and gives its length in durationSeconds.
+    int addClipFromData(ClipKind kind,
+                        int trackIndex,
+                        const juce::String& displayName,
+                        const juce::String& assetId,
+                        const juce::String& sourceTool,
+                        const juce::MemoryBlock* encodedAudio,
+                        double startSeconds,
+                        double durationSeconds,
+                        juce::String& errorMessage);
     bool moveClip(int clipIndex, int trackIndex, double startSeconds);
     void setClipDisplayName(int clipIndex, const juce::String& displayName);
     void setClipAssetReference(int clipIndex, const cs::AssetRef& assetRef);
@@ -72,6 +85,20 @@ public:
     bool deleteClip(int clipIndex);
     bool splitClip(int clipIndex, double splitSeconds);
     bool hasActiveRecordingClip() const noexcept { return ! activeRecordingClips.empty(); }
+
+    // Linked clips (a video and its sound) edit together: move/trim/split/duplicate/delete on one is applied
+    // to the others in its group. See TimelineClip::linkGroupId.
+    std::vector<int> getLinkedPartnerIndices(int clipIndex) const;
+    bool isClipLinked(int clipIndex) const;
+    bool linkClips(int firstClipIndex, int secondClipIndex);
+    void unlinkClip(int clipIndex); // frees the whole group
+    void setClipSoundDetached(int clipIndex, bool detached);
+    void setClipVideoParams(int clipIndex, const juce::NamedValueSet& params);
+    void setClipSourceRange(int clipIndex, double sourceStartSeconds, double sourceDurationSeconds);
+    void setClipSourceTool(int clipIndex, const juce::String& sourceTool);
+    // For a video whose sound was split off (or that sound clip): the other half, when the two are not linked.
+    int findSoundCounterpart(int clipIndex) const;
+    static juce::String videoSoundSourceTool(const juce::String& videoAssetId) { return "video-sound:" + videoAssetId; }
 
     juce::String addMarker(double seconds, const juce::String& name = {});
     void removeMarker(const juce::String& id);
@@ -144,6 +171,8 @@ public:
     void clear();
 
     bool analyzeClipWaveform(int clipIndex, juce::String& errorMessage);
+    bool analyzeClipWaveformFromData(int clipIndex, const juce::MemoryBlock& encodedAudio, juce::String& errorMessage);
+    bool analyzeClipWaveformFromReader(int clipIndex, juce::AudioFormatReader& reader, juce::String& errorMessage);
     juce::ValueTree createState() const;
     void restoreState(const juce::ValueTree& state);
 
@@ -187,6 +216,9 @@ public:
     int getAutomationRecordingRate(int trackIndex) const;
 
 private:
+    bool trimClipStartUnlinked(int clipIndex, double newStartSeconds);
+    bool trimClipEndUnlinked(int clipIndex, double newEndSeconds);
+    int indexOfClipId(const juce::String& clipId) const;
     int getAutomationClipIndex(int trackIndex) const;
 
     double tempoBpm = 120.0;

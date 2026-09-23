@@ -305,6 +305,64 @@ int TimelineModel::addClip(ClipKind kind,
     return clipIndex;
 }
 
+int TimelineModel::addClipFromData(ClipKind kind,
+                                   int trackIndex,
+                                   const juce::String& displayName,
+                                   const juce::String& assetId,
+                                   const juce::String& sourceTool,
+                                   const juce::MemoryBlock* encodedAudio,
+                                   double startSeconds,
+                                   double durationSeconds,
+                                   juce::String& errorMessage)
+{
+    if (trackIndex < 0)
+    {
+        errorMessage = "Choose a valid track before placing the sound.";
+        return -1;
+    }
+
+    if (! juce::isPositiveAndBelow(trackIndex, getTrackCount()))
+        setTrackCount(trackIndex + 1);
+
+    if (! canTrackContainClip(getTrackKind(trackIndex), kind))
+    {
+        errorMessage = "That clip type cannot live on the selected track.";
+        return -1;
+    }
+
+    const auto isAudioBacked = kind == ClipKind::audio || kind == ClipKind::foley;
+    if (isAudioBacked && (encodedAudio == nullptr || encodedAudio->getSize() == 0))
+    {
+        errorMessage = "The sound has no data.";
+        return -1;
+    }
+
+    TimelineClip clip;
+    clip.id = juce::Uuid().toString();
+    clip.kind = kind;
+    clip.displayName = displayName.trim().isNotEmpty() ? displayName.trim() : toDisplayName(kind) + " Clip";
+    clip.assetId = assetId.trim();
+    clip.sourceTool = sourceTool.trim();
+    clip.trackIndex = trackIndex;
+    clip.startSeconds = juce::jmax(0.0, startSeconds);
+    clip.durationSeconds = (isAudioBacked || kind == ClipKind::video) ? juce::jmax(0.0, durationSeconds)
+                                                                      : juce::jmax(0.05, durationSeconds);
+    clip.sourceStartSeconds = 0.0;
+    clip.sourceDurationSeconds = clip.durationSeconds;
+    clip.recording = false;
+
+    clips.push_back(std::move(clip));
+    const auto clipIndex = static_cast<int>(clips.size()) - 1;
+
+    if (isAudioBacked && ! analyzeClipWaveformFromData(clipIndex, *encodedAudio, errorMessage))
+    {
+        clips.erase(clips.begin() + clipIndex);
+        return -1;
+    }
+
+    return clipIndex;
+}
+
 void TimelineModel::setClipDisplayName(int clipIndex, const juce::String& displayName)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
@@ -342,7 +400,7 @@ void TimelineModel::setClipDuration(int clipIndex, double newDurationSeconds)
     clips[(size_t) clipIndex].durationSeconds = juce::jmax(0.05, newDurationSeconds);
 }
 
-bool TimelineModel::trimClipStart(int clipIndex, double newStartSeconds)
+bool TimelineModel::trimClipStartUnlinked(int clipIndex, double newStartSeconds)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
@@ -369,7 +427,7 @@ bool TimelineModel::trimClipStart(int clipIndex, double newStartSeconds)
     return true;
 }
 
-bool TimelineModel::trimClipEnd(int clipIndex, double newEndSeconds)
+bool TimelineModel::trimClipEndUnlinked(int clipIndex, double newEndSeconds)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
@@ -393,24 +451,254 @@ bool TimelineModel::trimClipEnd(int clipIndex, double newEndSeconds)
     return true;
 }
 
+int TimelineModel::indexOfClipId(const juce::String& clipId) const
+{
+    for (size_t i = 0; i < clips.size(); ++i)
+        if (clips[i].id == clipId)
+            return (int) i;
+    return -1;
+}
+
+std::vector<int> TimelineModel::getLinkedPartnerIndices(int clipIndex) const
+{
+    std::vector<int> partners;
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()) || clips[(size_t) clipIndex].linkGroupId.isEmpty())
+        return partners;
+
+    const auto& group = clips[(size_t) clipIndex].linkGroupId;
+    for (size_t i = 0; i < clips.size(); ++i)
+        if ((int) i != clipIndex && ! clips[i].recording && clips[i].linkGroupId == group)
+            partners.push_back((int) i);
+    return partners;
+}
+
+bool TimelineModel::isClipLinked(int clipIndex) const
+{
+    return ! getLinkedPartnerIndices(clipIndex).empty();
+}
+
+bool TimelineModel::linkClips(int firstClipIndex, int secondClipIndex)
+{
+    if (firstClipIndex == secondClipIndex
+        || ! juce::isPositiveAndBelow(firstClipIndex, (int) clips.size())
+        || ! juce::isPositiveAndBelow(secondClipIndex, (int) clips.size()))
+        return false;
+
+    auto& first = clips[(size_t) firstClipIndex];
+    auto& second = clips[(size_t) secondClipIndex];
+    const auto group = first.linkGroupId.isNotEmpty() ? first.linkGroupId
+                     : second.linkGroupId.isNotEmpty() ? second.linkGroupId
+                     : juce::Uuid().toString();
+    first.linkGroupId = group;
+    second.linkGroupId = group;
+    return true;
+}
+
+void TimelineModel::unlinkClip(int clipIndex)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return;
+
+    const auto group = clips[(size_t) clipIndex].linkGroupId;
+    if (group.isEmpty())
+        return;
+
+    for (auto& clip : clips)
+        if (clip.linkGroupId == group)
+            clip.linkGroupId = {};
+}
+
+void TimelineModel::setClipSoundDetached(int clipIndex, bool detached)
+{
+    if (juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        clips[(size_t) clipIndex].soundDetached = detached;
+}
+
+void TimelineModel::setClipVideoParams(int clipIndex, const juce::NamedValueSet& params)
+{
+    if (juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        clips[(size_t) clipIndex].videoParams = params;
+}
+
+void TimelineModel::setClipSourceRange(int clipIndex, double sourceStartSeconds, double sourceDurationSeconds)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return;
+
+    clips[(size_t) clipIndex].sourceStartSeconds = juce::jmax(0.0, sourceStartSeconds);
+    clips[(size_t) clipIndex].sourceDurationSeconds = juce::jmax(0.0, sourceDurationSeconds);
+}
+
+void TimelineModel::setClipSourceTool(int clipIndex, const juce::String& sourceTool)
+{
+    if (juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        clips[(size_t) clipIndex].sourceTool = sourceTool;
+}
+
+int TimelineModel::findSoundCounterpart(int clipIndex) const
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return -1;
+
+    const auto& clip = clips[(size_t) clipIndex];
+    if (clip.linkGroupId.isNotEmpty() || clip.recording)
+        return -1;
+
+    int best = -1;
+    double bestDistance = 0.0;
+    for (size_t i = 0; i < clips.size(); ++i)
+    {
+        if ((int) i == clipIndex || clips[i].recording || clips[i].linkGroupId.isNotEmpty())
+            continue;
+
+        const auto& other = clips[i];
+        const auto matches = (clip.kind == ClipKind::video && clip.soundDetached && other.kind == ClipKind::audio
+                              && other.sourceTool == videoSoundSourceTool(clip.assetId))
+                          || (clip.kind == ClipKind::audio && clip.sourceTool.startsWith("video-sound:")
+                              && other.kind == ClipKind::video && other.soundDetached
+                              && clip.sourceTool == videoSoundSourceTool(other.assetId));
+        if (! matches)
+            continue;
+
+        const auto distance = std::abs(other.startSeconds - clip.startSeconds);
+        if (best < 0 || distance < bestDistance)
+        {
+            best = (int) i;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+bool TimelineModel::trimClipStart(int clipIndex, double newStartSeconds)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto partners = getLinkedPartnerIndices(clipIndex);
+    const auto before = clips[(size_t) clipIndex].startSeconds;
+    if (! trimClipStartUnlinked(clipIndex, newStartSeconds))
+        return false;
+
+    const auto delta = clips[(size_t) clipIndex].startSeconds - before;
+    for (auto partner : partners)
+        trimClipStartUnlinked(partner, clips[(size_t) partner].startSeconds + delta);
+    return true;
+}
+
+bool TimelineModel::trimClipEnd(int clipIndex, double newEndSeconds)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto partners = getLinkedPartnerIndices(clipIndex);
+    const auto before = clips[(size_t) clipIndex].startSeconds + clips[(size_t) clipIndex].durationSeconds;
+    if (! trimClipEndUnlinked(clipIndex, newEndSeconds))
+        return false;
+
+    const auto delta = clips[(size_t) clipIndex].startSeconds + clips[(size_t) clipIndex].durationSeconds - before;
+    for (auto partner : partners)
+        trimClipEndUnlinked(partner, clips[(size_t) partner].startSeconds + clips[(size_t) partner].durationSeconds + delta);
+    return true;
+}
+
 bool TimelineModel::moveClip(int clipIndex, int trackIndex, double startSeconds)
 {
-    return creation::timeline::moveClip(clips, tracks, clipIndex, trackIndex, startSeconds);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto partners = getLinkedPartnerIndices(clipIndex);
+    const auto before = clips[(size_t) clipIndex].startSeconds;
+
+    // Linked clips move by the same amount; none of them can go before the start of the timeline.
+    auto delta = juce::jmax(0.0, startSeconds) - before;
+    for (auto partner : partners)
+        delta = juce::jmax(delta, -clips[(size_t) partner].startSeconds);
+
+    if (! creation::timeline::moveClip(clips, tracks, clipIndex, trackIndex, before + delta))
+        return false;
+
+    for (auto partner : partners)
+        creation::timeline::moveClip(clips, tracks, partner, clips[(size_t) partner].trackIndex, clips[(size_t) partner].startSeconds + delta);
+    return true;
 }
 
 bool TimelineModel::duplicateClip(int clipIndex, double startOffsetSeconds)
 {
-    return creation::timeline::duplicateClip(clips, clipIndex, startOffsetSeconds);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    juce::StringArray partnerIds;
+    for (auto partner : getLinkedPartnerIndices(clipIndex))
+        partnerIds.add(clips[(size_t) partner].id);
+
+    if (! creation::timeline::duplicateClip(clips, clipIndex, startOffsetSeconds))
+        return false;
+
+    // The copies form a group of their own, separate from the originals.
+    const auto group = partnerIds.isEmpty() ? juce::String() : juce::Uuid().toString();
+    clips.back().linkGroupId = group;
+
+    for (const auto& id : partnerIds)
+    {
+        const auto partner = indexOfClipId(id);
+        if (partner >= 0 && creation::timeline::duplicateClip(clips, partner, startOffsetSeconds))
+            clips.back().linkGroupId = group;
+    }
+    return true;
 }
 
 bool TimelineModel::deleteClip(int clipIndex)
 {
-    return creation::timeline::deleteClip(clips, clipIndex);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    juce::StringArray partnerIds;
+    for (auto partner : getLinkedPartnerIndices(clipIndex))
+        partnerIds.add(clips[(size_t) partner].id);
+
+    if (! creation::timeline::deleteClip(clips, clipIndex))
+        return false;
+
+    for (const auto& id : partnerIds)
+    {
+        const auto partner = indexOfClipId(id);
+        if (partner >= 0)
+            creation::timeline::deleteClip(clips, partner);
+    }
+    return true;
 }
 
 bool TimelineModel::splitClip(int clipIndex, double splitSeconds)
 {
-    return creation::timeline::splitClip(clips, clipIndex, splitSeconds);
+    if (! juce::isPositiveAndBelow(clipIndex, (int) clips.size()))
+        return false;
+
+    const auto clipId = clips[(size_t) clipIndex].id;
+    juce::StringArray partnerIds;
+    for (auto partner : getLinkedPartnerIndices(clipIndex))
+        partnerIds.add(clips[(size_t) partner].id);
+
+    if (! creation::timeline::splitClip(clips, clipIndex, splitSeconds))
+        return false;
+
+    // The left halves stay linked together, the right halves become a group of their own.
+    const auto rightGroup = juce::Uuid().toString();
+    auto rightsLinked = 0;
+    for (const auto& id : partnerIds)
+    {
+        const auto partner = indexOfClipId(id);
+        if (partner >= 0 && creation::timeline::splitClip(clips, partner, splitSeconds))
+        {
+            clips[(size_t) partner + 1].linkGroupId = rightGroup;
+            ++rightsLinked;
+        }
+    }
+
+    const auto primary = indexOfClipId(clipId);
+    if (primary >= 0)
+        clips[(size_t) primary + 1].linkGroupId = rightsLinked > 0 ? rightGroup : juce::String();
+    return true;
 }
 
 void TimelineModel::setTrackCount(int count)
@@ -781,7 +1069,60 @@ void TimelineModel::removeTrack(int trackIndex)
     activeRecordingClips.clear();
 }
 
+namespace
+{
+// A clip's waveform is saved with the arrangement (one byte per bar, 0-255), so it never has to be measured again from
+// the audio - which lives in the VFS and is not copied out to a file just to draw it.
+juce::String encodePeaks(const std::vector<float>& peaks)
+{
+    juce::String text;
+    text.preallocateBytes(peaks.size() * 2 + 1);
+    for (const auto peak : peaks)
+        text << juce::String::toHexString((int) juce::roundToInt(juce::jlimit(0.0f, 1.0f, peak) * 255.0f)).paddedLeft('0', 2);
+    return text;
+}
+
+std::vector<float> decodePeaks(const juce::String& text)
+{
+    std::vector<float> peaks;
+    peaks.reserve((size_t) text.length() / 2);
+    for (int i = 0; i + 1 < text.length(); i += 2)
+        peaks.push_back((float) text.substring(i, i + 2).getHexValue32() / 255.0f);
+    return peaks;
+}
+}
+
 bool TimelineModel::analyzeClipWaveform(int clipIndex, juce::String& errorMessage)
+{
+    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
+        return false;
+
+    auto& clip = clips[(size_t) clipIndex];
+
+    // A clip whose audio lives in the VFS has no file: its waveform is measured from its bytes when it is added (and
+    // saved), and must not be wiped here.
+    if (! clip.file.existsAsFile())
+    {
+        errorMessage = "Recorded audio file does not exist yet.";
+        return false;
+    }
+
+    clip.peaks.clear();
+    clip.rightPeaks.clear();
+    clip.sourceNumChannels = 0;
+
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(clip.file));
+    if (reader == nullptr)
+    {
+        errorMessage = "Could not read recorded audio for waveform display.";
+        return false;
+    }
+
+    return analyzeClipWaveformFromReader(clipIndex, *reader, errorMessage);
+}
+
+bool TimelineModel::analyzeClipWaveformFromData(int clipIndex, const juce::MemoryBlock& encodedAudio, juce::String& errorMessage)
 {
     if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
@@ -791,19 +1132,26 @@ bool TimelineModel::analyzeClipWaveform(int clipIndex, juce::String& errorMessag
     clip.rightPeaks.clear();
     clip.sourceNumChannels = 0;
 
-    if (! clip.file.existsAsFile())
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(
+        std::make_unique<juce::MemoryInputStream>(encodedAudio.getData(), encodedAudio.getSize(), false)));
+    if (reader == nullptr)
     {
-        errorMessage = "Recorded audio file does not exist yet.";
+        errorMessage = "Could not read the audio to draw its waveform.";
         return false;
     }
 
-    formatManager.registerBasicFormats();
-    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(clip.file));
-    if (reader == nullptr)
-    {
-        errorMessage = "Could not read recorded audio for waveform display.";
+    return analyzeClipWaveformFromReader(clipIndex, *reader, errorMessage);
+}
+
+bool TimelineModel::analyzeClipWaveformFromReader(int clipIndex, juce::AudioFormatReader& readerRef, juce::String& errorMessage)
+{
+    juce::ignoreUnused(errorMessage);
+    if (! juce::isPositiveAndBelow(clipIndex, static_cast<int>(clips.size())))
         return false;
-    }
+
+    auto& clip = clips[(size_t) clipIndex];
+    auto* reader = &readerRef;
 
     const auto fullDurationSeconds = reader->sampleRate > 0.0 ? static_cast<double>(reader->lengthInSamples) / reader->sampleRate
                                                               : clip.durationSeconds;
@@ -1367,6 +1715,7 @@ juce::ValueTree TimelineModel::createState() const
         trackState.setProperty("automationTargetDisplayName", track.automationTarget.displayName, nullptr);
         trackState.setProperty("automationTargetValueMode", toStorageToken(track.automationTarget.valueMode), nullptr);
         trackState.setProperty("automationTargetStepCount", track.automationTarget.stepCount, nullptr);
+        trackState.setProperty("automationTargetClipId", track.automationTarget.targetClipId, nullptr);
         trackState.setProperty("automationRecordMode", toStorageToken(track.automationRecordMode), nullptr);
         trackState.setProperty("automationRecordingPointsPerSecond", track.automationRecordingPointsPerSecond, nullptr);
         tracksState.addChild(trackState, -1, nullptr);
@@ -1386,11 +1735,27 @@ juce::ValueTree TimelineModel::createState() const
         clipState.setProperty("sourceTool", clip.sourceTool, nullptr);
         clipState.setProperty("trackIndex", clip.trackIndex, nullptr);
         clipState.setProperty("file", clip.file.getFullPathName(), nullptr);
+        if (! clip.peaks.empty())
+            clipState.setProperty("peaks", encodePeaks(clip.peaks), nullptr);
+        if (! clip.rightPeaks.empty())
+            clipState.setProperty("rightPeaks", encodePeaks(clip.rightPeaks), nullptr);
+        clipState.setProperty("sourceNumChannels", clip.sourceNumChannels, nullptr);
         clipState.setProperty("startSeconds", clip.startSeconds, nullptr);
         clipState.setProperty("durationSeconds", clip.durationSeconds, nullptr);
         clipState.setProperty("sourceStartSeconds", clip.sourceStartSeconds, nullptr);
         clipState.setProperty("sourceDurationSeconds", clip.sourceDurationSeconds, nullptr);
         clipState.setProperty("recording", false, nullptr);
+        if (clip.linkGroupId.isNotEmpty())
+            clipState.setProperty("linkGroupId", clip.linkGroupId, nullptr);
+        if (clip.soundDetached)
+            clipState.setProperty("soundDetached", true, nullptr);
+        if (clip.videoParams.size() > 0)
+        {
+            juce::ValueTree videoState("VideoParams");
+            for (int i = 0; i < clip.videoParams.size(); ++i)
+                videoState.setProperty(clip.videoParams.getName(i), clip.videoParams.getValueAt(i), nullptr);
+            clipState.addChild(videoState, -1, nullptr);
+        }
 
         if (! clip.midiNotes.empty())
         {
@@ -1513,6 +1878,7 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
             track.automationTarget.displayName = child.getProperty("automationTargetDisplayName").toString();
             track.automationTarget.valueMode = automationValueModeFromStorageToken(child.getProperty("automationTargetValueMode", "continuous").toString());
             track.automationTarget.stepCount = juce::jmax(0, (int) child.getProperty("automationTargetStepCount", 0));
+            track.automationTarget.targetClipId = child.getProperty("automationTargetClipId").toString();
             track.automationRecordMode = automationRecordModeFromStorageToken(child.getProperty("automationRecordMode", "touch").toString());
             track.automationRecordingPointsPerSecond = juce::jlimit(1, 120, (int) child.getProperty("automationRecordingPointsPerSecond", 10));
             if (track.name.trim().isEmpty())
@@ -1543,11 +1909,22 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
         clip.sourceTool = child.getProperty("sourceTool").toString();
         clip.trackIndex = (int) child.getProperty("trackIndex", -1);
         clip.file = juce::File(child.getProperty("file").toString());
+        clip.peaks = decodePeaks(child.getProperty("peaks").toString());
+        clip.rightPeaks = decodePeaks(child.getProperty("rightPeaks").toString());
+        clip.sourceNumChannels = (int) child.getProperty("sourceNumChannels", 0);
         clip.startSeconds = (double) child.getProperty("startSeconds", 0.0);
         clip.durationSeconds = (double) child.getProperty("durationSeconds", 0.0);
         clip.sourceStartSeconds = (double) child.getProperty("sourceStartSeconds", 0.0);
         clip.sourceDurationSeconds = (double) child.getProperty("sourceDurationSeconds", 0.0);
         clip.recording = false;
+        clip.linkGroupId = child.getProperty("linkGroupId").toString();
+        clip.soundDetached = (bool) child.getProperty("soundDetached", false);
+        if (const auto videoState = child.getChildWithName("VideoParams"); videoState.isValid())
+            for (int i = 0; i < videoState.getNumProperties(); ++i)
+            {
+                const auto name = videoState.getPropertyName(i);
+                clip.videoParams.set(name, videoState.getProperty(name));
+            }
         if (clip.displayName.trim().isEmpty())
             clip.displayName = clip.file.existsAsFile() ? clip.file.getFileNameWithoutExtension()
                                                         : toDisplayName(clip.kind) + " Clip";
@@ -1618,8 +1995,12 @@ void TimelineModel::restoreState(const juce::ValueTree& state)
         if (clips.back().trackIndex >= 0 && ! juce::isPositiveAndBelow(clips.back().trackIndex, getTrackCount()))
             setTrackCount(clips.back().trackIndex + 1);
 
-        juce::String errorMessage;
-        analyzeClipWaveform(static_cast<int>(clips.size()) - 1, errorMessage);
+        // A saved waveform is used as it is; only a clip without one (a local file from an older save) is measured.
+        if (clips.back().peaks.empty())
+        {
+            juce::String errorMessage;
+            analyzeClipWaveform(static_cast<int>(clips.size()) - 1, errorMessage);
+        }
     }
 }
 }

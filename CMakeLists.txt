@@ -106,6 +106,15 @@ endif()
 # Not yet linked into CreativeWorkstation itself - nothing in the app consumes it as a live video
 # FX graph host yet (no video-FX panel/editor exists). Built here so it compiles/links/smoke-tests
 # as part of the normal build, same as every other shared library, ahead of having a real consumer.
+# The shared OpenGL renderer (ShaderComposer and friends): Station draws video through it, the same way the Engine draws
+# its scenes.
+set(CS_RENDER_TARGET "")
+if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Render/CMakeLists.txt")
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Render"
+                     "${CMAKE_CURRENT_BINARY_DIR}/CreationSuiteSharedRender")
+    set(CS_RENDER_TARGET creation_suite_render)
+endif()
+
 set(CS_VIDEO_TARGET "")
 if(EXISTS "${CREATION_SUITE_SHARED_DIR}/Video/CMakeLists.txt")
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/Video"
@@ -154,12 +163,11 @@ if(NOT TARGET node_library_loader)
     add_subdirectory("${CREATION_SUITE_SHARED_DIR}/NodeLibraryLoader" CreationSuiteSharedNodeLibraryLoader)
 endif()
 
-# VFS-cache-first pod resolution: checks the Suite VFS cache, falls back to
-# the live lagdaemon.com registry on a miss, stores the result back into
-# the VFS. Needed before Station can reference a published pod inside a
-# schematic.
-if(NOT TARGET frate_pod_cache)
-    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FratePodCache" CreationSuiteSharedFratePodCache)
+# The Suite's front end for the FRust libraries: the compiler and Frate work on the VFS (as their
+# file system and their log) through SuiteFrust. Needs frust_lang / frate_lib / the plugin runtime and
+# the asset system, all added above.
+if(NOT TARGET frust_host)
+    add_subdirectory("${CREATION_SUITE_SHARED_DIR}/FrustHost" CreationSuiteSharedFrustHost)
 endif()
 
 juce_add_gui_app(CreativeWorkstation
@@ -226,7 +234,20 @@ else()
     target_compile_definitions(creation_station_language_host PUBLIC CS_ENABLE_SCRIPTING=0)
 endif()
 
+# Station's help (structured JSON topics) is compiled into the executable so the help window and the Virtual Engineer
+# both read it without any file on the computer.
+file(GLOB CS_HELP_TOPIC_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/help/topics/en-US/*.json")
+juce_add_binary_data(StationHelpData
+    HEADER_NAME HelpData.h
+    NAMESPACE HelpData
+    SOURCES ${CS_HELP_TOPIC_FILES} "${CMAKE_CURRENT_SOURCE_DIR}/help/help-inventory.json")
+set_target_properties(StationHelpData PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_sources(CreativeWorkstation PRIVATE
+    Source/Help/HelpLibrary.cpp
+    Source/Help/HelpLibrary.h
+    Source/Help/HelpPanel.cpp
+    Source/Help/HelpPanel.h
     Source/AI/CreationStationContextEngine.cpp
     Source/AI/CreationStationContextEngine.h
     Source/AI/CreationStationContextStore.cpp
@@ -245,8 +266,6 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Audio/PatchRuntimePlayer.h
     Source/Audio/PatchLiveVoice.cpp
     Source/Audio/PatchLiveVoice.h
-    Source/Audio/SignalGraphRuntime.cpp
-    Source/Audio/SignalGraphRuntime.h
     Source/Audio/VstPluginCatalog.cpp
     Source/Audio/VstPluginCatalog.h
     Source/Audio/SamplePackBuilder/PitchDetector.cpp
@@ -288,13 +307,14 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Video/VideoThumbnailCache.h
     Source/Video/VideoScrubPreview.h
     Source/Video/VideoPreviewComponent.h
+    Source/Video/Gl/VideoGlView.cpp
+    Source/Video/Gl/VideoGlView.h
+    Source/Video/Gl/VideoShaders.h
     Source/Patch/PatchModel.cpp
     Source/Patch/PatchModel.h
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
-    Source/Language/SignalGraph.cpp
-    Source/Language/SignalGraph.h
     Source/Language/AudioNodeCatalog.cpp
     Source/Language/AudioNodeCatalog.h
     Source/Language/AudioGraphCodegen.cpp
@@ -309,12 +329,12 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Views/AiPanel.h
     Source/Views/ContentPanel.cpp
     Source/Views/ContentPanel.h
+    Source/Views/RenderDialog.cpp
+    Source/Views/RenderDialog.h
     Source/Views/DslPanel.cpp
     Source/Views/DslPanel.h
     Source/Views/DockingWorkspace.cpp
     Source/Views/DockingWorkspace.h
-    Source/Views/GraphPanel.cpp
-    Source/Views/GraphPanel.h
     Source/Views/TourGuideOverlay.cpp
     Source/Views/TourGuideOverlay.h
     Source/Views/FeedbackDialog.cpp
@@ -363,26 +383,12 @@ target_compile_definitions(CreativeWorkstation PRIVATE
     # CE_CORE_NODE_LIBRARY uses for CoreNodesLibrary.frust.
     CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
     CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
-    # DslPanel's "Compile" button shells out to the real frust_compiler CLI
-    # (--emit-obj: parses, runs sema/codegen, and emits an object file, but
-    # never executes anything and never requires a `manifest "...";`
-    # declaration the way frust_plugin_host's JIT load path does) -- the
-    # right tool for a free-form scratch/patch editor that isn't a loadable
-    # plugin. frust_compiler is built as part of the FrustPluginRuntime
-    # subdirectory above, so its build output path is already known here.
-    CS_FRUST_COMPILER_EXECUTABLE="$<TARGET_FILE:frust_compiler>"
-    CS_FRATE_EXECUTABLE="$<TARGET_FILE:frate_cli>"
 )
 
 target_include_directories(CreativeWorkstation PRIVATE
     "${CREATION_SUITE_SHARED_DIR}/JuceDocking/include"
 )
 
-# CS_FRUST_COMPILER_EXECUTABLE above only bakes in the path -- this makes
-# sure the exe is actually built (and, on Windows, its PDB/DLL deps are
-# up to date) before CreativeWorkstation, since nothing else in this
-# target's own source tree references the frust_compiler target.
-add_dependencies(CreativeWorkstation frust_compiler)
 
 if(CREATION_STATION_ENABLE_ASIO)
     if(NOT EXISTS "${CREATION_STATION_ASIO_SDK_DIR}/iasiodrv.h")
@@ -419,7 +425,10 @@ if(CREATION_STATION_ENABLE_LTO)
 endif()
 
 target_link_libraries(CreativeWorkstation PRIVATE
+    StationHelpData
     ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_RENDER_TARGET}
+    juce::juce_opengl
     ${CS_SERVICES_TARGET}
     ${CS_UI_TARGET}
     ${CS_INTEROP_TARGET}
@@ -428,7 +437,7 @@ target_link_libraries(CreativeWorkstation PRIVATE
     CreationDock
     creation_station_language_host
     creation_suite_frust_plugin_runtime
-    creation_suite_frate_pod_cache
+    creation_suite_frust_host
     node_library_loader
     node_system
     juce::juce_audio_devices
@@ -653,6 +662,129 @@ target_link_libraries(StationFrustIntegrationSmoke PRIVATE
     node_system
 )
 
+# Checks that Station's embedded help loads, is consistent, and answers questions for both the help window and the
+# Virtual Engineer. Needs no audio hardware; exit code 0 = pass.
+juce_add_console_app(HelpLibrarySmoke PRODUCT_NAME "HelpLibrarySmoke")
+juce_generate_juce_header(HelpLibrarySmoke)
+target_sources(HelpLibrarySmoke PRIVATE
+    tests/HelpLibrarySmoke.cpp
+    Source/Help/HelpLibrary.cpp
+)
+target_include_directories(HelpLibrarySmoke PRIVATE Source/Help)
+target_compile_definitions(HelpLibrarySmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(HelpLibrarySmoke PRIVATE
+    StationHelpData
+    juce::juce_core
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Automated checks for PatchLiveVoice::renderAt() -- the entry point that runs a Signal clip's
+# patch live on the timeline. Needs no audio hardware; exit code 0 = pass.
+juce_add_console_app(SignalClipLiveSmoke PRODUCT_NAME "SignalClipLiveSmoke")
+juce_generate_juce_header(SignalClipLiveSmoke)
+target_sources(SignalClipLiveSmoke PRIVATE
+    tests/SignalClipLiveSmoke.cpp
+    Source/Audio/PatchLiveVoice.cpp
+    Source/Audio/PatchRuntimePlayer.cpp
+    Source/Patch/PatchModel.cpp
+)
+target_include_directories(SignalClipLiveSmoke PRIVATE Source)
+target_compile_definitions(SignalClipLiveSmoke PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
+)
+target_link_libraries(SignalClipLiveSmoke PRIVATE
+    creation_suite_frust_plugin_runtime
+    juce::juce_dsp
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Automated checks for the offline render of Signal clips through the real engine (no audio hardware).
+juce_add_console_app(SignalClipRenderSmoke PRODUCT_NAME "SignalClipRenderSmoke")
+juce_generate_juce_header(SignalClipRenderSmoke)
+target_sources(SignalClipRenderSmoke PRIVATE
+    tests/SignalClipRenderSmoke.cpp
+    Source/Audio/WorkstationAudioEngine.cpp
+    Source/Audio/PatchLiveVoice.cpp
+    Source/Audio/PatchRuntimePlayer.cpp
+    Source/Patch/PatchModel.cpp
+    Source/Timeline/TimelineModel.cpp
+)
+target_include_directories(SignalClipRenderSmoke PRIVATE Source)
+target_compile_definitions(SignalClipRenderSmoke PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_PLUGINHOST_VST3=1
+    CS_SIGNAL_LAB_NODE_LIBRARY="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabNodesLibrary.frust"
+    CS_SIGNAL_LAB_RUNTIME="${CMAKE_CURRENT_SOURCE_DIR}/BuiltInPlugins/SignalLabRuntime.frust"
+)
+target_link_libraries(SignalClipRenderSmoke PRIVATE
+    ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_TIMELINE_TARGET}
+    creation_suite_frust_plugin_runtime
+    juce::juce_audio_devices
+    juce::juce_audio_processors
+    juce::juce_audio_formats
+    juce::juce_audio_utils
+    juce::juce_dsp
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Automated checks for linked clips (a video and its sound) in the timeline model.
+juce_add_console_app(LinkedClipsSmoke PRODUCT_NAME "LinkedClipsSmoke")
+juce_generate_juce_header(LinkedClipsSmoke)
+target_sources(LinkedClipsSmoke PRIVATE
+    tests/LinkedClipsSmoke.cpp
+    Source/Timeline/TimelineModel.cpp
+)
+target_include_directories(LinkedClipsSmoke PRIVATE Source)
+target_compile_definitions(LinkedClipsSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(LinkedClipsSmoke PRIVATE
+    ${CS_ASSET_SYSTEM_TARGET}
+    ${CS_TIMELINE_TARGET}
+    juce::juce_audio_formats
+    juce::juce_data_structures
+    juce::juce_gui_basics
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Automated check that the header bar never loses a control at narrow window widths.
+juce_add_console_app(HeaderLayoutSmoke PRODUCT_NAME "HeaderLayoutSmoke")
+juce_generate_juce_header(HeaderLayoutSmoke)
+target_sources(HeaderLayoutSmoke PRIVATE tests/HeaderLayoutSmoke.cpp)
+target_compile_definitions(HeaderLayoutSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(HeaderLayoutSmoke PRIVATE
+    ${CS_UI_TARGET}
+    juce::juce_gui_extra
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Renders a known picture through the GPU video shader offscreen and checks real pixels (green screen, orientation,
+# parameters). Needs an OpenGL driver; exits 77 (skipped) where there is none.
+juce_add_console_app(VideoGlSmoke PRODUCT_NAME "VideoGlSmoke")
+juce_generate_juce_header(VideoGlSmoke)
+target_sources(VideoGlSmoke PRIVATE tests/VideoGlSmoke.cpp Source/Video/Gl/VideoGlView.cpp)
+target_include_directories(VideoGlSmoke PRIVATE Source)
+target_compile_definitions(VideoGlSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(VideoGlSmoke PRIVATE
+    ${CS_RENDER_TARGET}
+    juce::juce_opengl
+    juce::juce_gui_basics
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
 install(FILES README.md LICENSE docs/EULA.txt DESTINATION . COMPONENT CreativeWorkstation)
 
 set(CPACK_PACKAGE_NAME "DjehutiStation")
@@ -674,12 +806,6 @@ set(CPACK_WIX_UPGRADE_GUID "9F39E8E4-3B66-4EE8-8B7E-8E9D9B7F35D2")
 set(CPACK_STRIP_FILES TRUE)
 
 include(CPack)
-
-add_custom_command(TARGET CreativeWorkstation POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "D:/CreationSuite-Workspaces/gemini-$<LOWER_CASE:$<CONFIG>>-bin"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:CreativeWorkstation>" "D:/CreationSuite-Workspaces/gemini-$<LOWER_CASE:$<CONFIG>>-bin/"
-    COMMENT "Copying CreativeWorkstation to the shared gemini bin directory"
-)
 
 # Auto-generated output name overrides
 set_target_properties(CreationStationPluginKit PROPERTIES OUTPUT_NAME "DjehutiStationPluginKit")

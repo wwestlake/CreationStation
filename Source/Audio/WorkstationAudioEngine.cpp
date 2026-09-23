@@ -1,5 +1,8 @@
 #include "WorkstationAudioEngine.h"
 
+#include <creation/suite/SuiteSettings.h>
+#include <creation/suite/SuiteStoragePaths.h>
+
 #include <cmath>
 #include <array>
 #include <algorithm>
@@ -127,10 +130,18 @@ void configureMainBusOnly(juce::AudioPluginInstance& instance)
     }
 }
 
+// Inside the VFS root's Logs folder, never in the OS user-data folder. Empty (nothing is logged) until a root is chosen.
 juce::File getPluginStateDiagnosticsFile()
 {
-    auto logDirectory = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                            .getChildFile("Djehuti Station");
+    static const auto logDirectory = []
+    {
+        juce::String error;
+        return creation::suite::getLogsDirectory(creation::suite::SuiteSettingsStore().load(error));
+    }();
+
+    if (logDirectory == juce::File())
+        return {};
+
     logDirectory.createDirectory();
     return logDirectory.getChildFile("plugin-state-diagnostics.log");
 }
@@ -146,7 +157,8 @@ void appendPluginStateDiagnostic(const juce::String& eventName,
                 + " | file=" + pluginFile.getFullPathName()
                 + " | bytes=" + juce::String((int64) stateBytes)
                 + "\n";
-    getPluginStateDiagnosticsFile().appendText(line, false, false, "\n");
+    if (const auto file = getPluginStateDiagnosticsFile(); file != juce::File())
+        file.appendText(line, false, false, "\n");
 }
 }
 
@@ -793,7 +805,6 @@ void WorkstationAudioEngine::MasterOutputSource::getNextAudioBlock(const juce::A
         owner.arrangementSource.getNextAudioBlock(bufferToFill);
 
     insert.getNextAudioBlock(bufferToFill);
-    owner.processGraph(*bufferToFill.buffer);
     bufferToFill.buffer->applyGain(bufferToFill.startSample, bufferToFill.numSamples, owner.masterGain.load());
 }
 
@@ -831,6 +842,38 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
         return false;
     }
 
+    return loadReader(reader, file, settings, errorMessage);
+}
+
+bool WorkstationAudioEngine::AssetPreviewSource::loadData(const std::shared_ptr<const juce::MemoryBlock>& encodedData,
+                                                          const PreviewSettings& settings,
+                                                          juce::String& errorMessage)
+{
+    stop();
+
+    if (encodedData == nullptr || encodedData->getSize() == 0)
+    {
+        errorMessage = "That project sound is empty.";
+        return false;
+    }
+
+    // The reader reads the whole section it needs into memory below and is deleted before this returns, so the
+    // caller's block only has to stay alive for the duration of this call.
+    auto* reader = formatManager.createReaderFor(std::make_unique<juce::MemoryInputStream>(encodedData->getData(), encodedData->getSize(), false));
+    if (reader == nullptr)
+    {
+        errorMessage = "That sound could not be opened for preview.";
+        return false;
+    }
+
+    return loadReader(reader, juce::File(), settings, errorMessage);
+}
+
+bool WorkstationAudioEngine::AssetPreviewSource::loadReader(juce::AudioFormatReader* reader,
+                                                            const juce::File& labelFile,
+                                                            const PreviewSettings& settings,
+                                                            juce::String& errorMessage)
+{
     auto totalSamples = (int) reader->lengthInSamples;
     if (totalSamples <= 0)
     {
@@ -885,7 +928,7 @@ bool WorkstationAudioEngine::AssetPreviewSource::loadFile(const juce::File& file
     }
 
     playbackPosition = 0;
-    previewFile = file;
+    previewFile = labelFile;
     previewing.store(true);
     return true;
 }
@@ -1041,6 +1084,32 @@ void WorkstationAudioEngine::ArrangementSource::getNextAudioBlock(const juce::Au
             renderedAnyClip = true;
         }
 
+        // Live Signal clips: each clip's own PatchLiveVoice renders straight into this track's
+        // buffer at the patch position the transport implies, so play/loop/scrub decide what is heard.
+        if (auto liveSignalClips = owner.signalClips.load())
+        {
+            for (const auto& placement : *liveSignalClips)
+            {
+                if (placement.trackIndex != trackIndex || placement.voice == nullptr)
+                    continue;
+
+                const auto clipStart = placement.startSample;
+                const auto clipEnd = placement.startSample + placement.lengthSamples;
+
+                if (clipEnd <= blockStart || clipStart >= blockEnd)
+                    continue;
+
+                const auto overlapStart = juce::jmax<int64>(clipStart, blockStart);
+                const auto overlapEnd = juce::jmin<int64>(clipEnd, blockEnd);
+
+                placement.voice->renderAt(placement.sourceStartSample + (overlapStart - clipStart),
+                                          destination,
+                                          (int) (overlapStart - blockStart),
+                                          (int) (overlapEnd - overlapStart));
+                renderedAnyClip = true;
+            }
+        }
+
         return renderedAnyClip;
     };
 
@@ -1146,8 +1215,6 @@ void WorkstationAudioEngine::prepareGraph(double sampleRate, int blockSize)
     echoHistoryLeft.fill(0.0f);
     echoHistoryRight.fill(0.0f);
     echoWritePosition = 0;
-    signalGraph.prepare(sampleRate, blockSize);
-    graphVstInsertSource.prepareToPlay(blockSize, sampleRate);
 }
 
 int WorkstationAudioEngine::addTrack(const juce::String& trackName)
@@ -1314,6 +1381,21 @@ void WorkstationAudioEngine::applyAutomationForBlock(double blockStartSeconds)
 
             case cs::AutomationTargetKind::pluginBypass:
                 setTrackPluginBypassedRealtime(target.targetTrackIndex, target.pluginSlotIndex, value >= 0.5f);
+                break;
+
+            case cs::AutomationTargetKind::signalClipInput:
+                // Replace, not modulate: the lane's value becomes the clip's variable value for this block.
+                if (auto liveSignalClips = signalClips.load())
+                {
+                    for (const auto& placement : *liveSignalClips)
+                    {
+                        if (placement.voice != nullptr && placement.clipId == target.targetClipId)
+                        {
+                            placement.voice->setVariableValue(target.parameterId, value);
+                            break;
+                        }
+                    }
+                }
                 break;
 
             case cs::AutomationTargetKind::none:
@@ -1831,47 +1913,6 @@ void WorkstationAudioEngine::renderMetronome(float* const* outputChannelData,
     }
 }
 
-void WorkstationAudioEngine::processGraph(juce::AudioBuffer<float>& buffer)
-{
-    if (! playing.load())
-        return;
-
-    signalGraph.setEnabled(graphEnabled.load());
-    signalGraph.setSourceLevel(graphInput.load());
-    signalGraph.setSourceFrequency(graphSourceFrequency.load());
-    signalGraph.setDrive(graphDrive.load());
-    signalGraph.setTone(graphTone.load());
-    signalGraph.setEcho(graphEcho.load());
-    signalGraph.setWidth(graphWidth.load());
-    signalGraph.setMasterGain(masterGain.load());
-    signalGraph.render(buffer);
-
-    if (graphVstEnabled.load() && graphVstInsertSource.hasPlugin())
-    {
-        auto mix = juce::jlimit(0.0f, 1.0f, graphVstMix.load());
-        if (mix > 0.0f)
-        {
-            juce::AudioBuffer<float> dryBuffer;
-            juce::AudioBuffer<float> wetBuffer;
-            dryBuffer.makeCopyOf(buffer, true);
-            wetBuffer.makeCopyOf(buffer, true);
-
-            juce::AudioSourceChannelInfo wetInfo(&wetBuffer, 0, wetBuffer.getNumSamples());
-            graphVstInsertSource.getNextAudioBlock(wetInfo);
-
-            auto dryMix = 1.0f - mix;
-            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-            {
-                auto* dest = buffer.getWritePointer(channel);
-                auto* dry = dryBuffer.getReadPointer(channel);
-                auto* wet = wetBuffer.getReadPointer(channel);
-                for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
-                    dest[sample] = (dry[sample] * dryMix) + (wet[sample] * mix);
-            }
-        }
-    }
-
-}
 
 bool WorkstationAudioEngine::anyTrackNeedsLiveMonitoring() const noexcept
 {
@@ -2185,6 +2226,13 @@ bool WorkstationAudioEngine::previewAssetFile(const juce::File& file,
     return loaded;
 }
 
+bool WorkstationAudioEngine::previewAssetData(const std::shared_ptr<const juce::MemoryBlock>& encodedData,
+                                              const PreviewSettings& settings,
+                                              juce::String& errorMessage)
+{
+    return assetPreviewSource.loadData(encodedData, settings, errorMessage);
+}
+
 bool WorkstationAudioEngine::previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer,
                                                     double sampleRate,
                                                     juce::String& errorMessage)
@@ -2204,19 +2252,35 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
 
     for (const auto& target : targets)
     {
-        if (! target.file.existsAsFile())
-            continue;
+        const auto clipName = target.displayName.isNotEmpty() ? target.displayName : target.file.getFileName();
 
-        std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(target.file));
+        std::unique_ptr<juce::AudioFormatReader> reader;
+        if (target.encodedData != nullptr && target.encodedData->getSize() > 0)
+        {
+            reader.reset(formatManager.createReaderFor(std::make_unique<juce::MemoryInputStream>(target.encodedData->getData(), target.encodedData->getSize(), false)));
+        }
+        else
+        {
+            if (! target.file.existsAsFile())
+            {
+                errorMessage = "Tracker clip file is missing: " + clipName;
+                continue;
+            }
+            reader.reset(formatManager.createReaderFor(target.file));
+        }
+
         if (reader == nullptr)
         {
-            errorMessage = "Could not open recorded clip: " + target.file.getFileName();
+            errorMessage = "Could not open recorded clip: " + clipName;
             continue;
         }
 
         const auto totalSamples = (int64) reader->lengthInSamples;
         if (totalSamples <= 0)
+        {
+            errorMessage = "Tracker clip has no audio data: " + clipName;
             continue;
+        }
 
         ArrangementSource::Clip clip;
         const auto sourceStartSample = juce::jlimit<int64>(0,
@@ -2230,7 +2294,7 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
         clip.buffer.setSize(juce::jmax(2, (int) reader->numChannels), (int) samplesToRead, false, false, true);
         if (! readAndResampleSection(*reader, sourceStartSample, samplesToRead, graphSampleRate, clip.buffer))
         {
-            errorMessage = "Could not resample recorded clip: " + target.file.getFileName();
+            errorMessage = "Could not resample recorded clip: " + clipName;
             continue;
         }
         clip.startSample = (int64) std::llround(target.startSeconds * graphSampleRate);
@@ -2245,6 +2309,68 @@ bool WorkstationAudioEngine::setTrackerPlaybackClips(const juce::Array<PlaybackC
     }
 
     arrangementSource.setClips(std::move(clips));
+    return true;
+}
+
+std::shared_ptr<const WorkstationAudioEngine::SignalClipSet> WorkstationAudioEngine::buildSignalClipSet(
+    const juce::Array<SignalClipTarget>& targets, double sampleRate, int blockSize,
+    const std::shared_ptr<const SignalClipSet>& reuseFrom) const
+{
+    auto set = std::make_shared<SignalClipSet>();
+
+    for (const auto& target : targets)
+    {
+        if (target.durationSeconds <= 0.0)
+            continue;
+
+        std::shared_ptr<PatchLiveVoice> voice;
+        if (reuseFrom != nullptr)
+        {
+            for (const auto& existing : *reuseFrom)
+            {
+                if (existing.clipId == target.clipId && existing.patchKey == target.patchKey && existing.sampleRate == sampleRate)
+                {
+                    voice = existing.voice;
+                    break;
+                }
+            }
+        }
+
+        if (voice == nullptr)
+        {
+            voice = std::make_shared<PatchLiveVoice>();
+            voice->prepareToPlay(blockSize, sampleRate);
+            voice->rebuild(target.patch, makeVariableBindingMap(target.patch));
+            voice->setPatchDurationSeconds(target.patch.durationSeconds > 0.0 ? target.patch.durationSeconds : 5.0);
+            voice->setOutputScale(1.0f); // match the offline render exactly; 0.9 is only Signal Lab's preview headroom
+            voice->adoptPublishedGraphNow();
+        }
+
+        SignalClipPlacement placement;
+        placement.clipId = target.clipId;
+        placement.patchKey = target.patchKey;
+        placement.trackIndex = target.trackIndex;
+        placement.sampleRate = sampleRate;
+        placement.startSample = (int64) std::llround(target.startSeconds * sampleRate);
+        placement.lengthSamples = (int64) std::llround(target.durationSeconds * sampleRate);
+        placement.sourceStartSample = (int64) std::llround(target.sourceStartSeconds * sampleRate);
+        placement.voice = std::move(voice);
+        set->push_back(std::move(placement));
+    }
+
+    return set;
+}
+
+bool WorkstationAudioEngine::setTrackerSignalClips(const juce::Array<SignalClipTarget>& targets, juce::String& errorMessage)
+{
+    const auto previous = signalClips.load();
+    auto next = buildSignalClipSet(targets, graphSampleRate, graphBlockSize, previous);
+
+    retiredSignalClips[1] = std::move(retiredSignalClips[0]);
+    retiredSignalClips[0] = previous;
+    signalClips.store(std::move(next));
+
+    juce::ignoreUnused(errorMessage);
     return true;
 }
 
@@ -2392,9 +2518,10 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
                                                       double durationSeconds,
                                                       const RenderSettings& settings,
                                                       juce::AudioBuffer<float>& outputBuffer,
-                                                      juce::String& errorMessage)
+                                                      juce::String& errorMessage,
+                                                      const juce::Array<SignalClipTarget>& signalTargets)
 {
-    if (targets.isEmpty())
+    if (targets.isEmpty() && signalTargets.isEmpty())
     {
         errorMessage = "There are no tracker clips to render.";
         return false;
@@ -2423,21 +2550,29 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
 
     masterInsertSource.prepareToPlay(safeBlockSize, safeSampleRate);
 
+    // The render gets its own voices at the render sample rate. The live ones keep their state and rate for
+    // playback, and are put back below; they must never leak into a render (or a scrub preview).
+    const auto liveSignalClips = signalClips.load();
+    const auto renderSignalClips = buildSignalClipSet(signalTargets, safeSampleRate, safeBlockSize, nullptr);
+    signalClips.store(renderSignalClips);
+
     if (! setTrackerPlaybackClips(targets, errorMessage))
     {
+        signalClips.store(liveSignalClips);
         prepareGraph(previousSampleRate, previousBlockSize);
         playing.store(wasPlaying);
         return false;
     }
 
     arrangementSource.prepareToPlay(safeBlockSize, safeSampleRate);
-    arrangementSource.setPlaybackPositionSeconds(0.0);
+    arrangementSource.setPlaybackPositionSeconds(juce::jmax(0.0, settings.startSeconds));
 
     outputBuffer.setSize(2, totalSamples, false, false, true);
     outputBuffer.clear();
 
     juce::AudioBuffer<float> blockBuffer(2, safeBlockSize);
     auto renderedSamples = 0;
+    auto cancelled = false;
 
     while (renderedSamples < totalSamples)
     {
@@ -2453,9 +2588,15 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
             outputBuffer.copyFrom(channel, renderedSamples, blockBuffer, channel, 0, samplesThisBlock);
 
         renderedSamples += samplesThisBlock;
+
+        if (settings.onProgress && ! settings.onProgress((float) renderedSamples / (float) totalSamples))
+        {
+            cancelled = true;
+            break;
+        }
     }
 
-    if (settings.normalizePeak)
+    if (! cancelled && settings.normalizePeak)
     {
         const auto peak = outputBuffer.getMagnitude(0, outputBuffer.getNumSamples());
         if (peak > 0.0f)
@@ -2466,12 +2607,20 @@ bool WorkstationAudioEngine::renderTrackerMixToBuffer(const juce::Array<Playback
     }
 
     arrangementSource.setPlaybackPositionSeconds(0.0);
+    signalClips.store(liveSignalClips);
     prepareGraph(previousSampleRate, previousBlockSize);
     for (auto* track : tracks)
         if (track != nullptr)
             track->prepareToPlay(previousBlockSize, previousSampleRate);
     masterInsertSource.prepareToPlay(previousBlockSize, previousSampleRate);
     playing.store(wasPlaying);
+
+    if (cancelled)
+    {
+        errorMessage = "Render cancelled.";
+        return false;
+    }
+
     return true;
 }
 
@@ -2492,7 +2641,6 @@ void WorkstationAudioEngine::reapplyHostedPluginStates()
             track->insertChain.reapplyCachedStates();
 
     masterInsertSource.reapplyCachedState();
-    graphVstInsertSource.reapplyCachedState();
 }
 
 bool WorkstationAudioEngine::startRecordingToFile(const juce::File& file, juce::String& errorMessage)
@@ -2537,19 +2685,12 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
 
     for (const auto& target : targets)
     {
-        target.file.getParentDirectory().createDirectory();
-        if (target.file.existsAsFile())
-            target.file.deleteFile();
-
-        std::unique_ptr<juce::FileOutputStream> outputStream(target.file.createOutputStream());
-        if (outputStream == nullptr)
-        {
-            errorMessage = "Could not create recording file: " + target.file.getFileName();
-            return false;
-        }
+        // A recording is written into memory (as a complete WAV) and handed over when it stops; nothing goes to the disk.
+        auto takeData = std::make_shared<juce::MemoryBlock>();
+        auto* outputStream = new juce::MemoryOutputStream(*takeData, false);
 
         auto numChannels = tracks[(size_t) target.trackIndex]->isStereoEnabled() ? 2 : 1;
-        auto* writer = wavFormat.createWriterFor(outputStream.release(),
+        auto* writer = wavFormat.createWriterFor(outputStream,
                                                  graphSampleRate,
                                                  (unsigned int) numChannels,
                                                  24,
@@ -2558,6 +2699,7 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
 
         if (writer == nullptr)
         {
+            delete outputStream;
             errorMessage = "Could not create audio writer: " + target.file.getFileName();
             return false;
         }
@@ -2566,6 +2708,7 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
         recordingWriter.trackIndex = target.trackIndex;
         recordingWriter.numChannels = numChannels;
         recordingWriter.file = target.file;
+        recordingWriter.data = takeData;
         recordingWriter.writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(writer, recordingThread, 32768);
         newWriters.push_back(std::move(recordingWriter));
     }
@@ -2580,9 +2723,31 @@ bool WorkstationAudioEngine::startRecordingToFiles(const juce::Array<RecordingTa
 void WorkstationAudioEngine::stopRecording()
 {
     const juce::ScopedLock lock(recordingLock);
-    recordingWriters.clear();
     recording = false;
+
+    // Closing each writer flushes what is buffered and finishes the WAV header; then the take is ready to be taken.
+    auto stopped = std::move(recordingWriters);
+    recordingWriters.clear();
+    for (auto& recordingWriter : stopped)
+    {
+        recordingWriter.writer.reset();
+        if (recordingWriter.data != nullptr && recordingWriter.data->getSize() > 0)
+            finishedTakes[recordingWriter.file.getFullPathName()] = recordingWriter.data;
+    }
+
     recordingFile = {};
+}
+
+std::shared_ptr<const juce::MemoryBlock> WorkstationAudioEngine::takeFinishedRecording(const juce::File& takeName)
+{
+    const juce::ScopedLock lock(recordingLock);
+    const auto found = finishedTakes.find(takeName.getFullPathName());
+    if (found == finishedTakes.end())
+        return nullptr;
+
+    auto data = found->second;
+    finishedTakes.erase(found);
+    return data;
 }
 
 juce::Array<juce::File> WorkstationAudioEngine::getRecordingFiles() const
@@ -2686,88 +2851,6 @@ void WorkstationAudioEngine::setTrackSoloed(int trackIndex, bool shouldSolo)
 void WorkstationAudioEngine::setMasterGain(float gain)
 {
     masterGain.store(gain);
-}
-
-void WorkstationAudioEngine::setGraphEnabled(bool shouldEnable)
-{
-    graphEnabled.store(shouldEnable);
-    signalGraph.setEnabled(shouldEnable);
-}
-
-void WorkstationAudioEngine::setGraphDrive(float amount)
-{
-    graphDrive.store(amount);
-    signalGraph.setDrive(amount);
-}
-
-void WorkstationAudioEngine::setGraphInput(float amount)
-{
-    graphInput.store(amount);
-    signalGraph.setSourceLevel(amount);
-}
-
-void WorkstationAudioEngine::setGraphSourceFrequency(float hz)
-{
-    graphSourceFrequency.store(hz);
-    signalGraph.setSourceFrequency(hz);
-}
-
-void WorkstationAudioEngine::setGraphTone(float amount)
-{
-    graphTone.store(amount);
-    signalGraph.setTone(amount);
-}
-
-void WorkstationAudioEngine::setGraphEcho(float amount)
-{
-    graphEcho.store(amount);
-    signalGraph.setEcho(amount);
-}
-
-void WorkstationAudioEngine::setGraphWidth(float amount)
-{
-    graphWidth.store(amount);
-    signalGraph.setWidth(amount);
-}
-
-bool WorkstationAudioEngine::loadGraphVstPlugin(const juce::File& file, juce::String& errorMessage)
-{
-    return graphVstInsertSource.loadPlugin(file, errorMessage);
-}
-
-void WorkstationAudioEngine::unloadGraphVstPlugin()
-{
-    graphVstInsertSource.unloadPlugin();
-}
-
-juce::String WorkstationAudioEngine::getGraphVstPluginName() const
-{
-    return graphVstInsertSource.getPluginName();
-}
-
-juce::File WorkstationAudioEngine::getGraphVstPluginFile() const
-{
-    return graphVstInsertSource.getPluginFile();
-}
-
-bool WorkstationAudioEngine::hasGraphVstPlugin() const noexcept
-{
-    return graphVstInsertSource.hasPlugin();
-}
-
-void WorkstationAudioEngine::setGraphVstEnabled(bool shouldEnable)
-{
-    graphVstEnabled.store(shouldEnable);
-}
-
-void WorkstationAudioEngine::setGraphVstMix(float amount)
-{
-    graphVstMix.store(juce::jlimit(0.0f, 1.0f, amount));
-}
-
-juce::AudioProcessorEditor* WorkstationAudioEngine::createGraphVstPluginEditor()
-{
-    return graphVstInsertSource.createEditor();
 }
 
 bool WorkstationAudioEngine::loadMasterPlugin(const juce::File& file, juce::String& errorMessage)
@@ -2930,144 +3013,6 @@ void WorkstationAudioEngine::setTrackPluginBypassedRealtime(int trackIndex, int 
         tracks[(size_t) trackIndex]->insertChain.setBypassed(slotIndex, shouldBypass);
 }
 
-bool WorkstationAudioEngine::renderMidiClipToFile(const juce::File& instrumentPluginFile,
-                                                  const std::vector<cs::MidiNoteEvent>& notes,
-                                                  const std::vector<cs::MidiCCEvent>& ccEvents,
-                                                  double tempoBpm,
-                                                  double durationSeconds,
-                                                  juce::File& outputFile,
-                                                  juce::String& errorMessage) const
-{
-    if (! instrumentPluginFile.existsAsFile())
-    {
-        errorMessage = "No instrument plugin is loaded on this track.";
-        return false;
-    }
-
-    if (notes.empty())
-    {
-        errorMessage = "The MIDI clip has no notes to render.";
-        return false;
-    }
-
-    juce::AudioPluginFormatManager formatManager;
-    formatManager.addDefaultFormats();
-
-    juce::OwnedArray<juce::PluginDescription> pluginDescriptions;
-    for (auto* format : formatManager.getFormats())
-    {
-        if (format != nullptr && format->fileMightContainThisPluginType(instrumentPluginFile.getFullPathName()))
-            format->findAllTypesForFile(pluginDescriptions, instrumentPluginFile.getFullPathName());
-    }
-
-    if (pluginDescriptions.isEmpty())
-    {
-        errorMessage = "Could not identify the instrument plugin format.";
-        return false;
-    }
-
-    const auto sampleRate = juce::jmax(8000.0, graphSampleRate);
-    const auto blockSize = juce::jmax(64, graphBlockSize);
-
-    std::unique_ptr<juce::AudioPluginInstance> instance;
-    for (auto* pluginDescription : pluginDescriptions)
-    {
-        if (pluginDescription == nullptr)
-            continue;
-
-        juce::String creationError;
-        instance = formatManager.createPluginInstance(*pluginDescription, sampleRate, blockSize, creationError);
-        if (instance != nullptr)
-            break;
-    }
-
-    if (instance == nullptr)
-    {
-        errorMessage = "Could not create an instance of the instrument plugin for rendering.";
-        return false;
-    }
-
-    configureMainBusOnly(*instance);
-    instance->setPlayHead(&enginePlayHead);
-    instance->setPlayConfigDetails(2, 2, sampleRate, blockSize);
-    instance->prepareToPlay(sampleRate, blockSize);
-
-    // Sample-accurate note/CC scheduling, converted from clip-relative beats to samples.
-    const auto beatsToSamples = [tempoBpm, sampleRate](double beats)
-    {
-        return (int64) std::llround((beats * 60.0 / juce::jmax(1.0, tempoBpm)) * sampleRate);
-    };
-
-    juce::MidiBuffer fullMidi;
-    for (const auto& note : notes)
-    {
-        auto onSample = beatsToSamples(note.startBeats);
-        auto offSample = beatsToSamples(note.startBeats + note.lengthBeats);
-        fullMidi.addEvent(juce::MidiMessage::noteOn((int) note.channel, note.pitch, (juce::uint8) note.velocity), (int) onSample);
-        fullMidi.addEvent(juce::MidiMessage::noteOff((int) note.channel, note.pitch), (int) juce::jmax(onSample + 1, offSample));
-    }
-
-    for (const auto& point : ccEvents)
-        fullMidi.addEvent(juce::MidiMessage::controllerEvent(1, point.controller, point.value), (int) beatsToSamples(point.beats));
-
-    // Add a release tail so one-shot samples and reverb/decay aren't cut off.
-    auto tailSeconds = juce::jlimit(0.0, 4.0, instance->getTailLengthSeconds());
-    const auto totalSamples = (int64) std::ceil((durationSeconds + juce::jmax(0.5, tailSeconds)) * sampleRate);
-
-    juce::AudioBuffer<float> outputBuffer(2, (int) totalSamples);
-    outputBuffer.clear();
-
-    juce::AudioBuffer<float> blockBuffer(2, blockSize);
-
-    for (int64 blockStart = 0; blockStart < totalSamples; blockStart += blockSize)
-    {
-        const auto samplesThisBlock = (int) juce::jmin<int64>(blockSize, totalSamples - blockStart);
-
-        blockBuffer.clear();
-
-        juce::MidiBuffer blockMidi;
-        for (const auto metadata : fullMidi)
-        {
-            auto samplePos = (int64) metadata.samplePosition;
-            if (samplePos >= blockStart && samplePos < blockStart + samplesThisBlock)
-                blockMidi.addEvent(metadata.getMessage(), (int) (samplePos - blockStart));
-        }
-
-        instance->processBlock(blockBuffer, blockMidi);
-        outputBuffer.copyFrom(0, (int) blockStart, blockBuffer, 0, 0, samplesThisBlock);
-        outputBuffer.copyFrom(1, (int) blockStart, blockBuffer, 1, 0, samplesThisBlock);
-    }
-
-    instance->releaseResources();
-    instance.reset();
-
-    auto cacheDir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("CreationStationMidiRender");
-    cacheDir.createDirectory();
-    auto renderFile = cacheDir.getChildFile("clip_" + juce::Uuid().toString() + ".wav");
-
-    juce::WavAudioFormat wavFormat;
-    std::unique_ptr<juce::FileOutputStream> outputStream(renderFile.createOutputStream());
-    if (outputStream == nullptr)
-    {
-        errorMessage = "Could not create a temporary render file.";
-        return false;
-    }
-
-    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(outputStream.get(), sampleRate, 2, 24, {}, 0));
-    if (writer == nullptr)
-    {
-        errorMessage = "Could not create a WAV writer for the rendered clip.";
-        return false;
-    }
-
-    outputStream.release(); // writer now owns the stream
-    writer->writeFromAudioSampleBuffer(outputBuffer, 0, outputBuffer.getNumSamples());
-    writer.reset();
-
-    outputFile = renderFile;
-    return true;
-}
-
 bool WorkstationAudioEngine::hasTrackPlugin(int trackIndex) const noexcept
 {
     if (juce::isPositiveAndBelow(trackIndex, tracks.size()))
@@ -3188,17 +3133,6 @@ juce::ValueTree WorkstationAudioEngine::createSessionState() const
 
     state.addChild(masterInsert, -1, nullptr);
 
-    juce::ValueTree graphInsert("GraphInsert");
-    graphInsert.setProperty("enabled", graphVstEnabled.load(), nullptr);
-    graphInsert.setProperty("mix", graphVstMix.load(), nullptr);
-    graphInsert.setProperty("file", graphVstInsertSource.getPluginFile().getFullPathName(), nullptr);
-    graphInsert.setProperty("name", graphVstInsertSource.getPluginName(), nullptr);
-
-    juce::MemoryBlock graphState;
-    if (graphVstInsertSource.copyStateTo(graphState))
-        graphInsert.setProperty("state", juce::Base64::toBase64(graphState.getData(), graphState.getSize()), nullptr);
-
-    state.addChild(graphInsert, -1, nullptr);
     return state;
 }
 
@@ -3243,14 +3177,6 @@ juce::String WorkstationAudioEngine::createHostedPluginStateSignature() const
         masterInsert.setProperty("state", juce::Base64::toBase64(masterState.getData(), masterState.getSize()), nullptr);
     state.addChild(masterInsert, -1, nullptr);
 
-    juce::ValueTree graphInsert("GraphInsert");
-    graphInsert.setProperty("enabled", graphVstEnabled.load(), nullptr);
-    graphInsert.setProperty("mix", graphVstMix.load(), nullptr);
-    graphInsert.setProperty("file", graphVstInsertSource.getPluginFile().getFullPathName(), nullptr);
-    juce::MemoryBlock graphState;
-    if (graphVstInsertSource.copyStateTo(graphState))
-        graphInsert.setProperty("state", juce::Base64::toBase64(graphState.getData(), graphState.getSize()), nullptr);
-    state.addChild(graphInsert, -1, nullptr);
 
     if (auto xml = state.createXml())
         return xml->toString();
@@ -3387,25 +3313,6 @@ bool WorkstationAudioEngine::restoreSessionState(const juce::ValueTree& sessionS
             {
                 masterInsertSource.setBypassed((bool) masterInsert.getProperty("bypassed", false));
             }
-        }
-    }
-
-    if (auto graphInsert = sessionState.getChildWithName("GraphInsert"); graphInsert.isValid())
-    {
-        graphVstEnabled.store((bool) graphInsert.getProperty("enabled", true));
-        graphVstMix.store((float) graphInsert.getProperty("mix", 0.5f));
-
-        auto filePath = graphInsert.getProperty("file").toString();
-        if (filePath.isNotEmpty())
-        {
-            juce::MemoryBlock graphState;
-            auto encoded = graphInsert.getProperty("state").toString();
-            if (encoded.isNotEmpty())
-                graphState.fromBase64Encoding(encoded);
-
-            juce::String loadError;
-            if (! graphVstInsertSource.loadPlugin(juce::File(filePath), graphState.getSize() > 0 ? &graphState : nullptr, loadError))
-                errorMessage = loadError;
         }
     }
 

@@ -88,6 +88,30 @@ struct PatchOutput
     double pan = 0.0;
 };
 
+// A Signal Lab variable: a named, typed value the graph reads through Get nodes wired into ports.
+// Saved with the patch so a clip built from the saved patch alone knows what it exposes. isPublic
+// means "settable from outside the graph" (the timeline's automation picker lists exactly the public
+// variables); a private variable is internal to the graph.
+struct PatchVariable
+{
+    juce::String id;   // what Get/Set nodes reference; stable
+    juce::String name; // display name, e.g. "FootStepCrunch"
+    juce::String description;
+    juce::String valueType { "Float" }; // "Float" | "Int" | "Bool"
+    bool isPublic = false;
+    double defaultValue = 0.5;
+};
+
+// One wire from a variable's Get node into a bindable port, in the live voice's own port
+// vocabulary (targetPort is e.g. "level", "frequency", "cutoff", "mixWeight:1" - the same names
+// PatchLiveBindingMap uses), so the voice can bind a live slot to it without Signal Lab.
+struct PatchVariableBinding
+{
+    juce::String variableId;
+    juce::String targetNodeId; // a PatchSource::id or PatchNode::id
+    juce::String targetPort;
+};
+
 struct PatchDocument
 {
     juce::String schemaVersion { "1.0" };
@@ -109,6 +133,8 @@ struct PatchDocument
     juce::Array<PatchSource> sources;
     juce::Array<PatchNode> nodes;
     juce::Array<PatchConnection> connections;
+    juce::Array<PatchVariable> variables;
+    juce::Array<PatchVariableBinding> variableBindings;
     PatchOutput output;
 };
 

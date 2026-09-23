@@ -1,3 +1,4 @@
+#include <creation/ui/CreationSuiteHeaderBar.h>
 #include "ContentPanel.h"
 
 namespace
@@ -115,6 +116,14 @@ ContentPanel::ProjectAssetCard::ProjectAssetCard()
     };
     exportButton.setTooltip("Export this asset as a raw file");
     addAndMakeVisible(exportButton);
+
+    previewButton.onClick = [this]
+    {
+        if (onPreviewRequested)
+            onPreviewRequested(asset);
+    };
+    previewButton.setTooltip("Listen to this asset");
+    addAndMakeVisible(previewButton);
 }
 
 void ContentPanel::ProjectAssetCard::setAsset(const creation::assets::AssetDescriptor& newAsset)
@@ -122,9 +131,11 @@ void ContentPanel::ProjectAssetCard::setAsset(const creation::assets::AssetDescr
     asset = newAsset;
     const auto isPlaceable = asset.kind == creation::assets::AssetKind::audio || 
                              asset.kind == creation::assets::AssetKind::render || 
-                             asset.kind == creation::assets::AssetKind::patch;
+                             asset.kind == creation::assets::AssetKind::patch ||
+                             asset.kind == creation::assets::AssetKind::video;
     placeButton.setVisible(isPlaceable);
     exportButton.setVisible(asset.kind == creation::assets::AssetKind::audio || asset.kind == creation::assets::AssetKind::render);
+    previewButton.setVisible(asset.kind == creation::assets::AssetKind::audio || asset.kind == creation::assets::AssetKind::render);
     repaint();
 }
 
@@ -164,11 +175,20 @@ void ContentPanel::ProjectAssetCard::paint(juce::Graphics& g)
 void ContentPanel::ProjectAssetCard::resized()
 {
     auto buttons = getLocalBounds().removeFromRight(280).reduced(14, 18);
-    openButton.setBounds(buttons.removeFromLeft(70));
-    buttons.removeFromLeft(8);
-    placeButton.setBounds(buttons.removeFromLeft(70));
-    buttons.removeFromLeft(8);
-    exportButton.setBounds(buttons.removeFromLeft(96));
+    previewButton.setBounds(buttons.removeFromLeft(52));
+    buttons.removeFromLeft(6);
+    openButton.setBounds(buttons.removeFromLeft(54));
+    buttons.removeFromLeft(6);
+    placeButton.setBounds(buttons.removeFromLeft(54));
+    buttons.removeFromLeft(6);
+    exportButton.setBounds(buttons.removeFromLeft(74));
+}
+
+void ContentPanel::setPreviewingAssetId(const juce::String& assetId)
+{
+    previewingAssetId = assetId;
+    for (auto* card : projectAssetCards)
+        card->setPreviewing(assetId.isNotEmpty() && card->getAssetId() == assetId);
 }
 
 ContentPanel::ItemCard::ItemCard()
@@ -358,6 +378,12 @@ void ContentPanel::setProjectAssets(const juce::Array<creation::assets::AssetDes
             if (onExportProjectAssetRequested)
                 onExportProjectAssetRequested(selectedAsset);
         };
+        card->onPreviewRequested = [this](const creation::assets::AssetDescriptor& selectedAsset)
+        {
+            if (onPreviewProjectAssetRequested)
+                onPreviewProjectAssetRequested(selectedAsset);
+        };
+        card->setPreviewing(asset.id == previewingAssetId);
         card->setAsset(asset);
         projectAssetsHost.addAndMakeVisible(card);
     }
@@ -398,6 +424,12 @@ void ContentPanel::setStoragePath(const juce::String& path)
 
 void ContentPanel::setStatusText(const juce::String& text)
 {
+    if (onErrorStatus && CreationSuiteHeaderBar::statusTextIsError(text))
+    {
+        onErrorStatus(text);
+        return;
+    }
+
     statusLabel.setText(text, juce::dontSendNotification);
 }
 

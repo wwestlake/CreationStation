@@ -293,6 +293,7 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
     {
         auto* buffer = sourceBuffers.add(new juce::AudioBuffer<float>(1, numSamples));
         const auto& source = patch.sources.getReference(sourceIndex);
+        double accumulatedPhase = 0.0; // integrated per sample, exactly as PatchLiveVoice does, so live == offline
         for (int sample = 0; sample < numSamples; ++sample)
         {
             auto t = (float) sample / (float) juce::jmax(1, numSamples - 1);
@@ -312,7 +313,12 @@ bool PatchRuntimePlayer::renderPatchToBuffer(const cw::PatchDocument& patch,
                                            * (double) juce::jmap(weightMotion, 0.0f, 1.0f, 1.16f, 0.86f)
                                            * (double) juce::jmap(sizeMotion, 0.0f, 1.0f, 1.04f, 0.94f);
                 auto frequency = weightedBaseFrequency * std::pow(2.0, pitchSemitones / 12.0);
-                auto phase = juce::MathConstants<double>::twoPi * frequency * ((double) sample / sampleRate);
+
+                constexpr auto twoPi = juce::MathConstants<double>::twoPi;
+                auto phase = accumulatedPhase;
+                accumulatedPhase += twoPi * frequency / sampleRate;
+                if (accumulatedPhase >= twoPi)
+                    accumulatedPhase = std::fmod(accumulatedPhase, twoPi);
 
                 float waveform = 0.0f;
                 if (source.waveform == "sine")

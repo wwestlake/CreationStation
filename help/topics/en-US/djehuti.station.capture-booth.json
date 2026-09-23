@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.capture-booth",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Capture Booth",
+  "summary": "The Capture panel arms source lanes, monitors inputs and lists fresh captures for Foley and sound design.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.capture",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:e421279104788ebcf37fa67e782e92633b4e557a26c8a14740047864cffeb8f2"
+    }
+  ],
+  "keywords": [
+    "capture",
+    "record",
+    "booth",
+    "monitor input",
+    "arm"
+  ],
+  "alternateQueries": [
+    "What is the Capture panel?",
+    "How do I grab a sound?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.recording"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "what",
+      "kind": "paragraph",
+      "text": "The Capture Booth is a small recording view: arm a source lane (Arm), monitor its input (Input), and grab fresh material. While recording it shows \"Recording: <name>\"; when stopped, \"Capture stopped.\" Recent captures are listed, or \"No captures yet.\""
+    },
+    {
+      "id": "tracker",
+      "kind": "note",
+      "text": "For arranging recordings on the timeline use the Tracker; see the recording topic."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/RecordView.cpp"
+      }
+    ]
+  }
+}

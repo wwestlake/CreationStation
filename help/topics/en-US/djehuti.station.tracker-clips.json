@@ -1,0 +1,165 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.tracker-clips",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Work with clips: add, move, split, duplicate, rename, delete",
+  "summary": "Add clips from the project's assets, drag them along the timeline, and use the clip menu or the Edit menu to split, rename, duplicate and delete them.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.tracker.add-clip",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:1991ade7a84656b7d0cfb0a89cbf1298636221db8cd68cf8af90ff6b5599db09"
+    },
+    {
+      "helpId": "djehuti.station.tracker.clip-menu",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:c7e8bac995278fd5f7162b6cf6d567d5bdb421de68a023bbef2b396ec22cebd6"
+    },
+    {
+      "helpId": "djehuti.station.edit.split-clip",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:210c133006309edd8404113a92f5893796ea39867ba443b2fb28da6db367f4de"
+    },
+    {
+      "helpId": "djehuti.station.edit.duplicate-clip",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:a698ba090eaba5c2fbb2de02eae4662b4e2bec5ba0bfba9823ee3ca1179257ed"
+    },
+    {
+      "helpId": "djehuti.station.edit.rename-clip",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:bd278f5d98f3c2c707c5f5b9609b8329bee707ca1774c2cdabd20872cad25408"
+    },
+    {
+      "helpId": "djehuti.station.edit.delete-clip",
+      "anchorBlockId": "add",
+      "verifiedBehaviorSignature": "sha256:8a6ff660ea7123844ae2e47684a0cab3397cdb9d88785a66087fb0c89693e871"
+    }
+  ],
+  "keywords": [
+    "clip",
+    "add clip",
+    "split",
+    "duplicate",
+    "rename",
+    "delete",
+    "move clip",
+    "drag"
+  ],
+  "alternateQueries": [
+    "How do I split a clip?",
+    "How do I add a sound to a track?",
+    "How do I delete a clip?",
+    "How do I copy a clip?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.tracker-add-track"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.keyboard-shortcuts"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.assets-import"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "add",
+      "kind": "steps",
+      "title": "Add a clip",
+      "steps": [
+        {
+          "id": "right-click",
+          "instruction": "Right-click an empty spot on the track where the clip should go.",
+          "expectedResult": "A menu appears."
+        },
+        {
+          "id": "add-clip",
+          "instruction": "Choose Add Clip...",
+          "expectedResult": "A picker lists the project's assets that fit this kind of track, first, with a thumbnail and facts for each; others follow."
+        },
+        {
+          "id": "pick",
+          "instruction": "Choose an asset.",
+          "expectedResult": "The clip is placed at the spot you clicked."
+        }
+      ]
+    },
+    {
+      "id": "drop",
+      "kind": "paragraph",
+      "text": "You can also drop audio or video files from Windows onto the timeline, or use Place on Track in the Assets window."
+    },
+    {
+      "id": "move",
+      "kind": "paragraph",
+      "text": "Drag a clip to move it along the track or to another track of a matching kind."
+    },
+    {
+      "id": "split",
+      "kind": "definition",
+      "term": "Split at Playhead",
+      "definition": "Cuts the selected clip in two at the playhead (Ctrl+Shift+S, or Edit > Split at Playhead, or the clip's right-click menu). The playhead must be inside the clip."
+    },
+    {
+      "id": "duplicate",
+      "kind": "definition",
+      "term": "Duplicate clip",
+      "definition": "Makes a copy of the selected clip (Ctrl+D)."
+    },
+    {
+      "id": "rename",
+      "kind": "definition",
+      "term": "Rename clip",
+      "definition": "Changes the clip's name (F2)."
+    },
+    {
+      "id": "delete",
+      "kind": "definition",
+      "term": "Delete clip",
+      "definition": "Removes the clip from the timeline (Delete key). The asset stays in the project. It can be undone."
+    },
+    {
+      "id": "select",
+      "kind": "note",
+      "text": "Click a clip to select it. The clip commands are unavailable until a clip is selected."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (showAddClipPicker, splitClipAt)"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/TrackerPanel.cpp"
+      }
+    ]
+  }
+}

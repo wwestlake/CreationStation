@@ -2,14 +2,12 @@
 #include "MainComponent.h"
 #include <creation/ui/CreationSuiteLogos.h>
 #include <creation/ui/SuiteJUCEApplication.h>
-#include <creation/services/SuiteProcessRegistry.h>
 
 class CreativeWorkstationApplication : public creation::ui::SuiteJUCEApplication
 {
 public:
     CreativeWorkstationApplication() : SuiteJUCEApplication(creation::ui::SuiteLogoId::station)
     {
-        processRegistration.RegisterSelf("DjehutiStation");
     }
 
     const juce::String getApplicationName() override { return "Djehuti Station"; }
@@ -54,6 +52,7 @@ private:
             setIcon(creation::ui::getSuiteLogoImage(creation::ui::SuiteLogoId::station));
             setUsingNativeTitleBar(true);
             setResizable(true, true);
+            setResizeLimits(920, 560, 10000, 10000); // below this even the icon-only header would not fit
             setContentOwned(new MainComponent(std::move(startupProgressCallback)), true);
             centreWithSize(1400, 900);
             setVisible(true);
@@ -76,8 +75,6 @@ private:
                 onDecision(true);
         }
     };
-
-    creation::services::SuiteProcessRegistration processRegistration;
 };
 
 START_JUCE_APPLICATION(CreativeWorkstationApplication)

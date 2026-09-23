@@ -1,0 +1,184 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.menus-reference",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Menus: File, Edit, View and Help",
+  "summary": "Everything in the four menus, including how the File menu changes between the Tracker and the Signal Lab.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.file.import",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:5fb63783b6c207afe54087d97e588ca4e3bb462724f4332b03a0975d5553f340"
+    },
+    {
+      "helpId": "djehuti.station.file.save-project",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:0e3ebab1f4ae6b47adfe7c66c9a1b9e3781983f15173edc35cd54b51a0e4e786"
+    },
+    {
+      "helpId": "djehuti.station.file.new-arrangement",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:9848877e2a09f73ec15520806e3ea972c1955d0c9c677e0f6a28339fbb5f9ece"
+    },
+    {
+      "helpId": "djehuti.station.file.save-arrangement",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:c17c0faef63c830b0e0db4e5d9c6fe99fbe6336b282a49fa3f5ba0549287232c"
+    },
+    {
+      "helpId": "djehuti.station.file.load-arrangement",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:1aab86141a2e8843ea75942e2fbb8aa1bcabf17685687d8658d1882417bfee38"
+    },
+    {
+      "helpId": "djehuti.station.file.render-full-mix",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:1c8d2e11aafdde4ac4f9d6e3f4df3a5147b46cb0ffd78ef2fe54cf4806518522"
+    },
+    {
+      "helpId": "djehuti.station.file.export-wav",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:fe6a45c8a13860f42b8d4fc63266559d3157d4dc7c0e5f3d98c2464e22d0903a"
+    },
+    {
+      "helpId": "djehuti.station.file.new-signal",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:adaec97787d308acfe0aaa9d5d0aecb6949f4e71770d378d5e1f1faba34478f0"
+    },
+    {
+      "helpId": "djehuti.station.file.open-signal",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:22d03d079cad345a869f8a9b7757e8a3c3db7770463e03ad9702de60d974b3b6"
+    },
+    {
+      "helpId": "djehuti.station.file.save-signal",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:b29f75b4608c030f50346e4c06c9b9abae15ace315a184485c37f2f4fc611c51"
+    },
+    {
+      "helpId": "djehuti.station.file.render-signal",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:cedc437e6360330889919490a0705bbf100ae914813c34b8b23e7d9ff1aa3df4"
+    },
+    {
+      "helpId": "djehuti.station.edit.undo",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:4c854c330a1983d6ad9afa0c39ff8aacc9fac5d9372336cee624d83897ef82ce"
+    },
+    {
+      "helpId": "djehuti.station.edit.redo",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:67d1be164457944ef9b3286579cca244183027826ac250c28eb5e606cbabc38a"
+    },
+    {
+      "helpId": "djehuti.station.help.guided-tour",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:a544bc093bf7bc6d9d865b2aaca0a9302489c07a1d0f9ce3f94b5728cdff2b43"
+    },
+    {
+      "helpId": "djehuti.station.help.feedback",
+      "anchorBlockId": "file-follows-focus",
+      "verifiedBehaviorSignature": "sha256:3cd5f4f77308c48ce299a8fabea7b9e959ebd03712cdad70e3b4a7f73dd426e5"
+    }
+  ],
+  "keywords": [
+    "menu",
+    "File menu",
+    "Edit menu",
+    "View menu",
+    "Help menu",
+    "Save",
+    "Import",
+    "New Arrangement",
+    "Render Full Mix",
+    "Undo"
+  ],
+  "alternateQueries": [
+    "Where is Save?",
+    "Where is Render?",
+    "Why did the File menu change?",
+    "Where do I open a project?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.keyboard-shortcuts"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-arrangements"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "file-follows-focus",
+      "kind": "paragraph",
+      "text": "The File menu follows the panel that has focus. Click into the Tracker and File shows the arrangement items; click into the Signal Lab and it shows the signal items. Projects themselves are managed from the Project button in the header, not from File."
+    },
+    {
+      "id": "file-common",
+      "kind": "definition",
+      "term": "File (always)",
+      "definition": "Import... opens the import window. Save (shown as Save Project in the Signal Lab) saves the project."
+    },
+    {
+      "id": "file-tracker",
+      "kind": "definition",
+      "term": "File (Tracker focused)",
+      "definition": "New Arrangement, Save Arrangement..., Load Arrangement..., Render Full Mix..., Export Full Mix as WAV..."
+    },
+    {
+      "id": "file-signal",
+      "kind": "definition",
+      "term": "File (Signal Lab focused)",
+      "definition": "New Signal, Open Signal..., Save Signal..., Render Signal to Project, then Save Project."
+    },
+    {
+      "id": "edit",
+      "kind": "definition",
+      "term": "Edit",
+      "definition": "Undo (Ctrl+Z), Redo (Ctrl+Y), Duplicate Clip (Ctrl+D), Split at Playhead (Ctrl+Shift+S), Rename Clip (F2), Delete Clip (Delete). The clip items need a selected clip. Undo and Redo go to the focused panel: the Tracker or the Signal Lab."
+    },
+    {
+      "id": "view",
+      "kind": "definition",
+      "term": "View",
+      "definition": "Opens and closes panels: Tracker, Sampler, Signal, Layers, Plugins, Script, Capture, Score, Settings, Foley, Video, Track Insert, Virtual Engineer; and Reset Dock Layout."
+    },
+    {
+      "id": "help",
+      "kind": "definition",
+      "term": "Help",
+      "definition": "Help Topics (F1), Guided Tour and Send Feedback..."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (getMenuForIndex)"
+      }
+    ]
+  }
+}

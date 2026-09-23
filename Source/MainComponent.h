@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+#include <set>
 #include <JuceHeader.h>
 #include <array>
 #include <vector>
@@ -37,8 +39,16 @@
 #include "Views/AuthGateView.h"
 #include "Views/AiPanel.h"
 #include "Views/ContentPanel.h"
+#include "Views/ProgressTask.h"
+#include "Video/VideoPreviewComponent.h"
+#include "Video/Gl/VideoGlView.h"
+#include "Video/Gl/VideoLayerParams.h"
+#include "Video/Gl/VideoPanelHost.h"
+#include "Video/VideoScrubPreview.h"
+#include "Video/VideoSource.h"
+#include "Views/RenderDialog.h"
+#include "Views/ToastMessage.h"
 #include "Views/DslPanel.h"
-#include "Views/GraphPanel.h"
 #include "Views/MidiEditorPanel.h"
 #include "Views/MixerPanel.h"
 #include "Views/PluginBrowserList.h"
@@ -52,6 +62,8 @@
 #include "Views/TrackerPanel.h"
 #include "Views/TourGuideOverlay.h"
 #include "Views/FeedbackDialog.h"
+#include "Help/HelpLibrary.h"
+#include "Help/HelpPanel.h"
 #include <creation/ui/SuiteSettingsPanel.h>
 
 class MainComponent final : public juce::Component,
@@ -67,7 +79,6 @@ public:
         library,
         mix,
         plugins,
-        node,
         code,
         record,
         score,
@@ -238,7 +249,6 @@ private:
     ContentPanel contentPanel;
     MixerPanel mixerPanel;
     PluginsPanel pluginsPanel;
-    GraphPanel graphPanel;
     DslPanel dslPanel;
     RecordView recordView;
     FoleyPanel foleyPanel;
@@ -271,6 +281,13 @@ private:
     creation_station::FeedbackMetricsClient feedbackMetricsClient;
     creation_station::MetricsCollector metricsCollector;
     void showFeedbackWindow();
+    cs::help::Library helpLibrary;
+    std::unique_ptr<juce::DocumentWindow> helpWindow;
+    juce::Component::SafePointer<cs::help::HelpPanel> helpPanel;
+    // Opens the help browser on the topic for a feature (empty = the panel you are working in).
+    void showHelpWindow(const juce::String& helpId = {});
+    // The help ID of the panel that has focus, or empty when nothing specific has.
+    juce::String currentHelpId() const;
     std::unique_ptr<juce::DocumentWindow> midiEditorWindow;
     juce::Component::SafePointer<MidiEditorPanel> midiEditorPanel;
     std::array<std::unique_ptr<juce::DocumentWindow>, 12> workspacePopoutWindows;
@@ -279,9 +296,61 @@ private:
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     creation::assets::ProjectSession projectSession;
+    // Rendered WAV file for each Signal clip's source patch asset, so playback-target builds (which
+    // run on every scrub) don't hit the VFS. Cleared whenever a patch is saved.
+    std::map<juce::String, std::shared_ptr<const juce::MemoryBlock>> signalRenderBytes; // asset id -> the rendered sound of a Signal clip, in memory
+
+    // Video. The picture is a dock panel (dock it, float it, resize it); the sound is the video's own audio
+    // track, decoded once to a WAV so it plays through the clip's mixer track like any other audio clip.
+    cs::VideoGlView videoView; // the video picture: drawn by OpenGL, effects run on the GPU
+    cs::VideoPanelHost videoPanelHost { videoView }; // what the video panel shows: the picture plus a status strip
+    // One decoder per video clip that is on screen at the playhead (each layer of the picture has its own).
+    struct VideoLayerFeed
+    {
+        cs::VideoScrubPreview scrub;
+        juce::Image frame;
+        juce::String requestKey;
+        cs::VideoSource source;
+    };
+    std::map<juce::String, std::unique_ptr<VideoLayerFeed>> videoFeeds; // clip id -> its decoder and latest frame
+    std::vector<juce::String> videoActiveOrder;                          // clip ids at the playhead, bottom layer first
+    void refreshVideoLayers();                                           // republish the layers from the feeds and the clips' settings
+    void showVideoClipSettings(int clipIndex);
+    std::unique_ptr<juce::DocumentWindow> videoSettingsWindow;
+    std::map<juce::String, std::shared_ptr<const juce::MemoryBlock>> videoAudioBytes; // asset id -> that video's sound as a WAV, in memory
+    std::set<juce::String> videosWithoutAudio;          // asset ids whose video has no sound track
+    void updateVideoView(double timelineSeconds);
+    void openVideoViewForPlayback();
+    // The clip menu's video/sound actions (1 split the sound onto its own track, 2 unlink, 3 link, 4 put back,
+    // 5 video effects and layout).
+    void handleClipSoundAction(int clipIndex, int action);
+    // Right-click > Add Clip...: a picker that offers what fits the track, with a picture and facts for each item.
+    void showAddClipPicker(int trackIndex, double startSeconds);
+    // Reads what each video/audio/render/patch asset actually is (length, size of picture, channels, a thumbnail)
+    // for any asset that has no details yet, in a progress window. Returns false when there was nothing to do.
+    void splitSoundFromVideo(int clipIndex);
+    bool videoClipsNeedAudio() const;
+    // Makes sure every video clip's sound is ready (extracting and caching it in the project when it is not),
+    // in a progress window. Returns false when nothing needed doing.
+    bool prepareVideoAudio(std::function<void()> whenDone = {});
+    static juce::String videoAudioCachePath(const juce::String& assetId);
+
+    // An asset's bytes, read into memory through the VFS service (never copied out to a file); kept for reuse until the
+    // memory limit is reached. versionKey makes a re-saved asset be read again.
+    std::shared_ptr<const juce::MemoryBlock> readAssetBytes(const juce::String& logicalPath, const juce::String& versionKey);
+    std::map<juce::String, std::shared_ptr<const juce::MemoryBlock>> assetBytesCache;
+    juce::int64 assetBytesCacheSize = 0;
+    // Where a video in the project is read from: a stream of the VFS entry, never a file on the disk.
+    cs::VideoSource makeVideoSource(const juce::String& assetId, const juce::String& logicalPath) const;
+    // Parsed patch (and its content key) for each Signal clip's patch asset, so timeline refreshes
+    // don't re-fetch it from the VFS. Cleared whenever a patch is saved.
+    std::map<juce::String, std::pair<juce::String, cw::PatchDocument>> signalPatchDocs;
     // Which saved arrangement/patch/foley-setup (project asset id) is currently active in each
     // tool tab -- used to auto-restore the right one when the project reopens.
     juce::String currentArrangementAssetId;
+    juce::String arrangementBaseline;
+    juce::String shownArrangementTitle;
+    double arrangementTitleCheckedAtSeconds = 0.0;
     juce::String currentSignalLabAssetId;
     juce::String currentFoleyAssetId;
     VstPluginCatalog vstPluginCatalog;
@@ -324,6 +393,7 @@ private:
     bool appContextSyncInProgress = false;
     juce::String appContextLastPublishedChecksum;
     juce::String pendingAiPrompt;
+    juce::String pendingAiQuestion; // what the user typed, without the mode and access preamble
     CreationStationContextEngine::ContextPacket pendingAiContextPacket;
     bool pendingAiContextPacketValid = false;
     bool aiCompletionInFlight = false;
@@ -361,19 +431,51 @@ private:
     void parentHierarchyChanged() override;
     bool handleGlobalKeyPress(const juce::KeyPress& key);
     juce::ValueTree createProjectStateForSave();
-    void remapTemplateStateFilesToCurrentProject(juce::ValueTree& state) const;
     void saveSessionToDisk(bool userInitiated = false);
     void loadSessionFromDisk();
     void pollHostedPluginStateAutosave();
     bool prepareTrackerPlayback();
     void refreshTrackerPlaybackClips();
+    // includeSignalClips=false is the live-playback form: Signal clips are left out of the audio-file
+    // targets (they are run live by the engine, see buildSignalClipTargets) but still count toward
+    // durationSeconds. true (the default) is the offline/render form, which bakes them to WAV.
     bool buildTrackerPlaybackTargets(juce::Array<WorkstationAudioEngine::PlaybackClipTarget>& targets,
                                      double& durationSeconds,
-                                     juce::String& errorMessage) const;
+                                     juce::String& errorMessage,
+                                     bool includeSignalClips = true);
+    bool buildSignalClipTargets(juce::Array<WorkstationAudioEngine::SignalClipTarget>& targets,
+                                juce::String& errorMessage);
+    // Reads a Signal clip's patch (cached per asset) and its content key. False (with errorMessage set
+    // for a real read error) when the clip has no readable patch.
+    bool loadSignalClipPatch(const cs::TimelineClip& clip, cw::PatchDocument& patch, juce::String& patchKey, juce::String& errorMessage);
     void previewScrubAudioAt(double timelineSeconds);
     void refreshMidiPlaybackClips();
-    bool renderFullMixToProject();
-    void exportFullMixAsWav();
+    // The render dialog: what to render, where it goes, and in what format. Opens with `preferredDestination`
+    // selected; the last settings used are remembered for the session.
+    void showRenderDialog(RenderRequest::Destination preferredDestination);
+    void beginRender(const RenderRequest& request);
+    void runRenderJob(const RenderRequest& request, const juce::File& destinationFile);
+    RenderRequest lastRenderRequest;
+    juce::Component::SafePointer<juce::DialogWindow> renderDialogWindow;
+    // The running render (modal progress window + worker thread); kept alive until it has finished.
+    std::unique_ptr<juce::ThreadWithProgressWindow> renderJob;
+    // Writes a rendered mix into the project as a Render asset (encoded in memory, no temp file).
+    bool saveRenderToProject(const juce::AudioBuffer<float>& buffer, double sampleRate, int bitsPerSample, bool dither,
+                             const juce::String& displayName, creation::assets::AssetDescriptor& savedAsset,
+                             juce::String& errorMessage);
+    void toggleProjectAssetPreview(const creation::assets::AssetDescriptor& asset);
+    // Errors get a dialog with room to read them, a Close button and a Copy button - not the header's small
+    // status label. Errors that arrive while a dialog is open are collected into the next one, so a burst
+    // (say, importing several files that all fail) is one dialog rather than a stack of them.
+    void reportError(const juce::String& message);
+    // Anything that is not an error (confirmations, "stop playback first", ...): a readable message that
+    // clears itself, instead of the header's small status label, which is gone.
+    void showToast(const juce::String& message);
+    ToastMessage toast;
+    void showPendingErrors();
+    juce::StringArray pendingErrors;
+    bool errorDialogShowing = false;
+    juce::String previewingProjectAssetId;
     void pushTimelineUndoState();
     void pushTimelineUndoState(const juce::ValueTree& stateBeforeEdit);
     void undoTimelineEdit();
@@ -437,6 +539,10 @@ private:
     // a previously-closed panel means calling this again, not reusing an old handle.
     CreationDock::DockPanel* registerNamedDockPanel(const juce::String& panelId, CreationDock::DockTargetZone zone);
     void setWorkspaceMode(WorkspaceMode mode);
+    // Transport (Play/Pause/Stop, undo) goes to whichever of the Tracker or Signal Lab has focus, not to whichever tab
+    // was last clicked: the active mode only changed when a tab was clicked, so a Signal Lab shown by a restored layout
+    // (or clicked into) still sent Play to the tracker and nothing played.
+    void syncActiveModeToFocus();
     void resetDockLayout();
     void toggleToolWindow(WorkspaceMode mode);
     void toggleAiToolWindow();
@@ -505,7 +611,6 @@ private:
                                int trackIndex,
                                juce::Component::SafePointer<juce::Component> editorPointer,
                                int attemptsRemaining);
-    void assignPluginToGraphNode(const juce::File& file);
     void showTour();
     void importProjectSounds();
     void refreshProjectAssets();
@@ -519,6 +624,15 @@ private:
     // asset in each tool tab, used both by the auto-restore-on-project-open path and by each
     // tool's own interactive Load menu.
     bool restoreArrangementAsset(const creation::assets::AssetDescriptor& asset);
+
+    // One arrangement is open at a time; File > New Arrangement empties the Tracker (asking to save first if it has
+    // unsaved changes). "Unsaved" means the tracks and clips differ from how they were when last saved or loaded.
+    void newArrangement();
+    void performNewArrangement();
+    juce::String arrangementFingerprint() const;
+    bool arrangementIsDirty() const;
+    void markArrangementClean();
+    void refreshArrangementTitle();
     bool restoreSignalLabAsset(const creation::assets::AssetDescriptor& asset);
     bool restoreFoleyAsset(const creation::assets::AssetDescriptor& asset);
     void restoreLastActiveAssets(const juce::ValueTree& lastActiveAssetsState);
@@ -530,12 +644,21 @@ private:
                                  const juce::String& sourceTool,
                                  juce::String& errorMessage);
     bool importAudioFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    int placeVideoAssetOnTracker(const juce::File& sourceFile, const cs::VideoStreamInfo& info,
-                                 int targetTrack, double startSeconds, juce::String& errorMessage);
+    // Adds an already-uploaded video (its bytes are in the project at `logicalPath`) to the project's asset
+    // list and puts a clip for it on the track. Fast; message thread.
+    int addImportedVideoToTracker(const juce::File& sourceFile, const juce::String& assetId, const juce::String& logicalPath, juce::int64 fileSize,
+                                  const cs::VideoStreamInfo& info, const juce::MemoryBlock& thumbnailJpeg, int targetTrack, double startSeconds,
+                                  juce::String& errorMessage);
     void importVideoFilesToTracker(const juce::StringArray& filePaths, int preferredTrack, double startSeconds);
-    void importVideoFilesSequentially(juce::StringArray filePaths, int index, int trackIndex, double startSeconds);
+    void runVideoImport(juce::StringArray filePaths, int trackIndex, double startSeconds);
+
+    // File > Import: pick files or a folder, then bring them all into the project's asset library (no track placement).
+    void showImportWindow();
+    void runLibraryImport(juce::StringArray filePaths);
+    juce::Component::SafePointer<juce::DialogWindow> importWindow;
+    // The window for whatever long action is running (import, ...): progress bar, status line, Cancel.
+    std::unique_ptr<ProgressTask> progressTask;
     std::optional<creation::assets::AssetDescriptor> resolveTimelineClipAsset(const cs::TimelineClip& clip) const;
-    void resolveTrackerClipAssetFiles();
     void launchTutorialItem(const ContentPanel::TutorialItem& item);
     bool chooseStorageRoot(bool promptWhenAlreadyConfigured = false);
     bool ensureStorageRootConfigured();

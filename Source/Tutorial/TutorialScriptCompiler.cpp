@@ -100,12 +100,6 @@ bool ScriptCompiler::parseActionType(const juce::String& text, ActionType& type)
         return true;
     }
 
-    if (normalized == "applygraphmacro" || normalized == "apply-graph-macro")
-    {
-        type = ActionType::applyGraphMacro;
-        return true;
-    }
-
     return false;
 }
 

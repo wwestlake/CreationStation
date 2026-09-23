@@ -13,14 +13,34 @@ public:
     {
         image = std::move(newImage);
         receivedFrame = true;
+        idle = false;
         repaint();
     }
 
     void resetDecodingState()
     {
         receivedFrame = false;
+        idle = false;
         image = {};
         repaint();
+    }
+
+    // Nothing to show (the playhead is not over a video clip): a plain dark well, no "Decoding..." text.
+    void setIdle()
+    {
+        if (idle)
+            return;
+        idle = true;
+        image = {};
+        repaint();
+    }
+
+    // Called when the view is resized, so the owner can ask for frames at the new size.
+    std::function<void()> onSizeChanged;
+    void resized() override
+    {
+        if (onSizeChanged)
+            onSizeChanged();
     }
 
     void paint(juce::Graphics& g) override
@@ -28,7 +48,13 @@ public:
         g.setColour(juce::Colour(0xcc0a0e14));
         g.fillRect(getLocalBounds());
 
-        if (image.isValid())
+        if (idle)
+        {
+            g.setColour(juce::Colour(0xff5b6678));
+            g.setFont(juce::Font(juce::FontOptions(13.0f)));
+            g.drawText("No video at the playhead", getLocalBounds(), juce::Justification::centred);
+        }
+        else if (image.isValid())
         {
             g.drawImage(image, getLocalBounds().toFloat(), juce::RectanglePlacement::centred);
         }
@@ -52,5 +78,6 @@ public:
 private:
     juce::Image image;
     bool receivedFrame = false;
+    bool idle = true;
 };
 }

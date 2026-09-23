@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.guided-tour",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Take the guided tour",
+  "summary": "The Tour button (or Help > Guided Tour) starts a step-by-step overlay that points at parts of the window.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.help.guided-tour",
+      "anchorBlockId": "run",
+      "verifiedBehaviorSignature": "sha256:a544bc093bf7bc6d9d865b2aaca0a9302489c07a1d0f9ce3f94b5728cdff2b43"
+    }
+  ],
+  "keywords": [
+    "tour",
+    "guided tour",
+    "tutorial",
+    "walkthrough",
+    "getting started"
+  ],
+  "alternateQueries": [
+    "How do I get started?",
+    "Is there a tutorial?",
+    "How do I take the tour?"
+  ],
+  "relations": [],
+  "blocks": [
+    {
+      "id": "run",
+      "kind": "steps",
+      "title": "Run the tour",
+      "steps": [
+        {
+          "id": "start",
+          "instruction": "Click Tour in the header, or choose Help > Guided Tour.",
+          "expectedResult": "An overlay shows \"Step 1 of N\" with a title and text and highlights a part of the window.",
+          "uiTarget": "djehuti.station.help.guided-tour"
+        },
+        {
+          "id": "navigate",
+          "instruction": "Use Next and Previous to move through the steps, Skip to leave early, and Done on the last step."
+        }
+      ]
+    },
+    {
+      "id": "out-of-date",
+      "kind": "warning",
+      "text": "The tour's text has not been reviewed against the current application and may describe screens or buttons that have changed. When the tour and this help disagree, trust this help."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/TourGuideOverlay.cpp"
+      }
+    ]
+  }
+}

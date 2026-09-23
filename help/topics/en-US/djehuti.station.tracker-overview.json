@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.tracker-overview",
+  "locale": "en-US",
+  "type": "explanation",
+  "title": "The Tracker: tracks, clips and the timeline",
+  "summary": "The Tracker is the timeline where you arrange audio, MIDI, automation, Signal, Foley and video material on tracks.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.tracker",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:8f6fb076807e775ae5f1bfff8b3d695b53784e6942088c21f4e2c6cb24fdf3c2"
+    },
+    {
+      "helpId": "djehuti.station.tracker.mute-solo",
+      "anchorBlockId": "what",
+      "verifiedBehaviorSignature": "sha256:19e47de24b28b67fb4bbcf412dca4e3b4d57001276daf114ad2a365d319ba1c1"
+    }
+  ],
+  "keywords": [
+    "Tracker",
+    "timeline",
+    "tracks",
+    "clips",
+    "arrangement",
+    "playhead"
+  ],
+  "alternateQueries": [
+    "What is the Tracker?",
+    "How do I use the timeline?",
+    "What is a clip?"
+  ],
+  "relations": [
+    {
+      "type": "next",
+      "topicId": "djehuti.station.tracker-add-track"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-arrangements"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-track-types"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "what",
+      "kind": "paragraph",
+      "text": "The Tracker is a timeline. Tracks run across it, one per row. Clips sit on tracks: a clip is a piece of audio, a MIDI pattern, a generated Signal sound, a Foley setup or a video. The playhead marks the current position, and the transport plays from it."
+    },
+    {
+      "id": "empty",
+      "kind": "paragraph",
+      "text": "A new project's Tracker is empty (\"No tracks yet\"). Right-click the timeline to add a track."
+    },
+    {
+      "id": "clip-and-asset",
+      "kind": "paragraph",
+      "text": "A clip refers to an asset in the project; the audio itself is stored once in the project, not on the track. Deleting a clip does not delete the asset."
+    },
+    {
+      "id": "header",
+      "kind": "paragraph",
+      "text": "Each track has a header with its controls: Arm, Mon, M (mute), S (solo), FX, a Mono/ST switch, an input source, and a \"...\" menu of track actions. A timing bar shows the project tempo, time signature and key, with Snap and grid controls."
+    },
+    {
+      "id": "one-arrangement",
+      "kind": "note",
+      "text": "The Tracker shows one arrangement at a time. The tab shows its name, or Untitled, with a * when there are unsaved changes."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/TrackerPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Timeline/TimelineModel.h"
+      }
+    ]
+  }
+}

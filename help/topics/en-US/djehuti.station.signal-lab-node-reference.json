@@ -1,0 +1,139 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.signal-lab-node-reference",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Signal Lab nodes and variables",
+  "summary": "Every node you can add in the Signal Lab, grouped as in the palette, and how variables work.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.signal-lab.nodes",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:253c43dafef77342f7aa82ea51fa104451a958310c4254b3181f90616fb82622"
+    },
+    {
+      "helpId": "djehuti.station.signal-lab.variables",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:0b8b4b4ad6911b0bb1e9ac068543240c51c47b0a7a3c79b46cb9b47c099b4634"
+    },
+    {
+      "helpId": "djehuti.station.signal-lab.compile",
+      "anchorBlockId": "open",
+      "verifiedBehaviorSignature": "sha256:753136894f1e17bb5a3bcd43fa61c709bad6cb1f46e1934ce8e71d75aec356e6"
+    }
+  ],
+  "keywords": [
+    "nodes",
+    "oscillator",
+    "filter",
+    "envelope",
+    "mixer",
+    "sink",
+    "scope",
+    "analyzer",
+    "variables",
+    "Get",
+    "Set",
+    "cross fader",
+    "router",
+    "sample and hold"
+  ],
+  "alternateQueries": [
+    "What nodes are available?",
+    "How do I use a variable?",
+    "What does the Router do?",
+    "How do I see the waveform?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.signal-lab-overview"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "open",
+      "kind": "paragraph",
+      "text": "Right-click an empty spot on the canvas to open the palette."
+    },
+    {
+      "id": "sources",
+      "kind": "definition",
+      "term": "Sources",
+      "definition": "Sine, Saw, Square and Triangle oscillators, and Noise."
+    },
+    {
+      "id": "processing",
+      "kind": "definition",
+      "term": "Processing",
+      "definition": "Mixer (sums inputs), Filter, Envelope, and Cross Fader (blends two inputs)."
+    },
+    {
+      "id": "routing",
+      "kind": "definition",
+      "term": "Routing & Dynamics",
+      "definition": "Router (selects among inputs) and Sample & Hold."
+    },
+    {
+      "id": "io",
+      "kind": "definition",
+      "term": "I/O & Analysis",
+      "definition": "Sink (the output, in Audio or Wave (File) mode), Timeline (a node that moves a value over the length of the sound), Oscilloscope and Frequency Analyzer."
+    },
+    {
+      "id": "control",
+      "kind": "definition",
+      "term": "Control Surface",
+      "definition": "Fader Control and Button Control, driven by a MIDI control that can be learned."
+    },
+    {
+      "id": "variables-node",
+      "kind": "definition",
+      "term": "Variables",
+      "definition": "Get and Set nodes for each variable you have created."
+    },
+    {
+      "id": "variables",
+      "kind": "paragraph",
+      "text": "The Variables list on the left holds named values. Press + Variable to add one, then drag it onto the graph to place a Get node, or hold Alt while dropping to place a Set node. A variable is public (the timeline can control it) or private (only used inside the graph); public variables can be automated when the signal is used as a Signal clip."
+    },
+    {
+      "id": "compile",
+      "kind": "paragraph",
+      "text": "The Compile button checks and compiles the graph. Pressing Play compiles first when the graph has changed."
+    },
+    {
+      "id": "sink-modes",
+      "kind": "note",
+      "text": "A Sink in Wave (File) mode turns Play into Render: it renders straight to the project instead of starting the live engine."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SignalLabPanel.cpp (palette entries)"
+      }
+    ]
+  }
+}

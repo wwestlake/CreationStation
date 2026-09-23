@@ -1,14 +1,8 @@
 #include "DslPanel.h"
 
-// DslPanel's "Compile" button shells out to the real frust_compiler CLI in
-// --emit-obj mode (parses, runs sema/codegen, emits an object file, never
-// executes anything) rather than linking an embeddable FRust frontend
-// library -- FrustLang doesn't package its parser/sema as one today (see
-// CS_FRUST_COMPILER_EXECUTABLE's own comment in CMakeLists.txt). This also
-// means a bare, manifest-free patch compiles here exactly like it did under
-// CEL -- frust_plugin_host's JIT load path (used by Signal Lab/Foley's real
-// node-graph output) refuses to load anything without a `manifest "...";`
-// declaration, which would be unwanted boilerplate for a scratch patch.
+// The Script panel does not compile anything itself: pressing Compile hands the text to the host
+// (onCompileRequested), which stores it in the project VFS and compiles it there with the FRust
+// libraries built into the app. The panel only shows what comes back.
 DslPanel::DslPanel()
 {
     setName("Code");
@@ -59,7 +53,9 @@ pub fn gain(input: f64, amount: f64) -> f64 = {
     loadButton.setTooltip("Load a saved .frust file");
     addAndMakeVisible(loadButton);
 
-    compileSource();
+    outputEditor.setText("Press Compile to check this source.", juce::dontSendNotification);
+    exportButton.setEnabled(false);
+    saveButton.setEnabled(false);
 }
 
 void DslPanel::setSourceText(const juce::String& text)
@@ -99,44 +95,14 @@ void DslPanel::resized()
 
 void DslPanel::compileSource()
 {
-    const auto scratchDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                                 .getChildFile("djehuti_station_dsl_panel");
-    scratchDir.createDirectory();
-    const auto sourceFile = scratchDir.getChildFile("patch.frust");
-    const auto objectFile = scratchDir.getChildFile("patch.o");
-    sourceFile.replaceWithText(sourceEditor.getText());
-
-    juce::ChildProcess compilerProcess;
-    const juce::StringArray arguments {
-        CS_FRUST_COMPILER_EXECUTABLE,
-        "--emit-obj",
-        objectFile.getFullPathName(),
-        sourceFile.getFullPathName()
-    };
-
-    juce::String output;
-    if (!compilerProcess.start(arguments, juce::ChildProcess::wantStdOut | juce::ChildProcess::wantStdErr))
-    {
-        output = "Could not launch frust_compiler.";
-        lastCompileSucceeded = false;
-    }
+    CompileOutcome outcome;
+    if (onCompileRequested)
+        outcome = onCompileRequested(sourceEditor.getText());
     else
-    {
-        output = compilerProcess.readAllProcessOutput();
-        compilerProcess.waitForProcessToFinish(10000);
+        outcome.output = "Compiling is not available here.";
 
-        // frust_compiler prints nothing at all on a clean --emit-obj compile
-        // (see its own Main.cpp) -- any output at all means a parse/sema/
-        // codegen diagnostic fired. Not the process exit code: a known,
-        // separately-tracked frust_compiler bug means it doesn't yet exit
-        // nonzero on a compile error, so exit code can't be trusted here.
-        lastCompileSucceeded = output.isEmpty();
-    }
-
-    if (lastCompileSucceeded)
-        output = "Compiled cleanly.";
-
-    outputEditor.setText(output, juce::dontSendNotification);
+    lastCompileSucceeded = outcome.ok;
+    outputEditor.setText(outcome.output, juce::dontSendNotification);
     exportButton.setEnabled(lastCompileSucceeded);
     saveButton.setEnabled(lastCompileSucceeded);
 }

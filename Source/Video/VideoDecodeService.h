@@ -40,6 +40,12 @@ public:
     // thread on. Returns stream info with valid == false on failure (unreadable file, no
     // decodable video stream, no hardware decoder available for the codec).
     VideoStreamInfo open(const juce::File& file);
+    // Opens a video from a stream (a VFS entry read in pieces), so the video never has to be copied out to a file.
+    // `nameHint` is the original file name (with its extension): Windows uses it to recognise the container. The
+    // service owns the stream from here on, and reads from it on Media Foundation's own threads.
+    VideoStreamInfo open(std::unique_ptr<juce::InputStream> stream, const juce::String& nameHint);
+    // Why the last open() failed, in words a user can act on ("" after a success).
+    juce::String getLastError() const { return lastError; }
     void close();
     bool isOpen() const noexcept;
 
@@ -55,7 +61,10 @@ public:
     bool decodeAudioToFloatPCM(juce::AudioBuffer<float>& destination);
 
 private:
+    VideoStreamInfo openImpl(const juce::File* file, std::unique_ptr<juce::InputStream> stream, const juce::String& nameHint);
+
     struct Impl;
     std::unique_ptr<Impl> impl;
+    juce::String lastError;
 };
 }

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.video-sound-split",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Split a video's sound onto its own track",
+  "summary": "Right-click a video clip and choose Split sound onto its own track: the sound gets a linked audio track under the picture.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.tracker.split-sound",
+      "anchorBlockId": "split",
+      "verifiedBehaviorSignature": "sha256:2b116f069569d7480de2e6993092a4a2e760a5b58e86966858139021b23e7c9f"
+    },
+    {
+      "helpId": "djehuti.station.tracker.clip-menu",
+      "anchorBlockId": "split",
+      "verifiedBehaviorSignature": "sha256:c7e8bac995278fd5f7162b6cf6d567d5bdb421de68a023bbef2b396ec22cebd6"
+    }
+  ],
+  "keywords": [
+    "split sound",
+    "audio from video",
+    "link",
+    "unlink",
+    "video audio",
+    "detach audio"
+  ],
+  "alternateQueries": [
+    "How do I separate the audio from a video?",
+    "How do I edit the video's sound separately?",
+    "How do I reconnect the sound to the picture?"
+  ],
+  "relations": [
+    {
+      "type": "prerequisite",
+      "topicId": "djehuti.station.video-import-play"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "split",
+      "kind": "steps",
+      "title": "Split the sound",
+      "steps": [
+        {
+          "id": "menu",
+          "instruction": "Right-click the video clip and choose Split sound onto its own track.",
+          "expectedResult": "The first time, the video's sound is prepared (a progress window). A new audio track appears directly under the video's track, holding the sound as a clip.",
+          "uiTarget": "djehuti.station.tracker.split-sound"
+        }
+      ]
+    },
+    {
+      "id": "linked",
+      "kind": "paragraph",
+      "text": "The picture and its sound are linked: moving, trimming or splitting one does the same to the other. Unlink picture and sound lets you slide the sound against the picture; Link picture and sound joins them again; Put sound back into the video returns the sound to the video clip."
+    },
+    {
+      "id": "mixer",
+      "kind": "paragraph",
+      "text": "The video's own sound plays through the track it is on, so its volume is controlled by that track in the mixer."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp (splitSoundFromVideo)"
+      }
+    ]
+  }
+}

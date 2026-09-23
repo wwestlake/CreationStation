@@ -210,9 +210,6 @@ TrackerPanel::TrackerPanel()
     };
     addAndMakeVisible(keySelector);
 
-    arrangementMenuButton.onClick = [this] { showArrangementMenu(); };
-    arrangementMenuButton.setTooltip("Save or load this set of tracks as a named project asset");
-    addAndMakeVisible(arrangementMenuButton);
 
     snapToggleButton.setClickingTogglesState(true);
     snapToggleButton.setToggleState(true, juce::dontSendNotification);
@@ -435,6 +432,11 @@ TrackerPanel::TrackerPanel()
         if (onClipDuplicateRequested)
             onClipDuplicateRequested(clipIndex);
     };
+    canvas.onClipSoundAction = [this](int clipIndex, int action)
+    {
+        if (onClipSoundAction)
+            onClipSoundAction(clipIndex, action);
+    };
     canvas.onClipDeleteRequested = [this](int clipIndex)
     {
         if (onClipDeleteRequested)
@@ -645,10 +647,6 @@ void TrackerPanel::refreshTimelineView()
     canvas.repaint();
 }
 
-void TrackerPanel::updateVideoPreview(double timelineSeconds)
-{
-    canvas.updateVideoPreview(timelineSeconds);
-}
 
 void TrackerPanel::centerTransportInView()
 {
@@ -688,12 +686,16 @@ void TrackerPanel::paint(juce::Graphics& g)
 void TrackerPanel::resized()
 {
     auto area = getLocalBounds().reduced(22, 18);
-    auto header = area.removeFromTop(120);
-    auto controls = header.removeFromRight(420);
+    // In a narrow panel the snap/grid/pitch-pipe controls drop to a row of their own under the info row instead
+    // of taking the right-hand 420 px and squeezing the timing boxes to nothing.
+    const bool narrow = area.getWidth() < 980;
+    auto header = area.removeFromTop(narrow ? 142 : 120);
+    auto controls = narrow ? juce::Rectangle<int>() : header.removeFromRight(420);
     titleLabel.setBounds(header.removeFromTop(32));
     hintLabel.setBounds(header.removeFromTop(24));
     auto infoRow = header.removeFromTop(32);
-    selectionLabel.setBounds(infoRow.removeFromLeft(180));
+    constexpr int fixedInfoWidth = 92 + 62 + 6 + 52 + 6 + 72;
+    selectionLabel.setBounds(infoRow.removeFromLeft(juce::jlimit(60, 180, infoRow.getWidth() - fixedInfoWidth)));
     timingLabel.setBounds(infoRow.removeFromLeft(92));
     bpmEditor.setBounds(infoRow.removeFromLeft(62));
     infoRow.removeFromLeft(6);
@@ -705,16 +707,28 @@ void TrackerPanel::resized()
     // in the blank timeline area, and Remove Track lives behind the per-track "..." menu, both
     // matching the clip context-menu pattern so no destructive/structural action sits adjacent
     // to frequently-clicked buttons and gets mis-hit.
-    auto trackButtons = controls.removeFromTop(32);
-    arrangementMenuButton.setBounds(trackButtons.removeFromLeft(110));
-    trackButtons.removeFromLeft(10);
+    constexpr int pitchPipePadding = 8;
+    juce::Rectangle<int> trackButtons;
+    juce::Rectangle<int> pitchPipeOuter;
+    if (narrow)
+    {
+        header.removeFromTop(6);
+        auto row = header.removeFromTop(44);
+        trackButtons = row.removeFromLeft(166).withTrimmedTop(6).withHeight(32);
+        row.removeFromLeft(16);
+        pitchPipeOuter = row.removeFromLeft(pitchPipePadding * 2 + 70 + 6 + 60 + 6 + 70);
+    }
+    else
+    {
+        trackButtons = controls.removeFromTop(32);
+        controls.removeFromTop(8);
+        pitchPipeOuter = controls.removeFromTop(28 + pitchPipePadding * 2);
+    }
+
     snapToggleButton.setBounds(trackButtons.removeFromLeft(70));
     trackButtons.removeFromLeft(6);
     gridResolutionCombo.setBounds(trackButtons.removeFromLeft(90));
 
-    controls.removeFromTop(8);
-    constexpr int pitchPipePadding = 8;
-    auto pitchPipeOuter = controls.removeFromTop(28 + pitchPipePadding * 2);
     pitchPipeGroupBounds = pitchPipeOuter;
     auto pitchPipeRow = pitchPipeOuter.reduced(pitchPipePadding, pitchPipePadding);
     pitchPipeNoteCombo.setBounds(pitchPipeRow.removeFromLeft(70));
@@ -1069,7 +1083,7 @@ void TrackerPanel::TimelineCanvas::setTrackCount(int newTrackCount)
             if (onTrackHeightCommitted)
                 onTrackHeightCommitted(index);
         };
-        addAndMakeVisible(header);
+        headerHost.addAndMakeVisible(header);
         header->setInputSources(inputSourceNames);
         trackHeaders.add(header);
     }
@@ -1113,20 +1127,25 @@ void TrackerPanel::commitTimingEdits()
         onKeyChanged(keySelector.getText());
 }
 
-void TrackerPanel::showArrangementMenu()
+void TrackerPanel::promptSaveArrangement()
 {
-    auto defaultName = currentArrangementName.isNotEmpty() ? currentArrangementName : juce::String("Arrangement");
-    creation::ui::showNamedAssetSaveLoadMenu(arrangementMenuButton, "Arrangement", defaultName,
-        [this](const juce::String& name)
-        {
-            if (onArrangementSaveRequested)
-                onArrangementSaveRequested(name);
-        },
-        [this]
-        {
-            if (onArrangementLoadRequested)
-                onArrangementLoadRequested();
-        });
+    const auto defaultName = currentArrangementName.isNotEmpty() ? currentArrangementName : juce::String("Arrangement");
+
+    auto* prompt = new juce::AlertWindow("Save Arrangement", "Enter a name for this arrangement:", juce::MessageBoxIconType::QuestionIcon);
+    prompt->addTextEditor("name", defaultName);
+    prompt->addButton("Save", 1);
+    prompt->addButton("Cancel", 0);
+
+    prompt->enterModalState(true, juce::ModalCallbackFunction::create([safe = juce::Component::SafePointer<TrackerPanel>(this), prompt](int result)
+    {
+        std::unique_ptr<juce::AlertWindow> dialog(prompt);
+        if (result != 1 || safe == nullptr)
+            return;
+
+        const auto name = dialog->getTextEditorContents("name").trim();
+        if (name.isNotEmpty() && safe->onArrangementSaveRequested)
+            safe->onArrangementSaveRequested(name);
+    }), true);
 }
 
 void TrackerPanel::setCurrentArrangementName(const juce::String& name)
@@ -1241,6 +1260,7 @@ void TrackerPanel::TimelineCanvas::setTrackInput(int trackIndex, int inputChanne
 void TrackerPanel::TimelineCanvas::setSelectedTrack(int trackIndex)
 {
     selectedTrack = trackIndex;
+    ensureTrackVisible(trackIndex);
     for (int index = 0; index < trackHeaders.size(); ++index)
         if (auto* header = trackHeaders[index])
             header->setSelected(index == selectedTrack);
@@ -1435,6 +1455,10 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
         return;
     }
 
+    // The ruler stays put: tracks scrolled up beneath it must not paint over it.
+    g.saveState();
+    g.reduceClipRegion(0, rulerHeight, getWidth(), juce::jmax(0, getHeight() - rulerHeight));
+
     for (int trackIndex = 0; trackIndex < trackCount; ++trackIndex)
     {
         auto lane = juce::Rectangle<int>(0, trackTopY(trackIndex), getWidth(), getTrackHeightAt(trackIndex));
@@ -1590,9 +1614,20 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
                            clipBounds.reduced(8, 4).removeFromTop(16),
                            juce::Justification::centredLeft,
                            true);
+
+                // Two interlocked links mark clips that edit together (a video and its sound).
+                if (clip.linkGroupId.isNotEmpty() && clipBounds.getWidth() > 60)
+                {
+                    const auto first = juce::Rectangle<float>((float) clipBounds.getRight() - 30.0f, (float) clipBounds.getY() + 7.0f, 14.0f, 8.0f);
+                    g.setColour(juce::Colours::white.withAlpha(0.9f));
+                    g.drawRoundedRectangle(first, 4.0f, 1.6f);
+                    g.drawRoundedRectangle(first.translated(8.0f, 0.0f), 4.0f, 1.6f);
+                }
             }
         }
     }
+
+    g.restoreState();
 
     if (timelineModel != nullptr)
     {
@@ -1684,63 +1719,100 @@ void TrackerPanel::TimelineCanvas::paint(juce::Graphics& g)
     }
 }
 
-void TrackerPanel::TimelineCanvas::updateVideoPreview(double timelineSeconds)
-{
-    if (timelineModel == nullptr)
-    {
-        if (videoWindow) videoWindow->setVisible(false);
-        return;
-    }
-
-    const cs::TimelineClip* activeClip = nullptr;
-    for (const auto& clip : timelineModel->getClips())
-    {
-        if (clip.kind != cs::ClipKind::video)
-            continue;
-        if (timelineSeconds < clip.startSeconds || timelineSeconds >= clip.startSeconds + clip.durationSeconds)
-            continue;
-
-        activeClip = &clip;
-        break;
-    }
-
-    if (activeClip == nullptr)
-    {
-        if (videoWindow) videoWindow->setVisible(false);
-        return;
-    }
-
-    if (videoWindow) videoWindow->setVisible(true);
-    auto sourceSeconds = activeClip->sourceStartSeconds + (timelineSeconds - activeClip->startSeconds);
-
-    scrubPreview.requestFrame(activeClip->file, sourceSeconds,
-                              [safe = juce::Component::SafePointer<TimelineCanvas>(this)](juce::Image image)
-                              {
-                                  if (safe != nullptr)
-                                      safe->videoWindow->getPreviewComponent().setImage(image);
-                              });
-}
-
 void TrackerPanel::TimelineCanvas::resized()
 {
-    auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    constexpr int rulerHeight = 56;
+    const auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    const auto belowRuler = juce::jmax(0, getHeight() - rulerHeight);
 
+    clampVerticalScroll();
+    updateVerticalScrollBar();
+    headerHost.setBounds(0, rulerHeight, labelWidth, belowRuler);
+    verticalScrollBar.setBounds(getWidth() - 12, rulerHeight, 12, belowRuler);
+
+    // Headers sit inside headerHost (which starts under the ruler), so scrolling slides them beneath the ruler.
     for (int trackIndex = 0; trackIndex < trackHeaders.size(); ++trackIndex)
     {
         if (auto* header = trackHeaders[trackIndex])
-            header->setBounds(0, trackTopY(trackIndex), labelWidth, getTrackHeightAt(trackIndex));
+            header->setBounds(0, trackTopY(trackIndex) - rulerHeight, labelWidth, getTrackHeightAt(trackIndex));
     }
+}
+
+int TrackerPanel::TimelineCanvas::getTracksTotalHeight() const noexcept
+{
+    if (timelineModel == nullptr)
+        return trackCount * 100;
+
+    int total = 0;
+    for (int i = 0; i < timelineModel->getTrackCount(); ++i)
+        total += juce::jmax(1, timelineModel->getTrackHeight(i));
+    return total;
+}
+
+void TrackerPanel::TimelineCanvas::clampVerticalScroll() noexcept
+{
+    constexpr int rulerHeight = 56;
+    constexpr int bottomPadding = 12;
+    const auto maxScroll = juce::jmax(0, getTracksTotalHeight() + bottomPadding - juce::jmax(0, getHeight() - rulerHeight));
+    verticalScrollPixels = juce::jlimit(0, maxScroll, verticalScrollPixels);
+}
+
+void TrackerPanel::TimelineCanvas::updateVerticalScrollBar()
+{
+    constexpr int rulerHeight = 56;
+    constexpr int bottomPadding = 12;
+    const auto visible = juce::jmax(1, getHeight() - rulerHeight);
+    const auto total = getTracksTotalHeight() + bottomPadding;
+
+    verticalScrollBar.setRangeLimits(0.0, (double) juce::jmax(total, visible), juce::dontSendNotification);
+    verticalScrollBar.setCurrentRange((double) verticalScrollPixels, (double) visible, juce::dontSendNotification);
+    verticalScrollBar.setVisible(total > visible);
+}
+
+void TrackerPanel::TimelineCanvas::scrollBarMoved(juce::ScrollBar*, double newRangeStart)
+{
+    verticalScrollPixels = (int) std::lround(newRangeStart);
+    resized();
+    repaint();
+}
+
+void TrackerPanel::TimelineCanvas::scrollTracksBy(int deltaPixels)
+{
+    const auto before = verticalScrollPixels;
+    verticalScrollPixels += deltaPixels;
+    clampVerticalScroll();
+
+    if (verticalScrollPixels != before)
+    {
+        resized();
+        repaint();
+    }
+}
+
+void TrackerPanel::TimelineCanvas::ensureTrackVisible(int trackIndex)
+{
+    constexpr int rulerHeight = 56;
+    if (! juce::isPositiveAndBelow(trackIndex, trackCount) || getHeight() <= rulerHeight)
+        return;
+
+    const auto top = trackTopY(trackIndex);
+    const auto bottom = top + getTrackHeightAt(trackIndex);
+    if (top < rulerHeight)
+        scrollTracksBy(top - rulerHeight);
+    else if (bottom > getHeight())
+        scrollTracksBy(bottom - getHeight());
 }
 
 TrackerPanel::TimelineCanvas::TimelineCanvas() {
-    videoWindow = std::make_unique<cs::VideoPlayerWindow>("Video Player", juce::Colours::black);
+    headerHost.setInterceptsMouseClicks(false, true);
+    addAndMakeVisible(headerHost);
+
+    verticalScrollBar.setSingleStepSize(32.0);
+    verticalScrollBar.addListener(this);
+    addChildComponent(verticalScrollBar);
 }
 
 TrackerPanel::TimelineCanvas::~TimelineCanvas() {
-    if (videoWindow) {
-        videoWindow->setVisible(false);
-        videoWindow.reset();
-    }
 }
 
 void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
@@ -1940,6 +2012,31 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                 menu.addSeparator();
                 menu.addItem(3, "Duplicate clip");
                 menu.addItem(4, "Delete clip");
+
+                // Video and its sound (Premiere-style): split the sound out, edit them apart, link them again.
+                const auto& menuClip = timelineModel->getClips()[(size_t) draggingClipIndex];
+                const auto isLinked = timelineModel->isClipLinked(draggingClipIndex);
+                const auto counterpart = timelineModel->findSoundCounterpart(draggingClipIndex);
+                const auto isVideo = menuClip.kind == cs::ClipKind::video;
+                const auto isVideoSound = menuClip.kind == cs::ClipKind::audio && menuClip.sourceTool.startsWith("video-sound:");
+                if (isVideo)
+                {
+                    menu.addSeparator();
+                    menu.addItem(14, "Video effects and layout...");
+                }
+
+                if (isVideo || isVideoSound)
+                {
+                    menu.addSeparator();
+                    if (isVideo && ! menuClip.soundDetached)
+                        menu.addItem(10, "Split sound onto its own track");
+                    if (isLinked)
+                        menu.addItem(11, "Unlink picture and sound");
+                    if (counterpart >= 0)
+                        menu.addItem(12, "Link picture and sound");
+                    if (isVideo && menuClip.soundDetached)
+                        menu.addItem(13, "Put sound back into the video");
+                }
                 auto clickArea = juce::Rectangle<int>(event.x, event.y, 1, 1);
                 menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
                                                             .withTargetScreenArea(localAreaToGlobal(clickArea)),
@@ -1957,6 +2054,8 @@ void TrackerPanel::TimelineCanvas::mouseDown(const juce::MouseEvent& event)
                                             safe->onClipDuplicateRequested(clipIndex);
                                         else if (result == 4 && safe->onClipDeleteRequested)
                                             safe->onClipDeleteRequested(clipIndex);
+                                        else if (result >= 10 && result <= 14 && safe->onClipSoundAction)
+                                            safe->onClipSoundAction(clipIndex, result - 9);
                                     });
                 draggingClipIndex = -1;
                 repaint();
@@ -2145,6 +2244,23 @@ void TrackerPanel::TimelineCanvas::mouseDrag(const juce::MouseEvent& event)
 
 void TrackerPanel::TimelineCanvas::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
+    constexpr int rulerHeight = 56;
+    const auto labelWidth = juce::jmin(340, juce::jmax(290, getWidth() / 4));
+    const auto canvasPoint = event.getEventRelativeTo(this).position.toInt();
+    const auto zoomGesture = event.mods.isCtrlDown() || event.mods.isAltDown() || event.mods.isCommandDown();
+
+    // Over the track headers the wheel scrolls the tracks up and down; over the lanes it keeps scrolling
+    // the timeline sideways (and zooming with a modifier), handled by the panel.
+    if (! zoomGesture && canvasPoint.x < labelWidth && canvasPoint.y >= rulerHeight)
+    {
+        const auto vertical = std::abs(wheel.deltaY) >= std::abs(wheel.deltaX) ? wheel.deltaY : 0.0f;
+        if (std::abs(vertical) > 0.0001f)
+        {
+            scrollTracksBy((int) std::lround(-vertical * 180.0f));
+            return;
+        }
+    }
+
     if (onMouseWheelUsed)
         onMouseWheelUsed(event, wheel);
 }
@@ -2294,7 +2410,7 @@ int TrackerPanel::TimelineCanvas::trackTopY(int trackIndex) const noexcept
     auto count = timelineModel->getTrackCount();
     for (int i = 0; i < trackIndex && i < count; ++i)
         y += juce::jmax(1, timelineModel->getTrackHeight(i));
-    return y;
+    return y - verticalScrollPixels;
 }
 
 int TrackerPanel::TimelineCanvas::getTrackHeightAt(int trackIndex) const noexcept
@@ -2305,6 +2421,10 @@ int TrackerPanel::TimelineCanvas::getTrackHeightAt(int trackIndex) const noexcep
 int TrackerPanel::TimelineCanvas::yToTrackIndex(int y) const noexcept
 {
     constexpr int laneStart = 56;
+
+    // Below the ruler, undo the vertical scroll so the walk below is in unscrolled track space.
+    if (y >= laneStart)
+        y += verticalScrollPixels;
 
     if (timelineModel == nullptr || timelineModel->getTrackCount() <= 0)
         return (y - laneStart) / 100;
@@ -3257,7 +3377,7 @@ void TrackerPanel::TimelineCanvas::TrackHeader::mouseDrag(const juce::MouseEvent
 
     reorderDragActive = true;
     if (onReorderDragged)
-        onReorderDragged(trackIndex, getY() + event.position.roundToInt().y);
+        onReorderDragged(trackIndex, (getParentComponent() != nullptr ? getParentComponent()->getY() : 0) + getY() + event.position.roundToInt().y);
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseUp(const juce::MouseEvent& event)
@@ -3279,7 +3399,7 @@ void TrackerPanel::TimelineCanvas::TrackHeader::mouseUp(const juce::MouseEvent& 
 
     reorderDragActive = false;
     if (onReorderCommitted)
-        onReorderCommitted(trackIndex, getY() + event.position.roundToInt().y);
+        onReorderCommitted(trackIndex, (getParentComponent() != nullptr ? getParentComponent()->getY() : 0) + getY() + event.position.roundToInt().y);
 }
 
 void TrackerPanel::TimelineCanvas::TrackHeader::mouseMove(const juce::MouseEvent& event)

@@ -1,10 +1,13 @@
 #pragma once
 
+#include <map>
+#include <memory>
+
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <vector>
-#include "SignalGraphRuntime.h"
 #include "PatchLiveVoice.h"
 #include "../Timeline/TimelineModel.h"
 
@@ -46,10 +49,29 @@ public:
     struct PlaybackClipTarget
     {
         int trackIndex = -1;
+        // A clip's audio comes either from encodedData (the asset's bytes, read into memory through the VFS service:
+        // nothing is copied out to a file) or, for a file that was never in the VFS, from `file`.
         juce::File file;
+        std::shared_ptr<const juce::MemoryBlock> encodedData;
+        juce::String displayName;
         double startSeconds = 0.0;
         double sourceStartSeconds = 0.0;
         double durationSeconds = 0.0;
+    };
+
+    // A Signal clip scheduled for live playback: the clip's patch is run in real time by its own
+    // PatchLiveVoice (never baked to a WAV), so its inputs can be changed while it plays. `patchKey`
+    // identifies the patch content - a clip whose key is unchanged keeps its running voice across
+    // timeline refreshes, and a changed key (the patch was re-saved) gets a freshly built voice.
+    struct SignalClipTarget
+    {
+        juce::String clipId;
+        juce::String patchKey;
+        int trackIndex = -1;
+        double startSeconds = 0.0;
+        double sourceStartSeconds = 0.0;
+        double durationSeconds = 0.0;
+        cw::PatchDocument patch;
     };
 
     // A MIDI clip scheduled for real-time playback: notes are delivered live, sample-accurately,
@@ -70,6 +92,12 @@ public:
         int blockSize = 512;
         bool normalizePeak = false;
         float peakTargetDecibels = -1.0f;
+        // Where on the timeline the render starts; the render is durationSeconds long from here. Automation,
+        // clip positions and Signal clip voices all follow the timeline, so a custom range sounds exactly
+        // like that stretch of the full render.
+        double startSeconds = 0.0;
+        // Called after every block with the fraction done (0..1); return false to cancel the render.
+        std::function<bool(float progress)> onProgress;
     };
 
     WorkstationAudioEngine();
@@ -90,12 +118,18 @@ public:
     bool startRecordingToFile(const juce::File& file, juce::String& errorMessage);
     bool startRecordingToFiles(const juce::Array<RecordingTarget>& targets, juce::String& errorMessage);
     void stopRecording();
+    // The finished recording of a take (a complete WAV, in memory), handed over once; null if there is none.
+    std::shared_ptr<const juce::MemoryBlock> takeFinishedRecording(const juce::File& takeName);
     juce::File getRecordingFile() const { return recordingFile; }
     juce::Array<juce::File> getRecordingFiles() const;
     bool previewAssetFile(const juce::File& file, juce::String& errorMessage);
     bool previewAssetFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
+    // Previews an asset from its bytes (read into memory through the VFS service), never from a copied-out file.
+    bool previewAssetData(const std::shared_ptr<const juce::MemoryBlock>& encodedData, const PreviewSettings& settings, juce::String& errorMessage);
     bool previewGeneratedBuffer(const juce::AudioBuffer<float>& buffer, double sampleRate, juce::String& errorMessage);
     bool setTrackerPlaybackClips(const juce::Array<PlaybackClipTarget>& targets, juce::String& errorMessage);
+    // Message thread. Replaces the set of live Signal clips; see SignalClipTarget.
+    bool setTrackerSignalClips(const juce::Array<SignalClipTarget>& targets, juce::String& errorMessage);
     void setTrackerMidiClips(const juce::Array<MidiPlaybackClip>& clips);
 
     // Message-thread-safe: queues an immediate note on/off for one specific track's instrument,
@@ -199,11 +233,16 @@ public:
     bool isMidiRecording() const noexcept { return midiRecordingActive.load(); }
     // Message-thread-safe: drains and returns everything captured since the last call.
     std::vector<RecordedMidiEvent> takeRecordedMidiEvents();
+    // Renders the mix offline through the very same arrangement/mixer path playback uses, block by block, so
+    // automation, insert chains and gain/pan all apply. Signal clips come in as signalTargets and get their
+    // own fresh voices at the render sample rate (the live voices are set aside and put back afterwards),
+    // so a render never carries stale live voices and never plays a Signal clip twice.
     bool renderTrackerMixToBuffer(const juce::Array<PlaybackClipTarget>& targets,
                                   double durationSeconds,
                                   const RenderSettings& settings,
                                   juce::AudioBuffer<float>& outputBuffer,
-                                  juce::String& errorMessage);
+                                  juce::String& errorMessage,
+                                  const juce::Array<SignalClipTarget>& signalTargets = {});
     void reapplyHostedPluginStates();
     void stopAssetPreview();
     bool isPreviewingAsset() const noexcept;
@@ -284,30 +323,6 @@ public:
     void setTrackSoloed(int trackIndex, bool shouldSolo);
     void setMasterGain(float gain);
     float getMasterGain() const noexcept { return masterGain.load(); }
-    void setGraphEnabled(bool shouldEnable);
-    bool isGraphEnabled() const noexcept { return graphEnabled.load(); }
-    void setGraphDrive(float amount);
-    float getGraphDrive() const noexcept { return graphDrive.load(); }
-    void setGraphInput(float amount);
-    float getGraphInput() const noexcept { return graphInput.load(); }
-    void setGraphSourceFrequency(float hz);
-    float getGraphSourceFrequency() const noexcept { return graphSourceFrequency.load(); }
-    void setGraphTone(float amount);
-    float getGraphTone() const noexcept { return graphTone.load(); }
-    void setGraphEcho(float amount);
-    float getGraphEcho() const noexcept { return graphEcho.load(); }
-    void setGraphWidth(float amount);
-    float getGraphWidth() const noexcept { return graphWidth.load(); }
-    bool loadGraphVstPlugin(const juce::File& file, juce::String& errorMessage);
-    void unloadGraphVstPlugin();
-    juce::String getGraphVstPluginName() const;
-    juce::File getGraphVstPluginFile() const;
-    bool hasGraphVstPlugin() const noexcept;
-    void setGraphVstEnabled(bool shouldEnable);
-    bool isGraphVstEnabled() const noexcept { return graphVstEnabled.load(); }
-    void setGraphVstMix(float amount);
-    float getGraphVstMix() const noexcept { return graphVstMix.load(); }
-    juce::AudioProcessorEditor* createGraphVstPluginEditor();
 
     bool loadMasterPlugin(const juce::File& file, juce::String& errorMessage);
     void unloadMasterPlugin();
@@ -349,16 +364,6 @@ public:
     void setTrackPluginParameterValueRealtime(int trackIndex, int slotIndex, int paramIndex, float normalizedValue);
     void setTrackPluginBypassedRealtime(int trackIndex, int slotIndex, bool shouldBypass);
 
-    // Offline-renders a MIDI clip's notes/CC through the given instrument plugin into a
-    // temporary WAV file, so it can be scheduled for playback the same way as a recorded
-    // audio clip. Uses a fresh plugin instance - never touches the live, real-time track chain.
-    bool renderMidiClipToFile(const juce::File& instrumentPluginFile,
-                              const std::vector<cs::MidiNoteEvent>& notes,
-                              const std::vector<cs::MidiCCEvent>& ccEvents,
-                              double tempoBpm,
-                              double durationSeconds,
-                              juce::File& outputFile,
-                              juce::String& errorMessage) const;
 
     void audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
                                           int totalNumInputChannels,
@@ -646,6 +651,9 @@ private:
         void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
 
         bool loadFile(const juce::File& file, const PreviewSettings& settings, juce::String& errorMessage);
+        bool loadData(const std::shared_ptr<const juce::MemoryBlock>& encodedData, const PreviewSettings& settings, juce::String& errorMessage);
+        // Shared tail of loadFile/loadData; takes ownership of `reader`.
+        bool loadReader(juce::AudioFormatReader* reader, const juce::File& labelFile, const PreviewSettings& settings, juce::String& errorMessage);
         bool loadBuffer(const juce::AudioBuffer<float>& buffer, double sourceSampleRate, juce::String& errorMessage);
         void stop();
         bool isPreviewing() const noexcept { return previewing.load(); }
@@ -695,7 +703,6 @@ private:
     static constexpr int echoBufferSize = 4410;
 
     void prepareGraph(double sampleRate, int blockSize);
-    void processGraph(juce::AudioBuffer<float>& buffer);
     void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message) override;
     bool shouldRenderTrack(int trackIndex) const noexcept;
     // True if trackIndex itself is soloed, or any track anywhere in its descendant chain
@@ -735,10 +742,35 @@ private:
     PatchLiveVoice patchLiveVoice;
     ArrangementSource arrangementSource;
     PluginInsertSource masterInsertSource;
-    PluginInsertSource graphVstInsertSource;
     MasterOutputSource masterOutputSource;
     juce::OwnedArray<TrackChannelSource> tracks;
     std::atomic<std::shared_ptr<const TrackRoutingInfo>> cachedTrackRouting;
+
+    // One Signal clip placed on the timeline. Immutable once published; the PatchLiveVoice it
+    // points at holds the running DSP state and is only ever touched by the audio thread once
+    // published (voices are shared across consecutive sets when a clip's patch is unchanged).
+    struct SignalClipPlacement
+    {
+        juce::String clipId;
+        juce::String patchKey;
+        int trackIndex = -1;
+        double sampleRate = 0.0;
+        int64 startSample = 0;
+        int64 lengthSamples = 0;
+        int64 sourceStartSample = 0;
+        std::shared_ptr<PatchLiveVoice> voice;
+    };
+    using SignalClipSet = std::vector<SignalClipPlacement>;
+    // Builds a set of live Signal clip placements (one voice each) for the given sample rate and block size.
+    // A voice from `reuseFrom` with the same clip, patch content and sample rate is kept, so its DSP state
+    // survives a timeline refresh; pass nullptr to always build fresh voices, as a render does.
+    std::shared_ptr<const SignalClipSet> buildSignalClipSet(const juce::Array<SignalClipTarget>& targets,
+                                                            double sampleRate, int blockSize,
+                                                            const std::shared_ptr<const SignalClipSet>& reuseFrom) const;
+    std::atomic<std::shared_ptr<const SignalClipSet>> signalClips;
+    // Message thread only: keeps the last two replaced sets alive so the audio thread is never the
+    // one to drop the final reference (and free a voice) inside the audio callback.
+    std::shared_ptr<const SignalClipSet> retiredSignalClips[2];
     std::vector<MidiPlaybackClip> scheduledMidiClips;
     juce::CriticalSection scheduledMidiClipsLock;
     struct AuditionRequest { int trackIndex = -1; int pitch = 60; int velocity = 100; bool noteOn = true; };
@@ -793,7 +825,6 @@ private:
     int echoWritePosition = 0;
     double graphSampleRate = 44100.0;
     int graphBlockSize = 512;
-    SignalGraphRuntime signalGraph;
     std::atomic<bool> playing { false };
     std::atomic<bool> recording { false };
     std::atomic<bool> metronomeEnabled { false };
@@ -802,24 +833,19 @@ private:
     std::atomic<int> metronomeBeatsPerMeasure { 4 };
     int64 metronomeSampleCounter = 0;
     std::atomic<float> masterGain { 0.8f };
-    std::atomic<bool> graphEnabled { true };
-    std::atomic<float> graphInput { 0.0f };
-    std::atomic<float> graphSourceFrequency { 220.0f };
-    std::atomic<float> graphDrive { 0.15f };
-    std::atomic<float> graphTone { 0.55f };
-    std::atomic<float> graphEcho { 0.08f };
-    std::atomic<float> graphWidth { 0.5f };
-    std::atomic<bool> graphVstEnabled { true };
-    std::atomic<float> graphVstMix { 0.5f };
     juce::TimeSliceThread recordingThread { "CreationStationRecorder" };
     mutable juce::CriticalSection recordingLock;
     struct TrackRecordingWriter
     {
         int trackIndex = -1;
         int numChannels = 1;
-        juce::File file;
+        juce::File file; // only the take's name: a recording is held in memory, never written to a file
+        // Declared before the writer so it is destroyed after it: the writer's last flush still writes into this block.
+        std::shared_ptr<juce::MemoryBlock> data;
         std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
     };
+
+    std::map<juce::String, std::shared_ptr<juce::MemoryBlock>> finishedTakes; // take name -> its finished WAV
 
     std::vector<TrackRecordingWriter> recordingWriters;
     juce::File recordingFile;

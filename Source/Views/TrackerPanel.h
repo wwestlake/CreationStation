@@ -60,6 +60,9 @@ public:
     std::function<void(int, double)> onClipSplitRequested;
     std::function<void(int)> onClipDuplicateRequested;
     std::function<void(int)> onClipDeleteRequested;
+    // Video/sound actions from the clip menu: 1 split the sound onto its own track, 2 unlink, 3 link the two
+    // halves again, 4 put the sound back inside the video.
+    std::function<void(int clipIndex, int action)> onClipSoundAction;
     std::function<void(int)> onClipEditRequested;
     std::function<void(int, double)> onEmptyMidiClipRequested;
     std::function<void(double)> onTempoChanged;
@@ -81,10 +84,14 @@ public:
     // ProjectAssetService::saveGeneratedAsset mechanism -- see the Arrangement toolbar button.
     std::function<void(const juce::String& name)> onArrangementSaveRequested;
     std::function<void()> onArrangementLoadRequested;
+    // File menu: ask for a name (pre-filled with the current arrangement's) and save under it / pick one to load.
+    void promptSaveArrangement();
+    void requestLoadArrangement() { if (onArrangementLoadRequested) onArrangementLoadRequested(); }
 
     // The display name of whichever arrangement is currently active in this project (last
     // saved or loaded), so re-saving defaults to that name instead of always prompting fresh.
     void setCurrentArrangementName(const juce::String& name);
+    juce::String getCurrentArrangementName() const { return currentArrangementName; }
 
     void setTrackCount(int newTrackCount);
     void setTrackName(int trackIndex, const juce::String& name);
@@ -108,11 +115,6 @@ public:
     void setTimelineModel(cs::TimelineModel* model);
     void refreshTimelineView();
     void centerTransportInView();
-    // Drives the scrub preview overlay: finds whichever video clip covers timelineSeconds (if
-    // any) and requests a decode of the matching source-relative frame. Called every playback
-    // tick from MainComponent::timerCallback - see VideoScrubPreview for how it stays cheap
-    // under a fast, continuously-moving call rate.
-    void updateVideoPreview(double timelineSeconds);
     int getSelectedTrack() const noexcept { return selectedTrack; }
     void setAutomationTargetLabel(int trackIndex, const juce::String& label);
     void setAutomationRecordMode(int trackIndex, cs::AutomationRecordMode mode);
@@ -137,11 +139,17 @@ private:
     void applyWheelNavigation(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel);
     void scrollTimelineTo(double newRangeStart);
 
-    class TimelineCanvas final : public juce::Component
+    class TimelineCanvas final : public juce::Component,
+                                 private juce::ScrollBar::Listener
     {
     public:
         TimelineCanvas();
         ~TimelineCanvas() override;
+
+        // Vertical scrolling: the ruler stays put and the tracks scroll beneath it. Over the track headers the
+        // wheel scrolls this way; over the lanes it keeps scrolling the timeline sideways.
+        void scrollTracksBy(int deltaPixels);
+        void ensureTrackVisible(int trackIndex);
         std::function<void(int)> onTrackSelected;
         std::function<void(int, const juce::String&)> onTrackNameChanged;
         std::function<void(int, cs::TrackKind)> onTrackKindChanged;
@@ -175,6 +183,7 @@ private:
         std::function<void(int, double)> onClipSplitRequested;
         std::function<void(int)> onClipDuplicateRequested;
         std::function<void(int)> onClipDeleteRequested;
+        std::function<void(int clipIndex, int action)> onClipSoundAction;
         std::function<void(int)> onClipEditRequested;
         std::function<void(int, double)> onEmptyMidiClipRequested;
         std::function<void(int)> onAutomationTargetRequested;
@@ -210,7 +219,6 @@ private:
         void setTrackIndented(int trackIndex, bool indented);
         void setTrackAccentColour(int trackIndex, juce::Colour colour);
         void setScrollSeconds(double seconds);
-        void updateVideoPreview(double timelineSeconds);
         double getTransportSeconds() const noexcept;
         double getVisibleDurationSeconds() const noexcept;
         double getTotalDurationSeconds() const noexcept;
@@ -378,8 +386,6 @@ private:
         // mutable: populated lazily from drawVideoThumbnailStrip, a const paint helper (matching
         // drawAutomationLane's own const-ness, since neither touches this component's layout).
         mutable cs::VideoThumbnailCache videoThumbnailCache;
-        cs::VideoScrubPreview scrubPreview;
-        std::unique_ptr<cs::VideoPlayerWindow> videoWindow;
         bool draggingLoopRegion = false;
         bool loopRegionMoved = false;
         double loopDragStartSeconds = 0.0;
@@ -411,6 +417,15 @@ private:
         std::vector<float> trackGains;
         juce::Array<juce::String> inputSourceNames;
         juce::OwnedArray<TrackHeader> trackHeaders;
+
+        void scrollBarMoved(juce::ScrollBar* scrollBarThatHasMoved, double newRangeStart) override;
+        int getTracksTotalHeight() const noexcept;
+        void clampVerticalScroll() noexcept;
+        void updateVerticalScrollBar();
+
+        int verticalScrollPixels = 0;
+        juce::ScrollBar verticalScrollBar { true };
+        juce::Component headerHost; // clips the track headers to the area below the ruler
     };
 
     juce::Label titleLabel;
@@ -420,7 +435,6 @@ private:
     juce::TextEditor bpmEditor;
     juce::TextEditor timeSignatureEditor;
     juce::ComboBox keySelector;
-    juce::TextButton arrangementMenuButton { "Save/Load" };
     juce::ComboBox pitchPipeNoteCombo;
     juce::ComboBox pitchPipeOctaveCombo;
     juce::TextButton pitchPipePlayButton { "Play" };
@@ -440,6 +454,5 @@ private:
     void refreshSelectionLabel();
     void refreshTimelineScrollBar();
     void commitTimingEdits();
-    void showArrangementMenu();
 };
 

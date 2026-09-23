@@ -23,6 +23,8 @@ public:
     void setTutorialItems(const juce::Array<TutorialItem>& newItems);
     void setStoragePath(const juce::String& path);
     void setStatusText(const juce::String& text);
+    // A status message that reads as an error goes here instead of the panel's small label.
+    std::function<void(const juce::String& message)> onErrorStatus;
     void setAuthState(bool isSignedIn, bool isAdmin);
 
     std::function<void()> onRefreshRequested;
@@ -33,6 +35,9 @@ public:
     std::function<void(const creation::assets::AssetDescriptor&)> onOpenProjectAssetRequested;
     std::function<void(const creation::assets::AssetDescriptor&)> onPlaceProjectAssetRequested;
     std::function<void(const creation::assets::AssetDescriptor&)> onExportProjectAssetRequested;
+    std::function<void(const creation::assets::AssetDescriptor&)> onPreviewProjectAssetRequested;
+    // Which project asset is currently playing as a preview ("" = none), so its card shows Stop.
+    void setPreviewingAssetId(const juce::String& assetId);
     std::function<void(const TutorialItem&)> onLaunchTutorialRequested;
     std::function<void(const TutorialItem&)> onRevealTutorialRequested;
 
@@ -89,9 +94,14 @@ private:
         std::function<void(const creation::assets::AssetDescriptor&)> onOpenRequested;
         std::function<void(const creation::assets::AssetDescriptor&)> onPlaceRequested;
         std::function<void(const creation::assets::AssetDescriptor&)> onExportRequested;
+        std::function<void(const creation::assets::AssetDescriptor&)> onPreviewRequested;
+
+        void setPreviewing(bool isPreviewing) { previewButton.setButtonText(isPreviewing ? "Stop" : "Play"); }
+        const juce::String& getAssetId() const { return asset.id; }
 
     private:
         creation::assets::AssetDescriptor asset;
+        juce::TextButton previewButton { "Play" };
         juce::TextButton openButton { "Open" };
         juce::TextButton placeButton { "Place" };
         juce::TextButton exportButton { "Export Raw" };
@@ -110,6 +120,7 @@ private:
     juce::Component projectAssetsHost;
     juce::OwnedArray<ProjectAssetCard> projectAssetCards;
     juce::Array<creation::assets::AssetDescriptor> projectAssets;
+    juce::String previewingAssetId;
     juce::Viewport tutorialViewport;
     juce::Component tutorialHost;
     juce::OwnedArray<TutorialCard> tutorialCards;

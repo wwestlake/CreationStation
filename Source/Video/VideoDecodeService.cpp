@@ -2,13 +2,17 @@
 #include "Bt709NV12Shader.h"
 
 #include <d3d11.h>
+#include <d3d11_4.h>
 #include <d3dcompiler.h>
 #include <dxgi.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <mferror.h>
+#include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <mutex>
 #include <vector>
 
 #pragma comment(lib, "d3d11.lib")
@@ -65,6 +69,87 @@ private:
     T* ptr = nullptr;
 };
 
+
+// Lets Media Foundation read a video from a juce::InputStream (a VFS entry read in pieces) instead of a file path.
+// Media Foundation reads from its own worker threads, so every call is serialised.
+class JuceInputStreamIStream final : public IStream
+{
+public:
+    explicit JuceInputStreamIStream(std::unique_ptr<juce::InputStream> streamToUse) : stream(std::move(streamToUse)) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** object) override
+    {
+        if (riid == IID_IUnknown || riid == IID_ISequentialStream || riid == IID_IStream)
+        {
+            *object = static_cast<IStream*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return (ULONG) ++references; }
+    ULONG STDMETHODCALLTYPE Release() override
+    {
+        const auto remaining = (ULONG) --references;
+        if (remaining == 0)
+            delete this;
+        return remaining;
+    }
+
+    HRESULT STDMETHODCALLTYPE Read(void* buffer, ULONG count, ULONG* bytesRead) override
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        const auto wanted = count > 0x7fffffffu ? 0x7fffffff : (int) count;
+        const auto got = stream->read(buffer, wanted);
+        if (bytesRead != nullptr)
+            *bytesRead = (ULONG) got;
+        return got == wanted ? S_OK : S_FALSE;
+    }
+    HRESULT STDMETHODCALLTYPE Write(const void*, ULONG, ULONG*) override { return STG_E_ACCESSDENIED; }
+
+    HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER* newPosition) override
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        juce::int64 target = move.QuadPart;
+        if (origin == STREAM_SEEK_CUR)
+            target += stream->getPosition();
+        else if (origin == STREAM_SEEK_END)
+            target += stream->getTotalLength();
+
+        if (target < 0 || ! stream->setPosition(target))
+            return STG_E_INVALIDFUNCTION;
+
+        if (newPosition != nullptr)
+            newPosition->QuadPart = (ULONGLONG) stream->getPosition();
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE SetSize(ULARGE_INTEGER) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CopyTo(IStream*, ULARGE_INTEGER, ULARGE_INTEGER*, ULARGE_INTEGER*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE Commit(DWORD) override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE Revert() override { return S_OK; }
+    HRESULT STDMETHODCALLTYPE LockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE UnlockRegion(ULARGE_INTEGER, ULARGE_INTEGER, DWORD) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE Stat(STATSTG* stat, DWORD) override
+    {
+        if (stat == nullptr)
+            return STG_E_INVALIDPOINTER;
+        const std::lock_guard<std::mutex> lock(mutex);
+        std::memset(stat, 0, sizeof(*stat));
+        stat->type = STGTY_STREAM;
+        stat->cbSize.QuadPart = (ULONGLONG) juce::jmax<juce::int64>(0, stream->getTotalLength());
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE Clone(IStream**) override { return E_NOTIMPL; }
+
+private:
+    ~JuceInputStreamIStream() = default;
+
+    std::mutex mutex;
+    std::unique_ptr<juce::InputStream> stream;
+    std::atomic<long> references { 1 };
+};
+
 // COM apartment state is per-thread, not per-object - open()/decodeFrameAt()/
 // decodeAudioToFloatPCM() can each be called from a different background thread than the one
 // that constructed the VideoDecodeService, so each of those calls initializes COM on whichever
@@ -90,6 +175,9 @@ struct SharedD3D
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<IMFDXGIDeviceManager> deviceManager;
     UINT resetToken = 0;
+    // Every use of the device's one drawing context (turning a decoded frame into a picture) goes through this, so
+    // several video layers decoding at once take turns instead of trampling each other's GPU commands.
+    juce::CriticalSection decodeLock;
 };
 
 // Lazily created on first use and kept for the rest of the process's life. Recreating a D3D11
@@ -119,6 +207,14 @@ SharedD3D* getSharedD3D()
                                 candidate->context.address());
     if (FAILED(hr))
         return nullptr;
+
+    // Media Foundation uses this device from its own threads while we use it from ours: Windows requires the device
+    // to be made safe for that when it is shared this way.
+    {
+        ComPtr<ID3D11Multithread> multithread;
+        if (SUCCEEDED(candidate->device->QueryInterface(IID_PPV_ARGS(multithread.address()))))
+            multithread->SetMultithreadProtected(TRUE);
+    }
 
     hr = MFCreateDXGIDeviceManager(&candidate->resetToken, candidate->deviceManager.address());
     if (FAILED(hr))
@@ -202,42 +298,95 @@ bool VideoDecodeService::isOpen() const noexcept
 
 VideoStreamInfo VideoDecodeService::open(const juce::File& file)
 {
+    return openImpl(&file, nullptr, {});
+}
+
+VideoStreamInfo VideoDecodeService::open(std::unique_ptr<juce::InputStream> stream, const juce::String& nameHint)
+{
+    return openImpl(nullptr, std::move(stream), nameHint);
+}
+
+VideoStreamInfo VideoDecodeService::openImpl(const juce::File* file, std::unique_ptr<juce::InputStream> stream, const juce::String& nameHint)
+{
     close();
+    lastError = {};
 
     ScopedComInitializer comInit;
     auto* shared = getSharedD3D();
     if (shared == nullptr)
+    {
+        lastError = "the video decoder could not start a Direct3D 11 GPU device";
         return {};
+    }
+
+    const juce::ScopedLock decodeGuard(shared->decodeLock);
 
     ComPtr<IMFAttributes> attributes;
     if (FAILED(MFCreateAttributes(attributes.address(), 3)))
+    {
+        lastError = "Windows Media Foundation could not be set up";
         return {};
+    }
 
     attributes->SetUnknown(MF_SOURCE_READER_D3D_MANAGER, shared->deviceManager.get());
     attributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
     attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
 
     ComPtr<IMFSourceReader> reader;
-    auto hr = MFCreateSourceReaderFromURL(file.getFullPathName().toWideCharPointer(), attributes.get(), reader.address());
+    HRESULT hr = E_FAIL;
+    if (file != nullptr)
+    {
+        hr = MFCreateSourceReaderFromURL(file->getFullPathName().toWideCharPointer(), attributes.get(), reader.address());
+    }
+    else if (stream != nullptr)
+    {
+        // The video is read from the stream (a VFS entry, in pieces), never from a file on the disk.
+        auto* istream = new JuceInputStreamIStream(std::move(stream)); // starts with one reference
+        IMFByteStream* byteStream = nullptr;
+        hr = MFCreateMFByteStreamOnStream(istream, &byteStream);
+        istream->Release(); // the byte stream holds its own reference now
+        if (SUCCEEDED(hr))
+        {
+            IMFAttributes* byteStreamAttributes = nullptr;
+            if (nameHint.isNotEmpty() && SUCCEEDED(byteStream->QueryInterface(__uuidof(IMFAttributes), (void**) &byteStreamAttributes)))
+            {
+                byteStreamAttributes->SetString(MF_BYTESTREAM_ORIGIN_NAME, nameHint.toWideCharPointer());
+                byteStreamAttributes->Release();
+            }
+
+            hr = MFCreateSourceReaderFromByteStream(byteStream, attributes.get(), reader.address());
+            byteStream->Release();
+        }
+    }
     if (FAILED(hr))
+    {
+        lastError = "Windows could not open the file (error 0x" + juce::String::toHexString((juce::uint32) hr).paddedLeft('0', 8)
+                  + "); this container or codec may not be installed (MKV, WebM and HEVC often need extra codecs)";
         return {};
+    }
 
     // Ask for NV12 explicitly on the video stream. Without this the reader is free to pick its
     // own default output type (often a software-converted RGB32), which would silently defeat
     // the whole point of keeping decoded frames as GPU-resident NV12 textures.
     bool hasVideo = false;
+    HRESULT nv12Result = E_FAIL;
     {
         ComPtr<IMFMediaType> videoType;
         if (SUCCEEDED(MFCreateMediaType(videoType.address())))
         {
             videoType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
             videoType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
-            hasVideo = SUCCEEDED(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, videoType.get()));
+            nv12Result = reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, videoType.get());
+            hasVideo = SUCCEEDED(nv12Result);
         }
     }
 
     if (! hasVideo)
+    {
+        lastError = "the file has no video stream Windows can decode to the GPU (NV12 was refused, error 0x"
+                  + juce::String::toHexString((juce::uint32) nv12Result).paddedLeft('0', 8) + ")";
         return {};
+    }
 
     reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
 
@@ -309,15 +458,23 @@ VideoStreamInfo VideoDecodeService::open(const juce::File& file)
     return streamInfo;
 }
 
+// A frame decode that stops says where (the line), because these exits are otherwise silent and a hardware-decode
+// video that will not produce a picture is very hard to tell apart from one that is merely slow.
+#define DECODE_FAIL() do { if (lastError.isEmpty()) lastError = "frame decode stopped at VideoDecodeService.cpp line " + juce::String(__LINE__); return {}; } while (0)
+
 juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutputWidth, int maxOutputHeight)
 {
+    lastError = {};
+
     if (! isOpen())
-        return {};
+        DECODE_FAIL();
 
     ScopedComInitializer comInit;
     auto* shared = getSharedD3D();
     if (shared == nullptr)
-        return {};
+        DECODE_FAIL();
+
+    const juce::ScopedLock decodeGuard(shared->decodeLock);
 
     {
         PROPVARIANT seekVar;
@@ -339,28 +496,36 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
             LONGLONG timestamp = 0;
             auto hr = impl->sourceReader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0,
                                                       &actualStreamIndex, &flags, &timestamp, sample.address());
-            if (FAILED(hr) || (flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0)
-                return {};
+            if (FAILED(hr))
+            {
+                lastError = "the decoder could not read a frame (Media Foundation error 0x" + juce::String::toHexString((int) hr) + ")";
+                DECODE_FAIL();
+            }
+            if ((flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0)
+            {
+                lastError = "the decoder reached the end of the video before a frame (position " + juce::String(sourceSeconds, 2) + " s)";
+                DECODE_FAIL();
+            }
         }
     }
 
     if (! sample)
-        return {};
+        DECODE_FAIL();
 
     ComPtr<IMFMediaBuffer> buffer;
     if (FAILED(sample->ConvertToContiguousBuffer(buffer.address())))
-        return {};
+        DECODE_FAIL();
 
     // Only a hardware-backed sample hands back a D3D11 texture through this interface - a sample
     // that doesn't means the decoder fell back to software (no hardware decoder for this codec),
     // which this service doesn't attempt to handle via a CPU path per its own design brief.
     ComPtr<IMFDXGIBuffer> dxgiBuffer;
     if (FAILED(buffer->QueryInterface(IID_PPV_ARGS(dxgiBuffer.address()))))
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11Texture2D> sourceTexture;
     if (FAILED(dxgiBuffer->GetResource(IID_PPV_ARGS(sourceTexture.address()))))
-        return {};
+        DECODE_FAIL();
 
     UINT subresourceIndex = 0;
     dxgiBuffer->GetSubresourceIndex(&subresourceIndex);
@@ -368,28 +533,70 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
     D3D11_TEXTURE2D_DESC sourceDesc {};
     sourceTexture->GetDesc(&sourceDesc);
     if (sourceDesc.Width == 0 || sourceDesc.Height == 0)
-        return {};
+        DECODE_FAIL();
 
     // Decoder-pool textures are arrays (one slice reused per in-flight frame), so the views need
     // TEXTURE2DARRAY pointed at this sample's specific slice, not a plain TEXTURE2D view.
+    //
+    // Some decoders create those textures for decoding only (bind flags without SHADER_RESOURCE), and a shader cannot
+    // read such a texture at all (creating the view fails with E_INVALIDARG). Then the frame is copied into a plain
+    // texture of our own that a shader can read, and the views look at that copy instead.
+    ComPtr<ID3D11Texture2D> copyTexture; // keeps the copy alive while the views use it
+    ID3D11Texture2D* viewTexture = sourceTexture.get();
+    bool viewIsArraySlice = true;
+    if ((sourceDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE) == 0)
+    {
+        D3D11_TEXTURE2D_DESC copyDesc = sourceDesc;
+        copyDesc.ArraySize = 1;
+        copyDesc.MipLevels = 1;
+        copyDesc.Usage = D3D11_USAGE_DEFAULT;
+        copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        copyDesc.CPUAccessFlags = 0;
+        copyDesc.MiscFlags = 0;
+
+        if (const auto copyResult = shared->device->CreateTexture2D(&copyDesc, nullptr, copyTexture.address()); FAILED(copyResult))
+        {
+            lastError = "the decoded picture could not be copied to a GPU texture a shader can read (error 0x" + juce::String::toHexString((int) copyResult) + ")";
+            return {};
+        }
+
+        shared->context->CopySubresourceRegion(copyTexture.get(), 0, 0, 0, 0, sourceTexture.get(), subresourceIndex, nullptr);
+        viewTexture = copyTexture.get();
+        viewIsArraySlice = false;
+    }
+
     D3D11_SHADER_RESOURCE_VIEW_DESC lumaDesc {};
     lumaDesc.Format = DXGI_FORMAT_R8_UNORM;
-    lumaDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    lumaDesc.Texture2DArray.MostDetailedMip = 0;
-    lumaDesc.Texture2DArray.MipLevels = 1;
-    lumaDesc.Texture2DArray.FirstArraySlice = subresourceIndex;
-    lumaDesc.Texture2DArray.ArraySize = 1;
+    if (viewIsArraySlice)
+    {
+        lumaDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        lumaDesc.Texture2DArray.MostDetailedMip = 0;
+        lumaDesc.Texture2DArray.MipLevels = 1;
+        lumaDesc.Texture2DArray.FirstArraySlice = subresourceIndex;
+        lumaDesc.Texture2DArray.ArraySize = 1;
+    }
+    else
+    {
+        lumaDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        lumaDesc.Texture2D.MostDetailedMip = 0;
+        lumaDesc.Texture2D.MipLevels = 1;
+    }
 
     ComPtr<ID3D11ShaderResourceView> lumaSrv;
-    if (FAILED(shared->device->CreateShaderResourceView(sourceTexture.get(), &lumaDesc, lumaSrv.address())))
+    if (const auto srvResult = shared->device->CreateShaderResourceView(viewTexture, &lumaDesc, lumaSrv.address()); FAILED(srvResult))
+    {
+        lastError = "the decoded picture cannot be read by the GPU shader (texture format " + juce::String((int) sourceDesc.Format)
+                  + ", bind flags 0x" + juce::String::toHexString((int) sourceDesc.BindFlags) + ", array size " + juce::String((int) sourceDesc.ArraySize)
+                  + ", error 0x" + juce::String::toHexString((int) srvResult) + ")";
         return {};
+    }
 
     D3D11_SHADER_RESOURCE_VIEW_DESC chromaDesc = lumaDesc;
     chromaDesc.Format = DXGI_FORMAT_R8G8_UNORM;
 
     ComPtr<ID3D11ShaderResourceView> chromaSrv;
-    if (FAILED(shared->device->CreateShaderResourceView(sourceTexture.get(), &chromaDesc, chromaSrv.address())))
-        return {};
+    if (FAILED(shared->device->CreateShaderResourceView(viewTexture, &chromaDesc, chromaSrv.address())))
+        DECODE_FAIL();
 
     const auto sourceWidth = (int) sourceDesc.Width;
     const auto sourceHeight = (int) sourceDesc.Height;
@@ -410,26 +617,26 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
 
     ComPtr<ID3D11Texture2D> renderTargetTexture;
     if (FAILED(shared->device->CreateTexture2D(&rtDesc, nullptr, renderTargetTexture.address())))
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11RenderTargetView> renderTargetView;
     if (FAILED(shared->device->CreateRenderTargetView(renderTargetTexture.get(), nullptr, renderTargetView.address())))
-        return {};
+        DECODE_FAIL();
 
     auto vertexShaderBlob = compileShader("VSMain", "vs_4_0");
     auto pixelShaderBlob = compileShader("PSMain", "ps_4_0");
     if (! vertexShaderBlob || ! pixelShaderBlob)
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11VertexShader> vertexShader;
     if (FAILED(shared->device->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(),
                                                   nullptr, vertexShader.address())))
-        return {};
+        DECODE_FAIL();
 
     ComPtr<ID3D11PixelShader> pixelShader;
     if (FAILED(shared->device->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(),
                                                  nullptr, pixelShader.address())))
-        return {};
+        DECODE_FAIL();
 
     D3D11_SAMPLER_DESC samplerDesc {};
     samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -440,7 +647,7 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
 
     ComPtr<ID3D11SamplerState> samplerState;
     if (FAILED(shared->device->CreateSamplerState(&samplerDesc, samplerState.address())))
-        return {};
+        DECODE_FAIL();
 
     auto* context = shared->context.get();
 
@@ -477,13 +684,13 @@ juce::Image VideoDecodeService::decodeFrameAt(double sourceSeconds, int maxOutpu
 
     ComPtr<ID3D11Texture2D> stagingTexture;
     if (FAILED(shared->device->CreateTexture2D(&stagingDesc, nullptr, stagingTexture.address())))
-        return {};
+        DECODE_FAIL();
 
     context->CopyResource(stagingTexture.get(), renderTargetTexture.get());
 
     D3D11_MAPPED_SUBRESOURCE mapped {};
     if (FAILED(context->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mapped)))
-        return {};
+        DECODE_FAIL();
 
     juce::Image image(juce::Image::ARGB, outputWidth, outputHeight, false);
     {

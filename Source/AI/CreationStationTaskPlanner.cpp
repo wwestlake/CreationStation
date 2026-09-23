@@ -77,7 +77,6 @@ juce::String CreationStationTaskPlanner::actionTargetName(ActionTarget target)
     {
         case ActionTarget::workspace: return "Workspace";
         case ActionTarget::signalLab: return "Signal Lab";
-        case ActionTarget::patchGraph: return "Patch Graph";
         case ActionTarget::transport: return "Transport";
         case ActionTarget::context: return "Context";
     }
@@ -168,8 +167,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
                                     "A specific correction strategy is chosen.",
                                     "If multiple bands compete, start with the strongest one and re-measure before stacking more cuts.",
                                     { "decision", "eq" },
-                                    { makeAction(ActionTarget::workspace, "switch-mode", "Open Patch workspace", "node"),
-                                      makeAction(ActionTarget::patchGraph, "apply-macro", "Seed cleanup patch graph", "Noise Cleanup") }));
+                                    { makeAction(ActionTarget::workspace, "switch-mode", "Open Signal Lab", "signal") }));
             plan.steps.add(makeStep("apply-fix", StepType::act,
                                     "Apply the correction",
                                     "Create or adjust the patch, filter, or automation to reduce the offending energy while preserving character.",
@@ -216,8 +214,7 @@ CreationStationTaskPlanner::TaskPlan CreationStationTaskPlanner::buildPlan(
                                     "A manageable first graph is locked in.",
                                     "If routing becomes complex, freeze a minimal voice path and defer extras.",
                                     { "graph", "routing" },
-                                    { makeAction(ActionTarget::workspace, "switch-mode", "Open Patch workspace", "node"),
-                                      makeAction(ActionTarget::patchGraph, "apply-macro", "Seed instrument voice graph", "Instrument Voice") }));
+                                    { makeAction(ActionTarget::workspace, "switch-mode", "Open Signal Lab", "signal") }));
             plan.steps.add(makeStep("build-patch", StepType::act,
                                     "Build the playable patch",
                                     "Create the patch in FRust or the node system and bind the main controls for level, tone, and articulation.",

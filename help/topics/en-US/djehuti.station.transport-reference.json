@@ -1,0 +1,166 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.transport-reference",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Transport controls",
+  "summary": "The transport buttons in the header: Rew, Fwd, Stop, Play, Pause, Loop with a loop delay, Click (metronome) and Record.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.transport.play",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:b796b64cc993c3914aaaff4fb862dd6a6c3af1b4b52b44acc8e2bb22e338cbd6"
+    },
+    {
+      "helpId": "djehuti.station.transport.pause",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:f3e3989acdd36000f25bad17ccaa064e2052794a75c46fdd8447114537169d52"
+    },
+    {
+      "helpId": "djehuti.station.transport.stop",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:ba6ae2a47d46489e4eaf913a3eed13dd097de772c1a3027f653208d539afbefd"
+    },
+    {
+      "helpId": "djehuti.station.transport.record",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:84a9b028c2cf775300b8bbf9b04ca426083f1da6dc83781d99cd451b512217eb"
+    },
+    {
+      "helpId": "djehuti.station.transport.rewind",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:42106a7b246af7754356b4f732213c31818ef3c4e4319b8f2df76dd647764654"
+    },
+    {
+      "helpId": "djehuti.station.transport.fast-forward",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:8146544f7deedcd09afc6396cdb3f95361581557d15a01b9fd6f41cf3e7619bc"
+    },
+    {
+      "helpId": "djehuti.station.transport.loop",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:e41e8a5c29e87bcbadee776b97613d17d55711b9ab9788b7bb55a53d7ef4e216"
+    },
+    {
+      "helpId": "djehuti.station.transport.click",
+      "anchorBlockId": "overview",
+      "verifiedBehaviorSignature": "sha256:8fb49680f0d6ca9a5d938b9ec1c3cc130ad51672809b71b38e2c78e674f74827"
+    }
+  ],
+  "keywords": [
+    "transport",
+    "play",
+    "stop",
+    "pause",
+    "record",
+    "loop",
+    "metronome",
+    "click",
+    "rewind",
+    "fast forward",
+    "scrub"
+  ],
+  "alternateQueries": [
+    "How do I play?",
+    "How do I loop?",
+    "How do I turn on the metronome?",
+    "What does the loop delay do?",
+    "Why does Play do nothing in the Tracker?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.recording"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-loop-timing"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "overview",
+      "kind": "paragraph",
+      "text": "The transport is in the header. It controls whichever panel has focus for Play, Pause and Stop: with the Tracker focused it plays the arrangement; with the Signal Lab focused it plays the sound you are designing."
+    },
+    {
+      "id": "rewind-forward",
+      "kind": "definition",
+      "term": "Rew and Fwd",
+      "definition": "Rewind moves the playhead back and Fast forward moves it forward. The status line reads \"Transport: rewind to start\" or \"Transport: fast forward to end\" for the jump versions."
+    },
+    {
+      "id": "stop",
+      "kind": "definition",
+      "term": "Stop",
+      "definition": "Stops playback and recording."
+    },
+    {
+      "id": "play",
+      "kind": "definition",
+      "term": "Play",
+      "definition": "Starts playback. With video clips on the timeline the Video panel opens and shows the picture."
+    },
+    {
+      "id": "pause",
+      "kind": "definition",
+      "term": "Pause",
+      "definition": "Pauses playback where it is."
+    },
+    {
+      "id": "loop",
+      "kind": "definition",
+      "term": "Loop and loop delay",
+      "definition": "Loop makes playback repeat the loop region. The field beside it (shown as 0.0s) sets a delay between loops, with + and - buttons."
+    },
+    {
+      "id": "click",
+      "kind": "definition",
+      "term": "Click (metronome)",
+      "definition": "Cycles through three settings: metronome off, on while playing or recording, and always on. The status line names the current one."
+    },
+    {
+      "id": "record",
+      "kind": "definition",
+      "term": "Record",
+      "definition": "Records every armed audio track. See the recording topic for how a take is saved."
+    },
+    {
+      "id": "scrub",
+      "kind": "note",
+      "text": "A SCRUB indicator appears in the header when the X-Touch scrub mode is on. Jog-wheel scrubbing is not fully wired up yet."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/CreationSuiteHeaderBar.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/MainComponent.cpp"
+      }
+    ]
+  }
+}

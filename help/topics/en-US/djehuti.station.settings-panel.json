@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.settings-panel",
+  "locale": "en-US",
+  "type": "reference",
+  "title": "Settings panel and suite settings",
+  "summary": "The Settings panel holds audio, MIDI, startup, storage and tool preferences with a search box; the gear button opens suite-wide settings such as the storage folder and AI accounts.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.view.settings",
+      "anchorBlockId": "panel",
+      "verifiedBehaviorSignature": "sha256:333f9020d91ba912013738fa7b04617c773996a28b6bd871d06569a959acabb3"
+    },
+    {
+      "helpId": "djehuti.station.view.suite-settings",
+      "anchorBlockId": "panel",
+      "verifiedBehaviorSignature": "sha256:870c4e9aaf3851df239ba0712b8cb37092fff15a5323e4980b24d486327ebf5a"
+    },
+    {
+      "helpId": "djehuti.station.storage.folder",
+      "anchorBlockId": "panel",
+      "verifiedBehaviorSignature": "sha256:9a96679003406aa5df811ee77eb127a8a3906059bb617482ecdc70bf756a2004"
+    }
+  ],
+  "keywords": [
+    "settings",
+    "preferences",
+    "startup",
+    "autoload",
+    "storage",
+    "suite settings"
+  ],
+  "alternateQueries": [
+    "Where are the settings?",
+    "How do I make Station open my last project?",
+    "Where is the storage setting?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.audio-devices"
+    },
+    {
+      "type": "related",
+      "topicId": "djehuti.station.storage-vfs"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "panel",
+      "kind": "paragraph",
+      "text": "The Settings panel (View > Settings) is searchable and its sections collapse: Audio system, Input device, Output device, Studio Inputs, MIDI, Startup, Project, Storage folder and Tools. A section with a search match opens itself."
+    },
+    {
+      "id": "suite",
+      "kind": "paragraph",
+      "text": "The gear button in the header opens Djehuti Suite settings, shared by every suite application. Its tabs include Storage, Suite AI Accounts and Suite Log."
+    },
+    {
+      "id": "saving",
+      "kind": "paragraph",
+      "text": "Settings you change are saved into the project storage, not into files on your computer."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/SettingsPanel.cpp"
+      },
+      {
+        "kind": "source",
+        "ref": "shared/UI/src/SuiteSettingsPanel.cpp"
+      }
+    ]
+  }
+}

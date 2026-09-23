@@ -1,0 +1,109 @@
+{
+  "schemaVersion": "1.0",
+  "id": "djehuti.station.tracker-automation",
+  "locale": "en-US",
+  "type": "how-to",
+  "title": "Automate a control with an automation track",
+  "summary": "An automation track moves a control over time. Choose its target, pick a record mode (Touch, Latch or Write), and shape the curve.",
+  "product": "Djehuti Station",
+  "status": "draft",
+  "audiences": [
+    "user",
+    "support",
+    "virtual-engineer"
+  ],
+  "owners": [
+    "Djehuti Station"
+  ],
+  "appliesTo": {
+    "since": "0.9.1-beta6",
+    "platforms": [
+      "windows"
+    ]
+  },
+  "contexts": [
+    {
+      "helpId": "djehuti.station.tracker.automation",
+      "anchorBlockId": "setup",
+      "verifiedBehaviorSignature": "sha256:46ffefc8a25398c05a9a23c5fef70692a462c61f4c37ea5aabc87180b2651997"
+    }
+  ],
+  "keywords": [
+    "automation",
+    "automation lane",
+    "touch",
+    "latch",
+    "write",
+    "curve",
+    "envelope"
+  ],
+  "alternateQueries": [
+    "How do I automate volume?",
+    "What is Latch mode?",
+    "How do I change the curve?"
+  ],
+  "relations": [
+    {
+      "type": "related",
+      "topicId": "djehuti.station.tracker-track-types"
+    }
+  ],
+  "blocks": [
+    {
+      "id": "setup",
+      "kind": "steps",
+      "title": "Set up automation",
+      "steps": [
+        {
+          "id": "kind",
+          "instruction": "Press the kind button in a track's header and choose Automation."
+        },
+        {
+          "id": "target",
+          "instruction": "Press the target button (shown as No Target until chosen) and pick what this lane controls.",
+          "expectedResult": "The button shows the target."
+        },
+        {
+          "id": "mode",
+          "instruction": "Choose the record mode with the mode button.",
+          "expectedResult": "Touch, Latch or Write is shown."
+        }
+      ]
+    },
+    {
+      "id": "touch",
+      "kind": "definition",
+      "term": "Touch",
+      "definition": "Records while you move the control."
+    },
+    {
+      "id": "latch",
+      "kind": "definition",
+      "term": "Latch",
+      "definition": "Keeps recording after you let go of the control."
+    },
+    {
+      "id": "write",
+      "kind": "definition",
+      "term": "Write",
+      "definition": "Records continuously for the whole pass."
+    },
+    {
+      "id": "curves",
+      "kind": "paragraph",
+      "text": "Points on a lane can use a curve shape: Linear, Step, S-Curve, Power or Bezier. Right-click a point and choose Delete Point to remove it. The recording resolution (points per second) is a submenu on the lane."
+    }
+  ],
+  "verification": {
+    "contentRevision": 1,
+    "reviewedAt": "2026-09-20",
+    "reviewedBy": "Claude (from Station source, not yet reviewed by a person)",
+    "sourceRevision": "station-master-2faab9f+beta6-work",
+    "evidence": [
+      {
+        "kind": "source",
+        "ref": "apps/CreationStation/Source/Views/TrackerPanel.cpp"
+      }
+    ]
+  }
+}

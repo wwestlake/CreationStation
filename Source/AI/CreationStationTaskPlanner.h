@@ -10,7 +10,6 @@ public:
     {
         workspace,
         signalLab,
-        patchGraph,
         transport,
         context
     };
