@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-set(CREATION_STATION_VERSION "0.5.1" CACHE STRING "Djehuti Station product version")
+set(CREATION_STATION_VERSION "0.9.1beta15" CACHE STRING "Djehuti Station product version")
 option(CREATION_STATION_ENABLE_LTO "Enable JUCE link-time optimization for Creation Station targets" ON)
 project(CreativeWorkstation VERSION ${CREATION_STATION_VERSION} LANGUAGES CXX)
 
