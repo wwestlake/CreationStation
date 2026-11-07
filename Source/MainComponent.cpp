@@ -8,6 +8,9 @@
 #include "Branding.h"
 #include "Patch/PatchModel.h"
 #include "Video/VideoDecodeService.h"
+#include "Casting/WinRTCastingBackend.h"
+#include "Casting/StationCastingStreamSource.h"
+#include "Casting/CastingSessionController.h"
 #include <creation/assets/VfsEntryInputStream.h>
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectWorkspaceService.h>
@@ -1821,6 +1824,10 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     reportStartup("Creating studio panels...", 0.92f);
     addAndMakeVisible(transportBar);
     addAndMakeVisible(*menuBar);
+    addAndMakeVisible(castButton);
+    castButton.setTooltip("Cast Station's workspace to a TV or receiver on this network");
+    castButton.onClick = [this] { castButtonClicked(); };
+    updateCastButtonState(cs::casting::CastState::idle);
     addAndMakeVisible(*dockManager);
     // setSize() above ran before menuBar/dockManager existed, so the resized() it
     // triggered laid out only transportBar (its own null checks skipped the rest) --
@@ -4392,6 +4399,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
 MainComponent::~MainComponent()
 {
+    // Explicit, first-thing teardown rather than relying on member-destruction order: a cast
+    // session must release its capture/encoder/network resources before anything else about
+    // this window starts coming apart, not incidentally whenever its turn comes up.
+    castController.reset();
+    castStreamSource.reset();
+    castBackend.reset();
+
     if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
         top->removeKeyListener(this);
 
@@ -4745,6 +4759,8 @@ void MainComponent::resized()
     transportBar.setBounds(transportArea);
 
     auto menuArea = area.removeFromTop(28);
+    auto castArea = menuArea.removeFromRight(96);
+    castButton.setBounds(castArea.reduced(2, 2));
     if (menuBar != nullptr)
         menuBar->setBounds(menuArea);
 
@@ -4754,6 +4770,75 @@ void MainComponent::resized()
     authGateView.setBounds(getLocalBounds());
     tourOverlay.setBounds(getLocalBounds());
     markLayoutDirty();
+}
+
+// Work Order 3 (Cast to TV). Deferred until first use: WinRTCastingBackend needs this
+// component's native window handle, which only exists once MainComponent is actually on
+// screen -- not yet true at MainComponent's own construction time.
+void MainComponent::ensureCastingInitialized()
+{
+    if (castController != nullptr)
+        return;
+
+    castBackend = std::make_unique<cs::casting::WinRTCastingBackend>(*this);
+    castStreamSource = std::make_unique<cs::casting::StationCastingStreamSource>(*this);
+    castController = std::make_unique<cs::casting::CastingSessionController>(*castBackend, *castStreamSource);
+
+    castController->onStateChanged = [this](cs::casting::CastState state) { updateCastButtonState(state); };
+    castController->onError = [this](const cs::casting::CastError& error)
+    {
+        transportBar.setStatusText("Cast: " + cs::casting::describeCastError(error));
+    };
+}
+
+void MainComponent::castButtonClicked()
+{
+    ensureCastingInitialized();
+
+    using cs::casting::CastState;
+    const auto state = castController->getState();
+    if (state == CastState::idle || state == CastState::disconnected || state == CastState::failed)
+        castController->beginCast(castButton.getScreenBounds());
+    else
+        castController->disconnect();
+}
+
+void MainComponent::updateCastButtonState(cs::casting::CastState state)
+{
+    using cs::casting::CastState;
+    switch (state)
+    {
+        case CastState::idle:
+            castButton.setButtonText("Cast");
+            castButton.setTooltip("Cast Station's workspace to a TV or receiver on this network");
+            break;
+        case CastState::searching:
+            castButton.setButtonText("Searching...");
+            castButton.setTooltip("Looking for TVs and receivers on this network. Click to cancel.");
+            break;
+        case CastState::connecting:
+            castButton.setButtonText("Connecting...");
+            castButton.setTooltip("Connecting to the selected device. Click to cancel.");
+            break;
+        case CastState::connected:
+        {
+            const auto deviceName = castController != nullptr ? castController->getConnectedDevice().displayName : juce::String();
+            castButton.setButtonText("Casting");
+            castButton.setTooltip("Casting to " + deviceName + ". Click to disconnect.");
+            break;
+        }
+        case CastState::disconnecting:
+            castButton.setButtonText("Disconnecting...");
+            break;
+        case CastState::disconnected:
+            castButton.setButtonText("Cast");
+            castButton.setTooltip("Disconnected from the last device. Click to cast again.");
+            break;
+        case CastState::failed:
+            castButton.setButtonText("Cast failed");
+            castButton.setTooltip("The last casting attempt failed. Click to try again.");
+            break;
+    }
 }
 
 juce::StringArray MainComponent::getMenuBarNames()
