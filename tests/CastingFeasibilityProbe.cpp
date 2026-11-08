@@ -27,6 +27,14 @@
 
 #include <cstdio>
 
+#if JUCE_WINDOWS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
+#endif
+
 namespace
 {
 int failures = 0;
@@ -57,6 +65,46 @@ public:
         g.drawText("Djehuti Station -- Cast feasibility probe", getLocalBounds(), juce::Justification::centred);
     }
 };
+
+// Work Order 5 regression coverage: independently enumerate every up, gateway-less adapter
+// address on this machine (Hyper-V's vEthernet switch, VMware host-only networks, a VPN
+// tunnel's leftover address, etc.) via a direct GetAdaptersAddresses query, separate from
+// CastingStreamServer's own address-selection logic -- so this check still catches a
+// regression even if a future change breaks that selection logic itself, rather than just
+// re-running the same code it's meant to verify.
+juce::StringArray collectNoGatewayPrivateAddresses()
+{
+    juce::StringArray result;
+    ULONG bufferLen = 16384;
+    std::vector<uint8_t> buffer(bufferLen);
+    auto* addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+    auto flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_INCLUDE_GATEWAYS;
+    auto status = GetAdaptersAddresses(AF_INET, flags, nullptr, addresses, &bufferLen);
+    if (status == ERROR_BUFFER_OVERFLOW)
+    {
+        buffer.resize(bufferLen);
+        addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+        status = GetAdaptersAddresses(AF_INET, flags, nullptr, addresses, &bufferLen);
+    }
+    if (status != NO_ERROR)
+        return result;
+
+    for (auto* adapter = addresses; adapter != nullptr; adapter = adapter->Next)
+    {
+        if (adapter->OperStatus != IfOperStatusUp || adapter->FirstGatewayAddress != nullptr)
+            continue; // has a real gateway -- not one of the "bad" addresses this check looks for.
+        for (auto* unicast = adapter->FirstUnicastAddress; unicast != nullptr; unicast = unicast->Next)
+        {
+            if (unicast->Address.lpSockaddr == nullptr || unicast->Address.lpSockaddr->sa_family != AF_INET)
+                continue;
+            auto* sin = reinterpret_cast<sockaddr_in*>(unicast->Address.lpSockaddr);
+            char text[INET_ADDRSTRLEN] {};
+            if (inet_ntop(AF_INET, &sin->sin_addr, text, sizeof(text)) != nullptr)
+                result.add(text);
+        }
+    }
+    return result;
+}
 #endif
 }
 
@@ -107,6 +155,18 @@ int main()
         return 1;
     }
     std::printf("INFO  stream URL: %s\n", url.toRawUTF8());
+
+    // Work Order 5 regression: the stream server must bind to an adapter actually routed to
+    // the real network, not a virtual adapter (Hyper-V/VMware/stale VPN) a physical receiver
+    // could never reach. See CastingStreamServer::findLanAddress()'s gateway-preference fix.
+    {
+        const auto chosenHost = juce::URL(url).getDomain();
+        const auto badAddresses = collectNoGatewayPrivateAddresses();
+        std::printf("INFO  gateway-less (unreachable-from-LAN) adapter addresses on this machine: %s\n",
+            badAddresses.isEmpty() ? "(none)" : badAddresses.joinIntoString(", ").toRawUTF8());
+        check(! badAddresses.contains(chosenHost),
+              "the stream server did not bind to a gateway-less (virtual/VPN) adapter address");
+    }
 
     // Let a few real frames flow (repaint the window so each captured frame actually differs,
     // proving this is live capture, not one static snapshot encoded repeatedly).

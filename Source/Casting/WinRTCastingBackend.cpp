@@ -1,5 +1,7 @@
 #include "WinRTCastingBackend.h"
 
+#include <cstdio>
+
 #if JUCE_WINDOWS
 #include <windows.h>
 #include <shobjidl_core.h>
@@ -69,9 +71,14 @@ struct WinRTCastingBackend::Impl
 
             pickerAvailable = true;
         }
-        catch (const winrt::hresult_error&)
+        catch (const winrt::hresult_error& e)
         {
             pickerAvailable = false;
+            // Previously silent -- a user report of casting being unavailable gave no way to
+            // tell apartment-join failure, picker construction failure, and IInitializeWithWindow
+            // failure apart. Low-volume (only fires once per backend, only on real failure).
+            fprintf(stderr, "WinRTCastingBackend: picker construction failed, hresult 0x%08x: %ls\n",
+                (unsigned) e.code().value, e.message().c_str());
         }
     }
 
@@ -99,6 +106,10 @@ struct WinRTCastingBackend::Impl
         }
         catch (const winrt::hresult_error& e)
         {
+            // Previously silent beyond the user-facing error text -- see the constructor's
+            // catch block above for why the hresult itself is worth keeping on stderr.
+            fprintf(stderr, "WinRTCastingBackend: picker.Show() failed, hresult 0x%08x: %ls\n",
+                (unsigned) e.code().value, e.message().c_str());
             report(CastState::failed, { CastErrorCode::castingApiUnavailable, winrt::to_string(e.message()) });
         }
     }

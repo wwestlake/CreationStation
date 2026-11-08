@@ -10,6 +10,14 @@
 #include <vector>
 #include <juce_core/juce_core.h>
 
+#if JUCE_WINDOWS
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
+#endif
+
 namespace cs::casting
 {
 
@@ -23,8 +31,62 @@ constexpr size_t initSegmentCacheCap = 256 * 1024;       // generous for any fMP
 constexpr size_t liveHistoryCapBytes = 32 * 1024 * 1024; // ~a minute or so at typical bitrates.
 constexpr int outgoingQueueCapacity = 256;                // bounded per-client chunk backlog.
 
+#if JUCE_WINDOWS
+// A dev/workstation machine commonly carries several private-range virtual adapters alongside
+// the real one -- Hyper-V's vEthernet switch, VMware's host-only networks, a VPN's leftover
+// address -- none of which a physical TV on the real LAN can ever route to. A private-range-only
+// scan can't tell those apart from the real adapter (confirmed empirically on the development
+// machine: with Hyper-V, VMware, and OpenVPN all present, such a scan picked Hyper-V's
+// 172.30.48.1 over the real Wi-Fi adapter's 192.168.0.x address). The adapter actually routed to
+// the real network is reliably the one with a default gateway configured -- the virtual ones
+// above have none -- so prefer that signal over "is this address in a private range."
+juce::String findGatewayRoutedAddress()
+{
+    ULONG bufferLen = 16384;
+    std::vector<uint8_t> buffer(bufferLen);
+    auto* addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+    // FirstGatewayAddress is only populated when GAA_FLAG_INCLUDE_GATEWAYS is explicitly
+    // requested -- without it every adapter reports a null gateway list regardless of its real
+    // configuration, which is exactly the failure mode this function exists to avoid.
+    auto flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_INCLUDE_GATEWAYS;
+    auto result = GetAdaptersAddresses(AF_INET, flags, nullptr, addresses, &bufferLen);
+    if (result == ERROR_BUFFER_OVERFLOW)
+    {
+        buffer.resize(bufferLen);
+        addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
+        result = GetAdaptersAddresses(AF_INET, flags, nullptr, addresses, &bufferLen);
+    }
+    if (result != NO_ERROR)
+        return {};
+
+    for (auto* adapter = addresses; adapter != nullptr; adapter = adapter->Next)
+    {
+        if (adapter->OperStatus != IfOperStatusUp || adapter->FirstGatewayAddress == nullptr)
+            continue;
+        for (auto* unicast = adapter->FirstUnicastAddress; unicast != nullptr; unicast = unicast->Next)
+        {
+            if (unicast->Address.lpSockaddr == nullptr || unicast->Address.lpSockaddr->sa_family != AF_INET)
+                continue;
+            auto* sin = reinterpret_cast<sockaddr_in*>(unicast->Address.lpSockaddr);
+            char text[INET_ADDRSTRLEN] {};
+            if (inet_ntop(AF_INET, &sin->sin_addr, text, sizeof(text)) == nullptr)
+                continue;
+            juce::String s(text);
+            if (! s.startsWith("169.254.")) // link-local -- not really routed even with a gateway entry.
+                return s;
+        }
+    }
+    return {};
+}
+#endif
+
 juce::String findLanAddress()
 {
+#if JUCE_WINDOWS
+    if (const auto gatewayRouted = findGatewayRoutedAddress(); gatewayRouted.isNotEmpty())
+        return gatewayRouted;
+#endif
+
     juce::Array<juce::IPAddress> addresses;
     juce::IPAddress::findAllAddresses(addresses, false);
     for (auto& addr : addresses)
