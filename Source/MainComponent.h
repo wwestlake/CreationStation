@@ -258,12 +258,13 @@ private:
     // the real backend needs this component's native window handle, which doesn't exist until
     // MainComponent is actually on screen -- constructing these eagerly in MainComponent's own
     // constructor would run before that handle is valid.
-    juce::TextButton castButton { "Cast" };
+    // Work Order 6: moved from a dedicated toolbar button to View -> Cast to TV... (see
+    // getMenuForIndex/menuItemSelected), so there is no castButton member any more.
     std::unique_ptr<cs::casting::WinRTCastingBackend> castBackend;
     std::unique_ptr<cs::casting::StationCastingStreamSource> castStreamSource;
     std::unique_ptr<cs::casting::CastingSessionController> castController;
     void ensureCastingInitialized();
-    void castButtonClicked();
+    void castMenuItemSelected();
     void updateCastButtonState(cs::casting::CastState state);
     std::unique_ptr<CreationDock::DockManager> dockManager;
     PluginRackBar pluginRackBar;

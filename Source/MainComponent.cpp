@@ -94,6 +94,7 @@ constexpr int menuIdToolVideo = 2014;
 constexpr int menuIdToolVirtualEngineer = 2012;
 constexpr int menuIdToolTrackInsert = 2013;
 constexpr int menuIdToolResetLayout = 2099;
+constexpr int menuIdViewCastToTv = 2100;
 constexpr int menuIdFileSave = 1;
 constexpr int menuIdFileSaveArrangement = 2;
 constexpr int menuIdFileLoadArrangement = 3;
@@ -1824,10 +1825,6 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     reportStartup("Creating studio panels...", 0.92f);
     addAndMakeVisible(transportBar);
     addAndMakeVisible(*menuBar);
-    addAndMakeVisible(castButton);
-    castButton.setTooltip("Cast Station's workspace to a TV or receiver on this network");
-    castButton.onClick = [this] { castButtonClicked(); };
-    updateCastButtonState(cs::casting::CastState::idle);
     addAndMakeVisible(*dockManager);
     // setSize() above ran before menuBar/dockManager existed, so the resized() it
     // triggered laid out only transportBar (its own null checks skipped the rest) --
@@ -4759,8 +4756,6 @@ void MainComponent::resized()
     transportBar.setBounds(transportArea);
 
     auto menuArea = area.removeFromTop(28);
-    auto castArea = menuArea.removeFromRight(96);
-    castButton.setBounds(castArea.reduced(2, 2));
     if (menuBar != nullptr)
         menuBar->setBounds(menuArea);
 
@@ -4791,53 +4786,45 @@ void MainComponent::ensureCastingInitialized()
     };
 }
 
-void MainComponent::castButtonClicked()
+void MainComponent::castMenuItemSelected()
 {
     ensureCastingInitialized();
 
     using cs::casting::CastState;
     const auto state = castController->getState();
     if (state == CastState::idle || state == CastState::disconnected || state == CastState::failed)
-        castController->beginCast(castButton.getScreenBounds());
+    {
+        // The picker anchors near wherever the caller's screen bounds say -- there's no longer a
+        // toolbar button to anchor to, so anchor near the menu bar itself (top-right of the
+        // window), which is close enough to where the user just clicked "Cast to TV...".
+        auto anchor = getScreenBounds().removeFromTop(28).removeFromRight(96);
+        castController->beginCast(anchor);
+    }
     else
+    {
         castController->disconnect();
+    }
 }
 
 void MainComponent::updateCastButtonState(cs::casting::CastState state)
 {
+    // The View menu's "Cast to TV..." item label is computed fresh from castController's state
+    // every time the menu is opened (see getMenuForIndex) -- nothing to push there. This just
+    // surfaces state changes the user should notice even with the menu closed.
     using cs::casting::CastState;
     switch (state)
     {
-        case CastState::idle:
-            castButton.setButtonText("Cast");
-            castButton.setTooltip("Cast Station's workspace to a TV or receiver on this network");
-            break;
-        case CastState::searching:
-            castButton.setButtonText("Searching...");
-            castButton.setTooltip("Looking for TVs and receivers on this network. Click to cancel.");
-            break;
-        case CastState::connecting:
-            castButton.setButtonText("Connecting...");
-            castButton.setTooltip("Connecting to the selected device. Click to cancel.");
-            break;
+        case CastState::searching:     transportBar.setStatusText("Cast: searching for TVs and receivers..."); break;
+        case CastState::connecting:    transportBar.setStatusText("Cast: connecting..."); break;
         case CastState::connected:
         {
             const auto deviceName = castController != nullptr ? castController->getConnectedDevice().displayName : juce::String();
-            castButton.setButtonText("Casting");
-            castButton.setTooltip("Casting to " + deviceName + ". Click to disconnect.");
+            transportBar.setStatusText("Casting to " + deviceName);
             break;
         }
-        case CastState::disconnecting:
-            castButton.setButtonText("Disconnecting...");
-            break;
-        case CastState::disconnected:
-            castButton.setButtonText("Cast");
-            castButton.setTooltip("Disconnected from the last device. Click to cast again.");
-            break;
-        case CastState::failed:
-            castButton.setButtonText("Cast failed");
-            castButton.setTooltip("The last casting attempt failed. Click to try again.");
-            break;
+        case CastState::disconnected:  transportBar.setStatusText("Cast: disconnected"); break;
+        case CastState::failed:        transportBar.setStatusText("Cast: last attempt failed"); break;
+        default: break;
     }
 }
 
@@ -4926,6 +4913,30 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         menu.addItem(menuIdToolVirtualEngineer, "Virtual Engineer", true, isOpen(virtualEngineerPanelId));
         menu.addSeparator();
         menu.addItem(menuIdToolResetLayout, "Reset Dock Layout");
+        menu.addSeparator();
+        {
+            // Work Order 6: relocated from a dedicated toolbar button to the View menu, per the
+            // user's standing request -- a single dynamic item whose label reflects the casting
+            // session's current state, the same way the toolbar button's text used to.
+            using cs::casting::CastState;
+            const auto state = castController != nullptr ? castController->getState() : CastState::idle;
+            juce::String label = "Cast to TV...";
+            switch (state)
+            {
+                case CastState::searching:     label = "Searching..."; break;
+                case CastState::connecting:    label = "Connecting..."; break;
+                case CastState::connected:
+                {
+                    const auto deviceName = castController != nullptr ? castController->getConnectedDevice().displayName : juce::String();
+                    label = "Stop Casting (" + deviceName + ")";
+                    break;
+                }
+                case CastState::disconnecting: label = "Disconnecting..."; break;
+                case CastState::failed:        label = "Cast to TV... (last attempt failed)"; break;
+                default: break;
+            }
+            menu.addItem(menuIdViewCastToTv, label, true, state == CastState::connected);
+        }
         return menu;
     }
 
@@ -5000,6 +5011,7 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
             case menuIdToolVirtualEngineer: toggleAiToolWindow(); break;
             case menuIdToolTrackInsert: toggleDockPanel(trackInsertPanelId, CreationDock::DockTargetZone::Bottom); break;
             case menuIdToolResetLayout: resetDockLayout(); break;
+            case menuIdViewCastToTv: castMenuItemSelected(); break;
             default: break;
         }
 
