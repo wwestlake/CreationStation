@@ -70,6 +70,14 @@
 #include "Help/HelpLibrary.h"
 #include "Help/HelpPanel.h"
 #include <creation/ui/SuiteSettingsPanel.h>
+#include "Casting/CastingTypes.h"
+
+namespace cs::casting
+{
+class WinRTCastingBackend;
+class StationCastingStreamSource;
+class CastingSessionController;
+}
 
 class MainComponent final : public juce::Component,
                             private juce::MenuBarModel,
@@ -246,6 +254,18 @@ private:
     AuthGateView authGateView;
     CreationSuiteHeaderBar transportBar;
     std::unique_ptr<juce::MenuBarComponent> menuBar;
+    // Work Order 3 (Cast to TV). Lazily constructed (see ensureCastingInitialized()) because
+    // the real backend needs this component's native window handle, which doesn't exist until
+    // MainComponent is actually on screen -- constructing these eagerly in MainComponent's own
+    // constructor would run before that handle is valid.
+    // Work Order 6: moved from a dedicated toolbar button to View -> Cast to TV... (see
+    // getMenuForIndex/menuItemSelected), so there is no castButton member any more.
+    std::unique_ptr<cs::casting::WinRTCastingBackend> castBackend;
+    std::unique_ptr<cs::casting::StationCastingStreamSource> castStreamSource;
+    std::unique_ptr<cs::casting::CastingSessionController> castController;
+    void ensureCastingInitialized();
+    void castMenuItemSelected();
+    void updateCastButtonState(cs::casting::CastState state);
     std::unique_ptr<CreationDock::DockManager> dockManager;
     PluginRackBar pluginRackBar;
     TrackerPanel trackerPanel;

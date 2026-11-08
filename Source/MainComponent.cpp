@@ -8,6 +8,9 @@
 #include "Branding.h"
 #include "Patch/PatchModel.h"
 #include "Video/VideoDecodeService.h"
+#include "Casting/WinRTCastingBackend.h"
+#include "Casting/StationCastingStreamSource.h"
+#include "Casting/CastingSessionController.h"
 #include <creation/assets/VfsEntryInputStream.h>
 #include <creation/assets/ProjectContainerService.h>
 #include <creation/assets/ProjectWorkspaceService.h>
@@ -91,6 +94,7 @@ constexpr int menuIdToolVideo = 2014;
 constexpr int menuIdToolVirtualEngineer = 2012;
 constexpr int menuIdToolTrackInsert = 2013;
 constexpr int menuIdToolResetLayout = 2099;
+constexpr int menuIdViewCastToTv = 2100;
 constexpr int menuIdFileSave = 1;
 constexpr int menuIdFileSaveArrangement = 2;
 constexpr int menuIdFileLoadArrangement = 3;
@@ -4392,6 +4396,13 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
 MainComponent::~MainComponent()
 {
+    // Explicit, first-thing teardown rather than relying on member-destruction order: a cast
+    // session must release its capture/encoder/network resources before anything else about
+    // this window starts coming apart, not incidentally whenever its turn comes up.
+    castController.reset();
+    castStreamSource.reset();
+    castBackend.reset();
+
     if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
         top->removeKeyListener(this);
 
@@ -4756,6 +4767,67 @@ void MainComponent::resized()
     markLayoutDirty();
 }
 
+// Work Order 3 (Cast to TV). Deferred until first use: WinRTCastingBackend needs this
+// component's native window handle, which only exists once MainComponent is actually on
+// screen -- not yet true at MainComponent's own construction time.
+void MainComponent::ensureCastingInitialized()
+{
+    if (castController != nullptr)
+        return;
+
+    castBackend = std::make_unique<cs::casting::WinRTCastingBackend>(*this);
+    castStreamSource = std::make_unique<cs::casting::StationCastingStreamSource>(*this);
+    castController = std::make_unique<cs::casting::CastingSessionController>(*castBackend, *castStreamSource);
+
+    castController->onStateChanged = [this](cs::casting::CastState state) { updateCastButtonState(state); };
+    castController->onError = [this](const cs::casting::CastError& error)
+    {
+        transportBar.setStatusText("Cast: " + cs::casting::describeCastError(error));
+    };
+}
+
+void MainComponent::castMenuItemSelected()
+{
+    ensureCastingInitialized();
+
+    using cs::casting::CastState;
+    const auto state = castController->getState();
+    if (state == CastState::idle || state == CastState::disconnected || state == CastState::failed)
+    {
+        // The picker anchors near wherever the caller's screen bounds say -- there's no longer a
+        // toolbar button to anchor to, so anchor near the menu bar itself (top-right of the
+        // window), which is close enough to where the user just clicked "Cast to TV...".
+        auto anchor = getScreenBounds().removeFromTop(28).removeFromRight(96);
+        castController->beginCast(anchor);
+    }
+    else
+    {
+        castController->disconnect();
+    }
+}
+
+void MainComponent::updateCastButtonState(cs::casting::CastState state)
+{
+    // The View menu's "Cast to TV..." item label is computed fresh from castController's state
+    // every time the menu is opened (see getMenuForIndex) -- nothing to push there. This just
+    // surfaces state changes the user should notice even with the menu closed.
+    using cs::casting::CastState;
+    switch (state)
+    {
+        case CastState::searching:     transportBar.setStatusText("Cast: searching for TVs and receivers..."); break;
+        case CastState::connecting:    transportBar.setStatusText("Cast: connecting..."); break;
+        case CastState::connected:
+        {
+            const auto deviceName = castController != nullptr ? castController->getConnectedDevice().displayName : juce::String();
+            transportBar.setStatusText("Casting to " + deviceName);
+            break;
+        }
+        case CastState::disconnected:  transportBar.setStatusText("Cast: disconnected"); break;
+        case CastState::failed:        transportBar.setStatusText("Cast: last attempt failed"); break;
+        default: break;
+    }
+}
+
 juce::StringArray MainComponent::getMenuBarNames()
 {
     return { "File", "Edit", "View", "Help" };
@@ -4841,6 +4913,30 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
         menu.addItem(menuIdToolVirtualEngineer, "Virtual Engineer", true, isOpen(virtualEngineerPanelId));
         menu.addSeparator();
         menu.addItem(menuIdToolResetLayout, "Reset Dock Layout");
+        menu.addSeparator();
+        {
+            // Work Order 6: relocated from a dedicated toolbar button to the View menu, per the
+            // user's standing request -- a single dynamic item whose label reflects the casting
+            // session's current state, the same way the toolbar button's text used to.
+            using cs::casting::CastState;
+            const auto state = castController != nullptr ? castController->getState() : CastState::idle;
+            juce::String label = "Cast to TV...";
+            switch (state)
+            {
+                case CastState::searching:     label = "Searching..."; break;
+                case CastState::connecting:    label = "Connecting..."; break;
+                case CastState::connected:
+                {
+                    const auto deviceName = castController != nullptr ? castController->getConnectedDevice().displayName : juce::String();
+                    label = "Stop Casting (" + deviceName + ")";
+                    break;
+                }
+                case CastState::disconnecting: label = "Disconnecting..."; break;
+                case CastState::failed:        label = "Cast to TV... (last attempt failed)"; break;
+                default: break;
+            }
+            menu.addItem(menuIdViewCastToTv, label, true, state == CastState::connected);
+        }
         return menu;
     }
 
@@ -4915,6 +5011,7 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
             case menuIdToolVirtualEngineer: toggleAiToolWindow(); break;
             case menuIdToolTrackInsert: toggleDockPanel(trackInsertPanelId, CreationDock::DockTargetZone::Bottom); break;
             case menuIdToolResetLayout: resetDockLayout(); break;
+            case menuIdViewCastToTv: castMenuItemSelected(); break;
             default: break;
         }
 
