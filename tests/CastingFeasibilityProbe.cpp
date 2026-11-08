@@ -33,6 +33,12 @@
 #include <iphlpapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
+
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Devices.Enumeration.h>
+#include <winrt/Windows.Media.Casting.h>
+#pragma comment(lib, "windowsapp.lib")
 #endif
 
 namespace
@@ -105,6 +111,58 @@ juce::StringArray collectNoGatewayPrivateAddresses()
     }
     return result;
 }
+
+// Work Order 5: a way to ask "what does Windows.Media.Casting actually see on this network
+// right now" with no UI, no user interaction, and no screen takeover -- CastingDevicePicker.Show()
+// is interactive by design (it's an OS-shell-hosted flyout meant for a human to click through),
+// but the same device set is available headlessly via CastingDevice::GetDeviceSelector() fed into
+// the ordinary Windows.Devices.Enumeration API. Useful both for this automated probe and for any
+// future non-interactive diagnostic (no need to drive a real click through computer-use just to
+// find out whether a given receiver is Miracast/DLNA-visible).
+void probeHeadlessDeviceEnumeration()
+{
+    namespace Enumeration = winrt::Windows::Devices::Enumeration;
+    namespace Casting = winrt::Windows::Media::Casting;
+    namespace Foundation = winrt::Windows::Foundation;
+
+    try
+    {
+        const auto selector = Casting::CastingDevice::GetDeviceSelector(Casting::CastingPlaybackTypes::Video);
+        auto async = Enumeration::DeviceInformation::FindAllAsync(selector);
+
+        // A plain sleep-and-poll loop here would starve the completion notification: on an STA
+        // thread, WinRT marshals an IAsyncOperation's completion back via this thread's own
+        // message queue, so the loop must actually pump messages (as the frame-capture loop
+        // below already does via runDispatchLoopUntil) or Status() can sit at Started forever
+        // even once the OS-level enumeration work is really done. Confirmed empirically: a bare
+        // juce::Thread::sleep() poll here never left Started within an 8s budget.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(25);
+        while (async.Status() == Foundation::AsyncStatus::Started && std::chrono::steady_clock::now() < deadline)
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(25);
+
+        if (async.Status() != Foundation::AsyncStatus::Completed)
+        {
+            std::printf("INFO  headless device enumeration did not complete (status=%d) -- not a pass/fail signal by itself\n",
+                (int) async.Status());
+            return;
+        }
+
+        auto devices = async.GetResults();
+        std::printf("INFO  headless Miracast/DLNA-visible device enumeration found %u device(s):\n", devices.Size());
+        for (auto const& d : devices)
+        {
+            std::printf("INFO    - \"%s\" (id=%s)\n",
+                winrt::to_string(d.Name()).c_str(), winrt::to_string(d.Id()).c_str());
+        }
+        if (devices.Size() == 0)
+            std::printf("INFO    (none -- no device on this network currently advertises Miracast/DLNA \"Play To\" support)\n");
+    }
+    catch (const winrt::hresult_error& e)
+    {
+        std::printf("INFO  headless device enumeration threw hresult 0x%08x: %ls\n",
+            (unsigned) e.code().value, e.message().c_str());
+    }
+}
 #endif
 }
 
@@ -115,6 +173,11 @@ int main()
     return 77;
 #else
     juce::ScopedJuceInitialiser_GUI juceInit;
+
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+    std::printf("\n");
+    probeHeadlessDeviceEnumeration();
+    std::printf("\n");
 
     ProbeWindow window;
     // Station's real window is a juce::DocumentWindow with a native title bar and taskbar

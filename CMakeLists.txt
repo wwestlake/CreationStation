@@ -25,6 +25,7 @@ if(MSVC)
         Source/Casting/StationWindowCapture.cpp
         Source/Casting/WinRTCastingBackend.cpp
         Source/Casting/CastingMp4Sink.cpp
+        tests/CastingFeasibilityProbe.cpp
         PROPERTIES COMPILE_OPTIONS "/std:c++17;/await"
     )
 endif()
