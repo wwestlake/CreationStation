@@ -1,5 +1,9 @@
 # Creation Station
 
+Station and Movie share Suite VFS projects and their asset catalog while keeping
+separate editing data. See [Shared project compatibility - Order 1](docs/SHARED_PROJECT_ORDER_1.md)
+for the implementation, service dependency and validation report.
+
 A JUCE-based C++ creative audio tool focused on sound design, effects, and programmable audio workflows.
 
 ## What’s in the starter

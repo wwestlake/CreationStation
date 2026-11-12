@@ -1519,6 +1519,10 @@ void MainComponent::FxStackPanel::refreshButtonState()
     openButton.setEnabled(hasSelection);
 }
 
+#if JUCE_DEBUG
+#include "StationSharedProjectCheck.inc"
+#endif
+
 MainComponent::MainComponent()
     : MainComponent(StartupProgressCallback{})
 {
@@ -1663,6 +1667,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
                                                                                 {},
                                                                                 [this]()
                                                                                 {
+                                                                                    juce::String error;
+                                                                                    if (projectSession.isValid() && !projectSession.refreshManifest(error))
+                                                                                        transportBar.setStatusText(error);
                                                                                     return projectSession.getManifest().assetCatalog.assets;
                                                                                 },
                                                                                 [](const creation::assets::AssetDescriptor& asset)
@@ -1778,6 +1785,9 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
     rescanVstCatalog();
 
     reportStartup("Opening project workspace...", 0.72f);
+    // Capture app defaults before any project's state is loaded. A project made
+    // in another app must not inherit the previously opened Station session.
+    emptyProjectState = createProjectStateForSave().createCopy();
     auto loadedAutoloadProject = false;
     if (suiteSettings.suiteVfsRoot.isNotEmpty())
     {
@@ -4388,10 +4398,20 @@ MainComponent::MainComponent(StartupProgressCallback startupProgressCallback)
 
     reportStartup("Djehuti Station is ready.", 1.0f);
     startTimerHz(30);
+#if JUCE_DEBUG
+    juce::StringArray arguments;
+    arguments.addTokens(juce::JUCEApplication::getCommandLineParameters(), true);
+    const int sharedCheck = arguments.indexOf("--shared-project-check");
+    if (sharedCheck >= 0 && sharedCheck + 1 < arguments.size())
+        sharedProjectCheck = std::make_unique<SharedProjectCheck>(*this, juce::File(arguments[sharedCheck + 1].unquoted()));
+#endif
 }
 
 MainComponent::~MainComponent()
 {
+#if JUCE_DEBUG
+    sharedProjectCheck.reset();
+#endif
     if (auto* top = getTopLevelComponent(); top != nullptr && top != this)
         top->removeKeyListener(this);
 
@@ -6512,6 +6532,9 @@ void MainComponent::refreshProjectAssets()
         return;
     }
 
+    juce::String refreshError;
+    if (!projectSession.refreshManifest(refreshError))
+        transportBar.setStatusText(refreshError);
     auto projectAssets = projectSession.getManifest().assetCatalog.assets;
     contentPanel.setProjectAssets(projectAssets);
     refreshAiContextStore();
@@ -9833,6 +9856,7 @@ void MainComponent::beginCreateNewProject()
         options->transportBar.setProjectLabel("Project: " + options->projectSession.getManifest().projectName);
         options->settingsPanel.setProjectMetadata(options->projectSession.getManifest());
         options->refreshProjectAssets();
+        options->loadSessionFromDisk(options->emptyProjectState.createCopy());
         options->saveSessionToDisk(true);
         options->transportBar.setStatusText("Created project: " + options->projectSession.getManifest().projectName);
     }), true);
@@ -9851,7 +9875,8 @@ void MainComponent::openProject(const juce::String& projectId)
     guardUnsavedProjectChange("opening another project", [this, projectId]
     {
         juce::String errorMessage;
-        if (! creation::assets::ProjectWorkspaceService::openProject(suiteSettings, projectId, projectSession, errorMessage))
+        creation::assets::ProjectSession nextSession;
+        if (! creation::assets::ProjectWorkspaceService::openProject(suiteSettings, projectId, nextSession, errorMessage))
         {
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
                                                    "Project Error",
@@ -9859,10 +9884,20 @@ void MainComponent::openProject(const juce::String& projectId)
             return;
         }
 
+        juce::MemoryBlock bytes;
+        bool found = false;
+        if (!nextSession.readOptionalEntry("session.xml", bytes, found, errorMessage))
+        { transportBar.setStatusText(errorMessage); return; }
+        auto nextState = found ? juce::ValueTree::fromXml(bytes.toString()) : emptyProjectState.createCopy();
+        if (!nextState.hasType("CreationStationSession"))
+        { transportBar.setStatusText("The project's Station session is invalid; the current project was kept open."); return; }
+        if (transportBar.onStop) transportBar.onStop();
+        projectSession = std::move(nextSession);
+
         transportBar.setProjectLabel("Project: " + projectSession.getManifest().projectName);
         settingsPanel.setProjectMetadata(projectSession.getManifest());
         refreshProjectAssets();
-        loadSessionFromDisk();
+        loadSessionFromDisk(nextState);
         saveAppSettings();
     });
 }
@@ -10660,7 +10695,12 @@ void MainComponent::saveSessionToDisk(bool userInitiated)
     {
         auto xmlString = xml->toString();
         juce::MemoryBlock xmlBlock(xmlString.toRawUTF8(), xmlString.getNumBytesAsUTF8());
-        projectSession.writeEntry("session.xml", xmlBlock);
+        if (!projectSession.writeEntry("session.xml", xmlBlock))
+        {
+            projectDirty = true;
+            transportBar.setStatusText("Could not save Station session: " + projectSession.getLastWriteError());
+            return;
+        }
     }
     lastObservedPluginStateSignature = engine.createHostedPluginStateSignature();
     pluginStateAutosavePending = false;
@@ -11359,19 +11399,26 @@ bool MainComponent::handleGlobalKeyPress(const juce::KeyPress& key)
     return false;
 }
 
-void MainComponent::loadSessionFromDisk()
+void MainComponent::loadSessionFromDisk(const juce::ValueTree& loadedState)
 {
     if (! suiteSettings.suiteVfsRoot.isNotEmpty())
         return;
 
     juce::MemoryBlock sessionData;
-    juce::ValueTree state;
-    if (projectSession.isValid() && projectSession.readEntry("session.xml", sessionData))
+    auto state = loadedState;
+    if (!state.isValid() && projectSession.isValid())
     {
-        state = juce::ValueTree::fromXml(juce::String::createStringFromData(sessionData.getData(), (int)sessionData.getSize()));
+        bool found = false;
+        juce::String error;
+        if (!projectSession.readOptionalEntry("session.xml", sessionData, found, error))
+        { transportBar.setStatusText(error); return; }
+        state = found ? juce::ValueTree::fromXml(sessionData.toString()) : emptyProjectState.createCopy();
     }
-    if (! state.isValid())
+    if (! state.hasType("CreationStationSession"))
+    {
+        transportBar.setStatusText("The project's Station session is invalid.");
         return;
+    }
 
     loadAppSettings();
     applySelectedAudioDeviceSettings();
@@ -11450,6 +11497,9 @@ void MainComponent::loadSessionFromDisk()
         dslPanel.setSourceText(dslSource);
 
     refreshProjectAssets();
+    currentArrangementAssetId = {};
+    currentSignalLabAssetId = {};
+    currentFoleyAssetId = {};
     restoreLastActiveAssets(state.getChildWithName("LastActiveAssets"));
 
     if (auto scoreState = state.getChildWithName("ScoreView"); scoreState.isValid())

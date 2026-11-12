@@ -301,6 +301,11 @@ private:
     juce::Component::SafePointer<PluginRackBar> pluginRackBarSafe;
     juce::Component::SafePointer<MixerPanel> mixerPanelSafe;
     creation::assets::ProjectSession projectSession;
+    juce::ValueTree emptyProjectState;
+#if JUCE_DEBUG
+    class SharedProjectCheck;
+    std::unique_ptr<SharedProjectCheck> sharedProjectCheck;
+#endif
     // Rendered WAV file for each Signal clip's source patch asset, so playback-target builds (which
     // run on every scrub) don't hit the VFS. Cleared whenever a patch is saved.
     std::map<juce::String, std::shared_ptr<const juce::MemoryBlock>> signalRenderBytes; // asset id -> the rendered sound of a Signal clip, in memory
@@ -437,7 +442,7 @@ private:
     bool handleGlobalKeyPress(const juce::KeyPress& key);
     juce::ValueTree createProjectStateForSave();
     void saveSessionToDisk(bool userInitiated = false);
-    void loadSessionFromDisk();
+    void loadSessionFromDisk(const juce::ValueTree& loadedState = {});
     void pollHostedPluginStateAutosave();
     bool prepareTrackerPlayback();
     void refreshTrackerPlaybackClips();
