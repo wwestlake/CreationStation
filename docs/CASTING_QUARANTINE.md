@@ -33,11 +33,27 @@ Before changing the checkout, the mixed local `develop` tip `1311f57` and all
 The snapshot retains the known casting resize compilation defect; it is not a
 release candidate.
 
-A complete-history bundle, verified by `git bundle verify`, is retained in the
-ignored canonical build directory as
-`build/station-casting-preservation-20261118.bundle`. The preservation branch and
-bundle are local; the mixed branch has not been published as a shipping change.
-Do not discard these records during build-folder cleanup.
+The durable complete-history archive is
+[Station-Casting-Preservation-20261118.bundle](https://drive.google.com/file/d/1nfTek2943BT2nXuguRkOK9XEKT8vHTzW/view?usp=drivesdk)
+in the existing private **Djehuti Suite** Drive folder. Drive metadata was checked
+on November 18, 2026: owner-only access, no public/domain sharing. The link does
+not change those permissions. The mixed source has not been published to GitHub.
+
+- Size: 2,489,650 bytes.
+- SHA-256: `cfd0082f41c3a506b3e212b65b63375008baac1803fc9ec733c1fdfd6f04eefe`.
+- Preserved ref: `refs/heads/preserve/station-casting-wip-20261118`.
+- Preserved tip: `5378470382475cc646fccc02f016d01be44a61d3`.
+
+The uploaded archive was downloaded again, its SHA-256 matched, and
+`git bundle verify` confirmed complete history. A verified local mirror and
+checksum are also retained outside disposable build output in the workspace's
+`ProjectArchives/CreationStation/` directory. The old build-folder bundle is a
+working copy; archive durability does not depend on it or on a local Git ref.
+
+To recover, download the restricted Drive file with the authorized account,
+check its SHA-256, run `git bundle verify` in the existing repository, and inspect
+`git bundle list-heads` before restoring the preserved ref. Do not use the mixed
+snapshot as an ordinary feature PR or shipping baseline.
 
 Valid non-casting project work remains separately reviewable in
 [Station PR 94](https://github.com/wwestlake/CreationStation/pull/94), with its
