@@ -14,6 +14,22 @@ creation_suite_require_juce()
 include("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/CMake/CreationSharedLLVM.cmake")
 configure_creation_shared_llvm(CS "Djehuti Station")
 
+# The installed Windows SDK's C++/WinRT projection uses the legacy coroutine header, which needs
+# an older language mode than the rest of Station (C++20). Isolate that requirement to just the
+# two Cast-to-TV files that use C++/WinRT (Windows Graphics Capture, Windows.Media.Casting) --
+# the same adapter Djehuti Movie's own WinRT-using capture file already needs for the same
+# reason (see apps/CreationMovie/CMakeLists.txt), applied here independently since Station's
+# source tree is its own, not shared with Movie's.
+if(MSVC)
+    set_source_files_properties(
+        Source/Casting/StationWindowCapture.cpp
+        Source/Casting/WinRTCastingBackend.cpp
+        Source/Casting/CastingMp4Sink.cpp
+        tests/CastingFeasibilityProbe.cpp
+        PROPERTIES COMPILE_OPTIONS "/std:c++17;/await"
+    )
+endif()
+
 # Keep full optimizations in Release but still emit PDBs, so a crash dump collected from a
 # Release build can actually be resolved to real function names/line numbers instead of raw
 # offsets into the executable.
@@ -366,6 +382,23 @@ target_sources(CreativeWorkstation PRIVATE
     Source/Video/Gl/VideoShaders.h
     Source/Patch/PatchModel.cpp
     Source/Patch/PatchModel.h
+    Source/Casting/CastingTypes.cpp
+    Source/Casting/CastingTypes.h
+    Source/Casting/CastingBackend.h
+    Source/Casting/CastingStreamSource.h
+    Source/Casting/BoundedFrameQueue.h
+    Source/Casting/CastingSessionController.cpp
+    Source/Casting/CastingSessionController.h
+    Source/Casting/StationWindowCapture.cpp
+    Source/Casting/StationWindowCapture.h
+    Source/Casting/CastingMp4Sink.cpp
+    Source/Casting/CastingMp4Sink.h
+    Source/Casting/CastingStreamServer.cpp
+    Source/Casting/CastingStreamServer.h
+    Source/Casting/WinRTCastingBackend.cpp
+    Source/Casting/WinRTCastingBackend.h
+    Source/Casting/StationCastingStreamSource.cpp
+    Source/Casting/StationCastingStreamSource.h
     Source/Main.cpp
     Source/MainComponent.cpp
     Source/MainComponent.h
@@ -884,4 +917,53 @@ target_link_libraries(StationScriptGuideSmoke PRIVATE
     creation_suite_ai_frust_tools
     creation_suite_frust_plugin_runtime
     frust_lang
+)
+
+# Work Order 3 (Cast to TV): CastingSessionController's device-discovery/connect/fail/disconnect/
+# reconnect state machine and BoundedFrameQueue's bounded/drop-oldest behavior, driven entirely
+# through FakeCastingBackend -- no Windows casting API, no Media Foundation, no real receiver.
+# Needs no hardware; exit code 0 = pass.
+juce_add_console_app(CastingSessionSmoke PRODUCT_NAME "CastingSessionSmoke")
+juce_generate_juce_header(CastingSessionSmoke)
+target_sources(CastingSessionSmoke PRIVATE
+    tests/CastingSessionSmoke.cpp
+    Source/Casting/CastingTypes.cpp
+    Source/Casting/CastingSessionController.cpp
+)
+target_include_directories(CastingSessionSmoke PRIVATE Source)
+target_compile_definitions(CastingSessionSmoke PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(CastingSessionSmoke PRIVATE
+    juce::juce_gui_basics
+    juce::juce_graphics
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
+)
+
+# Work Order 3's mandatory feasibility gate, run for real: starts the real WinRT casting backend
+# and the real capture -> encode -> local HTTP stream pipeline (Windows Graphics Capture, Media
+# Foundation's fragmented-MP4 sink, a plain TCP client confirming the endpoint is connectable)
+# against a briefly-shown real window. Does NOT drive the interactive OS device picker and
+# cannot confirm a physical receiver plays the result -- see the test's own header comment and
+# the Work Order 3 report. Windows-only; exits 77 (skipped) on any other platform or where the
+# OS casting API itself isn't available.
+juce_add_console_app(CastingFeasibilityProbe PRODUCT_NAME "CastingFeasibilityProbe")
+juce_generate_juce_header(CastingFeasibilityProbe)
+target_sources(CastingFeasibilityProbe PRIVATE
+    tests/CastingFeasibilityProbe.cpp
+    Source/Casting/CastingTypes.cpp
+    Source/Casting/CastingSessionController.cpp
+    Source/Casting/StationWindowCapture.cpp
+    Source/Casting/CastingMp4Sink.cpp
+    Source/Casting/CastingStreamServer.cpp
+    Source/Casting/WinRTCastingBackend.cpp
+    Source/Casting/StationCastingStreamSource.cpp
+)
+target_include_directories(CastingFeasibilityProbe PRIVATE Source)
+target_compile_definitions(CastingFeasibilityProbe PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(CastingFeasibilityProbe PRIVATE
+    juce::juce_gui_basics
+    juce::juce_graphics
+    juce::juce_events
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags
 )
