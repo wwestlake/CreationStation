@@ -6,6 +6,10 @@ for the implementation, service dependency and validation report.
 
 A JUCE-based C++ creative audio tool focused on sound design, effects, and programmable audio workflows.
 
+TV placement uses Windows wireless display as an extended desktop. Station's
+experimental casting work is quarantined outside the shipping master baseline;
+see [casting quarantine and preserved work](docs/CASTING_QUARANTINE.md).
+
 ## What’s in the starter
 
 - Mixer-style workspace foundation
